@@ -594,3 +594,4 @@ Pythonwdhmm/
    d. **蓝图补录 2 个既有文件（偏差②收尾）**：根段补录 run_鲲鹏参数优化.py（鲲鹏三轮参数优化工作脚本，输出 outputs/kunpeng_param_opt/，对应回写#28 产物）；scripts/ 段补录 kunpeng_param_scan.py（两阶段参数网格扫描，输出 results/param_scan/scan_results.json）。两者均为既有工作脚本（非本次新增），如实标注"非薄入口、建议后续薄化"
    e. **首次提交**：git add -A 暂存 345 项（大文件/敏感文件/运行时产物均被 .gitignore 覆盖：quant.db 4.3GB 走 *.db、datasets/**/*、config/*.yaml、config/*.json、outputs/**/*、cache/**/*、results/**/*、实盘状态、backups/）；首次 commit 建立基线，commit message 引用本回写编号
    f. **纪律遵守**：未新增蓝图外文件（补录的是既有文件）；临时脚本清理符合治理规则4.1；无代码改动（纯版本管理启用+蓝图补录）
+   g. **补充修正**：首次提交 cb68473 后发现 .gitignore 对已暂存文件不生效，results/ 32 项缓存仍混入首次提交；二次提交 358709a git rm -r --cached results/ 移除（磁盘文件保留、不再跟踪），工作区现干净（git status 无输出）；本回写记录随之提交
