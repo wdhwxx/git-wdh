@@ -1,0 +1,1672 @@
+# 文件名：myquant/data_access/manager.py
+"""
+manager.py - 数据管理器（更新/校验/同步/自动维护）
+===================================================
+数据层的管理入口，负责数据的自动更新、质量校验、同步状态管理。
+
+核心能力:
+  1. 增量更新：只更新最新数据，不全量重下
+  2. 数据校验：完整性检查/异常检测/双源对比
+  3. 同步状态：记录每只股票最后更新时间
+  4. 自动同步：盘后自动更新所有股票数据
+  5. 数据修复：检测到异常数据时自动修复
+  6. 统计报告：数据覆盖率/更新状态/质量报告
+
+设计原则:
+  - 防未来函数：更新时严格按当前日期，不获取未来数据
+  - 增量优先：只更新缺失的数据，不重复下载
+  - 事务安全：所有写入在事务中执行，失败自动回滚
+  - 可追溯：所有更新操作记录日志和状态
+  - 为实盘预留：盘中实时监控数据延迟
+
+依赖: typing, datetime, threading, myquant.database, myquant.data_access.fetcher
+"""
+
+from __future__ import annotations
+
+import threading
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
+
+from myquant.core.logger import get_logger
+
+logger = get_logger("data_access.manager")
+
+from .fetcher import DataFetcher
+from .sources.base import MarketDataResult
+from .cleaner import load_clean_config, run_clean_pipeline
+from myquant.utils.file_utils import (
+    ensure_dir, get_project_path, write_csv, read_csv,
+    read_json, write_json, file_sha256, file_lock,
+)
+
+
+# ─────────────────────────────────────────────
+# 常量定义
+# ─────────────────────────────────────────────
+
+# 默认更新批量大小
+DEFAULT_BATCH_SIZE = 50
+
+# 数据异常阈值
+PRICE_JUMP_THRESHOLD = 0.5  # 单日涨跌幅超过50%视为异常（除权除息除外）
+VOLUME_ZERO_THRESHOLD = 0   # 成交量为0视为停牌或异常
+
+
+# ─────────────────────────────────────────────
+# 数据集版本异常 (任务14新增)
+# ─────────────────────────────────────────────
+
+class DatasetVersionError(Exception):
+    """数据集版本管理基础异常"""
+    pass
+
+
+class DatasetVersionNotFoundError(DatasetVersionError):
+    """版本不存在"""
+    pass
+
+
+class DataVersionIntegrityError(DatasetVersionError):
+    """版本数据完整性校验失败（checksum不匹配）"""
+    pass
+
+
+# ─────────────────────────────────────────────
+# DatasetVersion 版本元数据 (任务14新增)
+# ─────────────────────────────────────────────
+
+@dataclass
+class DatasetVersion:
+    """
+    数据集版本元数据（任务14）
+
+    记录一次数据集快照的完整元信息，供版本管理/追溯/回滚使用。
+
+    Attributes
+    ----------
+    version : int
+        版本号（同一数据集的版本单调递增）
+    symbol : str
+        标的代码
+    data_type : str
+        数据类型：bar/tick（对应 DataType.value）
+    period : str
+        K线周期：daily/minute/tick
+    adjust : str | None
+        复权方式：hfq/qfq/None
+    created_at : str
+        版本创建时间（UTC，YYYY-MM-DD HH:MM:SS）
+    source : str
+        数据来源：offline/live（实盘预留）
+    record_count : int
+        快照数据条数
+    total / valid / bad : int
+        清洗统计（原始总数/有效数/脏数据数）
+    valid_rate : float | None
+        合格率
+    quality_grade : str | None
+        质量等级（QualityGrade.value）
+    checksum : str | None
+        数据快照SHA256（完整性校验）
+    data_range : dict | None
+        数据时间范围 {start_date, end_date}
+    clean_run_id : str | None
+        关联任务13 clean_run_meta.run_id（清洗运行追溯）
+    parent_version : int | None
+        派生链上一版本（实盘增量版本）
+    description : str
+        版本说明
+    metadata : dict
+        扩展元数据
+    """
+    version: int
+    symbol: str
+    data_type: str = "bar"
+    period: str = "daily"
+    adjust: Optional[str] = "hfq"
+    created_at: Optional[str] = None
+    source: str = "offline"
+    record_count: int = 0
+    total: int = 0
+    valid: int = 0
+    bad: int = 0
+    valid_rate: Optional[float] = None
+    quality_grade: Optional[str] = None
+    checksum: Optional[str] = None
+    data_range: Optional[Dict[str, str]] = None
+    clean_run_id: Optional[str] = None
+    parent_version: Optional[int] = None
+    description: str = ""
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """序列化为字典（JSON可存储）"""
+        return {
+            "version": self.version,
+            "symbol": self.symbol,
+            "data_type": self.data_type,
+            "period": self.period,
+            "adjust": self.adjust,
+            "created_at": self.created_at,
+            "source": self.source,
+            "record_count": self.record_count,
+            "total": self.total,
+            "valid": self.valid,
+            "bad": self.bad,
+            "valid_rate": self.valid_rate,
+            "quality_grade": self.quality_grade,
+            "checksum": self.checksum,
+            "data_range": self.data_range,
+            "clean_run_id": self.clean_run_id,
+            "parent_version": self.parent_version,
+            "description": self.description,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "DatasetVersion":
+        """从字典反序列化"""
+        return cls(
+            version=data.get("version", 0),
+            symbol=data.get("symbol", ""),
+            data_type=data.get("data_type", "bar"),
+            period=data.get("period", "daily"),
+            adjust=data.get("adjust", "hfq"),
+            created_at=data.get("created_at"),
+            source=data.get("source", "offline"),
+            record_count=data.get("record_count", 0),
+            total=data.get("total", 0),
+            valid=data.get("valid", 0),
+            bad=data.get("bad", 0),
+            valid_rate=data.get("valid_rate"),
+            quality_grade=data.get("quality_grade"),
+            checksum=data.get("checksum"),
+            data_range=data.get("data_range"),
+            clean_run_id=data.get("clean_run_id"),
+            parent_version=data.get("parent_version"),
+            description=data.get("description", ""),
+            metadata=data.get("metadata", {}) or {},
+        )
+
+    @property
+    def data_file_name(self) -> str:
+        """数据快照文件名（含 data_type/period/adjust 标识）"""
+        adjust_suffix = f"_{self.adjust}" if self.adjust else ""
+        return f"{self.data_type}_{self.period}{adjust_suffix}.csv"
+
+
+# ─────────────────────────────────────────────
+# 数据管理器
+# ─────────────────────────────────────────────
+
+class DataManager:
+    """
+    数据管理器
+    ==========
+    负责数据的自动更新、质量校验、同步状态管理。
+
+    Usage:
+        from myquant.data_access import DataFetcher, DataManager
+        from myquant.data_access.sources.tdx_source import TdxDataSource
+
+        fetcher = DataFetcher()
+        fetcher.add_source(TdxDataSource())
+        manager = DataManager(fetcher)
+
+        # 增量更新单只股票
+        manager.update_symbol("000001.SZ")
+
+        # 批量更新所有股票
+        manager.update_all_symbols()
+
+        # 数据质量校验
+        report = manager.validate_data("000001.SZ")
+    """
+
+    def __init__(
+        self,
+        fetcher: DataFetcher,
+        db_connection=None,
+    ):
+        """
+        Parameters
+        ----------
+        fetcher : DataFetcher
+            数据获取器实例
+        db_connection : DatabaseConnection | None
+            数据库连接（用于持久化同步状态），None则仅内存管理
+        """
+        self._fetcher = fetcher
+        self._db = db_connection
+        self._lock = threading.Lock()
+        self._sync_status: Dict[str, Dict] = {}  # 内存同步状态缓存
+        self._update_stats: Dict[str, Any] = {
+            "total_updated": 0,
+            "total_failed": 0,
+            "last_update_time": None,
+        }
+
+    # ── 属性 ──
+
+    @property
+    def fetcher(self) -> DataFetcher:
+        return self._fetcher
+
+    @property
+    def update_stats(self) -> Dict:
+        return dict(self._update_stats)
+
+    # ═══════════════════════════════════════════
+    # 增量更新
+    # ═══════════════════════════════════════════
+
+    def update_symbol(
+        self,
+        symbol: str,
+        period: str = "daily",
+        adjust: Optional[str] = "hfq",
+        force_full: bool = False,
+    ) -> Dict:
+        """
+        增量更新单只股票数据
+
+        【防未来函数】只更新到当前日期，不获取未来数据
+
+        Parameters
+        ----------
+        symbol : str
+            股票代码
+        period : str
+            周期
+        adjust : str | None
+            复权方式
+        force_full : bool
+            是否强制全量更新（忽略已有数据）
+
+        Returns
+        -------
+        dict : 更新结果 {
+            symbol, status, record_count, start_date, end_date,
+            data_source, error_message
+        }
+        """
+        today = datetime.now().strftime("%Y-%m-%d")
+        result = {
+            "symbol": symbol,
+            "status": "pending",
+            "record_count": 0,
+            "start_date": None,
+            "end_date": None,
+            "data_source": "",
+            "error_message": "",
+        }
+
+        try:
+            # 确定起始日期
+            start_date = None
+            if not force_full:
+                last_date = self._get_last_sync_date(symbol, period)
+                if last_date:
+                    # 从最后同步日期的下一天开始
+                    last_dt = datetime.strptime(last_date, "%Y-%m-%d")
+                    start_date = (last_dt + timedelta(days=1)).strftime("%Y-%m-%d")
+                    # 如果已经是最新，跳过
+                    if start_date > today:
+                        result["status"] = "skipped"
+                        result["end_date"] = last_date
+                        return result
+
+            # 获取数据（绕过缓存，确保最新）
+            data_result = self._fetcher.get_market_data(
+                symbol, start_date=start_date, end_date=today,
+                period=period, adjust=adjust, use_cache=False,
+            )
+
+            if data_result and data_result.count > 0:
+                result["status"] = "completed"
+                result["record_count"] = data_result.count
+                result["start_date"] = data_result.start_date
+                result["end_date"] = data_result.end_date
+                result["data_source"] = data_result.source
+
+                # 持久化到数据库（如果有连接）
+                if self._db:
+                    self._save_to_database(symbol, data_result, period, adjust)
+
+                # 更新同步状态
+                self._update_sync_status(
+                    symbol, period, "market",
+                    data_result.end_date, data_result.count,
+                    "completed", data_result.source,
+                )
+                # 使缓存失效
+                self._fetcher.invalidate_cache(symbol)
+                self._update_stats["total_updated"] += 1
+            else:
+                result["status"] = "no_data"
+                result["error_message"] = "未获取到数据"
+                self._update_stats["total_failed"] += 1
+
+        except Exception as e:
+            result["status"] = "failed"
+            result["error_message"] = str(e)
+            self._update_sync_status(
+                symbol, period, "market",
+                None, 0, "failed", "", str(e),
+            )
+            self._update_stats["total_failed"] += 1
+
+        self._update_stats["last_update_time"] = datetime.now().isoformat()
+        return result
+
+    def update_symbols_batch(
+        self,
+        symbols: List[str],
+        period: str = "daily",
+        adjust: Optional[str] = "hfq",
+        batch_size: int = DEFAULT_BATCH_SIZE,
+        progress_callback: Optional[Callable] = None,
+        force_full: bool = False,
+    ) -> List[Dict]:
+        """
+        批量更新股票数据
+
+        Parameters
+        ----------
+        symbols : list[str]
+            股票代码列表
+        period : str
+            周期
+        adjust : str | None
+            复权方式
+        batch_size : int
+            每批处理数量
+        progress_callback : callable | None
+            进度回调函数 callback(current, total, result)
+        force_full : bool
+            是否强制全量重下（忽略数据库已同步状态，从头拉取全部历史）。
+            True=全量重下（首次部署/数据修复/手动重建）；
+            False=增量（只补缺失，默认）。
+            增量/全量共用本函数：DataManager 依据数据库 sync_status 自动判断，
+            force_full=True 时跳过增量判断直接全量拉取，strictly end_date=today 防未来函数。
+
+        Returns
+        -------
+        list[dict] : 所有股票更新结果
+        """
+        results = []
+        total = len(symbols)
+        for i, symbol in enumerate(symbols):
+            result = self.update_symbol(symbol, period, adjust, force_full=force_full)
+            results.append(result)
+            if progress_callback:
+                try:
+                    progress_callback(i + 1, total, result)
+                except Exception as e:
+                    logger.debug(f"进度回调异常: {e}")
+        return results
+
+    def update_all_symbols(
+        self,
+        market: str = "A股",
+        period: str = "daily",
+        adjust: Optional[str] = "hfq",
+        progress_callback: Optional[Callable] = None,
+        force_full: bool = False,
+    ) -> List[Dict]:
+        """
+        更新所有股票数据
+
+        Parameters
+        ----------
+        market : str
+            市场
+        period : str
+            周期
+        adjust : str | None
+            复权方式
+        progress_callback : callable | None
+            进度回调
+
+        Returns
+        -------
+        list[dict] : 更新结果
+        """
+        stocks = self._fetcher.get_stock_list(market)
+        symbols = [s["symbol"] for s in stocks if s.get("symbol")]
+        return self.update_symbols_batch(
+            symbols, period, adjust,
+            progress_callback=progress_callback, force_full=force_full,
+        )
+
+    # ═══════════════════════════════════════════
+    # 数据质量校验
+    # ═══════════════════════════════════════════
+
+    def validate_data(
+        self,
+        symbol: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        period: str = "daily",
+    ) -> Dict:
+        """
+        数据质量校验
+
+        检查项:
+        1. 数据完整性：是否有缺失交易日
+        2. 价格异常：单日涨跌幅超过阈值
+        3. 成交量异常：成交量为0
+        4. 数据连续性：日期是否连续
+
+        【防未来函数】end_date 之后的数据不检查
+
+        Parameters
+        ----------
+        symbol : str
+            股票代码
+        start_date : str | None
+            开始日期
+        end_date : str | None
+            截止日期
+
+        Returns
+        -------
+        dict : 校验报告 {
+            symbol, total_records, missing_dates, price_anomalies,
+            volume_anomalies, continuity_issues, overall_status
+        }
+        """
+        data_result = self._fetcher.get_market_data(
+            symbol, start_date, end_date, period
+        )
+        report = {
+            "symbol": symbol,
+            "total_records": data_result.count if data_result else 0,
+            "missing_dates": [],
+            "price_anomalies": [],
+            "volume_anomalies": [],
+            "continuity_issues": [],
+            "overall_status": "unknown",
+        }
+
+        if not data_result or data_result.count == 0:
+            report["overall_status"] = "no_data"
+            return report
+
+        data = data_result.data
+        prev_close = None
+
+        for i, row in enumerate(data):
+            date = row.get("date", "")
+            close = row.get("close")
+            volume = row.get("volume", 0)
+            pct_chg = row.get("pct_chg")
+
+            # 成交量异常
+            if volume is not None and volume <= VOLUME_ZERO_THRESHOLD:
+                report["volume_anomalies"].append({
+                    "date": date, "volume": volume,
+                    "reason": "成交量为0",
+                })
+
+            # 价格异常（涨跌幅超过阈值）
+            if pct_chg is not None and abs(pct_chg) > PRICE_JUMP_THRESHOLD * 100:
+                report["price_anomalies"].append({
+                    "date": date, "pct_chg": pct_chg,
+                    "reason": f"涨跌幅{pct_chg:.2f}%超过阈值{PRICE_JUMP_THRESHOLD*100:.0f}%",
+                })
+
+            # 数据连续性检查（交易日之间不应超过5天，除节假日外）
+            if i > 0:
+                prev_date = data[i - 1].get("date", "")
+                try:
+                    d1 = datetime.strptime(prev_date, "%Y-%m-%d")
+                    d2 = datetime.strptime(date, "%Y-%m-%d")
+                    gap = (d2 - d1).days
+                    if gap > 7:  # 超过7天可能有缺失
+                        report["continuity_issues"].append({
+                            "prev_date": prev_date,
+                            "curr_date": date,
+                            "gap_days": gap,
+                            "reason": f"日期间隔{gap}天，可能有缺失",
+                        })
+                except ValueError:
+                    pass
+
+            prev_close = close
+
+        # 总体状态判断
+        issue_count = (
+            len(report["missing_dates"])
+            + len(report["price_anomalies"])
+            + len(report["volume_anomalies"])
+            + len(report["continuity_issues"])
+        )
+        if issue_count == 0:
+            report["overall_status"] = "healthy"
+        elif issue_count < 5:
+            report["overall_status"] = "minor_issues"
+        else:
+            report["overall_status"] = "needs_repair"
+
+        return report
+
+    def validate_batch(
+        self,
+        symbols: List[str],
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> List[Dict]:
+        """批量校验多只股票数据质量"""
+        return [self.validate_data(s, start_date, end_date) for s in symbols]
+
+    # ═══════════════════════════════════════════
+    # 同步状态管理
+    # ═══════════════════════════════════════════
+
+    def _get_last_sync_date(
+        self,
+        symbol: str,
+        period: str = "daily",
+        data_type: str = "market",
+    ) -> Optional[str]:
+        """获取最后同步日期"""
+        key = f"{symbol}|{period}|{data_type}"
+        # 先查内存
+        if key in self._sync_status:
+            return self._sync_status[key].get("last_sync_date")
+        # 再查数据库
+        if self._db:
+            try:
+                from ..database.queries import DataQueries
+                queries = DataQueries(self._db)
+                status_list = queries.get_sync_status(symbol=symbol)
+                for s in status_list:
+                    if s.get("period") == period and s.get("data_type") == data_type:
+                        self._sync_status[key] = s
+                        return s.get("last_sync_date")
+            except Exception as e:
+                logger.debug(f"同步状态查询失败: symbol={symbol}, 错误: {e}")
+        return None
+
+    def _update_sync_status(
+        self,
+        symbol: str,
+        period: str,
+        data_type: str,
+        last_sync_date: Optional[str],
+        record_count: int,
+        status: str,
+        data_source: str,
+        error_message: str = "",
+    ) -> None:
+        """更新同步状态"""
+        key = f"{symbol}|{period}|{data_type}"
+        self._sync_status[key] = {
+            "symbol": symbol,
+            "period": period,
+            "data_type": data_type,
+            "last_sync_date": last_sync_date,
+            "record_count": record_count,
+            "sync_status": status,
+            "data_source": data_source,
+            "error_message": error_message,
+        }
+        # 持久化到数据库
+        if self._db:
+            try:
+                from ..database.queries import DataQueries
+                queries = DataQueries(self._db)
+                queries.update_sync_status(
+                    symbol, period, data_type,
+                    last_sync_date or "", record_count,
+                    status, data_source, error_message,
+                )
+            except Exception as e:
+                logger.warning(f"同步状态更新失败: symbol={symbol}, period={period}, 错误: {e}")
+
+    def get_sync_report(self) -> Dict:
+        """获取同步状态报告"""
+        total = len(self._sync_status)
+        completed = sum(1 for s in self._sync_status.values() if s.get("sync_status") == "completed")
+        failed = sum(1 for s in self._sync_status.values() if s.get("sync_status") == "failed")
+        pending = sum(1 for s in self._sync_status.values() if s.get("sync_status") == "pending")
+        return {
+            "total_symbols": total,
+            "completed": completed,
+            "failed": failed,
+            "pending": pending,
+            "update_stats": self._update_stats,
+        }
+
+    # ═══════════════════════════════════════════
+    # 数据库持久化
+    # ═══════════════════════════════════════════
+
+    def _save_to_database(
+        self,
+        symbol: str,
+        data_result: MarketDataResult,
+        period: str,
+        adjust: Optional[str],
+    ) -> int:
+        """
+        将行情数据保存到数据库
+
+        Returns
+        -------
+        int : 保存的记录数
+        """
+        if not self._db or not data_result or data_result.count == 0:
+            return 0
+        try:
+            from ..database.queries import DataQueries
+            queries = DataQueries(self._db)
+            # 转换为数据库格式
+            db_data = []
+            for row in data_result.data:
+                db_data.append({
+                    "symbol": symbol,
+                    "market": data_result.market,
+                    "period": period,
+                    "adjust": adjust,
+                    "trade_date": row.get("date", ""),
+                    "trade_time": row.get("time"),
+                    "open": row.get("open"),
+                    "high": row.get("high"),
+                    "low": row.get("low"),
+                    "close": row.get("close"),
+                    "volume": row.get("volume"),
+                    "amount": row.get("amount"),
+                    "pct_chg": row.get("pct_chg"),
+                    "turnover": row.get("turnover"),
+                    "is_suspended": 1 if row.get("volume", 0) == 0 else 0,
+                    "data_source": data_result.source,
+                })
+            return queries.bulk_insert_market_data(db_data)
+        except Exception:
+            return 0
+
+    # ═══════════════════════════════════════════
+    # 自动同步（盘后更新）
+    # ═══════════════════════════════════════════
+
+    def auto_sync_after_market(
+        self,
+        market: str = "A股",
+        period: str = "daily",
+        adjust: Optional[str] = "hfq",
+        progress_callback: Optional[Callable] = None,
+    ) -> Dict:
+        """
+        盘后自动同步所有股票数据
+
+        【防未来函数】只更新到当前日期
+
+        Parameters
+        ----------
+        market : str
+            市场
+        period : str
+            周期
+        adjust : str | None
+            复权方式
+        progress_callback : callable | None
+            进度回调
+
+        Returns
+        -------
+        dict : 同步结果汇总
+        """
+        results = self.update_all_symbols(market, period, adjust, progress_callback)
+        success = sum(1 for r in results if r["status"] == "completed")
+        failed = sum(1 for r in results if r["status"] == "failed")
+        skipped = sum(1 for r in results if r["status"] == "skipped")
+        no_data = sum(1 for r in results if r["status"] == "no_data")
+        return {
+            "total": len(results),
+            "success": success,
+            "failed": failed,
+            "skipped": skipped,
+            "no_data": no_data,
+            "details": results,
+        }
+
+    # ═══════════════════════════════════════════
+    # 数据清洗与 processed 数据管理 (阶段2 v1)
+    # ═══════════════════════════════════════════
+
+    def clean_and_save_symbol(
+        self,
+        symbol: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        period: str = "daily",
+        adjust: Optional[str] = "hfq",
+        data_type: str = "bar",
+        clean_config: Optional[Dict] = None,
+        save_bad: bool = True,
+        save_report: bool = True,
+    ) -> Dict:
+        """
+        一键清洗并保存：拉取原始数据 -> 清洗 -> 保存到 datasets/processed/
+
+        【防未来函数】end_date 之后的数据不获取、不清洗
+
+        Parameters
+        ----------
+        symbol : str
+            标的代码
+        start_date : str | None
+            开始日期
+        end_date : str | None
+            截止日期
+        period : str
+            K线周期
+        adjust : str | None
+            复权方式
+        data_type : str
+            数据类型: bar | tick
+        clean_config : Dict | None
+            清洗配置，None 则自动加载 config/data_clean.yaml 或默认
+        save_bad : bool
+            是否保存脏数据
+        save_report : bool
+            是否生成质量报告
+
+        Returns
+        -------
+        dict : {
+            symbol, status, raw_count, cleaned_count, bad_count,
+            processed_file, bad_file, report_file, stats
+        }
+        """
+        result = {
+            "symbol": symbol,
+            "status": "pending",
+            "raw_count": 0,
+            "cleaned_count": 0,
+            "bad_count": 0,
+            "processed_file": None,
+            "bad_file": None,
+            "report_file": None,
+            "stats": {},
+            "error_message": "",
+        }
+
+        try:
+            # 1. 加载清洗配置
+            if clean_config is None:
+                clean_config = load_clean_config()
+
+            if not clean_config.get("enabled", True):
+                result["status"] = "clean_disabled"
+                result["error_message"] = "清洗功能已在配置中关闭"
+                return result
+
+            # 2. 拉取原始数据 (绕过缓存)
+            data_result = self._fetcher.get_market_data(
+                symbol, start_date=start_date, end_date=end_date,
+                period=period, adjust=adjust, use_cache=False,
+            )
+
+            if not data_result or data_result.count == 0:
+                result["status"] = "no_data"
+                result["error_message"] = "未获取到原始数据"
+                return result
+
+            raw_data = data_result.data
+            result["raw_count"] = len(raw_data)
+
+            # 3. 执行清洗流水线
+            clean_result = run_clean_pipeline(
+                records=raw_data,
+                data_type=data_type,
+                symbol=symbol,
+                config=clean_config,
+                save_bad=save_bad,
+                save_report=save_report,
+            )
+
+            cleaned = clean_result["cleaned"]
+            bad = clean_result["bad"]
+            stats = clean_result["stats"]
+
+            result["cleaned_count"] = len(cleaned)
+            result["bad_count"] = len(bad)
+            result["bad_file"] = clean_result["bad_file"]
+            result["report_file"] = clean_result["report_file"]
+            result["stats"] = stats
+
+            # 4. 保存清洗后数据到 processed
+            # M2修复：启用跨批次去重（#O3修复声明的能力在此调用路径生效）
+            if cleaned:
+                processed_file = self._save_processed_data(
+                    records=cleaned,
+                    symbol=symbol,
+                    data_type=data_type,
+                    period=period,
+                    adjust=adjust,
+                    deduplicate_with_latest=True,
+                )
+                result["processed_file"] = processed_file
+
+            result["status"] = "completed"
+            self._update_stats["total_updated"] += 1
+
+        except Exception as e:
+            result["status"] = "failed"
+            result["error_message"] = str(e)
+            self._update_stats["total_failed"] += 1
+
+        return result
+
+    def load_processed_data(
+        self,
+        symbol: str,
+        data_type: str = "bar",
+        period: str = "daily",
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> List[Dict]:
+        """
+        从 datasets/processed/ 加载清洗后的数据
+
+        【防未来函数】end_date 之后的数据不返回
+
+        Parameters
+        ----------
+        symbol : str
+            标的代码
+        data_type : str
+            数据类型: bar | tick
+        period : str
+            K线周期
+        start_date : str | None
+            过滤开始日期
+        end_date : str | None
+            过滤截止日期
+
+        Returns
+        -------
+        List[Dict] : 清洗后的数据列表（按日期升序）
+        """
+        symbol_dir = get_project_path("datasets", "processed", symbol.replace(".", "_"))
+        if not symbol_dir.exists():
+            return []
+
+        # 查找最新的 processed 文件
+        pattern = f"{data_type}_*.csv"
+        files = sorted(symbol_dir.glob(pattern), reverse=True)
+        if not files:
+            return []
+
+        # 读取最新文件
+        try:
+            data = read_csv(str(files[0]))
+        except Exception:
+            return []
+
+        # 按日期过滤
+        if start_date or end_date:
+            filtered = []
+            for row in data:
+                date_str = row.get("date", "")
+                if start_date and date_str < start_date:
+                    continue
+                if end_date and date_str > end_date:
+                    continue
+                filtered.append(row)
+            data = filtered
+
+        return data
+
+    # ═══════════════════════════════════════════
+    # #O3修复：跨批次去重工具（基于date的upsert合并）
+    # ═══════════════════════════════════════════
+
+    @staticmethod
+    def _deduplicate_records_by_date(
+        new_records: List[Dict],
+        old_records: List[Dict],
+    ) -> List[Dict]:
+        """
+        基于 date 字段做跨批次去重合并（upsert 语义）。
+
+        #O3修复：解决数据源反复拉取同一日期数据导致 processed 目录累积重复 bar 的问题。
+
+        合并规则:
+          - 同 date 时，新数据覆盖旧数据（upsert）
+          - 旧数据中不在新数据中的日期保留
+          - 新数据中不在旧数据中的日期追加
+          - 最终按 date 升序排序返回
+
+        【防未来函数】仅基于传入的已发生数据合并，不引入未来数据。
+
+        Parameters
+        ----------
+        new_records : List[Dict]
+            新批次数据（须含 date 字段）
+        old_records : List[Dict]
+            旧批次数据（须含 date 字段）
+
+        Returns
+        -------
+        List[Dict] : 合并去重后的数据，按 date 升序
+        """
+        if not new_records:
+            return list(old_records or [])
+        if not old_records:
+            return list(new_records)
+
+        # 用字典做 upsert：key=date, value=record
+        merged: Dict[str, Dict] = {}
+        # 先放入旧数据
+        for rec in old_records:
+            date_key = str(rec.get("date", ""))
+            if date_key:
+                merged[date_key] = rec
+        # 新数据覆盖旧数据（upsert）
+        for rec in new_records:
+            date_key = str(rec.get("date", ""))
+            if date_key:
+                merged[date_key] = rec
+
+        # 按 date 升序排序
+        result = sorted(merged.values(), key=lambda r: str(r.get("date", "")))
+        return result
+
+    def _find_latest_processed_file(
+        self,
+        symbol: str,
+        data_type: str = "bar",
+        period: str = "daily",
+        adjust: Optional[str] = "hfq",
+    ) -> Optional[Path]:
+        """
+        查找同条件下最新的已保存 processed 文件。
+
+        #O3修复：跨批次去重时用于读取上一批次数据做合并。
+
+        文件命名规则: {data_type}_{period}_{adjust}_{timestamp}.csv
+        按文件名中的时间戳排序，返回最新文件路径。
+
+        Parameters
+        ----------
+        symbol : str
+            标的代码
+        data_type : str
+            数据类型 bar/tick
+        period : str
+            K线周期
+        adjust : str | None
+            复权方式
+
+        Returns
+        -------
+        Path | None : 最新文件路径，无匹配文件时返回 None
+        """
+        symbol_dir = get_project_path(
+            "datasets", "processed", symbol.replace(".", "_")
+        )
+        if not symbol_dir.exists():
+            return None
+
+        adjust_suffix = f"_{adjust}" if adjust else ""
+        prefix = f"{data_type}_{period}{adjust_suffix}_"
+
+        matching_files = []
+        for f in symbol_dir.iterdir():
+            if f.is_file() and f.name.startswith(prefix) and f.name.endswith(".csv"):
+                matching_files.append(f)
+
+        if not matching_files:
+            return None
+
+        # 按文件名（含时间戳）排序，取最新
+        matching_files.sort(key=lambda f: f.name, reverse=True)
+        return matching_files[0]
+
+    def _save_processed_data(
+        self,
+        records: List[Dict],
+        symbol: str,
+        data_type: str = "bar",
+        period: str = "daily",
+        adjust: Optional[str] = "hfq",
+        deduplicate_with_latest: bool = False,
+    ) -> Optional[str]:
+        """
+        保存清洗后数据到 datasets/processed/
+
+        #O3修复：增加 deduplicate_with_latest 参数，为 True 时与最新已保存文件
+        基于 date 做 upsert 合并去重，解决数据源反复拉取同一日期数据导致
+        processed 目录累积重复 bar 的问题。合并后保存为新文件（不覆盖旧文件，
+        保持可追溯，不破坏版本管理机制）。
+
+        Parameters
+        ----------
+        records : List[Dict]
+            清洗后数据
+        symbol : str
+            标的代码
+        data_type : str
+            数据类型 bar/tick
+        period : str
+            K线周期
+        adjust : str | None
+            复权方式
+        deduplicate_with_latest : bool
+            #O3修复：是否与最新已保存文件合并去重（默认False，原行为不变）
+
+        Returns
+        -------
+        str | None : 保存的文件路径
+        """
+        if not records:
+            return None
+
+        from datetime import datetime
+        symbol_dir = ensure_dir(get_project_path(
+            "datasets", "processed", symbol.replace(".", "_")
+        ))
+
+        # #O3修复：跨批次去重（与最新文件合并）
+        saved_records = records
+        dedup_stats = None
+        if deduplicate_with_latest:
+            latest_file = self._find_latest_processed_file(symbol, data_type, period, adjust)
+            if latest_file and latest_file.exists():
+                try:
+                    old_records = read_csv(str(latest_file))
+                    old_count = len(old_records)
+                    new_count = len(records)
+                    saved_records = self._deduplicate_records_by_date(records, old_records)
+                    merged_count = len(saved_records)
+                    dedup_stats = {
+                        "old_count": old_count,
+                        "new_count": new_count,
+                        "merged_count": merged_count,
+                        "duplicates_removed": old_count + new_count - merged_count,
+                        "latest_file": str(latest_file),
+                    }
+                    logger.info(
+                        f"[manager] 跨批次去重完成: symbol={symbol} "
+                        f"旧={old_count} 新={new_count} 合并后={merged_count} "
+                        f"去重={dedup_stats['duplicates_removed']}"
+                    )
+                except Exception as e:
+                    logger.warning(f"[manager] 跨批次去重失败，使用原始数据保存: {e}")
+                    saved_records = records
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        adjust_suffix = f"_{adjust}" if adjust else ""
+        filename = f"{data_type}_{period}{adjust_suffix}_{timestamp}.csv"
+        filepath = symbol_dir / filename
+
+        try:
+            write_csv(str(filepath), saved_records)
+            # 记录去重统计到文件元数据（通过日志，不修改文件格式）
+            if dedup_stats:
+                logger.debug(f"[manager] 去重文件已保存: {filepath}, stats={dedup_stats}")
+            return str(filepath)
+        except Exception:
+            return None
+
+    # ═══════════════════════════════════════════
+    # 数据集版本管理 (任务14：版本号/元数据/快照/回滚)
+    # ═══════════════════════════════════════════
+
+    def _versions_root(self, symbol: str) -> Path:
+        """版本管理根目录 datasets/processed/{symbol}/versions"""
+        symbol_dir = get_project_path("datasets", "processed", symbol.replace(".", "_"))
+        return symbol_dir / "versions"
+
+    def _version_dir(self, symbol: str, version: int) -> Path:
+        """版本目录 datasets/processed/{symbol}/versions/v{version}"""
+        return self._versions_root(symbol) / f"v{version}"
+
+    def _read_version_index(self, symbol: str) -> Dict[str, Any]:
+        """读取版本索引（不存在则返回空索引）"""
+        index_path = self._versions_root(symbol) / "index.json"
+        if not index_path.exists():
+            return {
+                "symbol": symbol,
+                "updated_at": None,
+                "head": {},
+                "last_rollback": None,
+                "versions": {},
+            }
+        try:
+            index = read_json(index_path)
+            index.setdefault("symbol", symbol)
+            index.setdefault("head", {})
+            index.setdefault("last_rollback", None)
+            index.setdefault("versions", {})
+            index.setdefault("updated_at", None)
+            return index
+        except Exception:
+            # 索引损坏时重建空索引（不丢弃版本数据，仅丢失索引记录）
+            return {
+                "symbol": symbol,
+                "updated_at": None,
+                "head": {},
+                "last_rollback": None,
+                "versions": {},
+            }
+
+    def _write_version_index(self, symbol: str, index: Dict[str, Any]) -> None:
+        """写版本索引（线程锁 + 跨进程文件锁保护）"""
+        root = ensure_dir(self._versions_root(symbol))
+        index_path = root / "index.json"
+        index["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        # 跨进程文件锁（容错：单进程环境锁失败不影响）
+        try:
+            with file_lock(str(root / ".index.lock"), timeout=5.0):
+                write_json(str(index_path), index)
+        except Exception:
+            write_json(str(index_path), index)
+
+    def _next_version(self, symbol: str, index: Dict[str, Any]) -> int:
+        """计算下一个版本号（当前最大+1，空则1）"""
+        existing = [int(v) for v in index.get("versions", {}).keys()]
+        return (max(existing) + 1) if existing else 1
+
+    @staticmethod
+    def _extract_data_range(records: List[Dict]) -> Optional[Dict[str, str]]:
+        """从记录提取数据时间范围（防未来函数：仅取当前记录中的日期）"""
+        dates = [str(r["date"]) for r in records if r.get("date")]
+        if not dates:
+            return None
+        return {"start_date": min(dates), "end_date": max(dates)}
+
+    @staticmethod
+    def _now_utc_str() -> str:
+        """当前UTC时间字符串"""
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+    def create_dataset_version(
+        self,
+        symbol: str,
+        records: List[Dict],
+        data_type: str = "bar",
+        period: str = "daily",
+        adjust: Optional[str] = "hfq",
+        source: str = "offline",
+        clean_run_id: Optional[str] = None,
+        parent_version: Optional[int] = None,
+        description: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> DatasetVersion:
+        """
+        创建数据集新版本（版本号自动递增，生成快照 + 元数据 + 校验和）
+
+        【防未来函数】仅基于传入的已发生数据创建版本，不引入未来数据。
+
+        Parameters
+        ----------
+        symbol : str
+            标的代码
+        records : list[dict]
+            数据集快照数据（清洗后 processed 数据，须含 date 字段）
+        data_type : str
+            数据类型 bar/tick
+        period : str
+            K线周期
+        adjust : str | None
+            复权方式
+        source : str
+            数据来源 offline/live
+        clean_run_id : str | None
+            关联任务13 clean_run_meta.run_id（清洗运行追溯）
+        parent_version : int | None
+            派生链上一版本（实盘增量版本）
+        description : str
+            版本说明
+        metadata : dict | None
+            扩展元数据
+
+        Returns
+        -------
+        DatasetVersion : 新版本元数据
+        """
+        if not records:
+            raise ValueError(f"创建版本失败：records 为空（symbol={symbol}）")
+        with self._lock:
+            index = self._read_version_index(symbol)
+            version = self._next_version(symbol, index)
+
+            # 写数据快照
+            v_dir = ensure_dir(self._version_dir(symbol, version))
+            meta = DatasetVersion(
+                version=version,
+                symbol=symbol,
+                data_type=data_type,
+                period=period,
+                adjust=adjust,
+                created_at=self._now_utc_str(),
+                source=source,
+                record_count=len(records),
+                data_range=self._extract_data_range(records),
+                clean_run_id=clean_run_id,
+                parent_version=parent_version,
+                description=description,
+                metadata=metadata or {},
+            )
+            data_file = v_dir / meta.data_file_name
+            write_csv(str(data_file), records)
+            meta.checksum = file_sha256(str(data_file))
+
+            # 写版本元数据
+            write_json(str(v_dir / "metadata.json"), meta.to_dict())
+
+            # 更新索引
+            index["versions"][str(version)] = meta.to_dict()
+            index["head"][data_type] = version
+            self._write_version_index(symbol, index)
+            return meta
+
+    def create_dataset_version_from_clean_run(
+        self,
+        symbol: str,
+        clean_run_id: str,
+        records: Optional[List[Dict]] = None,
+        data_type: str = "bar",
+        period: str = "daily",
+        adjust: Optional[str] = "hfq",
+        description: str = "",
+        db_connection: Any = None,
+    ) -> DatasetVersion:
+        """
+        从清洗运行记录创建数据集版本（任务13 clean_run_meta 无缝衔接）
+
+        自动从 clean_run_meta 读取清洗元信息（total/valid/bad/valid_rate/
+        quality_grade/source 等）补充到版本元数据，实现清洗→版本入库闭环。
+
+        Parameters
+        ----------
+        symbol : str
+            标的代码
+        clean_run_id : str
+            任务13 clean_run_meta.run_id（清洗运行ID）
+        records : list[dict] | None
+            数据集快照数据；None 时尝试从 processed_file 加载
+        data_type : str
+            数据类型 bar/tick
+        period : str
+            K线周期
+        adjust : str | None
+            复权方式
+        description : str
+            版本说明
+        db_connection : DatabaseConnection | None
+            数据库连接（读取 clean_run_meta），None 则用 self._db 或默认连接
+
+        Returns
+        -------
+        DatasetVersion : 新版本元数据
+
+        Raises
+        ------
+        ValueError : clean_run 不存在或无数据可创建版本
+        """
+        run_meta: Optional[Dict] = None
+        # 读取清洗运行元信息
+        try:
+            conn = db_connection or self._db
+            if conn is None:
+                from myquant.database import get_connection
+                conn = get_connection()
+            from myquant.database import CleanDataQueries
+            cq = CleanDataQueries(conn)
+            run_meta = cq.get_clean_run(clean_run_id)
+        except Exception:
+            run_meta = None
+
+        source = "offline"
+        if run_meta:
+            source = run_meta.get("source", "offline") or "offline"
+
+        # 确定数据：优先显式传入，其次 processed_file
+        if records is None:
+            records = []
+            if run_meta and run_meta.get("processed_file"):
+                try:
+                    records = read_csv(run_meta["processed_file"])
+                except Exception:
+                    records = []
+            if not records:
+                raise ValueError(
+                    f"创建版本失败：clean_run={clean_run_id} 无数据可快照"
+                    f"（需传入 records 或 processed_file 可读）"
+                )
+
+        # 构建扩展元数据（清洗统计）
+        extra_meta: Dict[str, Any] = {"clean_run_meta": None}
+        if run_meta:
+            extra_meta["clean_run_meta"] = {
+                "run_id": run_meta.get("run_id"),
+                "status": run_meta.get("status"),
+                "severity": run_meta.get("severity"),
+                "total": run_meta.get("total"),
+                "valid": run_meta.get("valid"),
+                "bad": run_meta.get("bad"),
+                "total_duration": run_meta.get("total_duration"),
+            }
+
+        return self.create_dataset_version(
+            symbol=symbol,
+            records=records,
+            data_type=data_type,
+            period=period,
+            adjust=adjust,
+            source=source,
+            clean_run_id=clean_run_id,
+            description=description,
+            metadata=extra_meta,
+        )
+
+    def list_dataset_versions(
+        self,
+        symbol: str,
+        data_type: Optional[str] = None,
+    ) -> List[DatasetVersion]:
+        """
+        列出版本（按版本号降序）
+
+        data_type 指定时仅返回该数据类型的版本。
+        """
+        with self._lock:
+            index = self._read_version_index(symbol)
+        versions = []
+        for v_str, meta_dict in index.get("versions", {}).items():
+            if data_type and meta_dict.get("data_type") != data_type:
+                continue
+            try:
+                versions.append(DatasetVersion.from_dict(meta_dict))
+            except Exception:
+                continue
+        versions.sort(key=lambda v: v.version, reverse=True)
+        return versions
+
+    def get_dataset_version(
+        self,
+        symbol: str,
+        version: int,
+        data_type: Optional[str] = None,
+    ) -> Optional[DatasetVersion]:
+        """查询指定版本元数据（不存在返回 None）"""
+        with self._lock:
+            index = self._read_version_index(symbol)
+        meta_dict = index.get("versions", {}).get(str(version))
+        if not meta_dict:
+            return None
+        if data_type and meta_dict.get("data_type") != data_type:
+            return None
+        return DatasetVersion.from_dict(meta_dict)
+
+    def get_latest_dataset_version(
+        self,
+        symbol: str,
+        data_type: str = "bar",
+    ) -> Optional[DatasetVersion]:
+        """获取指定数据类型的最新版本（head）"""
+        with self._lock:
+            index = self._read_version_index(symbol)
+        head = index.get("head", {}).get(data_type)
+        if head is None:
+            return None
+        meta_dict = index.get("versions", {}).get(str(head))
+        return DatasetVersion.from_dict(meta_dict) if meta_dict else None
+
+    def load_dataset_version(
+        self,
+        symbol: str,
+        version: int,
+        data_type: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        verify: bool = True,
+    ) -> List[Dict]:
+        """
+        加载指定版本的数据快照
+
+        【防未来函数】end_date 之后的数据绝对不返回。
+
+        Parameters
+        ----------
+        symbol : str
+            标的代码
+        version : int
+            版本号
+        data_type : str | None
+            数据类型（None 自动从版本元数据识别）
+        start_date : str | None
+            过滤开始日期
+        end_date : str | None
+            过滤截止日期（防未来函数关键参数）
+        verify : bool
+            是否校验 checksum（完整性）
+
+        Returns
+        -------
+        list[dict] : 版本数据（按日期升序）
+
+        Raises
+        ------
+        DatasetVersionNotFoundError : 版本不存在
+        DataVersionIntegrityError : 完整性校验失败
+        """
+        with self._lock:
+            index = self._read_version_index(symbol)
+        meta_dict = index.get("versions", {}).get(str(version))
+        if not meta_dict:
+            raise DatasetVersionNotFoundError(
+                f"版本不存在: symbol={symbol}, version={version}"
+            )
+        meta = DatasetVersion.from_dict(meta_dict)
+        if data_type and meta.data_type != data_type:
+            raise DatasetVersionNotFoundError(
+                f"版本 {version} 数据类型为 {meta.data_type}，非 {data_type}"
+            )
+
+        data_file = self._version_dir(symbol, version) / meta.data_file_name
+        if not data_file.exists():
+            raise DatasetVersionNotFoundError(
+                f"版本数据文件缺失: {data_file}"
+            )
+
+        # 完整性校验
+        if verify and meta.checksum:
+            actual = file_sha256(str(data_file))
+            if actual != meta.checksum:
+                raise DataVersionIntegrityError(
+                    f"版本 {version} 数据完整性校验失败: {data_file}"
+                )
+
+        data = read_csv(str(data_file))
+
+        # 按日期过滤（防未来函数：严格 end_date）
+        if start_date or end_date:
+            filtered = []
+            for row in data:
+                date_str = row.get("date", "")
+                if start_date and date_str < start_date:
+                    continue
+                if end_date and date_str > end_date:
+                    continue
+                filtered.append(row)
+            data = filtered
+
+        # 按日期升序
+        try:
+            data.sort(key=lambda r: r.get("date", ""))
+        except Exception as e:
+            logger.debug(f"数据排序失败，保持原顺序: {e}")
+        return data
+
+    def rollback_dataset_version(
+        self,
+        symbol: str,
+        version: int,
+        data_type: str = "bar",
+        period: str = "daily",
+        adjust: Optional[str] = "hfq",
+        description: str = "",
+    ) -> str:
+        """
+        回滚到指定版本
+
+        将指定版本的数据快照写回 processed 当前目录（阶段2时间戳格式兼容，
+        load_processed_data 的 glob 取最新文件机制会自动读到回滚数据），
+        并在版本索引记录回滚事件（可追溯）。
+
+        【防未来函数】回滚只使用已保存的历史版本快照，不引入未来数据。
+
+        Parameters
+        ----------
+        symbol : str
+            标的代码
+        version : int
+            目标版本号（回滚到此版本数据）
+        data_type : str
+            数据类型
+        period : str
+            K线周期
+        adjust : str | None
+            复权方式
+        description : str
+            回滚说明
+
+        Returns
+        -------
+        str : 回滚后的当前数据文件路径
+
+        Raises
+        ------
+        DatasetVersionNotFoundError : 版本不存在
+        """
+        data = self.load_dataset_version(symbol, version, data_type=data_type)
+        if not data:
+            raise DatasetVersionError(f"回滚失败：版本 {version} 数据为空")
+
+        symbol_dir = ensure_dir(get_project_path(
+            "datasets", "processed", symbol.replace(".", "_")
+        ))
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        adjust_suffix = f"_{adjust}" if adjust else ""
+        filename = f"{data_type}_{period}{adjust_suffix}_{timestamp}_rollback_v{version}.csv"
+        filepath = symbol_dir / filename
+        write_csv(str(filepath), data)
+
+        # 记录回滚事件到版本索引
+        with self._lock:
+            index = self._read_version_index(symbol)
+            index["last_rollback"] = {
+                "to_version": version,
+                "data_type": data_type,
+                "rolled_back_at": self._now_utc_str(),
+                "file": str(filepath),
+                "description": description,
+            }
+            self._write_version_index(symbol, index)
+
+        return str(filepath)
+
+    def delete_dataset_version(
+        self,
+        symbol: str,
+        version: int,
+        data_type: Optional[str] = None,
+    ) -> bool:
+        """
+        删除指定版本（移除快照目录 + 更新索引与 head）
+
+        Returns
+        -------
+        bool : 是否删除成功（版本不存在返回 False）
+        """
+        with self._lock:
+            index = self._read_version_index(symbol)
+            meta_dict = index.get("versions", {}).get(str(version))
+            if not meta_dict:
+                return False
+            if data_type and meta_dict.get("data_type") != data_type:
+                return False
+
+            # 删除版本目录
+            v_dir = self._version_dir(symbol, version)
+            import shutil
+            shutil.rmtree(v_dir, ignore_errors=True)
+
+            # 更新索引
+            index["versions"].pop(str(version), None)
+            # 修正 head：若删除的是 head，回退到该类型前一个版本
+            dt = meta_dict.get("data_type", "bar")
+            if index.get("head", {}).get(dt) == version:
+                remaining = [
+                    int(v) for v, m in index["versions"].items()
+                    if m.get("data_type") == dt
+                ]
+                index["head"][dt] = max(remaining) if remaining else None
+                if index["head"].get(dt) is None:
+                    index["head"].pop(dt, None)
+            self._write_version_index(symbol, index)
+            return True
+
+    def verify_dataset_version(
+        self,
+        symbol: str,
+        version: int,
+        data_type: Optional[str] = None,
+    ) -> bool:
+        """校验版本数据完整性（checksum）"""
+        with self._lock:
+            index = self._read_version_index(symbol)
+        meta_dict = index.get("versions", {}).get(str(version))
+        if not meta_dict:
+            return False
+        meta = DatasetVersion.from_dict(meta_dict)
+        data_file = self._version_dir(symbol, version) / meta.data_file_name
+        if not data_file.exists():
+            return False
+        if not meta.checksum:
+            return data_file.exists()
+        return file_sha256(str(data_file)) == meta.checksum
+
+    def get_dataset_versions_metadata(
+        self,
+        symbol: str,
+        data_type: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        数据集版本汇总信息
+
+        Returns
+        -------
+        dict : {
+            symbol, version_count, head, last_rollback,
+            versions: [DatasetVersion.to_dict(), ...],  # 按版本号降序
+        }
+        """
+        with self._lock:
+            index = self._read_version_index(symbol)
+        versions = self.list_dataset_versions(symbol, data_type=data_type)
+        return {
+            "symbol": symbol,
+            "version_count": len(versions),
+            "head": index.get("head", {}),
+            "last_rollback": index.get("last_rollback"),
+            "versions": [v.to_dict() for v in versions],
+        }
+
+    def __repr__(self) -> str:
+        report = self.get_sync_report()
+        return (
+            f"DataManager(symbols={report['total_symbols']}, "
+            f"completed={report['completed']}, failed={report['failed']})"
+        )

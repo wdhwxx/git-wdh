@@ -1,0 +1,136 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+*.whl
+*.manifest
+*.spec
+
+# ===== 虚拟环境 =====
+.venv/
+venv/
+env/
+ENV/
+
+# ===== IDE =====
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# ===== 环境变量（绝对不能提交密钥）=====
+.env
+.env.*
+!.env.example
+
+# ===== 数据与日志 =====
+data/
+# datasets目录：保留骨架，忽略内部数据文件
+datasets/**/*
+!datasets/**/.gitkeep
+
+# 日志目录：保留骨架，忽略内部日志文件
+logs/**/*
+!logs/.gitkeep
+
+*.db
+*.sqlite
+*.sqlite3
+
+# ===== 量化数据产出 =====
+# outputs目录：保留骨架，忽略回测结果
+outputs/**/*
+!outputs/.gitkeep
+
+# ===== 缓存目录（V5回测性能优化新增，保留骨架，忽略缓存产物）=====
+# cache/ 运行时缓存：因子L2磁盘缓存、数据指纹仓库、回测结果缓存、临时文件
+cache/**/*
+!cache/**/.gitkeep
+
+# ===== 实盘状态与信号（实盘对接必备，不入库）=====
+# 实盘运行时产生的持仓、资金、交易记录、信号报告，全部忽略
+实盘状态/**/*
+!实盘状态/.gitkeep
+实盘信号/**/*
+!实盘信号/.gitkeep
+
+# 旧项目遗留目录（本项目不再使用，保留做兼容）
+# backtest_output/
+
+# ===== 回测批量结果缓存（#34: git init 时发现 results/ 32项混入暂存，启用忽略）=====
+# results/ 为批量回测指纹+结果+汇总报告运行时缓存，不入库
+results/**/*
+!results/**/.gitkeep
+
+*.parquet
+*.feather
+*.h5
+*.hdf5
+
+# ===== 模型产物 =====
+models/
+*.pkl
+*.pickle
+*.pt
+*.pth
+*.onnx
+*.joblib
+
+# ===== Jupyter =====
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ===== 缓存与临时文件 =====
+.cache/
+.hypothesis/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.tmp
+*.bak
+*.log
+
+# L4修复: 审计修复备份目录（.bak_20260911.py 等不匹配 *.bak，需整目录忽略）
+backups/
+
+# ===== 基准测试与覆盖率产物（P3-3 性能基准新增）=====
+# pytest-benchmark 输出目录（基准测试结果 JSON/图表）
+.benchmarks/
+
+# ===== 数据库运行时文件 =====
+*.db-journal
+*.sqlite-journal
+*-journal
+
+# ===== 系统文件 =====
+.DS_Store
+.DS_Store?
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ===== 实际配置文件（不入库，只保留.example模板）=====
+config/*.yaml
+!config/*.example.yaml
+# L6修复: 运行时状态文件（data_clean_run.json 等），防误提交
+config/*.json
+
+# ===== 其他 =====
+*.csv.gz
+*.zip
+*.tar.gz
+*.rar

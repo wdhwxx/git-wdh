@@ -1,0 +1,306 @@
+Pythonwdhmm/
+├── .gitignore                        # 忽略数据集、日志、密钥、缓存、虚拟环境、输出结果、脏数据目录
+├── pyproject.toml                    # 项目元信息、依赖分组（gui/web/live/dev/benchmark），3个插件入口点
+│                                     # entry-points: myquant.strategies（外部策略包注册）/ myquant.brokers（券商适配器注册）/ myquant.data_sources（行情数据源注册）；pytest配置含lookahead/slow/benchmark标记
+├── README.md                         # 项目概述、安装步骤、快速开始与模块说明
+├── .env.example                      # 环境变量模板，包含密钥、数据库路径、API Key等示例
+├── alembic.ini                       # ✨【第6项】Alembic迁移配置：script_location=myquant/database/migrations，SQLite URL，英文注释避免Windows GBK解码问题
+│
+├── run_回测入口.py                # 回测入口（中文名）：加载配置 -> 初始化数据 -> 运行回测引擎 -> 输出报告
+├── run_GUI入口.py                 # GUI入口（中文名）：启动桌面图形界面（可选依赖）
+├── run_实盘入口.py                # 实盘入口（中文名）：加载实盘配置 -> 初始化引擎与风控 -> 启动事件循环
+├── run_回测配置GUI.py             # ✨【回写】GUI子入口（中文名）：启动回测参数配置对话框（gui/backtest_config_dialog.py），可视化选择策略/标的池/参数后调起回测；回测与实盘配置同源
+├── run_全量清洗GUI.py             # ✨【回写】GUI子入口（中文名）：启动数据全量清洗对话框（gui/data_clean_dialog.py），可视化配置清洗范围与参数；薄入口，业务逻辑在data_access/full_clean_service.py
+├── run_数据下载GUI.py             # ✨【回写】GUI子入口（中文名）：启动数据下载对话框（gui/data_download_dialog.py），可视化选择数据源与下载范围；设计稿见docs/mockups/
+│
+├── 一键部署.bat                     # ✨【#6】一键部署脚本（v2.0，2026-08-27）：自动查找Anaconda→创建/更新conda环境quant(Py3.12)→创建必要目录→pip install -e ".[dev,web,live]"（失败自动切清华镜像重试）→初始化数据库quant.db→验证核心模块导入(含防未来函数lookahead_guard)→通达信路径检测提示+快速开始；双击或命令行运行；注意其创建data/为旧版路径，实际项目现用datasets/
+├── 优化后期迭代项目结构图.txt         # ✨【#6】项目结构图旧版存档（入口名为英文run_backtest.py/run_gui.py/run_live.py，与总图中文件名不同，仅供后期迭代参考；权威基准为本文件project_layout_gear2.md）
+├── 自定义配置速查卡.html              # ✨【回写】GUI与配置项速查卡（HTML参考文档）：三个GUI对话框的操作步骤与配置字段速查，配合config/*.yaml模板使用
+├── 项目交接文档.md                   # ✨【#6】早期交接文档存档（2026-08-26，阶段2完成时）：含4条铁律说明、项目概述/路径/策略参数；现已由docs/下更完整交接文档取代，历史保留
+│
+├── datasets/                         # 数据存储根目录，按加工层级分子目录
+│   ├── raw/                          # 【原始只读】原始行情数据，任何场景禁止修改此目录文件；原样保存数据源返回内容
+│   │                                 # 格式：parquet/csv，按周期分目录（raw/daily/等），当前v1为扁平结构；后续可扩展为<数据源>/<标的>/<年月>三级分片
+│   ├── processed/                    # 【清洗后标准数据集】经过校验、清洗、对齐之后的Bar/Tick标准数据
+│   │                                 # ✅已实现完整版本化管理（#M2/#S5修复）：由data_access/manager.py的DatasetVersion提供，含create_dataset_version/create_from_clean_run/list/get/get_latest/load/rollback/delete/verify版本方法 + checksum(SHA256)校验 + parent_version派生链 + 版本索引持久化 + DatasetVersionError异常体系；v1不再仅输出简单json统计报告
+│   ├── features/                     # 特征数据（因子计算后的中间结果，供策略与模型使用，依赖processed，不直接读raw）
+│   └── bad/                          # ✨【新增】脏数据归档目录：校验失败、不可修复数据原样存放，附带错误标记json；gitignore忽略
+│
+├── database/                         # ✨【#5】运行时SQLite数据库目录：主要产物quant.db（约5GB，行情/交易/清洗元信息等持久化存储），由myquant/database层+Alembic迁移(alembic.ini配置)管理，运行时产生不入库（*.db已gitignore覆盖）；注意与myquant/database/源码层同名不同层
+├── outputs/                          # 回测结果、图表、绩效报告、交易明细、数据清洗统计报告等输出（运行时产物，gitignore已忽略不入库）
+│   ├── daily_reports/                # 日报输出目录（预留，盘后自动生成日报）
+│   ├── _verify_full/                 # 性能基准完整验证输出（equity/trades/report html+pdf/summary，由性能基准测试.py生成）
+│   └── _入口测试/                    # 入口脚本测试输出（按时间戳子目录，开发期测试遗留）
+├── backups/                          # ✨【#4】结果备份归档目录：scripts/结果备份.py 输出，按时间戳生成backup_YYYYMMDD_HHMMSS快照目录归档outputs/回测结果+logs/运行日志；可选--include-db备份database/quant.db、--include-config备份config/*.yaml（含敏感信息谨慎）、--zip压缩为zip、--keep N自动清理旧备份、--list查看；备份内容gitignore已忽略不入库；实盘运行状态不在此备份，走live/state_store.py状态持久化
+├── notebooks/                        # Jupyter探索性分析、策略原型验证、数据质量探查Notebook
+├── logs/                             # 运行时日志目录；专门分出data_quality子目录存放清洗告警日志，已加入.gitignore
+│
+├── docs/                             # 项目文档目录（共38个文件：5核心文档+26交接摘要+3其他+4 mockups设计稿）
+│   ├── architecture.md               # 架构设计图、模块依赖关系、数据流与同步/异步边界说明
+│   ├── data_dictionary.md            # 数据库表结构、字段说明、数据源规范、数据版本、清洗规则文档
+│   ├── strategy_specs.md             # 策略逻辑规格、参数说明与回测/实盘注意事项
+│   ├── project_layout_gear2.md       # 【本文件】折中档位2架构蓝图
+│   ├── stage_completion.md           # 【阶段完成度总表】
+│   ├── 交接文档_20260830.md          # 最新交接文档（项目状态/已完成/待办/相符性复查）
+│   ├── 未完成事项摘要_实盘前待办.md    # 实盘上线前待办事项汇总
+│   ├── 结构相符性评估报告_20260901.md # ✨【回写】项目结构与本蓝图相符性评估报告（偏差清单+代码级核验结论，偏差①/②已修复）
+│   ├── mockups/                      # ✨【回写】GUI设计稿目录（4文件）：数据下载对话框设计稿与渲染图、用户面板参考图、预览页；对应gui/data_download_dialog.py等已实现对话框，设计存档
+│   └── 交接摘要_*.md（26个）          # 过程性交接摘要存档：阶段9任务7-28（17个）+策略库扩展/回测报告增强/性能优化/数据库迁移/六项优先级盘点/调试文件清理/验证脚本清单/相符性复查问题清单/系统逻辑链审查问题清单（9个）
+│
+├── config/                           # 结构化配置文件目录（模板文件入库，真实yaml不提交）
+│   ├── backtest_config.example.yaml  # 回测参数模板：初始资金、手续费、滑点、时间范围等
+│   ├── live_config.example.yaml     # 实盘参数模板：券商连接、风控阈值、订阅合约等
+│   ├── strategy_params.example.yaml # 策略参数模板：全部6策略参数块（ma_cross/rsrs/grid/momentum/mean_reversion/multi_factor）
+│   ├── risk_params.example.yaml      # 风控参数模板：最大回撤、单笔限额、流控阈值等
+│   ├── data_clean.example.yaml       # ✨【新增】数据清洗规则配置模板：校验开关、异常阈值、去重策略、缺失处理策略、白黑名单标的
+│   │                                  # ✅已实现：CleanRuleLibrary规则对象映射（data_access/cleaner/rules_loader.py），支持yaml配置加载
+│   ├── data_clean_run.json       # ✨【回写】全量清洗运行时状态文件（不入库）：由gui/data_clean_dialog.py生成、供scripts/数据全量清洗.py --config读取；⚠️不受.gitignore的config/*.yaml规则覆盖（该规则仅匹配yaml），存在误提交风险，建议后续在.gitignore补充config/data_clean_run.json忽略项
+│   └── features/                     # 特征工程配置目录（预留）：因子参数、特征列表、特征工程流水线配置；当前为空目录占位(.gitkeep)，后续迭代实现特征配置时直接补yaml
+│
+├── docker/                           # 容器化部署配置
+│   ├── Dockerfile                    # 基于Python官方镜像，安装项目与依赖，设置工作目录
+│   └── docker-compose.yml            # 编排服务：应用容器、数据库容器（可选）、监控容器
+│
+├── .github/                          # CI/CD配置
+│   └── workflows/
+│       └── ci.yml                    # 自动化测试、lint、构建Docker镜像；包含数据清洗单元测试执行
+│
+├── scripts/                          # 一次性运维脚本，只做入口，业务逻辑全部调用myquant内部模块，禁止业务写在脚本内
+│   ├── 数据下载.py                    # 数据下载入口：调用fetcher拉取原始数据写入raw；可触发完整清洗流水线输出processed
+│   ├── 数据清洗.py                    # ✨【新增】独立清洗流水线入口脚本：对raw指定范围/标的执行清洗，输出processed，生成质量报告
+│   ├── 实盘模拟回测.py                # ✨【新增】实盘模拟回测入口（单券商端到端链路验证，akshare真实历史数据）
+│   ├── 双券商模拟实盘.py              # ✨【新增·任务27】双券商并行模拟实盘入口（QMT主+Ptrade备+主备failover演示，akshare优先+模拟兜底）
+│   ├── 实时行情驱动.py                # ✨【任务28】实时行情驱动入口：腾讯/akshare/mock多源，流式清洗+事件总线，--broker paper/qmt/ptrade/dual
+│   ├── 生成回测报告.py                # ✨【第4项】回测报告入口：配置→HistoricalDataProvider→策略→BacktestEngine→LookaheadGuard校验→完整报告5件套，支持蒙特卡洛参数
+│   ├── 性能基准测试.py                # ✨【第5项】性能基准与优化验证入口：运行benchmarks指标基准 + A-E五项164项统一验证，支持--benchmark-only/--verify-only/--quick
+│   ├── 数据库迁移.py                  # ✨【第6项】Alembic迁移中文入口：upgrade/downgrade/current/history/stamp/check/init，支持--db指定数据库路径
+│   ├── 数据库初始化.py                # 数据库初始化：调用database.schema与migrations创建表结构
+│   ├── 运行API.py                     # REST API服务启动入口（uvicorn/FastAPI）
+│   ├── 结果备份.py                    # 备份outputs、datasets/bad和关键状态到归档文件
+│   ├── 标的预筛选.py                  # ✨【回写】标的预筛选入口：从quant.db按代码前缀/上市年限/日均成交额/换手率筛出可交易标的池，输出config/stock_pool.yaml供回测配置引用；流动性指标按回测起始日前历史窗口计算（防未来）；回测/实盘共用同一套筛选条件（实盘无缝对接）
+│   ├── 数据导出_DB到processed.py      # ✨【回写】DB导出入口（当前主格式）：quant.db的hfq日线→datasets/processed/扁平parquet，逐只导出+完整性校验+断点续传；格式与实盘数据提供器一致（实盘无缝对接）；取代旧CSV子目录版脚本（导出DB到回测数据.py，仅存档不再使用）
+│   ├── 数据全量清洗.py                # ✨【回写】全量清洗薄入口：参数解析→组装配置→调用FullCleanService.run()；链路=DB读取→清洗管线→事务写回→清洗元信息→bad归档→可选重建processed；支持--config/--symbols/--dry-run/--workers；与GUI全量清洗对话框共用同一服务
+│   └── 垃圾数据清理.py                # ✨【回写】垃圾数据清理工具入口：扫描识别测试残留/孤儿文件/旧格式冗余/缓存/轮转日志（A-F安全分级），默认dry-run，--execute才执行；含保护清单（主库/主数据/真实报告永不删）
+│
+├── tests/                            # 测试体系（标准pytest单元测试 + 性能基准，12文件979项，2026-09-01实测收集数）
+  │   ├── __init__.py
+  │   ├── conftest.py                   # pytest全局配置，通过pytest_plugins加载fixtures目录
+  │   ├── unit/                         # ✨【目录重构】标准pytest单元测试（被pytest收集运行，12文件979项）
+  │   │   ├── __init__.py
+  │   │   ├── test_indicators.py        # 指标计算正确性（11指标，145项）✅已完成
+  │   │   ├── test_strategies.py        # 策略信号生成逻辑与参数边界（6策略，115项）✅已完成
+  │   │   ├── test_backtest.py          # 回测引擎事件循环、撮合、绩效计算（67项）✅已完成
+  │   │   ├── test_database.py          # 数据库连接、查询、迁移脚本（68项）✅已完成
+  │   │   ├── test_data_clean.py        # 数据清洗单元测试（高频核心case + 极端边界，93项）✅已完成
+  │   │   ├── test_data_manager.py      # 数据加载、版本管理（68项）✅已完成
+  │   │   ├── test_live_risk.py         # 风控规则拦截、仓位限制、流控（83项）✅已完成
+  │   │   ├── test_models.py            # 数据模型校验、序列化（88项）✅已完成
+  │   │   ├── test_execution.py         # 执行层接口与订单状态机（66项）✅已完成
+  │   │   ├── test_monitoring.py        # 健康检查、告警通道、指标采集（105项）✅已完成
+  │   │   ├── test_allocation.py        # 组合资金分配逻辑（63项）✅已完成
+  │   │   └── test_logger.py            # ✨【回写】统一日志配置与data_quality专用通道测试（路由/级别阈值/双写/结构化字段/统一告警API，18项）✅已完成
+  │   ├── fixtures/                     # 按领域拆分fixture，避免conftest膨胀
+  │   │   ├── __init__.py
+  │   │   ├── market_data.py            # 行情fixture：正常+脏数据样本
+  │   │   ├── strategies.py              # 策略fixture：已注册策略实例、信号样例
+  │   │   ├── live_env.py               # 实盘环境fixture：mock_broker、mock_feed
+  │   │   └── database.py               # 数据库fixture：临时数据库、初始化schema
+  │   └── benchmarks/                   # 性能基准测试目录（marker控制开关，默认不跑）
+  │       ├── __init__.py
+  │       ├── _benchmark_utils.py       # 轻量级性能基准工具（纯Python无外部依赖）：BenchmarkResult/BenchmarkRunner（预热+测量+均值/中位数/P95/P99/ops/sec+阈值断言）+ make_synthetic_bars()合成K线（历史日期随机游走防未来函数）；不依赖pytest-benchmark，可独立运行也可被pytest收集
+  │       ├── conftest.py               # 基准测试专用fixture与阈值配置
+  │       ├── test_indicator_perf.py    # 技术指标计算耗时基准
+  │       ├── test_engine_throughput.py  # 引擎每秒处理bar数基准
+  │       └── test_execution_latency.py # 下单接口延迟基准
+  │
+└── myquant/                          # 核心源码包
+    ├── __init__.py
+    │
+    ├── core/                         # 基础设施层：配置、日志、异常、缓存、异步运行时、事件总线、防未来函数校验器
+    │   ├── __init__.py
+    │   ├── settings.py               # 全局配置管理器：加载.env和config/*.yaml，支持多级覆盖；加载data_clean配置
+    │   ├── config_loader.py          # 通用配置加载器(YAML/JSON)，处理默认值、配置校验
+    │   ├── constants.py              # 项目常量：颜色、状态码、时间单位、枚举
+    │   │                             # ✅已实现：DirtyDataType(14种)、RepairStrategy、QualityGrade、CleanStep、SeverityLevel 数据清洗枚举
+    │   ├── exceptions.py            # 自定义异常体系（QuantBaseError基类，含message/code/details/cause+to_dict）：ConfigError/DataError/StrategyError/RiskViolationError/BacktestError/LookaheadError/TransportError/CacheError/EventError 共9大类+子类
+    │   │                             # ✅已实现：DataQualityError/Critical/Warning、CleaningPipelineError、DataRepairError 脏数据异常体系；LookaheadError防未来函数异常(规则4核心,code=8001)；wrap_exception()安全执行包装器
+    │   ├── logger.py                 # 统一日志配置
+    │   │                             # ✅已实现（偏差①修复·2026-09-01）：独立data_quality日志通道——DataQualityFilter路由(data_clean.*/live.*/data_quality命名空间)+DataQualityFormatter+logs/data_quality/子目录（WARNING及以上）；双写机制（告警同时进控制台/全量日志与专用文件）；结构化字段source(offline/live/api)+symbol自动提取；统一告警API log_data_quality_alert()/get_data_quality_logger()（实时行情/实盘无缝对接入口）；live/data_feed.py三处实时告警点已接入；测试见tests/unit/test_logger.py(18项)
+    │   ├── date_utils.py             # ✨【回写】bar数据日期格式化工具（日线/分钟线统一date字段格式）：实盘链路核心依赖，被live/engine.py与live/data_feed.py（3处）直接调用；与utils/time_utils.py分工：date_utils管bar日期字符串格式化，time_utils管时区/交易日历/时间戳转换
+    │   ├── cache.py                  # 计算结果缓存：内存LRU / Redis
+    │   ├── async_runtime.py          # 异步运行时管理：事件循环、任务封装、信号处理优雅关闭
+    │   ├── event_bus.py              # 事件总线：进程内发布订阅，同步/异步事件
+    │   │                             # ✅已实现：DataQualityEvent/PipelineCompleteEvent/QualityAlertEvent/StrategyPauseEvent 强类型事件 + EventFilter过滤器 + DataQualityEventPublisher便捷发布器
+    │   ├── lookahead_guard.py        # ✨【#1】防未来函数校验器（规则4核心）：记录指标/信号/成交/止损/数据访问5类操作，四条铁律自动校验（指标不含当日/T+1成交/先检查后更新/因子仅用历史），回测结束assert_pass()强制校验；环境变量LOOKAHEAD_GUARD_ENABLED/STRICT控制开关与严格模式；回测实盘共用同一校验逻辑（实盘无缝对接）；依赖exceptions.LookaheadError
+    │   └── transports/               # 外部消息中间件适配
+    │       ├── __init__.py
+    │       ├── base.py               # 传输抽象基类 publish/subscribe
+    │       ├── redis_bus.py          # Redis Pub/Sub实现（可选）
+    │       └── rabbitmq_bus.py       # RabbitMQ实现（可选）
+    │
+    ├── engine/                       # 引擎抽象层（回测实盘共用骨架）
+    │   ├── __init__.py
+    │   └── base.py                   # BaseEngine抽象基类 on_init/on_market_event/on_stop；market_event输入必须经过清洗
+    │
+    ├── models/                       # 数据模型层，类型安全dataclass/pydantic；【第一道校验关口】
+    │   ├── __init__.py
+    │   ├── trade.py                  # Order、Position、Trade 订单状态枚举
+    │   ├── market_data.py            # Tick、Bar、Snapshot、MarketEvent；内置pydantic字段值域校验，原始数据先parse本模型
+    │   └── backtest.py               # BacktestConfig、BacktestResult绩效容器
+    │
+    ├── database/                     # 数据库抽象层：统一持久化接口
+    │   ├── __init__.py
+    │   ├── connection.py             # SQLite连接管理上下文管理器
+    │   ├── schema.py                 # 表结构总览DDL
+    │   │                             # ✅已实现：clean_run_meta(清洗运行元信息) + dirty_data_stats(脏数据统计14种类型) 两表 + CleanRunMetaSchema/DirtyDataStatsSchema + 9索引
+    │   ├── queries.py               # 类型安全SQL封装CRUD
+    │   └── migrations/               # ✨【第6项】Alembic数据库迁移
+    │       ├── __init__.py           # 兼容层：自研MigrationManager保留（v1/v2），Alembic为主迁移框架
+    │       ├── env.py                # Alembic环境配置：项目根自动探测、SQLite路径解析、offline/online双模式、事务迁移
+    │       ├── script.py.mako        # 迁移脚本模板
+    │       └── versions/             # 版本迁移脚本
+    │           ├── 0001_initial_schema.py  # 初始建表：8表(6业务+2清洗元信息)+30索引，从schema.py完整转换
+    │           └── 0002_add_market_data_composite_index.py  # 增量迁移：market_data(symbol,period,trade_date)复合索引
+    │
+    ├── data_access/                  # ✨【数据获取+清洗核心模块】
+    │   ├── __init__.py
+    │   ├── fetcher.py                # 行情拉取：网络请求、限流、重试、格式转换，输出原始数据写入datasets/raw
+    │   ├── factory.py                # ✨【#2】数据获取器工厂（统一入口+自动优先级注册）：create_default_fetcher()/create_fetcher(mode)（auto/tdx/akshare）/detect_tdx_available()/get_available_sources()；优先级=通达信本地源最高（纯本地毫秒级，回测主力）→akshare备用（内部多源降级新浪→东财），通达信不可用自动跳过不报错；所有查询严格传递end_date防未来；实时行情/实盘场景可通过mode指定专用源
+    │   ├── manager.py                # 数据管理器：增量更新/质量校验/同步状态/调用清洗函数输出processed；✅已实现 DatasetVersion 完整版本管理（任务14）：create_dataset_version/create_from_clean_run/list/get/get_latest/load/rollback/delete/verify 版本方法 + checksum(SHA256)校验 + parent_version派生链 + 版本索引持久化 + DatasetVersionError异常体系
+    │   ├── full_clean_service.py     # ✨【回写】全量清洗业务逻辑层：FullCleanService——DB读取→清洗管线→事务写回→清洗元信息落库→bad归档→可选重建processed（subprocess调scripts/数据导出_DB到processed.py）；唯一调用方=scripts/数据全量清洗.py（CLI与GUI全量清洗对话框共用）；业务逻辑归myquant，脚本只做薄入口（架构纪律）
+    │   ├── cleaner/                  # ✨【数据清洗核心模块】已重构为面向对象架构
+    │   │   ├── __init__.py
+    │   │   ├── base_cleaner.py       # ✅已实现：CleanRule/CleanResult/CleanerBase(ABC)/CleanerRegistry 清洗器抽象基类与注册器
+    │   │   ├── error_codes.py        # ✨【回写】结构化清洗错误码：ErrorCode枚举（按CRITICAL/WARNING分级）+ format_error()/infer_dirty_type_from_errors()；bar_cleaner.py核心依赖（15+处），且被live/data_feed.py导入用于实时行情质量校验（实盘无缝对接：离线清洗与实时流式清洗共用同一错误码语义）
+    │   │   ├── bar_cleaner.py        # ✅已实现：BarCleaner(CleanerBase) Bar数据清洗器（校验/去重/异常检测/修复/落盘）
+    │   │   ├── tick_cleaner.py       # ✅已实现：TickCleaner(CleanerBase) Tick数据清洗器
+    │   │   ├── pipeline.py           # ✅已实现：PipelineStep/PipelineResult/CleanPipeline 完整流水线编排对象
+    │   │   ├── rules_loader.py       # ✅已实现：CleanRuleLibrary 规则对象映射与yaml配置加载
+    │   │   └── quality_reporter.py   # ✅已实现：质量报告生成器（json统计+分级告警+脏数据归档）
+    │   └── sources/                  # 多数据源适配器，只负责拿到外部原始数据，不做业务清洗
+    │       ├── __init__.py
+    │       ├── base.py               # 数据源抽象基类
+    │       ├── akshare_source.py      # AkShare数据源实现
+    │       ├── broker_source.py       # 券商实时数据源预留接口
+    │       ├── composite_source.py    # 多源融合+自动降级
+    │       ├── web_source.py         # ✨【回写】网页数据源（东方财富→新浪→腾讯三级降级）：当前仅供gui/data_download_dialog.py下载链路使用（直接实例化）；未注册入factory数据源体系；设计定位为实时行情/实盘统一标的池来源，为后续纳入实时数据源体系预留扩展点（# TODO: 后续迭代实现，v1暂不开发）
+    │       └── tdx_source.py         # 通达信本地数据源：解析.day文件(32字节/K线)，自动探测安装路径，纯本地毫秒级响应；已实现get_market_data/get_stock_list/health_check抽象方法；✨【#S4修复】补充get_financial_data/get_index_list/subscribe_realtime三个不支持功能的安全默认实现（返回空列表/False+warning日志，不抛NotImplementedError），避免调用方未检查supports_*时崩溃；supports_financial=False/supports_realtime=False/supported_periods={daily}；为实盘无缝对接预留DDE实时数据扩展点
+    │
+    ├── indicators/                   # 技术指标计算模块；**只接收已经清洗完成的processed数据，不处理脏原始数据**
+    │   ├── __init__.py
+    │   ├── moving_average.py         # SMA、EMA、WMA、MACD（指数平滑异同移动平均线，MACD在此文件）
+    │   ├── momentum.py               # ROC（变动率）、MOM（动量，三因子之动量因子）、RSI、KDJ
+    │   ├── volatility.py             # ATR、Volatility（收益率波动率，三因子之波动率因子）、BollingerBands（布林带）
+    │   └── rsrs.py                   # ✨【#3】RSRS阻力支撑相对强度指标（系统核心择时指标）：线性回归high=α+β*low，β为原始斜率+z-score标准化；参数period=18/norm_window=60/buy=0.7/sell=-0.7；输出rsrs(z-score)/rsrs_raw(β)/rsrs_r2(R²)/signal四列；防未来函数铁律：β用iloc[i-period:i]不含第i根，批量calculate先算含当日β再整体shift(1)，流式update用不含当前bar的最近period根，validate_no_lookahead()自校验；@register_indicator注册，回测批量+实盘流式共用同一逻辑（实盘无缝对接）
+    │
+    ├── strategies/                   # 策略模块，输入是经过清洗后的标准行情事件；回测/实盘共用同一注册器与实例
+    │   ├── __init__.py               # 统一导出：6个策略类 + create_strategy/list_strategies/discover_strategies API
+    │   ├── registry.py               # 策略注册器：装饰器注册、动态发现、外部插件入口点
+    │   ├── base.py                   # 策略抽象基类：信号生成、参数接口、生命周期钩子、通用工具
+    │   │                             # （check_stop_loss/check_take_profit/_should_rebalance/_get_close_series）
+    │   ├── ma_strategy.py            # RSRS三因子择时策略 + 均线交叉示例
+    │   ├── grid_strategy.py          # 网格交易策略（震荡市，固定区间/auto_grid自适应）
+    │   ├── momentum_strategy.py      # 动量交易策略（趋势市，定期调仓选top_n，按当前bar截断防未来）
+    │   ├── mean_reversion_strategy.py# 均值回归策略（震荡市，布林+RSI，按当前bar截断防未来）
+    │   └── multi_factor_strategy.py  # 多因子策略（动量+反转+低波动+量价，复合打分选top_n）
+    │
+    ├── backtest/                     # 回测引擎模块；只读取processed数据集，绝不直接读取raw原始数据
+    │   ├── __init__.py
+    │   ├── engine.py                 # 回测引擎继承BaseEngine，时间序列事件循环；✨【#S3修复】内置LookaheadGuard防未来函数显式校验：__init__支持lookahead_guard注入/enable_lookahead_guard开关，on_init自动reset，on_market_event记录成交(铁律3 T+1)，_execute_signal记录信号(铁律4因子仅用历史)，on_stop调用assert_pass()统一校验；_bar_date_str辅助日期转换，_order_signal_dates映射订单→信号日，校验失败记录日志不中断回测结果；防未来函数从入口脚本升级为引擎内置能力
+    │   ├── data_loader.py            # 数据加载：DataProviderBase + HistoricalDataProvider，从processed加载，严格end_date过滤防未来
+    │   ├── metrics.py                # 绩效指标：夏普、最大回撤、胜率、Calmar、Sortino
+    │   ├── recorder.py               # 交易记录器：成交明细、持仓变动、资金曲线
+    │   ├── monte_carlo.py            # ✨【第4项】蒙特卡洛分析：已实现收益重采样引导模拟，破产概率/收益置信区间/净值分位带
+    │   ├── pdf_report.py             # ✨【第4项】PDF报告生成（fpdf2纯Python，中文字体自动探测，专业排版可打印存档）
+    │   └── report.py                 # ✨【第4项增强】HTML报告生成器：交互式Plotly图表+蒙特卡洛区块+完整报告5件套(html/pdf/text/trades_csv/equity_csv)
+    │
+    ├── execution/                    # 统一执行抽象层，回测实盘共用接口
+    │   ├── __init__.py
+    │   ├── base.py                   # ExecutionInterface抽象基类：下单撤单查单
+    │   ├── sim_broker.py             # 回测模拟撮合：滑点佣金印花税部分成交
+    │   └── state_machine.py          # 订单生命周期状态机
+    │
+    ├── allocation/                   # 组合资金分配模块（多策略运行）
+    │   ├── __init__.py
+    │   ├── base.py                   # 分配器抽象基类
+    │   ├── equal_weight.py           # 等权分配
+    │   ├── risk_parity.py            # 风险平价
+    │   └── target_volatility.py      # 目标波动率
+    │
+    ├── risk/                         # 风控独立模块，硬隔离
+    │   ├── __init__.py
+    │   ├── risk_manager.py           # 风控核心：仓位限制、止损、流控、拦截
+    │   │                             # ✅已实现：DataQualityRiskConfig + SymbolDataQualityStatus + subscribe_to_event_bus(3类事件) + 脏数据自动暂停(单标的/全局) + 自动恢复
+    │   ├── guardian.py               # 风控守护进程：健康监控、强制平仓断开
+    │   └── rules.py                  # 风控规则库
+    │
+    ├── gui/                          # 桌面图形界面（可选依赖）
+    │   ├── __init__.py
+    │   ├── main_window.py            # 主窗口菜单面板状态栏
+    │   ├── backtest_config_dialog.py # ✨【回写】回测参数配置对话框：被run_回测配置GUI.py调用；discover_strategies策略发现 + config/stock_pool.yaml标的池（经scripts/标的预筛选.py生成）→ 可视化选择策略/标的/参数 → 生成回测yaml → 调起回测入口；回测与实盘配置同源（实盘无缝对接）
+    │   ├── data_clean_dialog.py      # ✨【回写】全量清洗配置对话框：被run_全量清洗GUI.py调用；可视化配置清洗范围/参数 → 生成config/data_clean_run.json（运行时状态文件，不入库）→ subprocess调起scripts/数据全量清洗.py；与CLI共用同一FullCleanService（data_access/full_clean_service.py）
+    │   ├── data_download_dialog.py   # ✨【回写】数据下载管理器对话框：被run_数据下载GUI.py调用；8项数据下载管理功能，含数据源选择/下载范围/通达信检测/网源抓取（直接实例化sources/web_source.py）；设计稿见docs/mockups/；网源当前仅供下载链路，为后续纳入实时行情数据源体系预留扩展点
+    │   └── widgets/
+    │       ├── __init__.py
+    │       ├── kline_item.py         # K线绘制控件
+    │       ├── side_panel.py         # 侧边面板参数配置、账户概览
+    │       └── plot_helper.py        # 绘图辅助
+    │
+    ├── web/                          # Web看板模块（可选依赖）
+    │   ├── __init__.py
+    │   └── dashboard.py              # Streamlit看板：8页面（首页/策略/回测/实盘/风控/数据质量/数据/关于）；✅已实现数据质量探查页（任务15）：_render_data_quality渲染 + 从monitoring.data_quality_explorer导入DataQualityExplorer（#S2修复：类定义已迁移到monitoring底层，web层仅做导入保持向后兼容）；数据源=CleanDataQueries(任务13)+MetricsCollector(任务11)；source过滤区分offline/live为实盘对接预留；streamlit未安装时友好提示
+    │
+    ├── live/                         # 实盘交易模块；v1实盘data_feed调用cleaner下普通清洗函数做流式清洗
+    │   ├── __init__.py
+    │   ├── engine.py                 # 实盘引擎继承BaseEngine，协调数据、策略、执行、风控
+    │   │                             # 【任务27】接入 BrokerManager 多券商管理器：set_broker自动包装(单券商向后兼容)/set_broker_manager(多券商并行)
+    │   │                             #           唯一执行通道=broker_manager（路由主券商+拒单/断线自动failover）；行情广播push_market_data
+    │   │                             #           合并持仓watch；统一health schema；context.data增量同步（策略数据源与回测同构，防未来）
+    │   ├── data_feed.py              # 实时行情接入订阅重连分发；流式清洗(单条校验+跳变检测) + attach_event_bus事件总线联动 + 脏数据钩子
+    │   ├── portfolio.py              # 实时持仓、市值、可用冻结资金
+    │   ├── scheduler.py              # 定时任务、巡检、日报
+    │   ├── state_store.py            # 状态持久化，崩溃恢复
+    │   └── brokers/                  # 券商适配层，只负责对接券商原始接口，不做清洗
+    │       ├── __init__.py
+    │       ├── base_broker.py        # 券商抽象基类
+    │       ├── paper_broker.py       # 本地模拟券商（Paper Trading，模拟撮合）
+    │       ├── qmt_broker.py         # 迅投QMT适配器（SIM模拟撮合+LIVE SDK占位，第1项实盘对接）
+    │       ├── ptrade_broker.py      # 恒生Ptrade适配器（SIM模拟撮合+LIVE API占位，第1项实盘对接）
+    │       └── manager.py            # 多券商管理器（双券商并行：路由/主备切换/合并视图/健康监控）
+    │
+    ├── monitoring/                   # 监控告警模块
+    │   ├── __init__.py
+    │   ├── health_check.py           # 健康检查：数据源连通性、磁盘、进程
+    │   ├── alerting.py               # 告警通道，支持分级去重
+    │   │                             # ✅已实现：AlertManager.subscribe_to_event_bus(5类事件) + DataQualityEvent自动聚合告警 + Console/Log/Email/Webhook四通道
+    │   ├── metrics_collector.py      # 运行指标采集
+    │   │                             # ✅已实现：11个内置数据质量指标(dirty_count/ratio/grade/repair等) + collect_from_data_quality_event + subscribe_to_event_bus自动采集 + Prometheus导出
+    │   └── data_quality_explorer.py # ✨【#S2修复】数据质量探查器（从web/dashboard.py迁移到monitoring底层，消除API依赖Web的架构倒置）：DataQualityExplorer类13方法（实时指标/清洗运行列表/运行详情/等级分布/脏数据统计/总览），纯Python数据层不依赖streamlit，API层和Web层均从此导入；数据源=CleanDataQueries+MetricsCollector；source过滤区分offline/live为实盘对接预留
+    │
+    ├── api/                          # REST API模块
+    │   ├── __init__.py
+    │   ├── routes.py                 # 路由聚合
+    │   │                             # ✅已实现：6个数据质量端点(/api/data/quality, /overview, /runs, /runs/{id}, /dirty, /metrics) + 告警管理端点
+    │   ├── middleware/
+    │   │   ├── __init__.py
+    │   │   ├── auth.py
+    │   │   └── rate_limit.py
+    │   ├── models/
+    │   │   ├── __init__.py
+    │   │   └── schemas.py            # ✅已实现：DataQualityResponse/QualityMetricsInfo/DirtyData/QualityOverviewData/CleanRunsData/AlertInfo 等数据质量pydantic响应schema
+    │   └── dependencies/
+    │       ├── __init__.py
+    │       └── get_services.py
+    │
+    ├── ml/                           # 机器学习模块；输入只能读取processed清洗后数据，禁止读取raw原始
+    │   ├── __init__.py
+    │   ├── features.py               # 特征工程因子计算标签生成
+    │   ├── model_registry.py         # 模型注册版本管理
+    │   ├── training_pipeline.py      # 训练流水线
+    │   └── inference_service.py      # 批量/实时预测服务
+    │
+    └── utils/                        # 通用工具包
+        ├── __init__.py
+        ├── time_utils.py             # 日期时间、时区、交易日历，清洗模块强依赖本工具
+        ├── file_utils.py             # 路径读写压缩
+        └── math_utils.py             # 统计、数值格式化，用于异常值检测（3σ、四分位）

@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>鲲鹏量化交易系统 · 自定义配置速查卡</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+    background: #eef1f5;
+    color: #2c3e50;
+    padding: 24px;
+  }
+  .card {
+    max-width: 1180px;
+    margin: 0 auto;
+    background: #ffffff;
+    border-radius: 14px;
+    box-shadow: 0 6px 28px rgba(44,62,80,.12);
+    overflow: hidden;
+  }
+  /* 顶部 */
+  .header {
+    background: linear-gradient(135deg, #1f3a5f 0%, #2c5282 100%);
+    color: #fff;
+    padding: 22px 32px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .header h1 { font-size: 22px; font-weight: 700; letter-spacing: 1px; }
+  .header .sub { font-size: 12px; opacity: .8; margin-top: 4px; }
+  .header .tag {
+    background: rgba(255,255,255,.15);
+    border: 1px solid rgba(255,255,255,.3);
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+  }
+  /* 主体网格 */
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    padding: 20px 24px;
+  }
+  .section {
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .section-title {
+    padding: 10px 16px;
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .s1 .section-title { background: #c05621; }
+  .s2 .section-title { background: #2b6cb0; }
+  .s3 .section-title { background: #2f855a; }
+  .s4 .section-title { background: #6b46c1; }
+  .num {
+    background: rgba(255,255,255,.25);
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { padding: 8px 12px; text-align: left; vertical-align: top; border-bottom: 1px solid #edf2f7; }
+  th { background: #f7fafc; color: #4a5568; font-weight: 600; font-size: 11px; }
+  tr:last-child td { border-bottom: none; }
+  .path {
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 11px;
+    color: #c05621;
+    background: #fff5eb;
+    padding: 2px 6px;
+    border-radius: 4px;
+    display: inline-block;
+    word-break: break-all;
+  }
+  .key { color: #2b6cb0; font-weight: 600; }
+  .note { font-size: 11px; color: #718096; }
+  .hl { background: #fef3c7; padding: 1px 4px; border-radius: 3px; font-weight: 600; }
+  /* 底部 */
+  .footer {
+    background: #f7fafc;
+    border-top: 1px solid #e2e8f0;
+    padding: 16px 24px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .warn-box {
+    background: #fff5f5;
+    border-left: 4px solid #c53030;
+    padding: 10px 14px;
+    border-radius: 0 6px 6px 0;
+    font-size: 12px;
+  }
+  .warn-box h4 { color: #c53030; font-size: 12px; margin-bottom: 6px; }
+  .warn-box ul { padding-left: 18px; color: #742a2a; line-height: 1.7; }
+  .tool-box {
+    background: #ebf8ff;
+    border-left: 4px solid #2b6cb0;
+    padding: 10px 14px;
+    border-radius: 0 6px 6px 0;
+    font-size: 12px;
+  }
+  .tool-box h4 { color: #2b6cb0; font-size: 12px; margin-bottom: 6px; }
+  .tool-box ul { padding-left: 18px; color: #2c5282; line-height: 1.7; }
+  .run-cmd {
+    font-family: "Consolas", monospace;
+    background: #1a365d;
+    color: #90cdf4;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    display: inline-block;
+    margin-top: 4px;
+  }
+  .meta {
+    text-align: center;
+    padding: 10px;
+    font-size: 11px;
+    color: #a0aec0;
+    background: #f7fafc;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+
+  <!-- 顶部 -->
+  <div class="header">
+    <div>
+      <h1>鲲鹏量化交易系统 · 自定义配置速查卡</h1>
+      <div class="sub">Pythonwdhmm / 数据过滤 · 回测时间 · 下载时间 · 策略参数 — 一页速查</div>
+    </div>
+    <div class="tag">v1 · 2026-08-30</div>
+  </div>
+
+  <!-- 主体 -->
+  <div class="grid">
+
+    <!-- 维度1：过滤股票/市场 -->
+    <div class="section s1">
+      <div class="section-title"><span class="num">1</span>过滤股票代码 / 市场（创业板、科创板等）</div>
+      <table>
+        <tr><th style="width:38%">位置</th><th>说明 / 改法</th></tr>
+        <tr>
+          <td><span class="path">myquant\strategies\base.py</span><br><span class="key">StockPoolBuilder</span></td>
+          <td><b>核心过滤（已内置）</b>。<span class="hl">DEFAULT_EXCLUDE_PREFIXES</span> = ("688","300","301","4","8","43","83","87","88","89","92")。改这行元组即可增删过滤前缀；<span class="key">filter_by_code()</span> 按前缀过滤。</td>
+        </tr>
+        <tr>
+          <td><span class="path">myquant\data_access\sources\akshare_source.py</span><br><span class="key">get_stock_list()</span></td>
+          <td>下载时取全市场 A 股（东财接口），按前缀判 SH/SZ/BJ。想"下载时就不下创业板/科创板"，在此函数内加前缀过滤。</td>
+        </tr>
+        <tr>
+          <td><span class="path">myquant\data_access\sources\tdx_source.py</span><br><span class="key">get_stock_list()</span></td>
+          <td>通达信本地源，已过滤指数/转债/基金，只留沪深 A 股（60/68/90、00/30/20）。</td>
+        </tr>
+        <tr>
+          <td><span class="path">scripts\数据下载.py</span><br><span class="key">download_daily()</span></td>
+          <td><span class="hl">symbols = fetcher.get_stock_list()</span> 全市场下载。要"只下载指定股票/市场"，在此对 symbols 加过滤。</td>
+        </tr>
+        <tr>
+          <td><span class="path">config\backtest_config.example.yaml</span><br><span class="key">stock_pool.codes</span></td>
+          <td>回测自定义列表：<span class="hl">type: custom</span> 时直接手写想要的股票代码列表。</td>
+        </tr>
+        <tr>
+          <td><span class="path">run_回测配置GUI.py</span> <span class="hl">新增</span></td>
+          <td>图形化窗口：勾选板块（科创板/创业板/北交所）+ 自定义前缀（如 30,92），实时预览，生成 <span class="path">config\backtest_config.yaml</span>（含 exclude_prefixes）。</td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- 维度2：回测时间 -->
+    <div class="section s2">
+      <div class="section-title"><span class="num">2</span>回测时间设置</div>
+      <table>
+        <tr><th style="width:38%">位置</th><th>说明 / 改法</th></tr>
+        <tr>
+          <td><span class="path">config\backtest_config.example.yaml</span><br><span class="key">backtest.start_date / end_date</span></td>
+          <td><b>主配置</b>。复制为 <span class="path">backtest_config.yaml</span> 后改这两个日期，格式 YYYY-MM-DD。</td>
+        </tr>
+        <tr>
+          <td><span class="path">run_回测入口.py</span><br><span class="key">--start / --end</span></td>
+          <td>命令行覆盖配置文件：<br><span class="run-cmd">python run_回测入口.py --start 2024-01-01 --end 2024-12-31</span></td>
+        </tr>
+        <tr>
+          <td><span class="path">run_回测配置GUI.py</span> <span class="hl">新增</span></td>
+          <td>窗口里用日期选择器直接选起止日期，无需手写。</td>
+        </tr>
+        <tr>
+          <td><span class="path">myquant\backtest\data_loader.py</span><br><span class="key">get_bars(end_date)</span></td>
+          <td><b>防未来函数</b>：数据加载严格按 end_date 过滤，绝不返回未来数据。</td>
+        </tr>
+      </table>
+      <div style="padding:10px 14px;background:#f0f7ff;font-size:11px;color:#2c5282;">
+        <b>常用命令：</b><br>
+        <span class="run-cmd">python run_回测入口.py --config config\backtest_config.yaml</span><br>
+        <span class="run-cmd">python run_回测入口.py --list-strategies</span>
+      </div>
+    </div>
+
+    <!-- 维度3：数据下载时间 -->
+    <div class="section s3">
+      <div class="section-title"><span class="num">3</span>数据下载时间设置</div>
+      <table>
+        <tr><th style="width:38%">位置</th><th>说明 / 改法</th></tr>
+        <tr>
+          <td><span class="path">myquant\data_access\sources\akshare_source.py</span><br><span class="key">get_market_data(start,end)</span></td>
+          <td>单只下载日期范围，默认 <span class="hl">19900101 ~ 今天</span>。改 <span class="key">ak_start / ak_end</span> 即控制下载时间范围。</td>
+        </tr>
+        <tr>
+          <td><span class="path">myquant\data_access\sources\tdx_source.py</span></td>
+          <td>通达信源同样有 <span class="key">_filter_by_date(start,end)</span> 按日期范围过滤。</td>
+        </tr>
+        <tr>
+          <td><span class="path">scripts\数据下载.py</span><br><span class="key">--incremental</span></td>
+          <td><b>增量更新</b>（盘后每日运行，约1-5分钟）。增量逻辑按数据库 <span class="path">sync_status</span> 表的最后同步日期决定补哪些天。</td>
+        </tr>
+        <tr>
+          <td><span class="path">myquant\data_access\manager.py</span><br><span class="key">update_symbols_batch()</span></td>
+          <td>批量更新核心，处理增量逻辑、数据库保存、同步状态。</td>
+        </tr>
+        <tr>
+          <td><span class="path">scripts\数据下载.py</span><br>下载模式</td>
+          <td>
+            <span class="hl">--daily</span> 全量日线（首次，30-60分钟）<br>
+            <span class="hl">--incremental</span> 增量更新<br>
+            <span class="hl">--finance</span> 财务数据<br>
+            <span class="hl">--all</span> 日线增量+财务<br>
+            <span class="hl">--validate</span> 数据质量校验 / <span class="hl">--status</span> 同步状态
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- 维度4：其他自定义 -->
+    <div class="section s4">
+      <div class="section-title"><span class="num">4</span>其他可自定义项</div>
+      <table>
+        <tr><th style="width:38%">位置</th><th>说明 / 改法</th></tr>
+        <tr>
+          <td><span class="path">config\strategy_params.example.yaml</span><br>+ <span class="path">backtest_config → strategy.params</span></td>
+          <td><b>策略参数</b>：RSRS 周期(18)/标准化窗口(60)/买卖阈值(±0.7)/止盈20%/止损15%；各策略（grid/momentum/mean_reversion/multi_factor）参数集中管理。</td>
+        </tr>
+        <tr>
+          <td><span class="path">config\backtest_config.example.yaml</span><br><span class="key">sim_broker</span></td>
+          <td><b>手续费/滑点/T+1/涨跌停</b>：佣金万2、最低5元、印花税千1、过户费万0.1、滑点万2、T+1、100股一手、涨跌停10%。</td>
+        </tr>
+        <tr>
+          <td><span class="path">config\backtest_config.example.yaml</span><br><span class="key">position</span></td>
+          <td><b>仓位管理</b>：单票最大20%、最多同时5只、总仓位上限95%。</td>
+        </tr>
+        <tr>
+          <td><span class="path">config\risk_params.example.yaml</span></td>
+          <td><b>风控参数</b>：最大回撤、单笔限额、流控阈值等。</td>
+        </tr>
+        <tr>
+          <td><span class="path">config\data_clean.example.yaml</span></td>
+          <td><b>数据清洗规则</b>：OHLC逻辑校验、价格跳变阈值22%、成交量异常100倍、重复时间戳策略等。<span class="note">（v1 暂无标的白黑名单，计划 TODO）</span></td>
+        </tr>
+        <tr>
+          <td><span class="path">config\backtest_config.example.yaml</span><br><span class="key">output</span></td>
+          <td><b>输出</b>：输出目录、是否保存交易/持仓/资金曲线、是否生成报告、报告标题、日志级别。</td>
+        </tr>
+      </table>
+    </div>
+
+  </div>
+
+  <!-- 底部：注意事项 + 新增工具 -->
+  <div class="footer">
+    <div class="warn-box">
+      <h4>⚠ 两个必须注意的坑</h4>
+      <ul>
+        <li><b>three_factor 尚未接通</b>：<span class="path">run_回测入口.py</span> 里 <span class="hl">stock_pool.type: three_factor</span> 仍是 TODO（会提示并降级为 custom）。真正生效的前缀过滤在 RSRS 策略内部的 <span class="key">StockPoolBuilder</span>。</li>
+        <li><b>回测数据链路未通</b>：回测读 <span class="path">datasets\processed\</span>（目前只有测试标的），真实完整数据在 <span class="path">database\quant.db</span>（2040万行/9343只/1990~2026）。全量回测前需先把 DB 数据导出到回测可读目录。</li>
+      </ul>
+    </div>
+    <div class="tool-box">
+      <h4>🚀 新增工具：回测配置窗口</h4>
+      <ul>
+        <li><b>文件</b>：<span class="path">run_回测配置GUI.py</span> + <span class="path">myquant\gui\backtest_config_dialog.py</span></li>
+        <li><b>功能</b>：图形化选回测时间/资金/策略；勾选剔除板块（科创板/创业板/北交所）+ 自定义排除前缀（如 30,92），实时预览；一键生成配置并启动回测。</li>
+        <li><b>运行</b>：<span class="run-cmd">python run_回测配置GUI.py</span></li>
+        <li><b>状态</b>：窗口 v1 已可运行；exclude_prefixes 已写入配置，<span class="note">接入策略层（一行改动）待确认后执行</span>。</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="meta">Pythonwdhmm 鲲鹏量化交易系统 · 自定义配置速查卡 · 生成于 2026-08-30 · 仅作内部参考</div>
+
+</div>
+</body>
+</html>

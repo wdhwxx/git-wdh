@@ -1,0 +1,230 @@
+# 文件名：docker/docker-compose.yml
+# Pythonwdhmm 鲲鹏量化交易系统 — Docker容器编排配置
+# 编排服务：应用容器 + 数据库容器 + 监控容器
+# 为回测、实盘、Web看板提供完整运行环境
+#
+# 安全说明（H5 加固）：
+#   - 数据库/Redis 口令必须通过根目录 .env 提供（${VAR:?} 强制校验，缺失即报错），禁止写死
+#   - 所有端口默认仅绑定 127.0.0.1；需要对外服务时在 .env 中设置 API_BIND / DB_BIND / REDIS_BIND / DASHBOARD_BIND=0.0.0.0
+
+version: "3.8"
+
+services:
+  # ============================================================
+  # 应用服务：回测引擎 + 实盘信号生成
+  # ============================================================
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: pythonwdhmm-app
+    restart: unless-stopped
+    volumes:
+      # 数据目录挂载（宿主机持久化，容器重建不丢数据）
+      - ../datasets:/app/datasets
+      - ../outputs:/app/outputs
+      - ../实盘状态:/app/实盘状态
+      - ../实盘信号:/app/实盘信号
+      - ../logs:/app/logs
+      - ../database:/app/database
+      # 配置文件挂载（方便修改配置不用重建镜像）
+      - ../config:/app/config:ro
+      - ../.env:/app/.env:ro
+    environment:
+      - TZ=Asia/Shanghai
+      - TRADE_MODE=paper
+      - LOG_LEVEL=INFO
+      # 数据库连接（指向db服务）
+      - DB_TYPE=sqlite
+      - DB_PATH=/app/database/quant.db
+    ports:
+      - "${API_BIND:-127.0.0.1}:8000:8000"    # REST API端口（默认仅本机，对外需设 API_BIND=0.0.0.0）
+      # 疑点1确认: 删除 app 的 8501 映射——8501 为 dashboard 服务专用，双映射会端口冲突
+    depends_on:
+      db:
+        condition: service_healthy
+        required: false    # db 为可选（profile: postgres），默认 sqlite 模式无需等待
+    # M10修复: 默认启动 API 服务（原 run_回测入口.py --help 启动即退出，
+    # 且不监听 8000，healthcheck 永远失败）
+    command: ["python", "scripts/运行API.py", "--host", "0.0.0.0", "--port", "8000"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]   # M10: 对齐真实路由
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - quant-net
+
+  # ============================================================
+  # 实盘服务：实时行情 + 自动交易（独立容器，与回测隔离）
+  # ============================================================
+  live:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: pythonwdhmm-live
+    restart: unless-stopped
+    volumes:
+      - ../datasets:/app/datasets
+      - ../outputs:/app/outputs
+      - ../实盘状态:/app/实盘状态
+      - ../实盘信号:/app/实盘信号
+      - ../logs:/app/logs
+      - ../database:/app/database
+      - ../config:/app/config:ro
+      - ../.env:/app/.env:ro
+    environment:
+      - TZ=Asia/Shanghai
+      - TRADE_MODE=paper
+      - LOG_LEVEL=INFO
+      - DB_TYPE=sqlite
+      - DB_PATH=/app/database/quant.db
+      # 实时行情配置（为实盘无缝对接预留）
+      - REALTIME_DATA_SOURCE=akshare
+      - REALTIME_DATA_FREQUENCY=daily
+      # 状态持久化与崩溃恢复
+      - STATE_DIR=/app/实盘状态
+      - SIGNAL_DIR=/app/实盘信号
+      - AUTO_RECOVER_ON_START=true
+    depends_on:
+      db:
+        condition: service_healthy
+        required: false    # db 为可选（profile: postgres），默认 sqlite 模式无需等待
+    # 实盘服务默认启动实盘入口（模拟模式）
+    command: ["python", "run_实盘入口.py", "--mode", "simulate"]
+    healthcheck:
+      # M10修复: 实盘入口不提供 HTTP 服务，原 curl 8000/health 永远失败；
+      # 改为进程存活检查（业务进程常驻即健康）
+      test: ["CMD-SHELL", "pgrep -f run_实盘入口.py || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - quant-net
+    profiles:
+      - live    # 仅在 docker-compose --profile live up 时启动
+
+  # ============================================================
+  # 数据库服务：SQLite（默认）/ PostgreSQL（可选）
+  # ============================================================
+  db:
+    image: postgres:15-alpine
+    container_name: pythonwdhmm-db
+    restart: unless-stopped
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../database/init:/docker-entrypoint-initdb.d
+    environment:
+      - POSTGRES_USER=quant
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD（强口令）}
+      - POSTGRES_DB=pythonwdhmm
+      - TZ=Asia/Shanghai
+    ports:
+      - "${DB_BIND:-127.0.0.1}:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quant -d pythonwdhmm"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - quant-net
+    profiles:
+      - postgres    # 仅在需要PostgreSQL时启动：docker-compose --profile postgres up
+
+  # ============================================================
+  # 缓存服务：Redis（事件总线 + 计算缓存 + 实时行情分发）
+  # ============================================================
+  redis:
+    image: redis:7-alpine
+    container_name: pythonwdhmm-redis
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?请在 .env 中设置 REDIS_PASSWORD（强口令）}
+    ports:
+      - "${REDIS_BIND:-127.0.0.1}:6379:6379"
+    # 疑点5确认: 淘汰策略 allkeys-lru → volatile-lru（只淘汰带 TTL 的缓存键；
+    # 未设 TTL 的持久键——未来订单/去重/限流等不可重建数据——永不静默淘汰）
+    command: /bin/sh -c 'redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy volatile-lru --requirepass "$$REDIS_PASSWORD"'
+    healthcheck:
+      # 通过 REDISCLI_AUTH 环境变量传密码，避免密码出现在命令行参数/进程列表中
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - quant-net
+    profiles:
+      - redis    # 仅在需要Redis时启动：docker-compose --profile redis up
+
+  # ============================================================
+  # 监控服务：Web看板（Streamlit）
+  # ============================================================
+  dashboard:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: pythonwdhmm-dashboard
+    restart: unless-stopped
+    volumes:
+      - ../datasets:/app/datasets:ro
+      - ../outputs:/app/outputs:ro
+      - ../实盘状态:/app/实盘状态:ro
+      - ../实盘信号:/app/实盘信号:ro
+      - ../logs:/app/logs:ro
+    environment:
+      - TZ=Asia/Shanghai
+      - LOG_LEVEL=INFO
+    # 疑点4确认: 移除宿主端口映射——8501 仅在 quant-net 内部，
+    # 对外访问必须经 auth 网关（Basic Auth 反代），避免直连绕过鉴权
+    command: ["streamlit", "run", "myquant/web/dashboard.py", "--server.port=8501", "--server.address=0.0.0.0"]
+    depends_on:
+      - app
+    networks:
+      - quant-net
+    profiles:
+      - web    # 仅在需要Web看板时启动：docker-compose --profile web up
+
+# ============================================================
+# 看板鉴权网关（疑点4确认：反向代理 Basic Auth 挡在 8501 前）
+# ============================================================
+  auth:
+    image: nginx:1.27-alpine
+    container_name: pythonwdhmm-auth
+    restart: unless-stopped
+    environment:
+      - DASHBOARD_USER=${DASHBOARD_USER:?请在 .env 中设置 DASHBOARD_USER（看板登录账号）}
+      - DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD:?请在 .env 中设置 DASHBOARD_PASSWORD（看板登录密码，强口令）}
+    volumes:
+      - ./nginx/dashboard_auth.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      # 对外仍是 8501（与旧直连一致），背后有 Basic Auth
+      - "${DASHBOARD_BIND:-127.0.0.1}:8501:80"
+    # 容器启动时用 openssl 生成 htpasswd（密码经 stdin 传入，不进进程列表），
+    # 然后启动 nginx；DASHBOARD_USER/PASSWORD 只存在于容器环境变量中
+    command: /bin/sh -c 'echo "$${DASHBOARD_USER}:$$(printf %s "$$DASHBOARD_PASSWORD" | openssl passwd -apr1 -stdin)" > /etc/nginx/.htpasswd && nginx -g "daemon off;"'
+    depends_on:
+      - dashboard
+    networks:
+      - quant-net
+    profiles:
+      - web    # 与看板同 profile：--profile web up 一起启动
+
+# ============================================================
+# 数据卷（持久化）
+# ============================================================
+volumes:
+  pgdata:
+    driver: local
+  redisdata:
+    driver: local
+
+# ============================================================
+# 网络
+# ============================================================
+networks:
+  quant-net:
+    driver: bridge

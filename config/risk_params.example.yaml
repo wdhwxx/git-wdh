@@ -1,0 +1,86 @@
+# ============================================================
+# 风控参数模板（Risk Params Template）
+# ============================================================
+# 使用方法：
+#   1. 复制本文件为 risk_params.yaml（去掉.example后缀）
+#   2. 修改风控参数
+#   3. 在 backtest_config.yaml 或 live_config.yaml 中引用
+#
+# 设计原则：
+#   - 风控独立模块，与策略解耦，硬隔离
+#   - 回测与实盘使用同一套风控参数，确保一致性
+#   - 所有限制都是硬拦截，触发后直接拒绝交易
+# ============================================================
+
+# ========== 仓位控制 ==========
+position:
+  max_single_stock: 0.20                    # 单只股票最大仓位20%
+  max_single_industry: 0.30                 # 单一行业最大仓位30%
+  max_total_positions: 5                     # 最多同时持有5只股票
+  max_total_position: 0.95                   # 总仓位上限95%（留5%现金）
+  min_cash_reserve: 0.05                     # 最低现金保留5%
+
+# ========== 止损规则 ==========
+stop_loss:
+  enable: true                               # 是否启用止损
+  max_drawdown_per_stock: 0.15               # 单只股票亏损15%止损
+  max_drawdown_total: 0.20                    # 总账户回撤20%减仓至50%
+  max_drawdown_stop: 0.30                     # 总账户回撤30%清仓停止交易
+  trailing_stop_pct: 0.0                      # 移动止损（0=不启用，防未来函数）
+  cooldown_after_stop: 3                      # 止损后冷却3天不交易该股票
+
+# ========== 止盈规则 ==========
+take_profit:
+  enable: true                                # 是否启用止盈
+  profit_target: 0.20                         # 目标止盈+20%（达到后卖出）
+  partial_take_profit: false                  # 是否分批止盈（false=一次性全卖）
+  # partial_profit_pct: 0.15                  # 第一批止盈15%卖一半
+  # remaining_profit_pct: 0.25                # 剩余25%全卖
+
+# ========== 交易频率限制 ==========
+trading:
+  max_trades_per_day: 20                      # 每日最多交易20次
+  max_orders_per_day: 50                      # 每日最多下单50次（含撤单）
+  min_holding_days: 1                          # 最少持有1天（T+1已保证）
+  order_value_min: 1000                        # 单笔最小下单金额（元）
+  order_value_max: 200000                      # 单笔最大下单金额（元）
+
+# ========== 流动性过滤 ==========
+liquidity:
+  min_avg_volume: 1000000                     # 最低日均成交量100万股
+  min_turnover_rate: 0.005                     # 最低换手率0.5%
+  min_market_cap: 3000000000                   # 最低市值30亿（过滤小盘股）
+  exclude_st: true                              # 排除ST股票
+  exclude_suspend: true                         # 排除停牌股票
+  exclude_new_stock_days: 60                    # 排除上市不足60天的新股
+
+# ========== 涨跌停限制 ==========
+price_limit:
+  limit_up_pct: 0.10                           # 涨停幅度10%（普通股）
+  limit_down_pct: 0.10                          # 跌停幅度10%
+  allow_buy_limit_up: false                     # 涨停板是否可买入（false=不能买）
+  allow_sell_limit_down: false                  # 跌停板是否可卖出（false=不能卖）
+  # 科创板/创业板（20%涨跌停）
+  kechuang_limit_pct: 0.20
+  chuangyeban_limit_pct: 0.20
+
+# ========== 实时风控（实盘专用，独立线程运行）==========
+realtime_risk:
+  enabled: true                                 # 是否启用实时风控
+  check_interval: 60                            # 风控检查间隔（秒）
+  # 盘中异常检测
+  abnormal_volume_alert: true                   # 异常放量告警
+  abnormal_price_alert: true                    # 异常涨跌告警
+  # 系统健康监控
+  max_latency_ms: 5000                          # 最大允许延迟（毫秒），超过告警
+  max_error_rate: 0.05                          # 最大错误率5%，超过停止交易
+  # 强制平仓（极端情况）
+  force_close_on_crash: true                    # 程序崩溃时是否强制平仓（需券商支持）
+  force_close_on_disconnect: 300                # 断线超过300秒强制平仓
+
+# ========== 风控日志与告警 ==========
+logging:
+  log_risk_events: true                         # 记录所有风控拦截事件
+  log_level: "WARNING"                          # 风控日志级别
+  alert_on_block: true                          # 风控拦截时发送告警
+  alert_on_stop: true                           # 触发停止交易时发送告警

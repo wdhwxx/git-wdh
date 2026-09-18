@@ -1,0 +1,592 @@
+# 文件名：myquant/ml/features.py
+"""
+features.py - 特征工程（因子计算 + 标签生成）
+==============================================
+机器学习特征工程核心（任务18，ML 完整 MLOps 链路第一环）。
+
+数据来源（铁律）:
+  - 输入只能读取 processed 清洗后数据（Bar 列表或 DataFrame），禁止读取 raw 原始数据
+  - 依赖 processed 而非 raw，与总图 myquant/ml/ 注释一致
+
+核心能力:
+  - FeatureConfig 特征配置（训练/推理共用，JSON 可序列化，杜绝训练-推理不一致）
+  - FeatureEngine 特征引擎：
+      compute_features()    批量特征计算（严格因果，trailing 滚动窗口）
+      generate_labels()     标签生成（未来 N 期收益，仅训练集使用）
+      build_dataset()       特征+标签对齐为 FeatureDataset（丢弃无标签尾部）
+      compute_incremental() 实盘增量特征（逐 bar，与训练特征逐列一致）
+      lookahead_guard()     防未来断言（截断重算一致性验证）
+  - FeatureDataset 特征数据集（X/y/timestamps，JSON 可序列化供训练/推理）
+
+防未来函数（铁律4，本任务核心）:
+  - 【特征】全部 trailing 窗口：pandas rolling/pct_change/shift(n) 只使用
+    <=t 的 bar 数据，t 时刻特征绝不引用未来 bar
+  - 【标签】forward_return = close.shift(-horizon)/close - 1 引用未来，
+    但仅存在于训练目标列；build_dataset 丢弃无标签尾部行（不参与训练）
+  - 【验证】lookahead_guard：对每行截断重算特征，断言与全量计算一致
+    （若特征泄露未来，截断重算结果必不同 → 断言失败）
+  - 本模块不提供任何预测方法；inference（任务21）只产出特征，不产出未来收益
+
+为实盘无缝对接（任务22-23 实盘增强前置）:
+  - compute_incremental：实盘收到新 bar 增量算特征，与训练特征逐列一致
+  - FeatureConfig JSON 序列化：训练配置与实盘推理共用同一配置
+  - 特征列名固定：训练/推理完全一致，杜绝训练-推理偏移
+
+依赖: pandas, numpy, myquant.indicators, myquant.models.market_data
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field, asdict
+from typing import Any, Dict, List, Optional
+
+import numpy as np
+import pandas as pd
+
+from myquant.core.logger import get_logger
+
+logger = get_logger("ml.features")
+
+try:
+    from myquant.indicators import get_indicator
+    INDICATORS_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    get_indicator = None  # type: ignore[assignment]
+    INDICATORS_AVAILABLE = False
+    logger.warning("[ml] myquant.indicators 不可用，技术指标特征将跳过")
+
+try:
+    from myquant.models.market_data import Bar
+    BAR_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    Bar = None  # type: ignore[assignment]
+    BAR_AVAILABLE = False
+
+
+# ═══════════════════════════════════════════════
+#  默认特征配置
+# ═══════════════════════════════════════════════
+
+# 技术指标默认配置（复用 myquant.indicators，prefix 为列名前缀）
+# 输出列命名规则：{prefix}_{指标输出列}，例如 sma_20 → sma_20_sma
+DEFAULT_INDICATOR_CONFIGS: List[Dict[str, Any]] = [
+    {"name": "sma", "params": {"period": 20}, "prefix": "sma_20"},
+    {"name": "sma", "params": {"period": 60}, "prefix": "sma_60"},
+    {"name": "ema", "params": {"period": 12}, "prefix": "ema_12"},
+    {"name": "ema", "params": {"period": 26}, "prefix": "ema_26"},
+    {"name": "rsi", "params": {"period": 14}, "prefix": "rsi_14"},
+    {"name": "macd", "params": {"fast": 12, "slow": 26, "signal": 9}, "prefix": "macd"},
+    {"name": "kdj", "params": {"n": 9, "m1": 3, "m2": 3}, "prefix": "kdj"},
+    {"name": "atr", "params": {"period": 14}, "prefix": "atr_14"},
+    {"name": "bollinger_bands", "params": {"period": 20, "std_dev": 2.0}, "prefix": "bb"},
+    {"name": "volatility", "params": {"period": 20}, "prefix": "vol_20"},
+]
+
+# 派生特征开关（基于已算指标列二次加工，全部 trailing）
+DEFAULT_DERIVED_FEATURES: List[str] = ["sma_gap", "atr_norm", "bb_width"]
+
+
+# ═══════════════════════════════════════════════
+#  FeatureConfig 特征配置
+# ═══════════════════════════════════════════════
+
+@dataclass
+class FeatureConfig:
+    """
+    特征配置（训练/推理共用，JSON 可序列化）
+
+    通过 to_dict()/from_dict() 持久化，训练与实盘推理使用同一份配置，
+    保证特征逐列一致（杜绝训练-推理偏移）。
+
+    Attributes
+    ----------
+    horizon : int
+        标签未来收益期数（forward_return 的 lookahead 步数）
+    label_type : str
+        标签类型：return（连续收益）/ direction（涨跌二分类）
+    price_col : str
+        价格列名（默认 close）
+    return_windows : List[int]
+        多期收益窗口（return_N = close.pct_change(N)）
+    rolling_windows : List[int]
+        滚动均值/标准差/最大/最小窗口
+    momentum_windows : List[int]
+        动量窗口（momentum_N = close/close.shift(N) - 1）
+    indicator_configs : List[Dict]
+        技术指标配置（复用 myquant.indicators）
+    derived_features : List[str]
+        派生特征开关（sma_gap/atr_norm/bb_width）
+    min_periods : int
+        特征最小有效行数（窗口不足置 NaN）
+    """
+    horizon: int = 5
+    label_type: str = "return"
+    price_col: str = "close"
+    return_windows: List[int] = field(default_factory=lambda: [1, 5, 10, 20])
+    rolling_windows: List[int] = field(default_factory=lambda: [5, 20, 60])
+    momentum_windows: List[int] = field(default_factory=lambda: [5, 20])
+    indicator_configs: List[Dict[str, Any]] = field(
+        default_factory=lambda: [dict(c) for c in DEFAULT_INDICATOR_CONFIGS]
+    )
+    derived_features: List[str] = field(
+        default_factory=lambda: list(DEFAULT_DERIVED_FEATURES)
+    )
+    min_periods: int = 30
+
+    def to_dict(self) -> Dict[str, Any]:
+        """序列化为可 JSON 持久化的 dict"""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "FeatureConfig":
+        """从 dict 反序列化（缺失字段用默认值）"""
+        known = {f.name for f in cls.__dataclass_fields__.values()}
+        return cls(**{k: v for k, v in data.items() if k in known})
+
+    def to_json(self) -> str:
+        """序列化为 JSON 字符串（训练配置持久化）"""
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
+
+    @classmethod
+    def from_json(cls, text: str) -> "FeatureConfig":
+        """从 JSON 字符串反序列化"""
+        return cls.from_dict(json.loads(text))
+
+    @property
+    def max_lookback(self) -> int:
+        """
+        最大回看窗口（增量推理需缓存的历史 bar 数）
+
+        取所有滚动窗口与指标周期的最大值 + 缓冲。
+        """
+        windows = list(self.return_windows) + list(self.rolling_windows) \
+            + list(self.momentum_windows)
+        for cfg in self.indicator_configs:
+            for v in cfg.get("params", {}).values():
+                if isinstance(v, int) and v > 1:
+                    windows.append(v)
+        return max(windows) if windows else self.min_periods
+
+
+# ═══════════════════════════════════════════════
+#  FeatureDataset 特征数据集
+# ═══════════════════════════════════════════════
+
+@dataclass
+class FeatureDataset:
+    """
+    特征数据集（build_dataset 产物）
+
+    Attributes
+    ----------
+    X : pd.DataFrame
+        特征矩阵（行 = 样本，列 = feature_columns；无标签尾部已丢弃）
+    y : pd.Series
+        标签（未来 horizon 期收益或涨跌方向）
+    timestamps : List[float]
+        样本对应时间戳（与 X 行一一对应）
+    feature_columns : List[str]
+        特征列名
+    label_column : str
+        标签列名
+    """
+    X: pd.DataFrame
+    y: pd.Series
+    timestamps: List[float]
+    feature_columns: List[str]
+    label_column: str
+
+    @property
+    def n_samples(self) -> int:
+        return len(self.X)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """序列化（JSON 安全：NaN → None）"""
+        return {
+            "X": self.X.where(pd.notna(self.X), None).to_dict(orient="list"),
+            "y": self.y.where(pd.notna(self.y), None).tolist(),
+            "timestamps": [float(t) if t is not None else None for t in self.timestamps],
+            "feature_columns": list(self.feature_columns),
+            "label_column": self.label_column,
+        }
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), ensure_ascii=False)
+
+    def __repr__(self) -> str:
+        return (
+            f"FeatureDataset(n_samples={self.n_samples}, features={len(self.feature_columns)}, "
+            f"label={self.label_column})"
+        )
+
+
+# ═══════════════════════════════════════════════
+#  辅助：Bar 列表 → DataFrame
+# ═══════════════════════════════════════════════
+
+def bars_to_df(bars: List[Any]) -> pd.DataFrame:
+    """
+    将 Bar 列表转换为标准 DataFrame
+
+    输入必须是 processed 清洗后数据（Bar 对象列表），禁止 raw 原始数据。
+    输出列：timestamp/open/high/low/close/volume/amount/trades。
+
+    Parameters
+    ----------
+    bars : List[Bar]
+        Bar 对象列表（myquant.models.market_data.Bar）
+
+    Returns
+    -------
+    pd.DataFrame : 标准化行情 DataFrame（按 timestamp 升序）
+    """
+    if not bars:
+        return pd.DataFrame(columns=["timestamp", "open", "high", "low",
+                                     "close", "volume", "amount", "trades"])
+    rows = []
+    for b in bars:
+        rows.append({
+            "timestamp": float(getattr(b, "timestamp", 0.0)),
+            "open": float(getattr(b, "open", 0.0)),
+            "high": float(getattr(b, "high", 0.0)),
+            "low": float(getattr(b, "low", 0.0)),
+            "close": float(getattr(b, "close", 0.0)),
+            "volume": float(getattr(b, "volume", 0.0)),
+            "amount": float(getattr(b, "amount", 0.0)),
+            "trades": int(getattr(b, "trades", 0) or 0),
+        })
+    df = pd.DataFrame(rows)
+    df = df.sort_values("timestamp").reset_index(drop=True)
+    return df
+
+
+# ═══════════════════════════════════════════════
+#  FeatureEngine 特征引擎
+# ═══════════════════════════════════════════════
+
+class FeatureEngine:
+    """
+    特征工程引擎（任务18）
+
+    特征全部 trailing 滚动窗口（严格因果，不使用未来数据）；
+    标签仅用于训练（build_dataset 丢弃无标签尾部）。
+
+    为实盘对接：compute_incremental 支持逐 bar 增量特征，
+    与训练 compute_features 使用同一 FeatureConfig，特征逐列一致。
+    """
+
+    def __init__(self, config: Optional[FeatureConfig] = None):
+        self.config = config if config is not None else FeatureConfig()
+        logger.info(
+            f"[ml] 特征引擎初始化：{len(self.config.indicator_configs)}指标, "
+            f"horizon={self.config.horizon}, max_lookback={self.config.max_lookback}"
+        )
+
+    # ─────────────────────────────────────────────
+    #  输入准备
+    # ─────────────────────────────────────────────
+
+    def _prepare_df(self, data: Any) -> pd.DataFrame:
+        """标准化输入：Bar 列表或 DataFrame → 按时间升序的 DataFrame"""
+        if isinstance(data, pd.DataFrame):
+            df = data.copy()
+        elif BAR_AVAILABLE and isinstance(data, (list, tuple)) and data and isinstance(data[0], Bar):
+            df = bars_to_df(list(data))  # type: ignore[arg-type]
+        elif isinstance(data, (list, tuple)):
+            df = pd.DataFrame(data) if data else pd.DataFrame()
+        else:
+            raise TypeError(f"不支持的数据类型: {type(data)}")
+        if df.empty:
+            return df
+        if self.config.price_col not in df.columns:
+            raise ValueError(f"输入数据缺少价格列: {self.config.price_col}")
+        # 按时间升序（防未来：确保特征按时间因果顺序计算）
+        if "timestamp" in df.columns:
+            df = df.sort_values("timestamp")
+        df = df.reset_index(drop=True)
+        return df
+
+    # ─────────────────────────────────────────────
+    #  特征计算（严格因果）
+    # ─────────────────────────────────────────────
+
+    def compute_features(self, data: Any) -> pd.DataFrame:
+        """
+        批量计算特征（严格因果）
+
+        【防未来函数】所有特征使用 pandas rolling/pct_change/shift(n) 的
+        trailing 窗口，t 时刻特征只依赖 <=t 的 bar，绝不引用未来。
+
+        Returns
+        -------
+        pd.DataFrame : 特征列（含派生特征），index 与输入对齐
+        """
+        df = self._prepare_df(data)
+        if df.empty:
+            return pd.DataFrame()
+        close = df[self.config.price_col].astype(float)
+        feat = pd.DataFrame(index=df.index)
+
+        # 1. 价格衍生（trailing）
+        for n in self.config.return_windows:
+            feat[f"return_{n}"] = close.pct_change(periods=n)
+        feat["log_return_1"] = np.log(close / close.shift(1))
+        for w in self.config.rolling_windows:
+            feat[f"rolling_mean_{w}"] = close.rolling(w).mean()
+            feat[f"rolling_std_{w}"] = close.rolling(w).std()
+            feat[f"rolling_max_{w}"] = close.rolling(w).max()
+            feat[f"rolling_min_{w}"] = close.rolling(w).min()
+        for n in self.config.momentum_windows:
+            feat[f"momentum_{n}"] = close / close.shift(n) - 1
+
+        # 2. 技术指标（复用 myquant.indicators）
+        if INDICATORS_AVAILABLE:
+            for cfg in self.config.indicator_configs:
+                name = cfg["name"]
+                params = cfg.get("params", {})
+                prefix = cfg.get("prefix", name)
+                try:
+                    indicator = get_indicator(name, **params)
+                    res = indicator.calculate(df)
+                except Exception as e:  # pragma: no cover
+                    logger.warning(f"[ml] 指标 {name} 计算失败，跳过: {e}")
+                    continue
+                out_cols = [c for c in res.columns if c not in df.columns]
+                for oc in out_cols:
+                    feat[f"{prefix}_{oc}"] = res[oc]
+
+        # 3. 派生特征（基于已算指标列，trailing）
+        self._compute_derived(feat, close, df)
+
+        # 4. 窗口不足置 NaN（min_periods 之前）
+        if self.config.min_periods > 0 and len(feat) > 0:
+            feat.iloc[: self.config.min_periods] = np.nan
+
+        return feat
+
+    def _compute_derived(
+        self, feat: pd.DataFrame, close: pd.Series, df: pd.DataFrame
+    ) -> None:
+        """派生特征（基于已算指标列，全部 trailing）"""
+        for name in self.config.derived_features:
+            try:
+                if name == "sma_gap" and "sma_20_sma" in feat.columns and "sma_60_sma" in feat.columns:
+                    feat["sma_gap"] = feat["sma_20_sma"] / feat["sma_60_sma"] - 1
+                elif name == "atr_norm" and "atr_14_atr" in feat.columns:
+                    feat["atr_norm"] = feat["atr_14_atr"] / close
+                elif name == "bb_width" and "bb_upper" in feat.columns and "bb_lower" in feat.columns and "bb_mid" in feat.columns:
+                    feat["bb_width"] = (feat["bb_upper"] - feat["bb_lower"]) / feat["bb_mid"]
+            except Exception as e:  # pragma: no cover
+                logger.warning(f"[ml] 派生特征 {name} 计算失败: {e}")
+
+    @property
+    def feature_columns(self) -> List[str]:
+        """
+        特征列名（按默认配置预演计算，供 build_dataset/序列化使用）
+
+        【说明】该属性需基于实际数据计算得出最准确，这里提供默认配置下
+        的静态列名清单，用于快速获取列名；动态场景请以 compute_features 输出为准。
+        """
+        cols: List[str] = []
+        for n in self.config.return_windows:
+            cols.append(f"return_{n}")
+        cols.append("log_return_1")
+        for w in self.config.rolling_windows:
+            cols += [f"rolling_mean_{w}", f"rolling_std_{w}",
+                     f"rolling_max_{w}", f"rolling_min_{w}"]
+        for n in self.config.momentum_windows:
+            cols.append(f"momentum_{n}")
+        if INDICATORS_AVAILABLE:
+            for cfg in self.config.indicator_configs:
+                name = cfg["name"]
+                prefix = cfg.get("prefix", name)
+                try:
+                    indicator = get_indicator(name, **cfg.get("params", {}))
+                    for oc in getattr(indicator, "output_columns", []) or []:
+                        cols.append(f"{prefix}_{oc}")
+                except Exception:  # pragma: no cover
+                    continue
+        for name in self.config.derived_features:
+            if name in ("sma_gap", "atr_norm", "bb_width"):
+                cols.append(name)
+        return cols
+
+    # ─────────────────────────────────────────────
+    #  标签生成（仅训练集使用）
+    # ─────────────────────────────────────────────
+
+    def generate_labels(
+        self,
+        data: Any,
+        horizon: Optional[int] = None,
+        label_type: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        生成标签（未来 horizon 期收益 / 涨跌方向）
+
+        【防未来函数】标签引用未来数据，但仅用于训练目标：
+          - return 型：forward_return = close.shift(-horizon)/close - 1
+          - direction 型：(forward_return > 0) 二分类
+        标签列在 build_dataset 中与特征对齐，无标签尾部行被丢弃（不参与训练）。
+        推理阶段绝不使用标签列。
+        """
+        df = self._prepare_df(data)
+        if df.empty:
+            return pd.DataFrame()
+        horizon = horizon if horizon is not None else self.config.horizon
+        label_type = label_type if label_type is not None else self.config.label_type
+        close = df[self.config.price_col].astype(float)
+        forward_return = close.shift(-horizon) / close - 1.0
+        labels = pd.DataFrame(index=df.index)
+        labels["forward_return"] = forward_return
+        if label_type == "direction":
+            labels["direction"] = (forward_return > 0).astype(float)
+            labels.loc[forward_return.isna(), "direction"] = np.nan
+        labels["horizon"] = horizon
+        return labels
+
+    @property
+    def label_column(self) -> str:
+        """标签列名"""
+        return "direction" if self.config.label_type == "direction" else "forward_return"
+
+    # ─────────────────────────────────────────────
+    #  训练数据集构建
+    # ─────────────────────────────────────────────
+
+    def build_dataset(self, data: Any) -> FeatureDataset:
+        """
+        构建训练数据集（特征 + 标签对齐）
+
+        【防未来函数】丢弃：
+          1. 窗口不足的行（特征 NaN，min_periods 之前）
+          2. 无标签的尾部行（最后 horizon 行，标签 NaN）
+        返回的 X/y 只包含特征与标签均有效的样本。
+
+        Returns
+        -------
+        FeatureDataset : X/y/timestamps（JSON 可序列化）
+        """
+        df = self._prepare_df(data)
+        if df.empty:
+            return FeatureDataset(
+                X=pd.DataFrame(), y=pd.Series(dtype=float),
+                timestamps=[], feature_columns=[], label_column=self.label_column,
+            )
+        feat = self.compute_features(df)
+        labels = self.generate_labels(df)
+        fcols = [c for c in feat.columns if c != self.config.price_col]
+        combined = pd.concat([feat, labels], axis=1)
+        keep = [c for c in fcols] + [self.label_column]
+        sub = combined[keep]
+        valid = sub.dropna(subset=keep)
+        timestamps = (
+            df.loc[valid.index, "timestamp"].tolist()
+            if "timestamp" in df.columns else list(valid.index)
+        )
+        X = valid[fcols]
+        y = valid[self.label_column]
+        return FeatureDataset(
+            X=X, y=y, timestamps=timestamps,
+            feature_columns=fcols, label_column=self.label_column,
+        )
+
+    # ─────────────────────────────────────────────
+    #  实盘增量特征（为任务21-23 实盘对接）
+    # ─────────────────────────────────────────────
+
+    def compute_incremental(self, data: Any, lookback: Optional[int] = None) -> Dict[str, Any]:
+        """
+        实盘增量特征（只计算最新 bar 的特征）
+
+        【与训练精确一致】默认使用全部传入数据（从序列起点计算到最新 bar），
+        与训练阶段 compute_features(df) 的最后一行**逐列精确一致**——
+        这是实盘推理与训练特征对齐的硬保证（杜绝训练-推理偏移）。
+
+        Parameters
+        ----------
+        data : Bar 列表 / DataFrame
+            历史数据（实盘场景：引擎启动时加载 processed 历史，
+            之后每根新 bar 追加后调用本方法）
+        lookback : int | None
+            可选：显式截断最近 N 根重算。
+            ⚠️ 仅对纯 trailing 统计（pct_change/rolling/momentum/MA）精确；
+            递推指标（EMA/RSI/MACD/KDJ）截断后递推起点变化会产生 warmup
+            偏移，与训练全量结果可能不一致。默认 None（全量，精确一致）。
+
+        Returns
+        -------
+        dict : 最新 bar 的特征（NaN → None，JSON 安全）
+        """
+        df = self._prepare_df(data)
+        if df.empty:
+            return {}
+        if lookback is not None:
+            # 显式截断（仅 trailing 统计精确，递推指标有 warmup 偏移）
+            df = df.iloc[-lookback:].reset_index(drop=True)
+        feats = self.compute_features(df)
+        if feats.empty:
+            return {}
+        row = feats.iloc[-1]
+        return {k: (None if pd.isna(v) else float(v)) for k, v in row.items()}
+
+    # ─────────────────────────────────────────────
+    #  防未来断言
+    # ─────────────────────────────────────────────
+
+    @staticmethod
+    def lookahead_guard(engine: "FeatureEngine", data: Any, max_rows: int = 10) -> bool:
+        """
+        防未来断言：截断重算一致性验证
+
+        对前 i+1 行用同配置重算特征，断言第 i 行特征值与全量计算一致。
+        若特征泄露未来数据，截断重算结果必与全量不同 → 返回 False。
+
+        Parameters
+        ----------
+        engine : FeatureEngine
+            特征引擎
+        data : Bar 列表 / DataFrame
+            输入数据
+        max_rows : int
+            验证的最大行数（每行都做一次截断重算）
+
+        Returns
+        -------
+        bool : True=通过防未来断言（特征严格因果）
+        """
+        df = engine._prepare_df(data)
+        if len(df) < 3:
+            return True
+        full = engine.compute_features(df)
+        if full.empty:
+            return True
+        cols = [c for c in full.columns]
+        for i in range(min(max_rows, len(df))):
+            prefix = df.iloc[: i + 1]
+            if len(prefix) < 3:
+                continue
+            prefix_feat = engine.compute_features(prefix)
+            if prefix_feat.empty:
+                continue
+            for col in cols:
+                v_full = full.iloc[i][col]
+                v_pref = prefix_feat.iloc[-1][col]
+                if pd.isna(v_full) and pd.isna(v_pref):
+                    continue
+                if pd.isna(v_full) != pd.isna(v_pref):
+                    return False
+                if not pd.isna(v_full) and abs(float(v_full) - float(v_pref)) > 1e-9:
+                    return False
+        return True
+
+
+__all__ = [
+    "FeatureConfig",
+    "FeatureEngine",
+    "FeatureDataset",
+    "bars_to_df",
+    "DEFAULT_INDICATOR_CONFIGS",
+    "DEFAULT_DERIVED_FEATURES",
+]

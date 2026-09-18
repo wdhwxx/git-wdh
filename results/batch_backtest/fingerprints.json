@@ -1,0 +1,106 @@
+{
+  "format_version": "1.0",
+  "updated_at": "2026-09-12T00:24:09.404250+00:00",
+  "fingerprints": {
+    "000001.SZ": {
+      "symbol": "000001.SZ",
+      "hash_value": "e5af7b5d4f7216abd46a4f2c4330ad5dfd3c45c5346ad6ffdbbfc351b968e5f6",
+      "row_count": 300,
+      "start_date": "2023-01-02",
+      "end_date": "2024-02-23",
+      "columns": [
+        "amount",
+        "close",
+        "high",
+        "low",
+        "open",
+        "volume"
+      ],
+      "algorithm": "sha256",
+      "frequency": "daily",
+      "data_source": "batch",
+      "metadata": {},
+      "created_at": "2026-09-12T00:24:08.587883+00:00"
+    },
+    "000002.SZ": {
+      "symbol": "000002.SZ",
+      "hash_value": "ef35401a55bd47e09430c97cacaba83d955429b1e7a6a604a5c68241e63c99bd",
+      "row_count": 300,
+      "start_date": "2023-01-02",
+      "end_date": "2024-02-23",
+      "columns": [
+        "amount",
+        "close",
+        "high",
+        "low",
+        "open",
+        "volume"
+      ],
+      "algorithm": "sha256",
+      "frequency": "daily",
+      "data_source": "batch",
+      "metadata": {},
+      "created_at": "2026-09-12T00:24:08.588882+00:00"
+    },
+    "000003.SZ": {
+      "symbol": "000003.SZ",
+      "hash_value": "b01551c440b65d865f61e29c2acad6387cf50426b94d576430424d3ef193e5e1",
+      "row_count": 300,
+      "start_date": "2023-01-02",
+      "end_date": "2024-02-23",
+      "columns": [
+        "amount",
+        "close",
+        "high",
+        "low",
+        "open",
+        "volume"
+      ],
+      "algorithm": "sha256",
+      "frequency": "daily",
+      "data_source": "batch",
+      "metadata": {},
+      "created_at": "2026-09-12T00:24:08.588882+00:00"
+    },
+    "600000.SH": {
+      "symbol": "600000.SH",
+      "hash_value": "1f2b7f44927bec71cfce12b479273813dc3c127dfe995950b55525bc02b93803",
+      "row_count": 300,
+      "start_date": "2023-01-02",
+      "end_date": "2024-02-23",
+      "columns": [
+        "amount",
+        "close",
+        "high",
+        "low",
+        "open",
+        "volume"
+      ],
+      "algorithm": "sha256",
+      "frequency": "daily",
+      "data_source": "batch",
+      "metadata": {},
+      "created_at": "2026-09-12T00:24:08.588882+00:00"
+    },
+    "600001.SH": {
+      "symbol": "600001.SH",
+      "hash_value": "8f8aa249cdbdff560b3654daf26a568aad29e3e27dbd34740a200104d4414021",
+      "row_count": 300,
+      "start_date": "2023-01-02",
+      "end_date": "2024-02-23",
+      "columns": [
+        "amount",
+        "close",
+        "high",
+        "low",
+        "open",
+        "volume"
+      ],
+      "algorithm": "sha256",
+      "frequency": "daily",
+      "data_source": "batch",
+      "metadata": {},
+      "created_at": "2026-09-12T00:24:08.589882+00:00"
+    }
+  }
+}

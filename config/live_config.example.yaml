@@ -1,0 +1,219 @@
+# ============================================================
+# 文件名：config/live_config.example.yaml
+# 实盘配置模板（Live Config Template）
+# ============================================================
+# 使用方法：
+#   1. 复制本文件为 live_config.yaml（去掉.example后缀）
+#   2. 填写券商连接信息（建议从环境变量读取，不要写真实密钥）
+#   3. 运行 python run_实盘.py --config config/live_config.yaml
+#
+# 设计原则（4条铁律）：
+#   1. 以项目结构总图为核心（docs/project_layout_gear2.md）
+#   2. 为实时行情及实盘无缝对接做好充足准备
+#   3. 敏感信息（账号、密码、密钥）从环境变量读取，不写在文件里
+#   4. 严格禁用未来函数，回测与实盘参数一致，确保策略可平滑迁移
+# ============================================================
+
+# ========== 实盘基础设置 ==========
+live:
+  name: "ma_cross_live_demo"          # 实盘运行名称（用于输出目录命名和日志标识）
+  trade_mode: "paper"                  # 交易模式：paper=模拟盘（默认，安全）/ live=实盘（需谨慎）
+  timezone: "Asia/Shanghai"            # 时区（A股用上海时间）
+  initial_capital: 1000000             # 初始资金（元），paper模式用此资金模拟
+  log_level: "INFO"                    # 日志级别：DEBUG / INFO / WARNING / ERROR
+  run_hours:                            # 运行时间段（非交易时段自动暂停）
+    morning_start: "09:15"
+    morning_end: "11:30"
+    afternoon_start: "13:00"
+    afternoon_end: "15:00"
+
+# ========== 券商连接配置（为多券商对接预留）==========
+broker:
+  # 券商类型：paper=本地模拟撮合 / xtp=中泰XTP / qmt=迅投QMT / ptrade=恒生Ptrade / custom=自定义
+  type: "paper"
+  # 券商适配器（对应 myquant/live/brokers/ 下的实现类）
+  adapter: "paper_broker"               # 适配器名称：paper_broker / xtp_broker / qmt_broker / ptrade_broker
+  # 连接配置（实盘时填写，建议从环境变量读取，paper模式不需要）
+  # host: "${BROKER_HOST}"             # 券商交易服务器地址
+  # port: "${BROKER_PORT}"             # 端口
+  # account: "${BROKER_ACCOUNT}"       # 资金账号（从环境变量读取）
+  # password: "${BROKER_PASSWORD}"     # 交易密码（从环境变量读取）
+  # 连接管理
+  heartbeat_interval: 30                # 心跳间隔（秒）
+  reconnect_times: 5                    # 断线重连次数
+  reconnect_interval: 5                 # 重连间隔（秒）
+  # 订单配置
+  order_timeout: 30                     # 订单超时时间（秒），超时自动撤单
+  max_retry_times: 3                    # 下单失败最大重试次数
+
+# ========== 执行配置（手续费/滑点/交易规则，与回测sim_broker一致）==========
+execution:
+  commission_rate: 0.0002               # 佣金费率（万2，买卖双向）
+  min_commission: 5.0                    # 单笔最低佣金（元）
+  stamp_tax_rate: 0.001                 # 印花税率（千1，仅卖出收取，A股标准）
+  transfer_fee_rate: 0.00001            # 过户费率（万0.1，买卖双向，沪市）
+  slippage_mode: "ratio"                 # 滑点模式：ratio=按比例 / fixed=按固定金额
+  slippage_value: 0.0002                 # 滑点数值（ratio模式为万2，与实盘冲击成本一致）
+  enable_t1: true                        # A股T+1交易限制（true=当日买入不可卖）
+  lot_size: 100                          # 最小交易单位100股（1手）
+  price_limit_pct: 0.10                  # 涨跌停限制（普通股票10%，创业板/科创板20%需单独配置）
+  enforce_limit_up_down: true            # 涨跌停日是否允许成交（涨停不能买，跌停不能卖）
+
+# ========== 实时行情数据源配置（为多行情源预留）==========
+market_data:
+  # 行情源类型：akshare=AkShare免费行情 / tdx=通达信本地 / xtp=中泰XTP / qmt=迅投QMT / custom=自定义
+  source: "akshare"
+  # 行情频率：tick=逐笔 / 1m / 5m / 15m / 30m / 60m / daily=日线
+  frequency: "daily"                     # v1用日线信号，后续可升级为分钟级
+  # 订阅标的（实时行情订阅列表）
+  subscriptions:
+    - "000001.SZ"                       # 平安银行（示例）
+    - "600519.SH"                       # 贵州茅台（示例）
+  # 数据清洗（实时行情必须先清洗再使用，与回测一致）
+  enable_clean: true                     # 是否启用实时数据清洗
+  clean_config_path: "config/data_clean.example.yaml"  # 清洗规则配置
+  # 数据更新配置
+  update_before_market: "08:30"         # 盘前数据更新时间
+  update_after_market: "15:30"          # 盘后数据更新时间
+  # 实时行情重连
+  feed_reconnect_times: 5                # 行情源断线重连次数
+  feed_reconnect_interval: 10            # 重连间隔（秒）
+
+# ========== 股票池配置（与回测一致）==========
+stock_pool:
+  # 股票池类型：custom=自定义列表 / all=全市场 / three_factor=三因子交集（后续迭代）
+  type: "custom"
+  # custom类型时填写股票列表（带交易所后缀）
+  codes:
+    - "000001.SZ"
+    - "600519.SH"
+  # three_factor参数（后续迭代实现，v1预留）
+  # three_factor:
+  #   volatility_window: 20
+  #   momentum_window: 60
+  #   price_quantile: 0.33
+  #   factor_quantile: 0.33
+
+# ========== 策略配置（与回测完全一致，确保无缝迁移）==========
+# 注意：此处只写策略名与参数，禁止写任何策略业务代码
+# 策略名称必须与 @register_strategy 注册名一致
+strategy:
+  name: "ma_cross"                      # 策略名称：ma_cross（均线交叉，当前已实现）
+  params:                                # 策略参数，原样传给策略实例
+    fast_period: 5                       # 快速均线周期（5日）
+    slow_period: 20                      # 慢速均线周期（20日）
+    # 以下为止盈止损参数（ma_cross策略v1可选，后续迭代增强）
+    take_profit_pct: 0.20                # 目标止盈+20%（0=不启用）
+    stop_loss_pct: 0.15                  # 单只股票最大亏损15%止损（0=不启用）
+    trailing_stop_pct: 0.0               # 移动止损百分比（0=不启用，防未来函数）
+
+# ========== 仓位管理（与回测风控一致）==========
+position:
+  max_single_position: 0.20              # 单只股票最大仓位20%
+  max_total_positions: 5                  # 最多同时持有5只股票
+  max_total_position_pct: 0.95            # 总仓位上限95%（留5%现金）
+
+# ========== 风控配置（实盘硬隔离，独立线程运行）==========
+risk_control:
+  enabled: true                           # 是否启用风控（实盘强制true）
+  # 仓位限制
+  max_order_value: 200000                 # 单笔最大下单金额（元）
+  max_daily_trades: 20                     # 单日最大交易次数
+  # 亏损限制
+  max_daily_loss_pct: 0.03                 # 单日最大亏损3%（触发后停止交易）
+  max_drawdown_pct: 0.15                   # 最大回撤15%（触发后清仓停止）
+  # 涨跌停限制
+  allow_buy_limit_up: false                # 涨停板是否可买入（false=不能买）
+  allow_sell_limit_down: false             # 跌停板是否可卖出（false=不能卖）
+  # 流动性过滤
+  min_avg_volume: 1000000                  # 最低日均成交量100万股
+  exclude_st: true                          # 排除ST股票
+  exclude_suspend: true                     # 排除停牌股票
+
+# ========== 防未来函数校验（强制开启，不可关闭）==========
+lookahead_guard:
+  enabled: true                            # 是否启用防未来函数校验（强制true，不可关闭）
+  strict_mode: true                        # 严格模式：发现未来函数直接报错终止
+  # 校验规则：
+  # 1. 策略信号只能使用当前及历史K线数据，不能引用未来数据
+  # 2. 信号在T日收盘后生成，T+1日开盘成交
+  # 3. 指标计算窗口严格截止到当前Bar，不包含未来Bar
+
+# ========== 状态持久化配置（崩溃恢复必备，v1预留TODO）==========
+# TODO: 后续迭代实现 state_store.py，v1仅配置预留，不实际持久化
+state_store:
+  enabled: false                           # v1暂不启用，后续迭代实现
+  state_dir: "./live_state"               # 状态保存目录（相对路径）
+  # 持久化内容（后续迭代）
+  save_positions: true                     # 保存当前持仓
+  save_pending_orders: true                # 保存挂单
+  save_strategy_context: true              # 保存策略上下文
+  save_capital: true                       # 保存资金状态
+  save_trade_history: true                 # 保存交易记录
+  # 崩溃恢复（后续迭代）
+  auto_recover_on_start: false             # 启动时自动恢复上次状态
+  backup_interval: 300                     # 状态备份间隔（秒）
+
+# ========== 定时任务配置（Scheduler，v1预留TODO）==========
+# TODO: 后续迭代实现 scheduler.py，v1仅配置预留
+scheduler:
+  enabled: false                           # v1暂不启用，后续迭代实现
+  tasks:
+    - name: "盘前数据更新"
+      time: "08:30"
+      action: "update_market_data"
+    - name: "盘中状态巡检"
+      time: "10:30"
+      action: "health_check"
+    - name: "收盘信号生成"
+      time: "15:05"
+      action: "generate_signals"
+    - name: "盘后数据更新"
+      time: "15:30"
+      action: "update_market_data"
+    - name: "每日报告推送"
+      time: "16:00"
+      action: "push_daily_report"
+
+# ========== 信号输出配置 ==========
+signal_output:
+  enabled: true
+  signal_dir: "./outputs/live_signals"    # 信号报告输出目录
+  generate_html: true                      # 生成HTML信号报告
+  signal_time: "15:00"                     # 每日信号生成时间（收盘后）
+
+# ========== 消息推送配置 ==========
+notification:
+  enabled: false                           # 是否启用推送（false=仅写本地日志）
+  # 推送渠道（可同时启用多个，后续迭代实现）
+  channels:
+    feishu:
+      enabled: false
+      webhook: "${FEISHU_WEBHOOK}"        # 飞书Webhook（从环境变量读取）
+      secret: "${FEISHU_SECRET}"          # 飞书签名密钥（从环境变量读取）
+    wecom:
+      enabled: false
+      webhook: "${WECOM_WEBHOOK}"         # 企业微信Webhook
+    email:
+      enabled: false
+      smtp_host: "${SMTP_HOST}"           # SMTP服务器
+      smtp_port: 465
+      smtp_user: "${SMTP_USER}"           # 发件邮箱
+      smtp_password: "${SMTP_PASSWORD}"   # 邮箱授权码
+      smtp_to: "${SMTP_TO}"               # 收件邮箱
+  # 推送内容
+  push_buy_signals: true                   # 推送买入信号
+  push_sell_signals: true                  # 推送卖出信号
+  push_daily_summary: true                 # 推送每日汇总
+  push_alerts: true                        # 推送异常告警
+  # 推送去重
+  dedup_enabled: true                      # 启用去重（同一信号5分钟内不重复推送）
+  dedup_interval: 300                      # 去重间隔（秒）
+
+# ========== 盘中止盈提醒（实时监控持仓，v1预留TODO）==========
+# TODO: 后续迭代实现盘中实时监控，需要分钟级行情支持
+intraday_monitor:
+  enabled: false                           # v1暂不启用，需要分钟级行情支持
+  check_interval: 60                       # 检查间隔（秒）
+  take_profit_alert_pct: 0.18              # 接近止盈时提醒（18%时提醒，20%自动卖出）
+  stop_loss_alert_pct: 0.13                # 接近止损时提醒（13%时提醒，15%自动卖出）

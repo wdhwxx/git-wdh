@@ -1,0 +1,169 @@
+# ============================================================
+# 策略参数模板（Strategy Params Template）
+# ============================================================
+# 使用方法：
+#   1. 复制本文件为 strategy_params.yaml（去掉.example后缀）
+#   2. 修改策略参数
+#   3. 在 backtest_config.yaml 或 live_config.yaml 中通过 strategy.params_file 引用
+#
+# 说明：
+#   - 这里集中管理所有策略的参数，便于对比和调优
+#   - 每个策略的参数名必须与策略类的 on_init 方法参数一致
+#   - 新增策略只需添加一个配置块，无需改代码
+# ============================================================
+
+# ========== 当前使用的策略 ==========
+# 可选策略：rsrs / ma_cross / grid / momentum / mean_reversion / multi_factor / kunpeng
+active_strategy: "rsrs"                   # 当前激活的策略名称
+
+# ========== RSRS策略（阶段六最优，核心策略）==========
+rsrs:
+  # ----- RSRS指标参数 -----
+  period: 18                               # RSRS回归周期（18日，阶段六最优）
+  norm_window: 60                          # RSRS标准化窗口（60日）
+  buy_threshold: 0.7                       # 买入阈值（RSRS_norm > 0.7）
+  sell_threshold: -0.7                     # 卖出阈值（RSRS_norm < -0.7）
+  # ----- 止盈止损 -----
+  take_profit_pct: 0.20                    # 目标止盈+20%（阶段六D最优）
+  stop_loss_pct: 0.15                       # 单只股票最大亏损15%止损（0=不启用）
+  trailing_stop_pct: 0.0                    # 移动止损（0=不启用，防未来函数）
+  # ----- 信号过滤（可选）-----
+  volume_confirm: false                     # 是否需要成交量确认
+  volume_ratio_threshold: 1.2               # 放量倍数阈值
+  # ----- 适用标的 -----
+  # symbols: []                             # 空=适用所有股票，或指定列表
+
+# ========== 网格策略（阶段9A，震荡市）==========
+grid:
+  grid_lower: 10.0                          # 网格下界价格
+  grid_upper: 20.0                          # 网格上界价格
+  grid_num: 5                               # 网格数量（含边界共 grid_num+1 条网格线）
+  position_per_grid: 0.1                    # 每格仓位比例（10%可用资金，A股100股整数倍）
+  stop_loss_pct: 0.05                       # 跌破下界5%止损清仓（市价）
+  take_profit_pct: 0.10                     # 涨破上界10%止盈清仓（市价）
+  max_positions: 1                          # 最大持仓标的数（单标的网格）
+  auto_grid: false                          # 是否基于历史ATR自动计算网格区间
+  auto_grid_lookback: 20                    # auto_grid 回看bar数
+  auto_grid_atr_mult: 2.0                   # auto_grid ATR倍数（区间=中轴±ATR*倍数）
+
+# ========== 动量策略（阶段9B，趋势市）==========
+momentum:
+  momentum_period: 20                       # 动量计算周期（bar数）
+  top_n: 5                                  # 每次调仓选前N只动量最强标的
+  rebalance_days: 20                        # 调仓周期（bar事件数）
+  stop_loss_pct: 0.10                       # 单票止损（-10%卖出）
+  take_profit_pct: 0.20                     # 单票止盈（+20%卖出）
+  max_position_pct: 0.20                    # 单票最大仓位比例
+  max_positions: 5                          # 最大持仓数
+  equal_weight: true                        # 等权分配（false=按动量得分加权）
+  min_momentum: -1.0                        # 最小动量阈值（-1=不设下限；0=只选正动量）
+
+# ========== 均值回归策略（阶段9C，震荡市）==========
+mean_reversion:
+  bb_period: 20                             # 布林带周期
+  bb_std: 2.0                               # 布林带标准差倍数
+  rsi_period: 14                            # RSI周期
+  rsi_oversold: 30                          # RSI超卖阈值（<=视为超卖，买入）
+  rsi_overbought: 70                        # RSI超买阈值（>=视为超买，卖出）
+  stop_loss_pct: 0.08                       # 单票止损
+  take_profit_pct: 0.10                     # 单票止盈
+  max_position_pct: 0.20                    # 单票最大仓位比例
+  exit_on_mid: true                         # 持仓回归中轨平仓
+  use_rsi_filter: true                      # 是否用RSI过滤买卖信号
+
+# ========== 多因子策略（阶段9D，震荡+趋势混合市）==========
+multi_factor:
+  momentum_period: 20                       # 动量因子周期（bar数，越大越好）
+  reversal_period: 5                        # 反转因子周期（bar数，越小越好=超跌博反弹）
+  volatility_period: 20                     # 低波动因子周期（bar数，越小越好）
+  vol_price_period: 20                      # 量价趋势因子周期（量价相关窗口，越大越好）
+  top_n: 5                                  # 每次调仓选前N只综合得分最高标的
+  rebalance_days: 20                        # 调仓周期（bar事件数）
+  stop_loss_pct: 0.10                       # 单票止损
+  take_profit_pct: 0.20                     # 单票止盈
+  max_position_pct: 0.20                    # 单票最大仓位比例
+  max_positions: 5                          # 最大持仓数
+  equal_weight: true                        # 等权分配（false=按综合得分加权）
+  factor_weights:                           # 因子权重（不填默认 0.35/0.25/0.20/0.20）
+    momentum: 0.35
+    reversal: 0.25
+    low_vol: 0.20
+    vol_price: 0.20
+  zscore_mode: "cross_sectional"            # 标准化：cross_sectional（横截面）/ ts_rolling（滚动）
+  ts_roll_window: 60                        # ts_rolling 模式滚动标准化窗口
+  min_factor_stocks: 2                      # 额外因子有效样本下限（不足则丢弃该因子）
+  min_score: ~                              # 综合得分下限（~=null 不过滤）
+  # extra_factors:                          # 预留价值/质量因子（需配合 factor_provider）
+  #   quality_roe: {weight: 0.20, higher_better: true}
+  # factor_provider: ~                      # 额外因子数据提供器（后续基本面数据插拔）
+
+# ========== 鲲鹏起爆点策略（M1，量·价·均线三重共振）==========
+# 公式转译依据：docs/鲲鹏壹号策略_回测实施报告.md 第2/4章（27行通达信公式 pandas 转译）
+# 出场档位：conservative（-5%/+10%/无移动止盈）/ standard（-7%/+15%/盈利>8%后回撤3%，默认）/ aggressive（-10%/+25%/盈利>12%后回撤5%）
+kunpeng:
+  # ----- 量能模块 -----
+  vol_ratio_threshold: 4.5                  # 量比阈值（鲲鹏A>4.5，资金突然涌入）[3.0, 6.0]步长0.5
+  vol_count_window: 6                       # 放量天数 COUNT 窗口（鲲鹏H，原注"原数据7"）[5, 10]步长1
+  vol_active_days: 5                        # 放量天数门槛（鲲鹏H>=5）[4, 6]步长1
+  barslast_vol_window: 13                   # BARSLAST(H>=5)<13 窗口 [8, 20]步长1
+  barslast_ratio_window: 15                 # BARSLAST(A>4.5)<15 窗口 [10, 20]步长1
+  # ----- 均线模块 -----
+  ma_sticky_threshold: 1.22                 # 均线粘合度阈值（鲲鹏M<=1.22）[1.10, 1.35]步长0.02
+  # ----- MACD模块 -----
+  diff_dea_ratio: 0.018                     # |DIFF-DEA|/C<0.018 [0.010, 0.030]步长0.002
+  macd_abs_threshold: 0.10                  # MACD<0.10 [0.05, 0.20]步长0.02
+  macd_rise_threshold: 0.0001               # 翻红严格阈值（鲲鹏O/U：MACD>0.0001 严格翻红，排除贴零轴临界假金叉）[0.0, 0.001]步长0.0001
+  # ----- 出场组 -----
+  exit_mode: "standard"                     # 出场档位（默认标准型，三选一）
+  take_profit_pct: ~                        # 止盈阈值（~=null 取档位默认；可显式覆盖）[0.10, 0.25]
+  stop_loss_pct: ~                          # 止损阈值（~=null 取档位默认；可显式覆盖）[0.05, 0.10]
+  hold_days_cap: 60                         # 持有上限兜底（交易日）[20, 120]
+  # ----- 仓位组 -----
+  max_position_pct: 0.20                    # 单票最大仓位（固定）
+  max_positions: 5                          # 同时最大持仓数（固定）
+  capital_base: 1000000                     # 仓位资金基准（元，默认100万）
+
+# ========== 三因子交集股票池（阶段六E最优）==========
+# 说明：这不是策略，而是股票池筛选配置，被回测和实盘共同引用
+three_factor_pool:
+  volatility_window: 20                     # 波动率窗口（20日收益率标准差）
+  momentum_window: 60                       # 动量窗口（60日收益率）
+  price_quantile: 0.33                      # 价格因子分位数（前1/3高价股）
+  factor_quantile: 0.33                     # 各因子取前1/3，取交集
+  min_stocks: 10                            # 股票池最少股票数（不足时放宽因子阈值）
+  max_stocks: 200                           # 股票池最多股票数
+
+# ========== 双均线策略（示例，用于对比）==========
+ma_cross:
+  short_period: 5                           # 短期均线周期
+  long_period: 20                           # 长期均线周期
+  ma_type: "ema"                            # 均线类型：sma / ema / wma
+  position_pct: 0.95                        # 买入仓位比例
+
+# ========== RSI策略（示例）==========
+rsi:
+  period: 14                                 # RSI计算周期
+  overbought: 70                             # 超买阈值（卖出）
+  oversold: 30                               # 超卖阈值（买入）
+
+# ========== MACD策略（示例）==========
+macd:
+  fast_period: 12
+  slow_period: 26
+  signal_period: 9
+  golden_cross_buy: true                     # 金叉买入
+  death_cross_sell: true                     # 死叉卖出
+
+# ========== 布林带策略（示例）==========
+bollinger:
+  period: 20
+  std_dev: 2.0
+  breakout_buy: false                        # 突破上轨是否追涨
+
+# ========== 通用参数（所有策略共用）==========
+common:
+  data_frequency: "daily"                    # 数据频率：daily / 60m / 30m / 15m / 5m / 1m
+  use_adjusted: true                         # 是否使用复权数据
+  adjust_type: "hfq"                         # 复权方式：hfq=后复权 / qfq=前复权
+  min_price: 2.0                             # 过滤2元以下仙股
+  max_price: 500.0                           # 过滤500元以上高价股（可根据需要调整）

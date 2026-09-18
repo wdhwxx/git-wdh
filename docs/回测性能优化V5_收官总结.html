@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>回测性能优化 V5 · 项目收官总结</title>
+<style>
+  :root{
+    --bg:#F4F3EE; --card:#FFFFFF; --text:#1A1B1C; --sub:#6B7280;
+    --border:#E4E3DD; --accent:#8BC8EA; --accent-d:#2F6E93;
+    --ok:#52C41A; --warn:#FAAD14; --err:#EA6668;
+    --hi:#F0EAF5;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);
+       font-family:'PingFang SC','Microsoft YaHei','Segoe UI',Arial,sans-serif;
+       line-height:1.6;padding:0 0 48px;}
+  .wrap{max-width:1060px;margin:0 auto;padding:0 20px;}
+  /* ---------- Hero ---------- */
+  .hero{background:linear-gradient(135deg,#EAF3FA 0%,#D6EAF7 55%,#CBE4F4 100%);
+        border-bottom:1px solid var(--border);padding:52px 0 40px;}
+  .hero .kicker{font-size:13px;color:var(--accent-d);letter-spacing:2px;font-weight:600;}
+  .hero h1{font-size:34px;font-weight:700;margin:8px 0 6px;letter-spacing:1px;}
+  .hero .sub{font-size:15px;color:var(--sub);}
+  .stats{display:flex;flex-wrap:wrap;gap:14px;margin-top:26px;}
+  .stat{flex:1 1 150px;background:rgba(255,255,255,0.72);border:1px solid rgba(0,0,0,0.06);
+        border-radius:14px;padding:14px 16px;}
+  .stat .n{font-size:26px;font-weight:700;color:var(--accent-d);}
+  .stat .l{font-size:12px;color:var(--sub);margin-top:2px;}
+  /* ---------- Section ---------- */
+  section{margin-top:44px;}
+  .sec-title{display:flex;align-items:center;gap:10px;font-size:20px;font-weight:700;margin-bottom:6px;}
+  .sec-title .no{display:inline-flex;align-items:center;justify-content:center;
+       width:28px;height:28px;border-radius:8px;background:var(--accent-d);color:#fff;
+       font-size:14px;font-weight:700;flex:none;}
+  .sec-desc{font-size:13.5px;color:var(--sub);margin-bottom:18px;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:16px;
+        padding:20px 22px;box-shadow:0 1px 3px rgba(0,0,0,0.04);}
+  /* ---------- Timeline ---------- */
+  .tl{position:relative;margin-top:8px;}
+  .tl::before{content:"";position:absolute;left:13px;top:8px;bottom:8px;width:2px;
+              background:linear-gradient(180deg,var(--accent-d),var(--accent));}
+  .tl-item{position:relative;padding:0 0 22px 44px;}
+  .tl-item::before{content:"";position:absolute;left:7px;top:6px;width:14px;height:14px;
+       border-radius:50%;background:#fff;border:3px solid var(--accent-d);}
+  .tl-item:last-child::before{border-color:var(--ok);}
+  .tl-item .ph{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;}
+  .tl-item .ph b{font-size:17px;}
+  .tl-item .ph .tag{font-size:12px;font-weight:600;color:var(--ok);
+       border:1px solid rgba(82,196,26,0.5);border-radius:999px;padding:0 10px;}
+  .tl-item .ph .meta{font-size:12px;color:var(--sub);}
+  .tl-item .pts{margin-top:8px;font-size:13.5px;color:#374151;}
+  .tl-item .pts li{margin:4px 0 4px 18px;}
+  .tl-item .pts b{color:var(--accent-d);}
+  /* ---------- Grid / arch ---------- */
+  .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;}
+  .chip{font-size:12.5px;padding:5px 12px;border-radius:999px;background:#EEF6FB;
+        border:1px solid rgba(47,110,147,0.18);color:var(--accent-d);}
+  /* ---------- Tables ---------- */
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px;}
+  th,td{border:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top;}
+  th{background:#F6F8FA;font-weight:600;font-size:12.5px;color:#374151;}
+  tr:nth-child(even) td{background:#FAFAF8;}
+  .ok-t{color:var(--ok);font-weight:600;} .err-t{color:var(--err);font-weight:600;}
+  .warn-t{color:#B8860B;font-weight:600;}
+  .badge{display:inline-block;font-size:11.5px;font-weight:700;padding:1px 8px;border-radius:999px;color:#fff;}
+  .b-hi{background:var(--err);} .b-mid{background:var(--warn);} .b-lo{background:#9CA3AF;}
+  /* ---------- Arch ---------- */
+  .arch .layer{border:1px solid var(--border);border-radius:14px;padding:14px 16px;margin-top:12px;background:#fff;}
+  .arch .layer .lname{font-size:14px;font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:8px;}
+  .arch .layer .lname .lbadge{font-size:11px;font-weight:700;color:#fff;border-radius:6px;padding:1px 8px;}
+  .arch .nodes{display:flex;flex-wrap:wrap;gap:10px;}
+  .node{flex:1 1 150px;border:1px solid rgba(47,110,147,0.25);border-radius:10px;padding:10px 12px;background:#F7FBFE;}
+  .node b{font-size:13px;color:var(--accent-d);display:block;}
+  .node span{font-size:11.5px;color:var(--sub);}
+  .node.hl{border-color:var(--accent-d);background:linear-gradient(135deg,#E8F4FC,#D8ECF8);}
+  .flow{text-align:center;color:var(--accent-d);font-size:14px;margin:6px 0;}
+  /* ---------- red lines / footer ---------- */
+  .redline{display:flex;gap:12px;padding:10px 0;border-bottom:1px dashed var(--border);font-size:13.5px;}
+  .redline:last-child{border-bottom:none;}
+  .redline .rn{flex:none;width:22px;height:22px;border-radius:50%;background:var(--err);color:#fff;
+       font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;}
+  footer{margin-top:52px;padding-top:20px;border-top:1px solid var(--border);
+        font-size:12px;color:var(--sub);text-align:center;}
+  .echart{width:100%;height:320px;}
+  @media(max-width:600px){.hero h1{font-size:26px;} section{margin-top:34px;} .echart{height:300px;}}
+</style>
+</head>
+<body>
+
+<!-- ================= Hero ================= -->
+<div class="hero">
+  <div class="wrap">
+    <div class="kicker">鲲鹏量化交易系统 · 回测性能优化</div>
+    <h1>V5 项目收官总结</h1>
+    <div class="sub">7 天 · 4 阶段 · 35 项任务一次完整落地｜实盘链路零修改 · 三模式引擎 · 全量回归通过</div>
+    <div class="stats">
+      <div class="stat"><div class="n">7 天</div><div class="l">总工期 4 阶段一次性落地</div></div>
+      <div class="stat"><div class="n">35/35</div><div class="l">P0-P3 任务全部完成（9/10/10/6）</div></div>
+      <div class="stat"><div class="n">56</div><div class="l">涉及文件（24 新增 / 32 重构 / 0 改动实盘）</div></div>
+      <div class="stat"><div class="n">1187</div><div class="l">单元测试通过 · 2 skipped</div></div>
+      <div class="stat"><div class="n">71×</div><div class="l">100 标的批量回测提速（20min→16.9s）</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+
+<!-- ================= 一、项目概述 ================= -->
+<section>
+  <div class="sec-title"><span class="no">1</span>项目概述</div>
+  <div class="sec-desc">针对原事件驱动回测架构的五类根因，给出工程化系统性解法。</div>
+  <div class="card">
+    <div class="chips" style="margin-bottom:14px;">
+      <span class="chip">架构错配</span><span class="chip">重复计算</span>
+      <span class="chip">I/O 阻塞</span><span class="chip">GC 压力</span><span class="chip">并行不合理</span>
+    </div>
+    <div style="font-size:13.5px;color:#374151;">
+      完整实现<b>纯向量化引擎 vectorized</b>（大批量参数扫描）+ 新增 <b>mixed 混合引擎</b>（生产主力）+ 保留 <b>event 事件驱动</b>（真值基准）；
+      修复缓存失效、并行 L1 失效、pickle 风险、OOM、费用漂移、硬编码阈值等工程缺陷；
+      配套<b>数据指纹 / 三级缓存 / 内存防护 / 增量回测 / 完整测试与 CI 回归</b>；
+      实盘模块 live / risk / execution 保持<b>零修改</b>，链路严格隔离。
+    </div>
+  </div>
+</section>
+
+<!-- ================= 二、四阶段 ================= -->
+<section>
+  <div class="sec-title"><span class="no">2</span>四阶段完成情况</div>
+  <div class="sec-desc">P0 数据与因子层 → P1 引擎核心层 → P2 并行与治理层 → P3 验证交付层。</div>
+  <div class="card" style="padding:20px 22px 6px;">
+    <div class="tl">
+      <div class="tl-item">
+        <div class="ph"><b>P0 数据与因子层</b><span class="tag">9/9 完成</span><span class="meta">第 1-2 天 · 低风险高收益</span></div>
+        <ul class="pts">
+          <li>数据指纹 <b>DataFingerprint</b>（SHA-256 确定性、行/列无关）＋ FingerprintStore 多标的仓库</li>
+          <li><b>三级因子缓存</b>（L1 内存 LRU+TTL / L2 磁盘 Parquet / L3 回源），并行自动关 L1；FactorEngine 批量因子引擎</li>
+          <li>RSRS <b>闭式 OLS 纯向量化</b>（β、R² 闭式公式）→ <b>2000 根日线快 11 倍</b></li>
+          <li>OptimizedDataLoader 预取/分块/流水线 ＋ MemoryWatcher 三级水位 OOM 防护</li>
+          <li>CacheSyncManager 下载/清洗后自动同步失效；缓存管理运维脚本</li>
+        </ul>
+      </div>
+      <div class="tl-item">
+        <div class="ph"><b>P1 引擎核心层</b><span class="tag">10/10 完成</span><span class="meta">第 3-4 天 · 三模式引擎落地</span></div>
+        <ul class="pts">
+          <li><b>三模式引擎</b>：vectorized 纯向量（扫描）/ mixed 生产主力（向量化因子+bar 循环）/ event 真值基准（全保留）</li>
+          <li>fee_common 全局唯一费用入口 ＋ order_matcher 统一撮合 → 三引擎口径一致</li>
+          <li>策略基类三接口（on_bar / generate_signals_vectorized / generate_mixed_loop）＋ 6 个示例策略双接口改造</li>
+          <li>验收 A/B/C 全过：<b>100 标的批量 20min→16.9s（71×）</b>；mixed↔vectorized 逐点一致；线程安全</li>
+          <li>修复 recorder O(n²) 瓶颈 → <b>356s→16.15s（22×）</b></li>
+        </ul>
+      </div>
+      <div class="tl-item">
+        <div class="ph"><b>P2 并行与治理层</b><span class="tag">10/10 完成</span><span class="meta">第 5-6 天 · 隐性损耗治理</span></div>
+        <ul class="pts">
+          <li>PickleChecker 两阶段预检（静态扫描+真实往返）＋ I/O 线程池/计算进程池双池分离</li>
+          <li>parallel_factor_context 并行自动关 L1 并告警；回测日志降级/异步队列/采样（防日志风暴）</li>
+          <li>StageTimer 分阶段计时 ＋ LightLookaheadGuard 逐 bar O(1) 防未来函数（四类校验）</li>
+          <li>异步蒙特卡洛 / 参数优化接入并行 / 增量回测（指纹识别变更）/ 批量回测主入口</li>
+          <li>GUI 配置对话框 ＋ config 模板 engine.mode 与 performance 7 组开关</li>
+        </ul>
+      </div>
+      <div class="tl-item">
+        <div class="ph"><b>P3 验证交付层</b><span class="tag">6/6 完成</span><span class="meta">第 7 天 · 一致性回归与 CI</span></div>
+        <ul class="pts">
+          <li>三模式净值一致性校验（绝对+相对双阈值，逐日对拍，默认 3/3 对通过）</li>
+          <li>新增 <b>137 项</b>回归测试（一致性/指纹/缓存/内存监控/pickle）；修复 memory_watcher 水位回调状态机真实缺陷</li>
+          <li>三模式性能基准采集（event 1.0x / mixed 1.36x / vectorized 3.42x）</li>
+          <li>pyproject 依赖与 ruff 规则契约、.gitignore 缓存规则、一键部署.bat v3.0</li>
+          <li>实施报告 v5（方案+风险矩阵 12 项+演进路线）＋ CI 流水线（ruff 基线护栏＋一致性回归＋缓存/指纹专项）</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 三、性能成果 ================= -->
+<section>
+  <div class="sec-title"><span class="no">3</span>性能成果</div>
+  <div class="sec-desc">实测加速比与三模式引擎基准（数据来源：任务追踪文档已验证记录）。</div>
+
+  <div class="card">
+    <div class="sec-title" style="font-size:15px;">关键优化点加速比（×）</div>
+    <div id="ch-speed" class="echart"></div>
+  </div>
+
+  <div class="card" style="margin-top:14px;">
+    <div class="sec-title" style="font-size:15px;">三模式引擎基准实测（2 标的 × 500 根 × 3 次，seed=7）</div>
+    <div id="ch-engine" class="echart"></div>
+    <table>
+      <thead><tr><th>引擎模式</th><th>定位</th><th>耗时</th><th>吞吐</th><th>相对加速比</th><th>期末净值一致性</th></tr></thead>
+      <tbody>
+        <tr><td>event</td><td>真值基准</td><td>0.0244 s</td><td>41,020 bar/s</td><td>1.00×</td><td rowspan="3" style="text-align:center;vertical-align:middle;"><span class="ok-t">一致 1.042612</span></td></tr>
+        <tr><td>mixed</td><td>生产主力</td><td>0.0179 s</td><td>55,750 bar/s</td><td>1.36×</td></tr>
+        <tr><td>vectorized</td><td>参数扫描</td><td>0.0071 s</td><td>140,447 bar/s</td><td>3.42×</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top:14px;">
+    <div class="sec-title" style="font-size:15px;">预期性能指标（完整落地后，两种引擎口径）</div>
+    <table>
+      <thead><tr><th>场景</th><th>优化前</th><th>vectorized</th><th>mixed</th></tr></thead>
+      <tbody>
+        <tr><td>单标的 10 年日线 · 首次</td><td>12 s</td><td>1.2 s</td><td>1.4 s</td></tr>
+        <tr><td>单标的 · 热缓存</td><td>12 s</td><td>0.3 s</td><td>0.35 s</td></tr>
+        <tr><td>100 标的批量 · 冷启动</td><td>20 min</td><td>1 min</td><td>1.2 min</td></tr>
+        <tr><td>500 标的批量 · 冷启动</td><td>100 min</td><td>3 min</td><td>4 min</td></tr>
+        <tr><td>500 标的 · 热缓存</td><td>100 min</td><td>0.8 min</td><td>1.2 min</td></tr>
+        <tr><td>参数优化 200 组 × 50 标的</td><td>180 min</td><td>5 min</td><td>7 min</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ================= 四、架构 ================= -->
+<section>
+  <div class="sec-title"><span class="no">4</span>三模式引擎架构与治理体系</div>
+  <div class="sec-desc">数据与因子层 → 三模式引擎核心 → 并行与治理 → 验证交付，全链路分层示意。</div>
+  <div class="card arch">
+    <div class="layer">
+      <div class="lname"><span class="lbadge" style="background:#2F6E93;">P0</span>数据与因子层</div>
+      <div class="nodes">
+        <div class="node"><b>DataFingerprint</b><span>数据指纹 · 缓存失效与增量基础</span></div>
+        <div class="node"><b>FactorCache</b><span>三级缓存 L1/L2/L3 · 并行关 L1</span></div>
+        <div class="node"><b>FactorEngine</b><span>向量化因子引擎 · 批量计算</span></div>
+        <div class="node"><b>RSRS 闭式 OLS</b><span>纯向量化 · 快 11×</span></div>
+        <div class="node"><b>Loader + MemoryWatcher</b><span>预取/分块/流水线 · OOM 防护</span></div>
+      </div>
+    </div>
+    <div class="flow">▼ 统一数据输入 ▼</div>
+    <div class="layer">
+      <div class="lname"><span class="lbadge" style="background:#2F6E93;">P1</span>三模式引擎核心</div>
+      <div class="nodes">
+        <div class="node"><b>vectorized</b><span>纯向量化 · 大批量参数扫描</span></div>
+        <div class="node hl"><b>mixed ⭐</b><span>生产主力 · 向量化因子+bar 循环</span></div>
+        <div class="node"><b>event</b><span>真值基准 · 上线前全量验证</span></div>
+        <div class="node"><b>fee_common</b><span>全局唯一费用入口</span></div>
+        <div class="node"><b>order_matcher</b><span>三引擎统一撮合</span></div>
+      </div>
+    </div>
+    <div class="flow">▼ 并行调度 · 治理护栏 ▼</div>
+    <div class="layer">
+      <div class="lname"><span class="lbadge" style="background:#2F6E93;">P2</span>并行与治理层</div>
+      <div class="nodes">
+        <div class="node"><b>PickleChecker</b><span>提交前预检 · 拦截不可序列化</span></div>
+        <div class="node"><b>双池并行</b><span>I/O 线程池 + 计算进程池 · 自动关 L1</span></div>
+        <div class="node"><b>LightLookaheadGuard</b><span>逐 bar 防未来函数 · strict 拦截</span></div>
+        <div class="node"><b>StageTimer</b><span>分阶段计时 · 性能定位</span></div>
+        <div class="node"><b>回测日志模式</b><span>异步队列/采样/静音 · 防日志风暴</span></div>
+      </div>
+    </div>
+    <div class="flow">▼ 回归守护 ▼</div>
+    <div class="layer">
+      <div class="lname"><span class="lbadge" style="background:#2F6E93;">P3</span>验证交付层</div>
+      <div class="nodes">
+        <div class="node"><b>ConsistencyChecker</b><span>三模式逐日对拍 · 双阈值可配</span></div>
+        <div class="node"><b>EngineBenchmark</b><span>三模式基准 · 耗时/吞吐/加速比</span></div>
+        <div class="node"><b>137 项回归测试</b><span>一致性/指纹/缓存/内存/pickle</span></div>
+        <div class="node"><b>CI 流水线</b><span>ruff 基线护栏 + 一致性回归 + 专项单测</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 五、变更统计 ================= -->
+<section>
+  <div class="sec-title"><span class="no">5</span>变更统计</div>
+  <div class="sec-desc">共计 56 个文件 / 目录，实盘链路完全隔离。</div>
+  <div class="grid2">
+    <div class="card" style="border-top:4px solid var(--ok);">
+      <div style="font-size:13px;color:var(--sub);">全新新增</div>
+      <div style="font-size:30px;font-weight:700;color:var(--ok);">24</div>
+      <div style="font-size:12.5px;color:var(--sub);margin-top:4px;">cache 目录、vectorized/mixed 引擎、数据指纹、内存监控、pickle 预检、运维脚本、新增测试、实施文档</div>
+    </div>
+    <div class="card" style="border-top:4px solid var(--accent-d);">
+      <div style="font-size:13px;color:var(--sub);">重构 / 修改</div>
+      <div style="font-size:30px;font-weight:700;color:var(--accent-d);">32</div>
+      <div style="font-size:12.5px;color:var(--sub);margin-top:4px;">调度器、RSRS 向量化、策略基类三接口、数据 loader、并行模块、日志、配置模板、GUI、脚本、原测试扩展</div>
+    </div>
+    <div class="card" style="border-top:4px solid #9CA3AF;">
+      <div style="font-size:13px;color:var(--sub);">完全不改动（隔离红线）</div>
+      <div style="font-size:30px;font-weight:700;color:#9CA3AF;">0</div>
+      <div style="font-size:12.5px;color:var(--sub);margin-top:4px;">live 实盘 / risk 风控 / execution 执行 / database / monitoring / web / ml，保证实盘链路安全稳定</div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 六、风险矩阵 ================= -->
+<section>
+  <div class="sec-title"><span class="no">6</span>风险矩阵（12 项）</div>
+  <div class="sec-desc">全部 12 项均已在代码 / 脚本 / CI 层面制定并落实应对策略。</div>
+  <div class="card" style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>#</th><th>风险</th><th>等级</th><th>概率</th><th>影响</th><th>缓解措施</th><th>状态</th></tr></thead>
+      <tbody>
+        <tr><td>R1</td><td>缓存过期风险</td><td><span class="badge b-hi">高</span></td><td>中</td><td>高</td><td>数据指纹 SHA-256 变更检测 + CacheSyncManager 下载/清洗后自动失效</td><td class="ok-t">已落地</td></tr>
+        <tr><td>R2</td><td>三引擎结果漂移</td><td><span class="badge b-hi">高</span></td><td>中</td><td>高</td><td>fee_common 唯一费用入口 + 统一撮合 + ConsistencyChecker 逐日对拍</td><td class="ok-t">已落地</td></tr>
+        <tr><td>R3</td><td>并行 L1 缓存失效</td><td><span class="badge b-hi">高</span></td><td>中</td><td>高</td><td>parallel_factor_context 自动关 L1 并告警、退出恢复</td><td class="ok-t">已落地</td></tr>
+        <tr><td>R4</td><td>预加载 / 流水线 OOM</td><td><span class="badge b-hi">高</span></td><td>中</td><td>高</td><td>MemoryWatcher 三级水位 + 加载器三级自适应降级</td><td class="ok-t">已落地</td></tr>
+        <tr><td>R5</td><td>pickle 序列化风险</td><td><span class="badge b-mid">中</span></td><td>中</td><td>高</td><td>PickleChecker 两阶段预检，提交前拦截并定位嵌套路径</td><td class="ok-t">已落地</td></tr>
+        <tr><td>R6</td><td>费用逻辑漂移</td><td><span class="badge b-mid">中</span></td><td>中</td><td>中</td><td>fee_common 全局唯一入口（向量化+标量两套）；fee_table 默认关闭并警告</td><td class="ok-t">已落地</td></tr>
+        <tr><td>R7</td><td>硬编码一致性阈值</td><td><span class="badge b-mid">中</span></td><td>中</td><td>中</td><td>ComparisonTolerance 绝对+相对双阈值可配置（isclose 语义）</td><td class="ok-t">已落地</td></tr>
+        <tr><td>R8</td><td>性能回归</td><td><span class="badge b-mid">中</span></td><td>中</td><td>中</td><td>EngineBenchmark 三模式基准采集 + 一键脚本 + CI 冒烟</td><td class="ok-t">已落地</td></tr>
+        <tr><td>R9</td><td>日志风暴阻塞主线程</td><td><span class="badge b-mid">中</span></td><td>中</td><td>中</td><td>回测日志模式：级别提升 + 异步队列 + 采样输出 + 静音清单</td><td class="ok-t">已落地</td></tr>
+        <tr><td>R10</td><td>未来函数（数据泄露）</td><td><span class="badge b-hi">高</span></td><td>低</td><td>高</td><td>LightLookaheadGuard 逐 bar 校验四类未来函数，strict 抛错 + assert_pass 拦截</td><td class="ok-t">已落地</td></tr>
+        <tr><td>R11</td><td>内存水位回调误判</td><td><span class="badge b-lo">低</span></td><td>低</td><td>中</td><td>回归测试发现真实缺陷，新增 MemoryLevel.severity 整数严重度并修复</td><td class="ok-t">已修复</td></tr>
+        <tr><td>R12</td><td>数据 / 缓存同步漂移</td><td><span class="badge b-lo">低</span></td><td>低</td><td>中</td><td>CacheSyncManager 全链路同步，下载/清洗默认自动同步</td><td class="ok-t">已落地</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ================= 七、落地红线 ================= -->
+<section>
+  <div class="sec-title"><span class="no">7</span>落地红线（团队共识）</div>
+  <div class="card">
+    <div class="redline"><span class="rn">1</span><div><b>引擎定位</b>：vectorized 用于大批量参数扫描；<b>mixed 为生产主力</b>；event 作为真值基准，上线前必须 event 模式做一次全量验证。</div></div>
+    <div class="redline"><span class="rn">2</span><div><b>CI 一致性回归</b>：CI 必须执行三模式一致性回归，防止迭代带来逻辑漂移。</div></div>
+    <div class="redline"><span class="rn">3</span><div><b>L1 预期行为</b>：并行任务 L1 命中率下降属预期行为，不可用单进程热缓存指标验收多进程场景。</div></div>
+    <div class="redline"><span class="rn">4</span><div><b>数据更新流程</b>：必须「更新数据指纹 + 主动缓存失效」，回测异常优先排查缓存。</div></div>
+    <div class="redline"><span class="rn">5</span><div><b>实盘隔离</b>：live / risk / execution 禁止修改，回测优化全部隔离在 backtest 模块。</div></div>
+  </div>
+</section>
+
+<!-- ================= 八、局限与演进 ================= -->
+<section>
+  <div class="sec-title"><span class="no">8</span>局限与中长期演进路线</div>
+  <div class="sec-desc">本次版本已知局限均已做短期缓解；中长期按 v1.5 / v2.0 / v2.x 三级演进。</div>
+  <div class="card">
+    <div class="sec-title" style="font-size:15px;">已知局限（非阻塞，已缓解）</div>
+    <table>
+      <thead><tr><th>#</th><th>局限</th><th>本次缓解</th><th>残留敞口</th></tr></thead>
+      <tbody>
+        <tr><td>L1</td><td>mixed bar 循环超大标集性能受限</td><td>循环内局部向量化 + 可选 numba</td><td>超大标集吞吐受路径依赖约束</td></tr>
+        <tr><td>L2</td><td>并行关 L1 后 L2 磁盘 I/O 瓶颈</td><td>parquet 调优 + 预热脚本</td><td>多进程冷启动 I/O 竞争</td></tr>
+        <tr><td>L3</td><td>复杂策略 pickle 序列化开销</td><td>预检拦截 + 传配置字典 + 子进程重建</td><td>大对象序列化往返仍有成本</td></tr>
+        <tr><td>L4</td><td>&gt;1000 超大标集内存压力</td><td>内存水位 + 分块流水线降级</td><td>全量驻留内存场景仍受限</td></tr>
+        <tr><td>L5</td><td>真实策略 mixed↔vectorized 约 0.3% 自然差异</td><td>校验如实告警、按需放宽阈值</td><td>语义级差异需策略层对齐</td></tr>
+        <tr><td>L6</td><td>ruff 历史 lint 债（530 项基线）</td><td>固定规则契约 E4/E7/E9/F/I + 锁定 0.16.x</td><td>历史债未清扫，独立治理项</td></tr>
+        <tr><td>L7</td><td>dev 依赖未在部分环境安装</td><td>pyproject dev 组已并入声明</td><td>新环境需按完整分组安装</td></tr>
+        <tr><td>L8</td><td>性能基准结果未落盘持久化</td><td>summary + to_dict JSON 可序列化</td><td>尚无自动归档/趋势对比</td></tr>
+        <tr><td>L9</td><td>Redis / pika 可选依赖未实际部署</td><td>pyproject 已声明、延迟导入可降级</td><td>分布式能力需按需启用</td></tr>
+        <tr><td>L10</td><td>业务策略尚未全量迁移三接口</td><td>6 个示例策略双接口改造完成</td><td>业务策略迁移属独立迭代</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="grid2" style="margin-top:14px;">
+    <div class="card" style="border-top:4px solid var(--ok);">
+      <div style="font-size:14px;font-weight:700;margin-bottom:6px;">短期 v1.5（1-2 迭代）</div>
+      <div style="font-size:12.5px;color:#374151;">
+        ① mixed 局部向量化 + numba 开关；② parquet 写调优 + 冷启动预热；③ 性能基准落盘归档、趋势对比。
+      </div>
+    </div>
+    <div class="card" style="border-top:4px solid var(--warn);">
+      <div style="font-size:14px;font-weight:700;margin-bottom:6px;">中期 v2.0</div>
+      <div style="font-size:12.5px;color:#374151;">
+        ① 分块快照向量化回测（突破路径依赖）；② Redis 分布式共享缓存（消除并行 I/O 瓶颈）；③ 业务策略大规模迁移三接口。
+      </div>
+    </div>
+    <div class="card" style="border-top:4px solid var(--err);">
+      <div style="font-size:14px;font-weight:700;margin-bottom:6px;">长期 v2.x+</div>
+      <div style="font-size:12.5px;color:#374151;">
+        ① Ray 共享内存 / 分布式参数扫描；② Dask 外存计算（&gt;1000 标的）；③ CI 持续增强（基准趋势监控）。
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 九、验证 ================= -->
+<section>
+  <div class="sec-title"><span class="no">9</span>验证体系与交付物</div>
+  <div class="sec-desc">验收方式与结果一览。</div>
+  <div class="card">
+    <table>
+      <thead><tr><th>验证</th><th>命令</th><th>结果</th></tr></thead>
+      <tbody>
+        <tr><td>全量单测</td><td><code>pytest tests/unit/</code></td><td><span class="ok-t">1187 passed, 2 skipped</span></td></tr>
+        <tr><td>引擎验收</td><td><code>python scripts/验收_回测引擎V5.py</code></td><td>A/B/C 三项全过（71× / 逐点一致 / 线程安全）</td></tr>
+        <tr><td>一致性校验</td><td><code>python scripts/一致性校验.py</code></td><td>默认 3/3 对通过</td></tr>
+        <tr><td>性能基准</td><td><code>python scripts/性能基准测试.py --engine-benchmark-only</code></td><td>3.42× / 1.36× / 1.0×</td></tr>
+        <tr><td>代码规范</td><td><code>ruff check .</code>（E4/E7/E9/F/I）</td><td>基线 530（历史债）、新代码 0</td></tr>
+        <tr><td>部署</td><td><code>一键部署.bat</code> v3.0</td><td>4 项 V5 导入校验全过</td></tr>
+      </tbody>
+    </table>
+    <div style="margin-top:14px;font-size:13px;color:var(--sub);">
+      核心交付物：<b>P0</b> data_fingerprint / factor_cache / factor_engine / rsrs / memory_watcher / loader / cache_sync　
+      <b>P1</b> vectorized_engine / mixed_engine / engine / fee_common / order_matcher　
+      <b>P2</b> pickle_checker / parallel / light_lookahead_guard / timer / performance_config / async_monte_carlo / param_optimizer / incremental_backtest / batch_backtest　
+      <b>P3</b> consistency_check / engine_benchmark / 一致性校验.py / 性能基准测试.py / 5 测试文件 / pyproject.toml / .gitignore / 一键部署.bat / ci.yml
+    </div>
+  </div>
+</section>
+
+<footer>
+  数据来源：《回测性能优化 V5｜任务完成度摘要.md》已验证实施记录（更新至 2026-09-05，P3 6/6 完成）·
+  《回测性能优化实施报告_v5.md》风险矩阵与演进路线 · 三模式基准实测来自 P3-3。
+</footer>
+
+</div><!-- /wrap -->
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<script>
+(function(){
+  function fmt(v){return v.toLocaleString();}
+  function chart(domId, option){
+    var el=document.getElementById(domId);
+    if(!el) return;
+    if(typeof echarts==='undefined'){
+      el.innerHTML='<div style="padding:14px;color:#6B7280;font-size:13px;">图表库未加载，数据请见下方表格。</div>';
+      return;
+    }
+    try{
+      var m=echarts.init(el);
+      m.setOption(option);
+      window.addEventListener('resize',function(){m.resize();});
+    }catch(e){el.innerHTML='<div style="padding:14px;color:#6B7280;font-size:13px;">图表渲染失败，数据请见下方表格。</div>';}
+  }
+
+  chart('ch-speed',{
+    backgroundColor:'transparent',
+    tooltip:{trigger:'axis',triggerOn:'click',renderMode:'richText',confine:true,
+      textStyle:{fontSize:11},valueFormatter:function(v){return v+'×';}},
+    grid:{left:120,right:44,top:16,bottom:28,containLabel:true},
+    xAxis:{type:'value',name:'加速倍数',axisLabel:{color:'#555',fontSize:11}},
+    yAxis:{type:'category',inverse:true,
+      data:['100标的批量（验收A）','recorder O(n²)修复','RSRS闭式OLS','vectorized vs event','mixed vs event'],
+      axisLabel:{color:'#374151',fontSize:11}},
+    series:[{type:'bar',barWidth:18,
+      data:[
+        {value:71,itemStyle:{color:'#2F6E93'}},
+        {value:22,itemStyle:{color:'#3E8CB5'}},
+        {value:11,itemStyle:{color:'#6FA8C8'}},
+        {value:3.42,itemStyle:{color:'#9CC4DC'}},
+        {value:1.36,itemStyle:{color:'#C3DCEA'}}
+      ],
+      label:{show:true,position:'right',fontSize:11,color:'#374151',
+        formatter:function(p){return p.value+'×';}},
+      labelLayout:{hideOverlap:true}
+    }]
+  });
+
+  chart('ch-engine',{
+    backgroundColor:'transparent',
+    tooltip:{trigger:'axis',triggerOn:'click',renderMode:'richText',confine:true,
+      textStyle:{fontSize:11}},
+    legend:{top:0,itemWidth:14,itemHeight:8,textStyle:{color:'#6B7280',fontSize:11}},
+    grid:{left:52,right:52,top:34,bottom:28,containLabel:true},
+    xAxis:{type:'category',data:['event（真值基准）','mixed（生产主力）','vectorized（参数扫描）'],
+      axisLabel:{color:'#374151',fontSize:11,interval:0}},
+    yAxis:[
+      {type:'value',name:'耗时(s)',axisLabel:{color:'#555',fontSize:11}},
+      {type:'value',name:'吞吐(bar/s)',axisLabel:{color:'#555',fontSize:11}}
+    ],
+    series:[
+      {name:'耗时(s)',type:'bar',barWidth:22,yAxisIndex:0,
+       data:[{value:0.0244,itemStyle:{color:'#8BC8EA'}},
+             {value:0.0179,itemStyle:{color:'#5EA8CC'}},
+             {value:0.0071,itemStyle:{color:'#2F6E93'}}],
+       label:{show:true,position:'top',fontSize:10,color:'#374151'},
+       labelLayout:{hideOverlap:true}},
+      {name:'吞吐(bar/s)',type:'line',yAxisIndex:1,smooth:true,
+       data:[41020,55750,140447],
+       itemStyle:{color:'#EA6668'},lineStyle:{color:'#EA6668',width:2},
+       label:{show:true,position:'top',fontSize:10,color:'#EA6668',
+         formatter:function(p){return fmt(p.value);}},
+       labelLayout:{hideOverlap:true}}
+    ]
+  });
+})();
+</script>
+</body>
+</html>

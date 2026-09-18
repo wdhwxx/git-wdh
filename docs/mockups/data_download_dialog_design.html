@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>数据下载管理器 · 面板设计稿 v1</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background:#0b0e14; font-family:"Microsoft YaHei UI","Microsoft YaHei",sans-serif;
+    display:flex; flex-direction:column; justify-content:flex-start; align-items:center; min-height:100vh; padding:36px 24px; gap:26px;
+  }
+  /* ===== 窗口 ===== */
+  .win {
+    width:920px; background:#131720; border:1px solid #262c3a; border-radius:10px;
+    overflow:hidden; box-shadow:0 18px 60px rgba(0,0,0,.55);
+  }
+  /* 标题栏 */
+  .titlebar {
+    display:flex; align-items:center; gap:10px; padding:12px 16px;
+    background:linear-gradient(180deg,#1a2030,#161b26); border-bottom:1px solid #262c3a;
+  }
+  .tbar-dot { width:12px; height:12px; border-radius:50%; }
+  .tbar-dot.r{background:#ff5f57}.tbar-dot.y{background:#febc2e}.tbar-dot.g{background:#28c840}
+  .titlebar .tt { color:#e8edf7; font-size:14px; font-weight:600; letter-spacing:.5px; margin-left:6px; }
+  .titlebar .tt small { color:#7b8498; font-weight:400; margin-left:8px; font-size:12px; }
+  .titlebar .src { margin-left:auto; color:#5d667a; font-size:11px; font-family:Consolas,monospace; }
+  .body { padding:16px 18px 18px; }
+
+  /* ===== 区块标题 ===== */
+  .sec { display:flex; align-items:center; gap:8px; margin:14px 0 10px; }
+  .sec:first-child{ margin-top:0; }
+  .sec .bar { width:4px; height:14px; border-radius:2px; background:linear-gradient(180deg,#2fd4a7,#1f9d86); }
+  .sec .t { color:#cdd6e6; font-size:13px; font-weight:600; letter-spacing:.5px; }
+  .sec .tag { font-size:10px; color:#12181f; background:#2fd4a7; border-radius:3px; padding:1px 7px; font-weight:700; }
+  .sec .tag.new{ background:#ffb84d; color:#2a1a05; }
+
+  /* ===== 信息卡 ===== */
+  .cards { display:flex; gap:12px; }
+  .card {
+    flex:1; background:#0f1420; border:1px solid #232a3a; border-radius:8px; padding:11px 14px;
+  }
+  .card .card-tt { font-size:11px; color:#7b8498; letter-spacing:1px; margin-bottom:9px; display:flex; justify-content:space-between; }
+  .row { display:flex; align-items:center; gap:7px; margin:6px 0; font-size:12px; color:#c6cede; }
+  .row .nm { color:#8b93a7; width:92px; flex:none; }
+  .ok  { color:#2fd4a7; font-weight:700; }
+  .off { color:#5d667a; }
+  .val { color:#e8edf7; font-family:Consolas,monospace; }
+  .sub { color:#5d667a; font-size:11px; }
+
+  /* ===== 勾选区 ===== */
+  .check-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px 14px; }
+  .check-item {
+    display:flex; align-items:center; gap:9px; background:#0f1420; border:1px solid #232a3a;
+    border-radius:7px; padding:8px 12px; cursor:pointer; transition:border .15s;
+  }
+  .check-item:hover{ border-color:#2fd4a7; }
+  .cbx {
+    width:16px; height:16px; border-radius:4px; border:1.5px solid #4a5468; flex:none;
+    display:flex; align-items:center; justify-content:center; background:#1a2130; font-size:11px; color:#fff;
+  }
+  .check-item.on .cbx{ background:#2fd4a7; border-color:#2fd4a7; }
+  .check-item .txt { font-size:12.5px; color:#dbe2ef; }
+  .check-item .hint { font-size:10.5px; color:#5d667a; margin-top:2px; }
+  .check-item.on .hint{ color:#3a6b5e; }
+  .check-item.new{ border-color:#3a3340; background:#171321; }
+  .check-item.new .cbx{ border-color:#ffb84d; }
+  .check-item.new.on .cbx{ background:#ffb84d; border-color:#ffb84d; }
+  .check-item.new .txt { color:#ffe2b8; }
+  .check-item.new .hint{ color:#7a6a52; }
+
+  /* ===== 滚动进度区 ===== */
+  .progress-box {
+    background:#0a0e16; border:1px solid #232a3a; border-radius:8px; overflow:hidden;
+  }
+  .pbox-head {
+    display:flex; align-items:center; gap:8px; padding:8px 12px; background:#0f1420; border-bottom:1px solid #232a3a;
+  }
+  .pbox-head .live { width:8px; height:8px; border-radius:50%; background:#2fd4a7; box-shadow:0 0 8px #2fd4a7; animation:blink 1.2s infinite; }
+  @keyframes blink{ 50%{opacity:.35;} }
+  .pbox-head .t { font-size:12px; color:#cdd6e6; font-weight:600; }
+  .pbox-head .cnt { margin-left:auto; color:#5d667a; font-size:11px; font-family:Consolas,monospace; }
+  .pline { display:flex; align-items:center; gap:10px; padding:5px 12px; font-family:Consolas,"Microsoft YaHei UI",monospace; font-size:12px; border-bottom:1px solid #10151f; }
+  .pline .no { color:#5d667a; width:72px; flex:none; }
+  .pline .code { color:#8fb8ff; width:96px; flex:none; }
+  .pline .st { width:16px; flex:none; text-align:center; }
+  .pline .st.x{ color:#ff5f57; font-weight:700; }
+  .pline .st.v{ color:#2fd4a7; font-weight:700; }
+  .pline .st.s{ color:#febc2e; font-weight:700; }
+  .pline .n { color:#6b7589; }
+  .pline:hover{ background:#10161f; }
+  .pbox-foot { padding:7px 12px; color:#4a5468; font-size:10.5px; font-family:Consolas,monospace; background:#0d121c; }
+
+  /* ===== 底部操作区 ===== */
+  .actions { display:flex; align-items:center; gap:14px; margin-top:16px; }
+  .btn-start {
+    background:linear-gradient(180deg,#e8483c,#d93026); color:#fff; border:none; border-radius:7px;
+    padding:10px 26px; font-size:13.5px; font-weight:700; letter-spacing:1px; cursor:pointer;
+    box-shadow:0 4px 14px rgba(217,48,38,.35);
+  }
+  .btn-cancel {
+    background:#1a2130; color:#8b93a7; border:1px solid #2b3346; border-radius:7px; padding:9px 18px; font-size:12.5px; cursor:pointer;
+  }
+  .progress-wrap { flex:1; display:flex; align-items:center; gap:10px; }
+  .pbar { flex:1; height:8px; background:#0a0e16; border:1px solid #232a3a; border-radius:5px; overflow:hidden; }
+  .pbar .fill { height:100%; width:46%; background:linear-gradient(90deg,#1f9d86,#2fd4a7); border-radius:5px; }
+  .pbar .pct { color:#c6cede; font-size:12px; font-family:Consolas,monospace; width:44px; }
+
+  /* ===== 图例说明 ===== */
+  .legend { width:920px; color:#8b93a7; font-size:12px; line-height:1.8; }
+  .legend h3 { color:#cdd6e6; font-size:13px; margin-bottom:8px; border-bottom:1px solid #262c3a; padding-bottom:6px; }
+  .legend .k { display:inline-block; width:12px; height:12px; border-radius:3px; vertical-align:-2px; margin-right:7px; }
+  .legend .g{ background:#2fd4a7; } .legend .o{ background:#ffb84d; } .legend .r{ background:#ff5f57; }
+  .legend ul { list-style:none; display:grid; grid-template-columns:1fr 1fr; gap:6px 24px; padding:0; }
+  .legend li{ margin:0; }
+  .legend .code { font-family:Consolas,monospace; color:#8fb8ff; background:#161b26; padding:0 5px; border-radius:3px; }
+</style>
+</head>
+<body>
+
+<div class="win">
+  <!-- 标题栏 -->
+  <div class="titlebar">
+    <span class="tbar-dot r"></span><span class="tbar-dot y"></span><span class="tbar-dot g"></span>
+    <div class="tt">Pythonwdhmm 鲲鹏量化交易系统<small>· 数据下载管理器 v2</small></div>
+    <span class="src">quant · E:\Projects\Pythonwdhmm\datasets</span>
+  </div>
+
+  <div class="body">
+    <!-- 信息区 -->
+    <div class="cards">
+      <div class="card">
+        <div class="card-tt">数据源状态</div>
+        <div class="row"><span class="nm">通达信本地</span><span class="ok">✔</span><span class="val">D:\TDX</span></div>
+        <div class="row"><span class="nm">网页抓取</span><span class="ok">✔</span><span class="val">东财 → 新浪 → 腾讯</span><span class="sub">3s超时降级</span></div>
+        <div class="row"><span class="nm">券商实时</span><span class="off">○ 未配置</span><span class="sub">（实盘时接入XTP/QMT）</span></div>
+      </div>
+      <div class="card">
+        <div class="card-tt">数据概览</div>
+        <div class="row"><span class="nm">已下载(Parquet)</span><span class="val">3581 只</span></div>
+        <div class="row"><span class="nm">原始CSV</span><span class="val">0 只</span></div>
+        <div class="row"><span class="nm">数据库 quant.db</span><span class="val">5284776.0 KB</span></div>
+      </div>
+    </div>
+
+    <!-- 功能勾选区 -->
+    <div class="sec"><span class="bar"></span><span class="t">功能勾选（可多选，按顺序执行）</span></div>
+    <div class="check-grid">
+      <div class="check-item on"><div class="cbx">✓</div><div><div class="txt">全量下载日线数据</div><div class="hint">约5000只 · 30-60分钟</div></div></div>
+      <div class="check-item"><div class="cbx"></div><div><div class="txt">增量更新日线</div><div class="hint">盘后每日 · 1-5分钟</div></div></div>
+      <div class="check-item"><div class="cbx"></div><div><div class="txt">下载财务数据</div><div class="hint">PE/PB/业绩报表</div></div></div>
+      <div class="check-item"><div class="cbx"></div><div><div class="txt">全部更新</div><div class="hint">日线增量 + 财务</div></div></div>
+      <div class="check-item"><div class="cbx"></div><div><div class="txt">数据质量校验</div><div class="hint">完整性/异常检测</div></div></div>
+      <div class="check-item"><div class="cbx"></div><div><div class="txt">查看同步状态报告</div><div class="hint">仅展示，不下载</div></div></div>
+      <div class="check-item new on"><div class="cbx">✓</div><div><div class="txt">通达信单独下载 <span class="tag new">新增</span></div><div class="hint">强制仅用D:\TDX本地源 · 全量 · 零联网</div></div></div>
+      <div class="check-item new"><div class="cbx"></div><div><div class="txt">网页抓取全量 <span class="tag new">新增</span></div><div class="hint">akshare网页源 · 东财→新浪→腾讯降级</div></div></div>
+    </div>
+
+    <!-- 十行滚动进度区 -->
+    <div class="sec"><span class="bar"></span><span class="t">下载进度（实时滚动，仅显示最近10条）</span><span class="tag">live</span></div>
+    <div class="progress-box">
+      <div class="pbox-head">
+        <span class="live"></span>
+        <span class="t">[任务] 网页抓取全量</span>
+        <span class="cnt">源: 东财 · 已降级0次</span>
+      </div>
+      <div class="pline"><span class="no">[  30/530]</span><span class="code">600067.SH</span><span class="st v">✓</span><span class="n">(  128条)</span></div>
+      <div class="pline"><span class="no">[  80/530]</span><span class="code">600133.SH</span><span class="st v">✓</span><span class="n">(  200条)</span></div>
+      <div class="pline"><span class="no">[ 130/530]</span><span class="code">600198.SH</span><span class="st x">×</span><span class="n">(    0条)</span></div>
+      <div class="pline"><span class="no">[ 180/530]</span><span class="code">600267.SH</span><span class="st v">✓</span><span class="n">(  386条)</span></div>
+      <div class="pline"><span class="no">[ 230/530]</span><span class="code">600335.SH</span><span class="st s">⏭</span><span class="n">(    0条)</span></div>
+      <div class="pline"><span class="no">[ 280/530]</span><span class="code">600398.SH</span><span class="st v">✓</span><span class="n">(  412条)</span></div>
+      <div class="pline"><span class="no">[ 330/530]</span><span class="code">600483.SH</span><span class="st v">✓</span><span class="n">(   96条)</span></div>
+      <div class="pline"><span class="no">[ 380/530]</span><span class="code">600545.SH</span><span class="st x">×</span><span class="n">(    0条)</span></div>
+      <div class="pline"><span class="no">[ 430/530]</span><span class="code">600602.SH</span><span class="st v">✓</span><span class="n">(  277条)</span></div>
+      <div class="pline" style="background:#0e1420"><span class="no">[ 480/530]</span><span class="code">600664.SH</span><span class="st v">✓</span><span class="n">(  198条)</span></div>
+      <div class="pbox-foot">已完成 480/530 · 成功 452 · 失败 12 · 跳过 16 · 本次共写入 parquet 3581 → 新增 142 个</div>
+    </div>
+
+    <!-- 操作区 -->
+    <div class="actions">
+      <button class="btn-start">开始执行</button>
+      <button class="btn-cancel">取消</button>
+      <div class="progress-wrap">
+        <div class="pbar"><div class="fill"></div></div>
+        <span class="pct">46%</span>
+      </div>
+      <span style="color:#8fb8ff;font-size:11.5px;font-family:Consolas,monospace;">防未来函数：下载严格截止当前日期</span>
+    </div>
+  </div>
+</div>
+
+<div class="legend">
+  <h3>设计说明</h3>
+  <ul>
+    <li><span class="k g"></span>常规勾选 —— 原6项功能完整保留</li>
+    <li><span class="k o"></span>橙色标识 —— 本次新增2项专项</li>
+    <li><span class="k r"></span>进度区状态：<span class="code">✓成功 / ×失败(0条) / ⏭跳过</span></li>
+    <li>十行滚动：每次刷新显示最近10条，格式 <span class="code">[序号/总数] 代码 状态(条数)</span></li>
+    <li>网页抓取降级链：<span class="code">东财 → 新浪 → 腾讯</span>，东财3秒无响应自动切换</li>
+    <li>勾选互斥：全量 / 增量 / 全部更新 三者互斥，其余可叠加</li>
+    <li>执行放后台线程，UI不卡顿；底部进度条+取消按钮</li>
+    <li>视觉：深色科技风（#131720 底 + 青色 #2fd4a7 高亮 + 红色主按钮），与图1黑底控制台同气质</li>
+  </ul>
+</div>
+
+</body>
+</html>

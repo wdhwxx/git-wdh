@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>鲲鹏量化交易系统 — 量化模型结构图</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #020617;
+    color: #e2e8f0;
+    font-family: 'JetBrains Mono', 'Cascadia Mono', 'Microsoft YaHei', monospace;
+    padding: 32px 24px 48px;
+    min-height: 100vh;
+  }
+  .wrap { max-width: 1720px; margin: 0 auto; }
+
+  /* ── Header ─────────────────────────────── */
+  .header { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 8px; }
+  .pulse {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #22d3ee; margin-top: 9px; flex: 0 0 auto;
+    box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.7);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.6); }
+    70%  { box-shadow: 0 0 0 12px rgba(34, 211, 238, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(34, 211, 238, 0); }
+  }
+  h1 { font-size: 21px; font-weight: 700; color: #f8fafc; letter-spacing: 0.3px; }
+  .subtitle { font-size: 12px; color: #64748b; margin-top: 5px; letter-spacing: 0.2px; }
+  .subtitle b { color: #94a3b8; font-weight: 500; }
+
+  /* ── Diagram card ───────────────────────── */
+  .card {
+    margin-top: 22px;
+    border: 1px solid #1e293b;
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(15,23,42,0.55) 0%, rgba(2,6,23,0.55) 100%);
+    padding: 10px;
+    overflow-x: auto;
+  }
+  svg { display: block; min-width: 1680px; width: 100%; height: auto; }
+
+  /* ── Summary cards ──────────────────────── */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 14px; margin-top: 22px;
+  }
+  .sum {
+    border: 1px solid #1e293b; border-radius: 10px;
+    background: rgba(15, 23, 42, 0.6);
+    padding: 16px 18px;
+    transition: border-color .25s, box-shadow .25s;
+  }
+  .sum:hover { border-color: #334155; box-shadow: 0 0 22px rgba(34,211,238,0.09); }
+  .sum .k { font-size: 10px; color: #64748b; letter-spacing: 1.2px; text-transform: uppercase; }
+  .sum .v { font-size: 15px; color: #f1f5f9; font-weight: 600; margin: 8px 0 10px; }
+  .sum ul { list-style: none; }
+  .sum li { font-size: 11px; color: #94a3b8; line-height: 1.85; padding-left: 11px; position: relative; }
+  .sum li::before { content: '·'; position: absolute; left: 0; color: #475569; }
+  .sum li.warn { color: #fda4af; }
+  .sum li.warn::before { content: '⚠'; color: #fb7185; font-size: 9px; left: -2px; }
+  .sum li.ok { color: #6ee7b7; }
+  .sum li.ok::before { content: '✓'; color: #34d399; font-size: 9px; left: -1px; }
+
+  .footer {
+    margin-top: 26px; padding-top: 16px; border-top: 1px solid #0f172a;
+    font-size: 10.5px; color: #475569; letter-spacing: 0.3px;
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="header">
+    <div class="pulse"></div>
+    <div>
+      <h1>鲲鹏量化交易系统 — 量化模型结构图</h1>
+      <div class="subtitle">
+        RSRS(18/60) 择时 &nbsp;+&nbsp; 三因子交集选股 &nbsp;+&nbsp; 目标止盈 20% &nbsp;·&nbsp;
+        沪深A股日线级 &nbsp;·&nbsp; <b>本图依据源码实测绘制，标注 ✅ 已实现 / ❌ 占位未实现 / ⚠ 文档与代码口径冲突</b>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+<svg viewBox="0 0 1680 1600" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+    </pattern>
+    <marker id="ah" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#64748b"/>
+    </marker>
+    <marker id="ahRose" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#fb7185"/>
+    </marker>
+    <marker id="ahAmber" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#fbbf24"/>
+    </marker>
+  </defs>
+
+  <rect width="1680" height="1600" fill="url(#grid)"/>
+
+  <!-- ══════ ARROWS (drawn first, behind boxes) ══════ -->
+  <g stroke="#64748b" stroke-width="1.6" fill="none">
+    <!-- main vertical flow -->
+    <path d="M 570,188 L 570,224" marker-end="url(#ah)"/>
+    <path d="M 570,368 L 570,404" marker-end="url(#ah)"/>
+    <path d="M 570,518 L 570,554" marker-end="url(#ah)"/>
+    <path d="M 570,708 L 570,744" marker-end="url(#ah)"/>
+    <path d="M 570,898 L 570,934" marker-end="url(#ah)"/>
+    <path d="M 570,1078 L 570,1114" marker-end="url(#ah)"/>
+    <path d="M 570,1268 L 570,1304" marker-end="url(#ah)"/>
+    <!-- L1 horizontal -->
+    <path d="M 310,128 L 326,128" marker-end="url(#ah)"/>
+    <path d="M 580,128 L 596,128" marker-end="url(#ah)"/>
+    <path d="M 820,128 L 836,128" marker-end="url(#ah)"/>
+    <!-- L5 分配 → 风控 -->
+    <path d="M 500,823 L 526,823" marker-end="url(#ah)"/>
+    <!-- L6 broker → state machine → matcher -->
+    <path d="M 370,1008 L 396,1008" marker-end="url(#ah)"/>
+    <path d="M 730,1008 L 756,1008" marker-end="url(#ah)"/>
+    <!-- L7 metrics → result → advanced -->
+    <path d="M 470,1193 L 496,1193" marker-end="url(#ah)"/>
+    <path d="M 780,1193 L 806,1193" marker-end="url(#ah)"/>
+  </g>
+  <!-- lookahead guard constraints -->
+  <g stroke="#fb7185" stroke-width="1.3" stroke-dasharray="4,4" fill="none" opacity="0.85">
+    <path d="M 1116,298 L 1084,298" marker-end="url(#ahRose)"/>
+    <path d="M 1116,633 L 1084,633" marker-end="url(#ahRose)"/>
+    <path d="M 1116,1008 L 1084,1008" marker-end="url(#ahRose)"/>
+  </g>
+  <!-- data feed into ML branch -->
+  <path d="M 1080,128 C 1180,128 1200,150 1272,150" stroke="#fbbf24" stroke-width="1.4"
+        stroke-dasharray="5,4" fill="none" marker-end="url(#ahAmber)" opacity="0.9"/>
+  <text x="1150" y="120" fill="#fbbf24" font-size="8" text-anchor="middle" opacity="0.9">行情数据供给</text>
+
+  <!-- ══════ BOUNDARIES ══════ -->
+  <rect x="40" y="24" width="1060" height="1424" rx="12"
+        fill="none" stroke="#fbbf24" stroke-width="1.2" stroke-dasharray="8,4" opacity="0.42"/>
+  <text x="60" y="48" fill="#fbbf24" font-size="11" font-weight="600" opacity="0.95">
+    回测主链路 · BacktestEngine（backtest/engine.py:65-741，含 BacktestScheduler 三模式调度）
+  </text>
+
+  <rect x="1256" y="24" width="390" height="990" rx="12"
+        fill="none" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="8,4" opacity="0.4"/>
+  <text x="1276" y="48" fill="#cbd5e1" font-size="11" font-weight="600">
+    ML 独立实验分支（未接入主链路）
+  </text>
+
+  <!-- ══════ LAYER LABELS ══════ -->
+  <g fill="#475569" font-size="9" letter-spacing="0.6">
+    <text x="70" y="212">L2 · 因子与信号层</text>
+    <text x="70" y="392">L3 · 股票池构建</text>
+    <text x="70" y="542">L4 · 策略与信号生成</text>
+    <text x="70" y="732">L5 · 仓位分配 / 风控闸门</text>
+    <text x="70" y="922">L6 · 执行与撮合</text>
+    <text x="70" y="1102">L7 · 绩效与结果</text>
+    <text x="70" y="1292">L8 · 报告与看板输出</text>
+  </g>
+
+  <!-- ══════════ L1 数据接入层 ══════════ -->
+  <!-- A 数据源 -->
+  <rect x="70" y="68" width="240" height="120" rx="6" fill="#0f172a"/>
+  <rect x="70" y="68" width="240" height="120" rx="6" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="190" y="92" fill="#fff" font-size="12" font-weight="600" text-anchor="middle">数据源适配层</text>
+  <text x="190" y="112" fill="#cbd5e1" font-size="8.5" text-anchor="middle">tdx_source · web_source</text>
+  <text x="190" y="126" fill="#cbd5e1" font-size="8.5" text-anchor="middle">broker_source</text>
+  <text x="190" y="146" fill="#94a3b8" font-size="8.5" text-anchor="middle">factory.py 统一装配</text>
+  <text x="190" y="172" fill="#64748b" font-size="8" text-anchor="middle">data_access/sources/</text>
+
+  <!-- B Loader -->
+  <rect x="330" y="68" width="250" height="120" rx="6" fill="#0f172a"/>
+  <rect x="330" y="68" width="250" height="120" rx="6" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="455" y="92" fill="#fff" font-size="12" font-weight="600" text-anchor="middle">OptimizedDataLoader</text>
+  <text x="455" y="112" fill="#cbd5e1" font-size="8.5" text-anchor="middle">预取 Prefetch · 分块 Chunking</text>
+  <text x="455" y="126" fill="#cbd5e1" font-size="8.5" text-anchor="middle">流水线 Pipeline</text>
+  <text x="455" y="146" fill="#94a3b8" font-size="8.5" text-anchor="middle">MemoryWatcher 内存水位监控</text>
+  <text x="455" y="172" fill="#64748b" font-size="8" text-anchor="middle">data_access/loader.py:7-20</text>
+
+  <!-- C 清洗 -->
+  <rect x="600" y="68" width="220" height="120" rx="6" fill="#0f172a"/>
+  <rect x="600" y="68" width="220" height="120" rx="6" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="710" y="92" fill="#fff" font-size="12" font-weight="600" text-anchor="middle">清洗 Pipeline</text>
+  <text x="710" y="112" fill="#cbd5e1" font-size="8.5" text-anchor="middle">validate → deduplicate</text>
+  <text x="710" y="126" fill="#cbd5e1" font-size="8.5" text-anchor="middle">→ detect_anomalies → sort</text>
+  <text x="710" y="146" fill="#94a3b8" font-size="8.5" text-anchor="middle">→ save_bad → save_report</text>
+  <text x="710" y="172" fill="#64748b" font-size="8" text-anchor="middle">cleaner/pipeline.py:15</text>
+
+  <!-- D 存储 -->
+  <rect x="840" y="68" width="240" height="120" rx="6" fill="#0f172a"/>
+  <rect x="840" y="68" width="240" height="120" rx="6" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="960" y="92" fill="#fff" font-size="12" font-weight="600" text-anchor="middle">SQLite 存储（8 表）</text>
+  <text x="960" y="112" fill="#cbd5e1" font-size="8.5" text-anchor="middle">market_data · factor_data</text>
+  <text x="960" y="126" fill="#cbd5e1" font-size="8.5" text-anchor="middle">clean_run_meta · dirty_data_stats</text>
+  <text x="960" y="146" fill="#94a3b8" font-size="8.5" text-anchor="middle">strategy_state · sync_status</text>
+  <text x="960" y="172" fill="#64748b" font-size="8" text-anchor="middle">database/schema.py:31-247</text>
+
+  <!-- ══════════ L2 因子与信号层 ══════════ -->
+  <!-- A RSRS -->
+  <rect x="70" y="228" width="400" height="140" rx="6" fill="#0f172a"/>
+  <rect x="70" y="228" width="400" height="140" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="270" y="252" fill="#fff" font-size="12.5" font-weight="600" text-anchor="middle">RSRS 阻力支撑相对强度</text>
+  <text x="270" y="273" fill="#d1fae5" font-size="9" text-anchor="middle">OLS 闭式回归：high = α + β · low</text>
+  <text x="270" y="289" fill="#d1fae5" font-size="9" text-anchor="middle">period N = 18（不含当日 iloc[i−18:i]）</text>
+  <text x="270" y="305" fill="#d1fae5" font-size="9" text-anchor="middle">z-score 标准化 (β − μ)/σ，norm_window = 60</text>
+  <text x="270" y="321" fill="#d1fae5" font-size="9" text-anchor="middle">β 序列整体 shift(1) → 严格防未来</text>
+  <text x="270" y="341" fill="#fbbf24" font-size="8.5" text-anchor="middle">输出 rsrs · rsrs_raw · rsrs_r2 · signal(1 / −1 / 0)</text>
+  <text x="270" y="359" fill="#64748b" font-size="8" text-anchor="middle">indicators/rsrs.py:76-82, 149-154, 267-301</text>
+
+  <!-- B 三因子 -->
+  <rect x="500" y="228" width="300" height="140" rx="6" fill="#0f172a"/>
+  <rect x="500" y="228" width="300" height="140" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="650" y="252" fill="#fff" font-size="12.5" font-weight="600" text-anchor="middle">三因子计算</text>
+  <text x="650" y="273" fill="#d1fae5" font-size="9" text-anchor="middle">波动率 = 20日 pct_change().std()</text>
+  <text x="650" y="289" fill="#d1fae5" font-size="9" text-anchor="middle">价格 = 最新收盘价 close</text>
+  <text x="650" y="305" fill="#d1fae5" font-size="9" text-anchor="middle">动量 = close[−1]/close[−61] − 1</text>
+  <text x="650" y="325" fill="#94a3b8" font-size="8.5" text-anchor="middle">长度不足或因子 NaN → 自动剔除</text>
+  <text x="650" y="359" fill="#64748b" font-size="8" text-anchor="middle">strategies/base.py:581-616</text>
+
+  <!-- C 指标引擎 -->
+  <rect x="830" y="228" width="250" height="140" rx="6" fill="#0f172a"/>
+  <rect x="830" y="228" width="250" height="140" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="955" y="252" fill="#fff" font-size="12.5" font-weight="600" text-anchor="middle">指标与因子引擎</text>
+  <text x="955" y="273" fill="#d1fae5" font-size="9" text-anchor="middle">factor_engine · factor_cache</text>
+  <text x="955" y="289" fill="#d1fae5" font-size="9" text-anchor="middle">moving_average / volatility</text>
+  <text x="955" y="305" fill="#d1fae5" font-size="9" text-anchor="middle">momentum</text>
+  <text x="955" y="325" fill="#fbbf24" font-size="8.5" text-anchor="middle">FeatureEngine.lookahead_guard()</text>
+  <text x="955" y="339" fill="#94a3b8" font-size="8" text-anchor="middle">截断重算一致性校验</text>
+  <text x="955" y="359" fill="#64748b" font-size="8" text-anchor="middle">indicators/ · ml/features.py:538-582</text>
+
+  <!-- ══════════ L3 股票池 ══════════ -->
+  <rect x="70" y="408" width="1010" height="110" rx="6" fill="#0f172a"/>
+  <rect x="70" y="408" width="1010" height="110" rx="6" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="575" y="432" fill="#fff" font-size="12.5" font-weight="600" text-anchor="middle">StockPoolBuilder — 三因子交集股票池</text>
+  <text x="575" y="455" fill="#cffafe" font-size="9" text-anchor="middle">
+    ① filter_by_code 剔除 688/300/301/4/8/43/83/87/88/89/92 前缀　② calculate_factors　③ select_by_intersection
+  </text>
+  <text x="575" y="475" fill="#22d3ee" font-size="9.5" font-weight="500" text-anchor="middle">
+    nsmallest(1/3, volatility)　∩　nlargest(1/3, price)　∩　nlargest(1/3, momentum)　　　top_ratio = 1/3
+  </text>
+  <text x="575" y="494" fill="#fda4af" font-size="8.5" text-anchor="middle">
+    ⚠ 代码实际取「低波动」(base.py:625 nsmallest)，而 README:7 与 strategy_specs.md:65 表述为「高波动」— 口径冲突，待决策
+  </text>
+  <text x="575" y="511" fill="#64748b" font-size="8" text-anchor="middle">strategies/base.py:542-642（build → filter_by_code → calculate_factors → select_by_intersection）</text>
+
+  <!-- ══════════ L4 策略层 ══════════ -->
+  <!-- A RSRSStrategy -->
+  <rect x="70" y="558" width="430" height="150" rx="6" fill="#0f172a"/>
+  <rect x="70" y="558" width="430" height="150" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="285" y="582" fill="#fff" font-size="12.5" font-weight="600" text-anchor="middle">RSRSStrategy（核心策略）</text>
+  <text x="285" y="603" fill="#d1fae5" font-size="9" text-anchor="middle">买入　rsrs &gt; buy_threshold = 0.7</text>
+  <text x="285" y="619" fill="#d1fae5" font-size="9" text-anchor="middle">卖出　rsrs &lt; sell_threshold = −0.7</text>
+  <text x="285" y="635" fill="#d1fae5" font-size="9" text-anchor="middle">止盈　take_profit_pct = 0.20（+20%）</text>
+  <text x="285" y="651" fill="#d1fae5" font-size="9" text-anchor="middle">max_position_pct = 0.20 · max_positions = 5 · pool_rebalance_days</text>
+  <text x="285" y="672" fill="#fda4af" font-size="8.5" text-anchor="middle">⚠ 未实现 stop_loss（strategy_specs.md:44 标 0.15，代码无此参数）</text>
+  <text x="285" y="688" fill="#94a3b8" font-size="8" text-anchor="middle">signal.strength = min(1, |rsrs − threshold|) 信号强度分级</text>
+  <text x="285" y="701" fill="#64748b" font-size="8" text-anchor="middle">strategies/ma_strategy.py:50-502</text>
+
+  <!-- B 注册器 -->
+  <rect x="530" y="558" width="270" height="150" rx="6" fill="#0f172a"/>
+  <rect x="530" y="558" width="270" height="150" rx="6" fill="rgba(30,41,59,0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="665" y="582" fill="#fff" font-size="12.5" font-weight="600" text-anchor="middle">策略注册器</text>
+  <text x="665" y="603" fill="#e2e8f0" font-size="9" text-anchor="middle">@register_strategy 装饰器</text>
+  <text x="665" y="619" fill="#e2e8f0" font-size="9" text-anchor="middle">create_strategy(name, **params)</text>
+  <text x="665" y="635" fill="#e2e8f0" font-size="9" text-anchor="middle">discover_strategies(package)</text>
+  <text x="665" y="651" fill="#e2e8f0" font-size="9" text-anchor="middle">entry_points 外部插件加载</text>
+  <text x="665" y="673" fill="#94a3b8" font-size="8.5" text-anchor="middle">已注册策略：</text>
+  <text x="665" y="688" fill="#94a3b8" font-size="8" text-anchor="middle">MACross · RSRS · Grid · Momentum</text>
+  <text x="665" y="701" fill="#94a3b8" font-size="8" text-anchor="middle">MeanReversion · MultiFactor</text>
+
+  <!-- C 三引擎接口 -->
+  <rect x="830" y="558" width="250" height="150" rx="6" fill="#0f172a"/>
+  <rect x="830" y="558" width="250" height="150" rx="6" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="955" y="582" fill="#fff" font-size="12.5" font-weight="600" text-anchor="middle">三种引擎接口</text>
+  <text x="955" y="603" fill="#cffafe" font-size="9" text-anchor="middle">generate_signal</text>
+  <text x="955" y="617" fill="#94a3b8" font-size="8" text-anchor="middle">→ event_driven（engine.py）</text>
+  <text x="955" y="635" fill="#cffafe" font-size="9" text-anchor="middle">generate_signals_vectorized</text>
+  <text x="955" y="649" fill="#94a3b8" font-size="8" text-anchor="middle">→ vectorized_engine.py</text>
+  <text x="955" y="667" fill="#cffafe" font-size="9" text-anchor="middle">generate_mixed_loop</text>
+  <text x="955" y="681" fill="#94a3b8" font-size="8" text-anchor="middle">→ mixed_engine.py</text>
+  <text x="955" y="701" fill="#64748b" font-size="8" text-anchor="middle">BacktestScheduler.resolve_mode</text>
+
+  <!-- ══════════ L5 分配 + 风控 ══════════ -->
+  <!-- A 分配 -->
+  <rect x="70" y="748" width="430" height="150" rx="6" fill="#0f172a"/>
+  <rect x="70" y="748" width="430" height="150" rx="6" fill="rgba(251,146,60,0.3)" stroke="#fb923c" stroke-width="1.5"/>
+  <text x="285" y="772" fill="#fff" font-size="12.5" font-weight="600" text-anchor="middle">仓位分配 Allocation</text>
+  <text x="285" y="793" fill="#ffedd5" font-size="9" text-anchor="middle">EqualWeightAllocator ✅　wᵢ = 1/N</text>
+  <text x="285" y="809" fill="#ffedd5" font-size="9" text-anchor="middle">RiskParityAllocator ✅　inverse_volatility 模式</text>
+  <text x="285" y="823" fill="#94a3b8" font-size="8" text-anchor="middle">或 risk_parity 迭代　max_iter=1000 · tol=1e−8 · lr=0.01</text>
+  <text x="285" y="841" fill="#fda4af" font-size="9" text-anchor="middle">TargetVolatilityAllocator ❌ TODO → allocate() 回退等权</text>
+  <text x="285" y="861" fill="#ffedd5" font-size="8.5" text-anchor="middle">入　assets · total_capital · risk_data · constraints</text>
+  <text x="285" y="875" fill="#ffedd5" font-size="8.5" text-anchor="middle">出　AllocationResult(weights, amounts, metadata)</text>
+  <text x="285" y="891" fill="#64748b" font-size="8" text-anchor="middle">allocation/{base, equal_weight, risk_parity, target_volatility}.py</text>
+
+  <!-- B 风控 -->
+  <rect x="530" y="748" width="550" height="150" rx="6" fill="#0f172a"/>
+  <rect x="530" y="748" width="550" height="150" rx="6" fill="rgba(136,19,55,0.4)" stroke="#fb7185" stroke-width="1.5"/>
+  <text x="805" y="772" fill="#fff" font-size="12.5" font-weight="600" text-anchor="middle">风控闸门 Risk — 10 条规则（rules.py:469-480）</text>
+  <text x="805" y="793" fill="#ffe4e6" font-size="9" text-anchor="middle">RiskManager.check_order（下单前拦截）　·　check_positions（每根 bar 后）</text>
+  <text x="805" y="811" fill="#ffe4e6" font-size="8.5" text-anchor="middle">position_limit 30%/5只 · single_order_limit 20万 · max_drawdown 20%</text>
+  <text x="805" y="826" fill="#ffe4e6" font-size="8.5" text-anchor="middle">stop_loss 10%（禁加仓）· take_profit 50%（禁加仓）· rate_limit 100单/日</text>
+  <text x="805" y="841" fill="#ffe4e6" font-size="8.5" text-anchor="middle">price_limit ±10% 涨停不买/跌停不卖 · trading_hours · blacklist · cash_availability</text>
+  <text x="805" y="860" fill="#fecdd3" font-size="8.5" text-anchor="middle">RiskGuardian（盘中/盘后）check_health → evaluate → 告警 / 暂停 / 强制平仓</text>
+  <text x="805" y="877" fill="#fda4af" font-size="8" text-anchor="middle">⚠ v1 强制平仓只记录不执行；风控层不自动平仓（risk_manager.py:19）</text>
+  <text x="805" y="891" fill="#64748b" font-size="8" text-anchor="middle">risk/rules.py:469-603 · risk_manager.py:368-639 · guardian.py:179-514</text>
+
+  <!-- ══════════ L6 执行与撮合 ══════════ -->
+  <rect x="70" y="938" width="300" height="140" rx="6" fill="#0f172a"/>
+  <rect x="70" y="938" width="300" height="140" rx="6" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="220" y="962" fill="#fff" font-size="12.5" font-weight="600" text-anchor="middle">SimBroker</text>
+  <text x="220" y="983" fill="#cffafe" font-size="9" text-anchor="middle">订单簿 / 持仓 / 资金管理</text>
+  <text x="220" y="999" fill="#cffafe" font-size="9" text-anchor="middle">on_bar(bar) 触发撮合</text>
+  <text x="220" y="1015" fill="#cffafe" font-size="9" text-anchor="middle">内置费用计算</text>
+  <text x="220" y="1035" fill="#94a3b8" font-size="8.5" text-anchor="middle">实现 ExecutionInterface</text>
+  <text x="220" y="1069" fill="#64748b" font-size="8" text-anchor="middle">execution/sim_broker.py:42-63</text>
+
+  <rect x="400" y="938" width="330" height="140" rx="6" fill="#0f172a"/>
+  <rect x="400" y="938" width="330" height="140" rx="6" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="565" y="962" fill="#fff" font-size="12.5" font-weight="600" text-anchor="middle">OrderStateMachine</text>
+  <text x="565" y="983" fill="#cffafe" font-size="9" text-anchor="middle">PENDING → SUBMITTED → PARTIAL_FILLED → FILLED</text>
+  <text x="565" y="999" fill="#cffafe" font-size="9" text-anchor="middle">终态 FILLED / CANCELLED / REJECTED / EXPIRED</text>
+  <text x="565" y="1015" fill="#cffafe" font-size="9" text-anchor="middle">非法转移抛 ExecutionError</text>
+  <text x="565" y="1035" fill="#94a3b8" font-size="8.5" text-anchor="middle">submit · fill · cancel · reject · expire</text>
+  <text x="565" y="1069" fill="#64748b" font-size="8" text-anchor="middle">execution/state_machine.py:41-233</text>
+
+  <rect x="760" y="938" width="320" height="140" rx="6" fill="#0f172a"/>
+  <rect x="760" y="938" width="320" height="140" rx="6" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="920" y="962" fill="#fff" font-size="12.5" font-weight="600" text-anchor="middle">OrderMatcher + 费用模型</text>
+  <text x="920" y="983" fill="#cffafe" font-size="9" text-anchor="middle">T日收盘信号 → T+1 开盘价成交</text>
+  <text x="920" y="999" fill="#cffafe" font-size="9" text-anchor="middle">MARKET / LIMIT / STOP / STOP_LIMIT</text>
+  <text x="920" y="1015" fill="#cffafe" font-size="8.5" text-anchor="middle">佣金万2(min 5元) · 印花税千1(仅卖出)</text>
+  <text x="920" y="1030" fill="#cffafe" font-size="8.5" text-anchor="middle">过户费万0.1 · 滑点 2bps fixed_bps</text>
+  <text x="920" y="1049" fill="#fda4af" font-size="8" text-anchor="middle">⚠ matcher 不校验涨跌停/停牌（依赖 PriceLimitRule 前置拦截）</text>
+  <text x="920" y="1069" fill="#64748b" font-size="8" text-anchor="middle">backtest/order_matcher.py:334-397 · fee_common.py:20-24</text>
+
+  <!-- ══════════ L7 绩效与结果 ══════════ -->
+  <rect x="70" y="1118" width="400" height="150" rx="6" fill="#0f172a"/>
+  <rect x="70" y="1118" width="400" height="150" rx="6" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="270" y="1142" fill="#fff" font-size="12" font-weight="600" text-anchor="middle">MetricsCalculator → PerformanceMetrics</text>
+  <text x="270" y="1163" fill="#ede9fe" font-size="8.5" text-anchor="middle">收益　total / annualized / benchmark / excess_return</text>
+  <text x="270" y="1179" fill="#ede9fe" font-size="8.5" text-anchor="middle">风险　annualized_vol / downside_vol / max_drawdown (+duration)</text>
+  <text x="270" y="1195" fill="#ede9fe" font-size="8.5" text-anchor="middle">调整　sharpe / sortino / calmar / information_ratio</text>
+  <text x="270" y="1211" fill="#ede9fe" font-size="8.5" text-anchor="middle">交易　win_rate / profit_loss_ratio / avg_win / 连胜连亏</text>
+  <text x="270" y="1227" fill="#ede9fe" font-size="8.5" text-anchor="middle">基准　alpha / beta / tracking_error　·　成本 turnover</text>
+  <text x="270" y="1243" fill="#ede9fe" font-size="8.5" text-anchor="middle">分布　VaR95 / CVaR95 / skewness / kurtosis</text>
+  <text x="270" y="1261" fill="#fda4af" font-size="8" text-anchor="middle">⚠ 无月度分解、无滚动序列；incremental_update() 为占位</text>
+
+  <rect x="500" y="1118" width="280" height="150" rx="6" fill="#0f172a"/>
+  <rect x="500" y="1118" width="280" height="150" rx="6" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="640" y="1142" fill="#fff" font-size="12" font-weight="600" text-anchor="middle">BacktestResult（看板数据契约）</text>
+  <text x="640" y="1163" fill="#a78bfa" font-size="9" text-anchor="middle">equity_curve : EquityPoint[]</text>
+  <text x="640" y="1178" fill="#94a3b8" font-size="8" text-anchor="middle">date · equity · cash · position_value</text>
+  <text x="640" y="1191" fill="#94a3b8" font-size="8" text-anchor="middle">drawdown · benchmark_equity</text>
+  <text x="640" y="1210" fill="#a78bfa" font-size="9" text-anchor="middle">trades : TradeRecord[]</text>
+  <text x="640" y="1225" fill="#94a3b8" font-size="8" text-anchor="middle">pnl · pnl_pct · holding_days</text>
+  <text x="640" y="1238" fill="#94a3b8" font-size="8" text-anchor="middle">entry_reason · exit_reason · signal_source</text>
+  <text x="640" y="1258" fill="#ede9fe" font-size="8.5" text-anchor="middle">metrics · config · final_equity</text>
+
+  <rect x="810" y="1118" width="270" height="150" rx="6" fill="#0f172a"/>
+  <rect x="810" y="1118" width="270" height="150" rx="6" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="945" y="1142" fill="#fff" font-size="12" font-weight="600" text-anchor="middle">进阶分析模块</text>
+  <text x="945" y="1163" fill="#ede9fe" font-size="8.5" text-anchor="middle">MonteCarloAnalyzer 蒙特卡洛</text>
+  <text x="945" y="1179" fill="#ede9fe" font-size="8.5" text-anchor="middle">ParamOptimizer（Grid / Trial）</text>
+  <text x="945" y="1195" fill="#ede9fe" font-size="8.5" text-anchor="middle">BatchBacktester + 内存降级策略</text>
+  <text x="945" y="1211" fill="#ede9fe" font-size="8.5" text-anchor="middle">ConsistencyChecker 三引擎一致性</text>
+  <text x="945" y="1227" fill="#ede9fe" font-size="8.5" text-anchor="middle">IncrementalBacktest 增量回测</text>
+  <text x="945" y="1247" fill="#fbbf24" font-size="8.5" text-anchor="middle">均提供 to_dict() / summary()</text>
+  <text x="945" y="1261" fill="#fbbf24" font-size="8.5" text-anchor="middle">可直接喂看板，无需改动内核</text>
+
+  <!-- ══════════ L8 输出 ══════════ -->
+  <rect x="70" y="1308" width="330" height="120" rx="6" fill="#0f172a"/>
+  <rect x="70" y="1308" width="330" height="120" rx="6" fill="rgba(30,41,59,0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="235" y="1332" fill="#fff" font-size="12" font-weight="600" text-anchor="middle">ReportGenerator</text>
+  <text x="235" y="1352" fill="#e2e8f0" font-size="8.5" text-anchor="middle">generate_html（Chart.js · 浅色主题）</text>
+  <text x="235" y="1367" fill="#e2e8f0" font-size="8.5" text-anchor="middle">generate_trades_csv / equity_csv</text>
+  <text x="235" y="1382" fill="#e2e8f0" font-size="8.5" text-anchor="middle">downsample_equity_curve 渲染层降采样</text>
+  <text x="235" y="1397" fill="#94a3b8" font-size="8.5" text-anchor="middle">可选叠加蒙特卡洛区块</text>
+  <text x="235" y="1418" fill="#64748b" font-size="8" text-anchor="middle">backtest/report.py:48-601</text>
+
+  <rect x="430" y="1308" width="300" height="120" rx="6" fill="#0f172a"/>
+  <rect x="430" y="1308" width="300" height="120" rx="6" fill="rgba(30,41,59,0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="580" y="1332" fill="#fff" font-size="12" font-weight="600" text-anchor="middle">Streamlit Dashboard</text>
+  <text x="580" y="1352" fill="#e2e8f0" font-size="8.5" text-anchor="middle">8 页导航，仅「数据质量」页完整实现</text>
+  <text x="580" y="1367" fill="#fda4af" font-size="8.5" text-anchor="middle">回测 / 策略 / 实盘 / 风控页 v1 占位</text>
+  <text x="580" y="1382" fill="#e2e8f0" font-size="8.5" text-anchor="middle">TODO：K线 · 净值回撤 · 深色主题 · 下单</text>
+  <text x="580" y="1397" fill="#94a3b8" font-size="8.5" text-anchor="middle">侧边栏 radio 导航 · st.set_page_config</text>
+  <text x="580" y="1418" fill="#64748b" font-size="8" text-anchor="middle">web/dashboard.py:33-42, 217, 362</text>
+
+  <rect x="760" y="1308" width="320" height="120" rx="6" fill="#0f172a"/>
+  <rect x="760" y="1308" width="320" height="120" rx="6" fill="rgba(30,41,59,0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="920" y="1332" fill="#fff" font-size="12" font-weight="600" text-anchor="middle">tkinter GUI</text>
+  <text x="920" y="1352" fill="#e2e8f0" font-size="8.5" text-anchor="middle">main_window + kline_item + side_panel</text>
+  <text x="920" y="1367" fill="#e2e8f0" font-size="8.5" text-anchor="middle">backtest_config_dialog 参数表单</text>
+  <text x="920" y="1382" fill="#fda4af" font-size="8.5" text-anchor="middle">⚠ 与 Web 看板功能重叠，无分工设计</text>
+  <text x="920" y="1397" fill="#94a3b8" font-size="8.5" text-anchor="middle">TODO：迁移 PySide6 / PyQt5</text>
+  <text x="920" y="1418" fill="#64748b" font-size="8" text-anchor="middle">gui/main_window.py:8-45</text>
+
+  <!-- ══════════ LOOKAHEAD GUARD STRIP ══════════ -->
+  <rect x="1116" y="228" width="120" height="850" rx="6" fill="#0f172a"/>
+  <rect x="1116" y="228" width="120" height="850" rx="6" fill="rgba(136,19,55,0.28)"
+        stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,4"/>
+  <text x="1176" y="262" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">Lookahead</text>
+  <text x="1176" y="278" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">Guard</text>
+  <text x="1176" y="302" fill="#fbbf24" font-size="9" font-weight="600" text-anchor="middle">四条铁律</text>
+
+  <text x="1176" y="330" fill="#ffe4e6" font-size="8" text-anchor="middle">① indicator</text>
+  <text x="1176" y="344" fill="#ffe4e6" font-size="8" text-anchor="middle">data_end &lt;</text>
+  <text x="1176" y="358" fill="#ffe4e6" font-size="8" text-anchor="middle">calc_date</text>
+
+  <text x="1176" y="384" fill="#ffe4e6" font-size="8" text-anchor="middle">② 止损先</text>
+  <text x="1176" y="398" fill="#ffe4e6" font-size="8" text-anchor="middle">CHECK 后</text>
+  <text x="1176" y="412" fill="#ffe4e6" font-size="8" text-anchor="middle">UPDATE</text>
+
+  <text x="1176" y="438" fill="#ffe4e6" font-size="8" text-anchor="middle">③ trade_date</text>
+  <text x="1176" y="452" fill="#ffe4e6" font-size="8" text-anchor="middle">&gt; signal_date</text>
+  <text x="1176" y="466" fill="#94a3b8" font-size="8" text-anchor="middle">(T+1 成交)</text>
+
+  <text x="1176" y="492" fill="#ffe4e6" font-size="8" text-anchor="middle">④ signal</text>
+  <text x="1176" y="506" fill="#ffe4e6" font-size="8" text-anchor="middle">data_end ≤</text>
+  <text x="1176" y="520" fill="#ffe4e6" font-size="8" text-anchor="middle">signal_date</text>
+
+  <line x1="1132" y1="546" x2="1220" y2="546" stroke="#fb7185" stroke-width="0.8" opacity="0.45"/>
+
+  <text x="1176" y="572" fill="#fbbf24" font-size="8.5" font-weight="600" text-anchor="middle">记录 5 类操作</text>
+  <text x="1176" y="590" fill="#ffe4e6" font-size="8" text-anchor="middle">indicator</text>
+  <text x="1176" y="604" fill="#ffe4e6" font-size="8" text-anchor="middle">signal</text>
+  <text x="1176" y="618" fill="#ffe4e6" font-size="8" text-anchor="middle">trade</text>
+  <text x="1176" y="632" fill="#ffe4e6" font-size="8" text-anchor="middle">stop_loss</text>
+  <text x="1176" y="646" fill="#ffe4e6" font-size="8" text-anchor="middle">data_access</text>
+
+  <line x1="1132" y1="668" x2="1220" y2="668" stroke="#fb7185" stroke-width="0.8" opacity="0.45"/>
+
+  <text x="1176" y="694" fill="#ffe4e6" font-size="8.5" text-anchor="middle">STRICT = true</text>
+  <text x="1176" y="710" fill="#ffe4e6" font-size="8" text-anchor="middle">违规立即抛</text>
+  <text x="1176" y="724" fill="#fb7185" font-size="8" font-weight="600" text-anchor="middle">LookaheadError</text>
+
+  <text x="1176" y="756" fill="#ffe4e6" font-size="8.5" text-anchor="middle">回测结束必须</text>
+  <text x="1176" y="772" fill="#fb7185" font-size="8.5" font-weight="600" text-anchor="middle">assert_pass()</text>
+  <text x="1176" y="788" fill="#94a3b8" font-size="8" text-anchor="middle">有 violation 即终止</text>
+
+  <text x="1176" y="820" fill="#ffe4e6" font-size="8.5" text-anchor="middle">全局单例</text>
+  <text x="1176" y="836" fill="#94a3b8" font-size="8" text-anchor="middle">get_lookahead_</text>
+  <text x="1176" y="850" fill="#94a3b8" font-size="8" text-anchor="middle">guard()</text>
+
+  <line x1="1132" y1="872" x2="1220" y2="872" stroke="#fb7185" stroke-width="0.8" opacity="0.45"/>
+
+  <text x="1176" y="898" fill="#94a3b8" font-size="8" text-anchor="middle">另有独立校验</text>
+  <text x="1176" y="914" fill="#94a3b8" font-size="8" text-anchor="middle">rsrs.validate_</text>
+  <text x="1176" y="928" fill="#94a3b8" font-size="8" text-anchor="middle">no_lookahead()</text>
+  <text x="1176" y="948" fill="#94a3b8" font-size="8" text-anchor="middle">engine._run_</text>
+  <text x="1176" y="962" fill="#94a3b8" font-size="8" text-anchor="middle">lookahead_assert()</text>
+
+  <text x="1176" y="1040" fill="#64748b" font-size="8" text-anchor="middle">core/lookahead_</text>
+  <text x="1176" y="1054" fill="#64748b" font-size="8" text-anchor="middle">guard.py:114-533</text>
+
+  <!-- ══════════ ML BRANCH ══════════ -->
+  <!-- A FeatureEngine -->
+  <rect x="1276" y="80" width="350" height="170" rx="6" fill="#0f172a"/>
+  <rect x="1276" y="80" width="350" height="170" rx="6" fill="rgba(120,53,15,0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+  <text x="1451" y="104" fill="#fff" font-size="12" font-weight="600" text-anchor="middle">FeatureEngine 特征工程</text>
+  <text x="1451" y="125" fill="#fef3c7" font-size="8.5" text-anchor="middle">收益　return_1 / 5 / 10 / 20 · log_return_1</text>
+  <text x="1451" y="141" fill="#fef3c7" font-size="8.5" text-anchor="middle">滚动　rolling_mean/std/max/min_{5,20,60}</text>
+  <text x="1451" y="157" fill="#fef3c7" font-size="8.5" text-anchor="middle">动量　momentum_5 / momentum_20</text>
+  <text x="1451" y="173" fill="#fef3c7" font-size="8.5" text-anchor="middle">指标　sma_20/60 · ema_12/26 · rsi_14</text>
+  <text x="1451" y="189" fill="#fef3c7" font-size="8.5" text-anchor="middle">macd · kdj · atr_14 · bollinger · volatility_20</text>
+  <text x="1451" y="205" fill="#fef3c7" font-size="8.5" text-anchor="middle">派生　sma_gap · atr_norm · bb_width</text>
+  <text x="1451" y="224" fill="#fda4af" font-size="8" text-anchor="middle">lookahead_guard() 截断重算一致性校验</text>
+  <text x="1451" y="242" fill="#64748b" font-size="8" text-anchor="middle">ml/features.py:331-361, 538-582</text>
+
+  <!-- B TrainingPipeline -->
+  <rect x="1276" y="290" width="350" height="150" rx="6" fill="#0f172a"/>
+  <rect x="1276" y="290" width="350" height="150" rx="6" fill="rgba(120,53,15,0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+  <text x="1451" y="314" fill="#fff" font-size="12" font-weight="600" text-anchor="middle">TrainingPipeline 训练</text>
+  <text x="1451" y="335" fill="#fbbf24" font-size="8.5" font-weight="600" text-anchor="middle">纯 numpy 自研 — 无 sklearn 依赖</text>
+  <text x="1451" y="353" fill="#fef3c7" font-size="8.5" text-anchor="middle">LinearRegressor　岭回归闭式解</text>
+  <text x="1451" y="369" fill="#fef3c7" font-size="8.5" text-anchor="middle">LogisticRegressor　梯度下降二分类</text>
+  <text x="1451" y="389" fill="#fef3c7" font-size="8.5" text-anchor="middle">build_dataset → time_series_split</text>
+  <text x="1451" y="404" fill="#94a3b8" font-size="8" text-anchor="middle">strict 模式 + horizon 缓冲，防标签重叠</text>
+  <text x="1451" y="420" fill="#fef3c7" font-size="8.5" text-anchor="middle">→ fit → evaluate → register_model</text>
+  <text x="1451" y="434" fill="#64748b" font-size="8" text-anchor="middle">ml/training_pipeline.py:42, 86-251, 364-702</text>
+
+  <!-- C ModelRegistry -->
+  <rect x="1276" y="480" width="350" height="140" rx="6" fill="#0f172a"/>
+  <rect x="1276" y="480" width="350" height="140" rx="6" fill="rgba(120,53,15,0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+  <text x="1451" y="504" fill="#fff" font-size="12" font-weight="600" text-anchor="middle">ModelRegistry 版本管理</text>
+  <text x="1451" y="525" fill="#fef3c7" font-size="8.5" text-anchor="middle">datasets/models/{name}/versions/v{n}/</text>
+  <text x="1451" y="541" fill="#fef3c7" font-size="8.5" text-anchor="middle">pickle 工件 + metadata.json + index.json</text>
+  <text x="1451" y="557" fill="#fef3c7" font-size="8.5" text-anchor="middle">sha256 完整性校验</text>
+  <text x="1451" y="573" fill="#fef3c7" font-size="8.5" text-anchor="middle">activate_version 热切换 · rollback 回滚</text>
+  <text x="1451" y="591" fill="#94a3b8" font-size="8" text-anchor="middle">自增版本号，三层存储结构</text>
+  <text x="1451" y="611" fill="#64748b" font-size="8" text-anchor="middle">ml/model_registry.py:14-19, 358-448, 580-638</text>
+
+  <!-- D InferenceService -->
+  <rect x="1276" y="660" width="350" height="140" rx="6" fill="#0f172a"/>
+  <rect x="1276" y="660" width="350" height="140" rx="6" fill="rgba(120,53,15,0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+  <text x="1451" y="684" fill="#fff" font-size="12" font-weight="600" text-anchor="middle">InferenceService 推理</text>
+  <text x="1451" y="705" fill="#fef3c7" font-size="8.5" text-anchor="middle">入　Bar列表 / DataFrame + model_name + version</text>
+  <text x="1451" y="722" fill="#fef3c7" font-size="8.5" text-anchor="middle">出　InferenceResult</text>
+  <text x="1451" y="737" fill="#94a3b8" font-size="8" text-anchor="middle">predictions · probabilities · timestamps</text>
+  <text x="1451" y="750" fill="#94a3b8" font-size="8" text-anchor="middle">feature_columns · train_end_time</text>
+  <text x="1451" y="770" fill="#fda4af" font-size="8" text-anchor="middle">train_end_time 守卫拦截样本内预测</text>
+  <text x="1451" y="790" fill="#64748b" font-size="8" text-anchor="middle">ml/inference_service.py:72-143, 303-363</text>
+
+  <!-- E isolation note -->
+  <rect x="1276" y="840" width="350" height="130" rx="6" fill="#0f172a"/>
+  <rect x="1276" y="840" width="350" height="130" rx="6" fill="rgba(30,41,59,0.45)"
+        stroke="#94a3b8" stroke-width="1.3" stroke-dasharray="4,4"/>
+  <text x="1451" y="864" fill="#fb7185" font-size="11.5" font-weight="600" text-anchor="middle">⚠ 隔离状态说明</text>
+  <text x="1451" y="886" fill="#e2e8f0" font-size="8.5" text-anchor="middle">ML 分支未被 strategies/ 或 allocation/ 引用</text>
+  <text x="1451" y="902" fill="#e2e8f0" font-size="8.5" text-anchor="middle">不参与最终选股与下单决策</text>
+  <text x="1451" y="918" fill="#e2e8f0" font-size="8.5" text-anchor="middle">与 RSRS + 三因子主链路并行、互不耦合</text>
+  <text x="1451" y="940" fill="#94a3b8" font-size="8.5" text-anchor="middle">完整 MLOps 链路已具备，属可选增强分支</text>
+  <text x="1451" y="958" fill="#fbbf24" font-size="8.5" text-anchor="middle">接入主链路前需先完成样本外验证</text>
+
+  <!-- ML internal arrows -->
+  <g stroke="#fbbf24" stroke-width="1.4" fill="none" opacity="0.75">
+    <path d="M 1451,250 L 1451,286" marker-end="url(#ahAmber)"/>
+    <path d="M 1451,440 L 1451,476" marker-end="url(#ahAmber)"/>
+    <path d="M 1451,620 L 1451,656" marker-end="url(#ahAmber)"/>
+  </g>
+
+  <!-- ══════════ LEGEND ══════════ -->
+  <g font-size="9">
+    <rect x="70" y="1484" width="16" height="10" rx="2" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1.2"/>
+    <text x="94" y="1493" fill="#94a3b8">数据与存储</text>
+
+    <rect x="215" y="1484" width="16" height="10" rx="2" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.2"/>
+    <text x="239" y="1493" fill="#94a3b8">因子与策略计算</text>
+
+    <rect x="380" y="1484" width="16" height="10" rx="2" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.2"/>
+    <text x="404" y="1493" fill="#94a3b8">选股与执行撮合</text>
+
+    <rect x="545" y="1484" width="16" height="10" rx="2" fill="rgba(251,146,60,0.3)" stroke="#fb923c" stroke-width="1.2"/>
+    <text x="569" y="1493" fill="#94a3b8">仓位分配</text>
+
+    <rect x="680" y="1484" width="16" height="10" rx="2" fill="rgba(136,19,55,0.4)" stroke="#fb7185" stroke-width="1.2"/>
+    <text x="704" y="1493" fill="#94a3b8">风控与防未来校验</text>
+
+    <rect x="865" y="1484" width="16" height="10" rx="2" fill="rgba(120,53,15,0.3)" stroke="#fbbf24" stroke-width="1.2"/>
+    <text x="889" y="1493" fill="#94a3b8">ML 分支 / 关键提示</text>
+
+    <rect x="1050" y="1484" width="16" height="10" rx="2" fill="rgba(30,41,59,0.5)" stroke="#94a3b8" stroke-width="1.2"/>
+    <text x="1074" y="1493" fill="#94a3b8">输出与通用组件</text>
+
+    <!-- row 2 -->
+    <line x1="70" y1="1524" x2="106" y2="1524" stroke="#64748b" stroke-width="1.6" marker-end="url(#ah)"/>
+    <text x="114" y="1527" fill="#94a3b8">主数据流（Bar / Signal / Order / Result）</text>
+
+    <line x1="400" y1="1524" x2="436" y2="1524" stroke="#fbbf24" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#ahAmber)"/>
+    <text x="444" y="1527" fill="#94a3b8">数据供给（跨分支只读）</text>
+
+    <line x1="640" y1="1524" x2="676" y2="1524" stroke="#fb7185" stroke-width="1.3" stroke-dasharray="4,4" marker-end="url(#ahRose)"/>
+    <text x="684" y="1527" fill="#94a3b8">防未来函数校验约束</text>
+
+    <text x="880" y="1527" fill="#6ee7b7">✅ 已实现</text>
+    <text x="975" y="1527" fill="#fda4af">❌ 占位 / 未实现</text>
+    <text x="1105" y="1527" fill="#fbbf24">⚠ 文档与代码口径冲突，待决策</text>
+
+    <text x="70" y="1558" fill="#475569" font-size="8.5">
+      绘图依据：D:\Projects\Pythonwdhmm 源码实测（engine / indicators / strategies / allocation / risk / execution / backtest / ml 全模块），标注含文件路径与行号
+    </text>
+  </g>
+</svg>
+  </div>
+
+  <!-- ══════ SUMMARY CARDS ══════ -->
+  <div class="grid">
+    <div class="sum">
+      <div class="k">主链路结构</div>
+      <div class="v">8 层 · 单一垂直数据流</div>
+      <ul>
+        <li>数据接入 → 因子信号 → 股票池 → 策略</li>
+        <li>→ 分配/风控 → 执行撮合 → 绩效 → 输出</li>
+        <li>BacktestScheduler 按策略能力自动选引擎</li>
+        <li>event_driven / mixed / vectorized 三模式</li>
+        <li class="ok">ConsistencyChecker 校验三引擎结果一致</li>
+      </ul>
+    </div>
+
+    <div class="sum">
+      <div class="k">核心策略参数</div>
+      <div class="v">RSRS(18/60) · 阈值 ±0.7</div>
+      <ul>
+        <li>OLS 回归 high = α + β·low，β 序列 shift(1)</li>
+        <li>z-score 标准化窗口 60，买卖阈值 ±0.7</li>
+        <li>止盈 +20% · 单票仓位 20% · 持仓 ≤ 5 只</li>
+        <li>股票池 top_ratio = 1/3 三因子交集</li>
+        <li class="warn">止损未在 RSRSStrategy 中实现</li>
+      </ul>
+    </div>
+
+    <div class="sum">
+      <div class="k">绩效指标覆盖</div>
+      <div class="v">27+ 项 · 7 大类</div>
+      <ul>
+        <li>收益 / 风险 / 风险调整 / 交易 / 成本</li>
+        <li>基准对比（alpha·beta·IR·跟踪误差）</li>
+        <li>分布（VaR95·CVaR95·偏度·峰度）</li>
+        <li class="warn">缺月度收益分解、缺滚动窗口序列</li>
+        <li class="warn">incremental_update() 为占位实现</li>
+      </ul>
+    </div>
+
+    <div class="sum">
+      <div class="k">待决策事项</div>
+      <div class="v">3 处口径冲突 · 2 处占位</div>
+      <ul>
+        <li class="warn">波动率因子：代码取低波动，文档写高波动</li>
+        <li class="warn">止损：文档标 −15%，核心策略未实现</li>
+        <li class="warn">涨跌停：撮合层不校验，仅风控层拦截</li>
+        <li class="warn">TargetVolatilityAllocator 为 TODO 占位</li>
+        <li>ML 分支完整但未接入决策链路</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span>鲲鹏量化交易系统 · 量化模型结构图</span>
+    <span>Source: D:\Projects\Pythonwdhmm · 静态自包含 HTML（inline SVG，无 JS 依赖）</span>
+  </div>
+
+</div>
+</body>
+</html>

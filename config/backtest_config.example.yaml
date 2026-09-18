@@ -1,0 +1,179 @@
+# ============================================================
+# 回测配置模板（Backtest Config Template）
+# ============================================================
+# 使用方法：
+#   1. 复制本文件为 backtest_config.yaml（去掉.example后缀）
+#   2. 修改下面的参数为你需要的值
+#   3. 运行 python run_回测入口.py --config config/backtest_config.yaml
+#
+# 设计原则：
+#   - 参数与代码分离，所有回测参数在此配置
+#   - 全部使用相对路径，跨机器可迁移
+#   - 为实盘无缝对接预留字段（交易费用、撮合规则与实盘一致）
+# ============================================================
+
+# ========== 回测基础设置 ==========
+backtest:
+  name: "rsrs_backtest_v1"          # 回测名称，用于输出目录命名
+  start_date: "2020-01-01"          # 回测开始日期（格式：YYYY-MM-DD）
+  end_date: "2025-12-31"            # 回测结束日期
+  initial_capital: 1000000          # 初始资金（元），默认100万
+  benchmark: "000300.SH"            # 基准指数（沪深300，带交易所后缀）
+  time_frame: "1d"                   # K线周期：1d日线 / 1h / 30m / 5m / 1m（为实盘多周期预留）
+
+# ========== 引擎模式（三模式调度，P1）==========
+# 回测引擎三模式：由 BacktestScheduler 调度，auto 时按策略能力自动选择
+engine:
+  mode: "auto"                    # 引擎模式：auto自动 / event / mixed / vectorized
+                                  #   auto       = 按策略能力优先级自动选择（推荐）
+                                  #   vectorized = 纯向量化引擎，内存占用高，面向大批量参数扫描
+                                  #   mixed      = 混合引擎（生产主力，向量化因子+bar循环处理路径依赖）
+                                  #   event      = 事件驱动引擎（真值基准，上线前必须做一次全量验证）
+
+# ========== 股票池配置 ==========
+stock_pool:
+  # 股票池类型（4选1）：
+  #   all             = 全市场（不推荐，回测慢且含僵尸股）
+  #   three_factor    = 三因子交集（动态选股，与实盘一致）
+  #   custom          = 自定义代码列表（codes 字段填写）
+  #   preset_filtered = 标的预筛选结果（由 scripts/标的预筛选.py 或窗口生成，
+  #                     codes 字段自动填入筛选后的标的清单，回测只跑这些标的）
+  type: "three_factor"
+
+  # ★ 代码前缀排除（回测/实盘股票池过滤共用，窗口勾选后自动写入）
+  # 30=创业板, 688=科创板, 4/8=老三板, 92=北交所新代码段
+  # 留空 [] 表示不排除任何前缀
+  exclude_prefixes:
+    - "30"
+    - "688"
+    - "4"
+    - "8"
+    - "92"
+
+  # 三因子参数（type=three_factor 时生效，与实盘信号生成器一致）
+  three_factor:
+    volatility_window: 20            # 波动率窗口（交易日）
+    momentum_window: 60              # 动量窗口（交易日）
+    price_quantile: 0.33             # 价格分位数（前1/3高价股）
+    factor_quantile: 0.33            # 各因子取前1/3，取交集
+
+  # 标的代码列表（type=custom 或 preset_filtered 时生效）
+  # custom 类型：手动填写，例如：
+  #   - "000001.SZ"
+  #   - "600519.SH"
+  # preset_filtered 类型：由 scripts/标的预筛选.py 或窗口「预筛选标的」按钮自动生成，
+  #   包含筛选条件快照（上市年限/日均成交额/日均换手率等），可追溯
+  codes: []
+
+# ========== 策略配置（对接strategies注册器，按名字动态加载） ==========
+# 注意：此处只写策略名与参数，禁止写任何策略业务代码
+strategy:
+  name: "rsrs"                       # 策略名称，必须与 @register_strategy 注册名一致
+  params:                            # 策略参数，原样传给策略实例
+    # ----- RSRS核心参数（阶段六最优）-----
+    period: 18                       # RSRS回归周期（18日）
+    norm_window: 60                  # RSRS标准化窗口（60日）
+    buy_threshold: 0.7               # 买入阈值（RSRS_norm > 0.7 买入）
+    sell_threshold: -0.7             # 卖出阈值（RSRS_norm < -0.7 卖出）
+    # ----- 目标止盈（阶段六D最优）-----
+    take_profit_pct: 0.20            # 目标止盈+20%（达到后卖出）
+    # ----- 止损（可选，当前最优策略不用移动止损）-----
+    stop_loss_pct: 0.15              # 单只股票最大亏损15%止损（0=不启用）
+    trailing_stop_pct: 0.0           # 移动止损百分比（0=不启用，防未来函数）
+    # ----- 信号过滤器（通用，所有策略共用，回测/实盘一致）-----
+    min_volume_ratio: 0.0             # 买入信号最低量比（0=不启用，1.5=放量50%才买）
+    volume_ratio_period: 5            # 量比计算的均量周期（默认5日，量比=当日量/过去5日均量）
+
+# ========== 模拟券商（SimBroker）参数 ==========
+# 与实盘交易规则完全一致，确保回测结果可复现到实盘
+sim_broker:
+  commission_rate: 0.0002            # 佣金费率（万2，买卖双向）
+  min_commission: 5.0                 # 单笔最低佣金（元）
+  stamp_tax_rate: 0.001              # 印花税率（千1，仅卖出收取，A股标准）
+  transfer_fee_rate: 0.00001         # 过户费率（万0.1，买卖双向，沪市）
+  slippage_mode: "ratio"              # 滑点模式：ratio=按比例 / fixed=按固定金额
+  slippage_value: 0.0002              # 滑点数值（ratio模式为万2，与实盘冲击成本一致）
+  enable_t1: true                     # A股T+1交易限制（true=当日买入不可卖）
+  lot_size: 100                       # 最小交易单位100股（1手）
+  price_limit_pct: 0.10               # 涨跌停限制（普通股票10%）
+  enforce_limit_up_down: true         # 涨跌停日是否允许成交（涨停不能买，跌停不能卖）
+
+# ========== 仓位管理（与实盘风控一致）==========
+position:
+  max_single_position: 0.20           # 单只股票最大仓位20%
+  max_total_positions: 5               # 最多同时持有5只股票
+  max_total_position_pct: 0.95         # 总仓位上限95%（留5%现金）
+
+# ========== 数据配置 ==========
+data:
+  data_dir: "./datasets/processed"    # 数据目录（相对路径，跨机器可迁移）
+  data_format: "parquet"               # 数据格式：parquet / csv
+  date_column: "date"                  # 时间字段名
+  adjust: "hfq"                        # 复权方式：hfq=后复权（回测推荐）/ qfq=前复权 / none=不复权
+  price_columns:                       # 价格字段映射（根据实际数据调整）
+    open: "open"
+    high: "high"
+    low: "low"
+    close: "close"
+  volume: "volume"                     # 成交量字段
+  pct_chg: "pct_chg"                  # 涨跌幅字段（百分比格式，如-0.49表示-0.49%）
+
+# ========== 绩效指标配置 ==========
+metrics:
+  risk_free_rate: 0.03                 # 无风险年化利率（用于夏普比率）
+  annual_trade_days: 252               # 年化交易日数（A股标准252）
+
+# ========== 输出与报告配置 ==========
+output:
+  base_dir: "./outputs"                # 输出根目录（相对路径）
+  save_trades: true                     # 是否保存交易明细CSV
+  save_positions: true                  # 是否保存每日持仓CSV
+  save_equity_curve: true               # 是否保存资金曲线CSV
+  generate_report: true                  # 是否生成HTML报告
+  report_title: "RSRS策略回测报告"       # 报告标题
+  log_level: "INFO"                     # 日志级别：DEBUG / INFO / WARNING / ERROR
+
+# ========== 防未来函数校验（强制开启）==========
+lookahead_guard:
+  enabled: true                         # 是否启用防未来函数校验（强制true，不可关闭）
+  strict_mode: true                     # 严格模式：发现未来函数直接报错终止
+
+
+# ========== 性能优化开关（P2 全套）==========
+# 各开关由回测/批量/优化入口读取并实际生效；缺省值即安全默认，旧配置向前兼容
+performance:
+  # ── 并行治理（P2-2）：进程池提交前 pickle 预检，双池分离（I/O线程池 + 计算进程池）──
+  parallel:
+    enabled: true                 # 是否启用并行治理
+    cpu_workers: null             # 计算进程池大小（null=自动；批量回测/参数优化时生效）
+    check_pickle: true            # 进程池提交前是否 pickle 预检（拦截不可序列化任务）
+
+  # ── 回测日志模式（P2-3）：日志降级 + 异步队列 + 采样，消除日志风暴阻塞主线程 ──
+  backtest_logging:
+    enabled: true                 # 是否启用回测日志模式
+    level: "WARNING"              # 回测期间日志级别（DEBUG/INFO/WARNING/ERROR/CRITICAL）
+    sampling: true                # 是否采样输出（每N条/每N秒，降低写盘量）
+
+  # ── 分阶段计时（P2-4）：输出各阶段耗时，用于性能定位 ──
+  timer:
+    enabled: true                 # 是否启用分阶段计时
+
+  # ── 轻量防未来函数校验（P2-5）：引擎逐bar运行时校验，与记录型 LookaheadGuard 互补 ──
+  light_lookahead_guard:
+    enabled: true                 # 是否启用轻量防未来函数校验
+    strict: false                 # 严格模式：违规立即抛异常（false=记录+warning，结束统一拦截）
+
+  # ── 蒙特卡洛模拟（P2-6）：快速回测/参数扫描时跳过 MC，省算力 ──
+  monte_carlo:
+    skip: false                   # 是否跳过蒙特卡洛模拟（true=零算力快速模式）
+
+  # ── 增量回测（P2-8/9）：数据指纹识别变更标的，只重算变更，未变更复用缓存 ──
+  incremental:
+    enabled: true                 # 是否启用增量回测（数据指纹）
+    force_full: false             # 是否强制全量重算（忽略指纹差异，等价 --force-full）
+
+  # ── 内存自动降级（P2-9）：内存水位监控，压力升高自动降引擎模式与并行度 ──
+  memory:
+    enabled: true                 # 是否启用内存自动降级
+    warning_pct: 70.0             # 告警阈值（系统内存百分比，超过后引擎降一级+并行度减半）
+    critical_pct: 85.0            # 严重阈值（超过后强制 event 引擎 + 串行）

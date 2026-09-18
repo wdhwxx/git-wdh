@@ -1,0 +1,65 @@
+# ============================================================
+# 数据清洗规则配置模板 (折中档位2 v1)
+# ============================================================
+# 复制本文件为 data_clean.yaml 后修改实际值
+# v1: 直接字典读取，不做复杂规则对象映射
+# TODO(阶段9): 后续迭代实现 rules_loader 规则对象化、按标的差异化配置
+# ============================================================
+
+# ── 通用开关 ──
+enabled: true                  # 总开关，false 时跳过所有清洗直接返回原始数据
+log_bad_records: true          # 是否将脏数据写入 datasets/bad/ 目录
+log_quality_report: true       # 是否输出清洗质量报告到 outputs/
+
+# ── Bar (K线) 清洗规则 ──
+bar:
+  # 基础校验
+  check_ohlc_logic: true       # 校验 OHLC 逻辑: high>=max(open,close), low<=min(open,close), high>=low
+  check_non_negative: true     # 校验价格/成交量非负
+  check_symbol: true           # 校验 symbol 非空
+  check_timestamp: true        # 校验时间戳有效性
+
+  # 时间序列校验
+  check_time_monotonic: true   # 校验时间单调递增
+  check_duplicate_timestamp: true  # 校验重复时间戳
+  duplicate_strategy: "keep_last"  # 重复时间戳处理策略: keep_first | keep_last | drop_all
+
+  # 异常值检测
+  detect_price_jump: true      # 检测价格跳变 (相对前一根 close)
+  max_price_jump_pct: 0.22     # 单根最大涨跌幅阈值 (22%, 含涨跌停+容差)
+  detect_volume_anomaly: true  # 检测成交量异常
+  max_volume_ratio: 100.0      # 成交量异常倍数 (相对前一根)
+  allow_zero_volume: true      # 是否允许成交量为0 (停牌)
+
+  # 缺失值处理
+  fill_missing: false          # 是否填充缺失bar (v1默认关闭，TODO阶段9实现交易日对齐填充)
+  fill_strategy: "ffill"       # 填充策略: ffill(前值填充) | zero | drop
+
+  # 排序
+  sort_by_timestamp: true      # 清洗后按时间戳排序
+
+# ── Tick (逐笔) 清洗规则 ──
+tick:
+  check_price_non_negative: true
+  check_volume_non_negative: true
+  check_bid_ask: true          # 校验 bid < ask
+  check_timestamp: true
+  check_duplicate: true        # 校验重复 (同时间同价格同量)
+  duplicate_strategy: "keep_last"
+  detect_price_jump: true
+  max_price_jump_pct: 0.22
+  sort_by_timestamp: true
+
+# ── 脏数据归档 ──
+bad_data:
+  output_dir: "datasets/bad"   # 脏数据输出目录
+  format: "json"               # 归档格式: json | csv
+  include_reason: true         # 是否包含错误原因字段
+  max_records_per_file: 10000  # 单个归档文件最大记录数
+
+# ── 质量报告 ──
+quality_report:
+  output_dir: "outputs"        # 报告输出目录
+  format: "json"               # 报告格式: json
+  include_details: true        # 是否包含详细错误列表
+  summary_only: false          # true 时只输出汇总统计，不输出明细
