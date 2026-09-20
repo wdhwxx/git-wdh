@@ -45,7 +45,7 @@ class ROC(IndicatorBase):
     name = "roc"
     output_columns = ["roc"]
 
-    def __init__(self, period: int = 10, price_col: str = "close", **kwargs: Any):
+    def __init__(self, period: int = 10, price_col: str = "收盘价", **kwargs: Any):
         super().__init__(period=period, price_col=price_col, **kwargs)
         self.period = period
         self.price_col = price_col
@@ -112,7 +112,7 @@ class MOM(IndicatorBase):
     def __init__(
         self,
         period: int = 60,
-        price_col: str = "close",
+        price_col: str = "收盘价",
         mode: str = "relative",
         **kwargs: Any,
     ):
@@ -194,7 +194,7 @@ class RSI(IndicatorBase):
     name = "rsi"
     output_columns = ["rsi"]
 
-    def __init__(self, period: int = 14, price_col: str = "close", **kwargs: Any):
+    def __init__(self, period: int = 14, price_col: str = "收盘价", **kwargs: Any):
         super().__init__(period=period, price_col=price_col, **kwargs)
         self.period = period
         self.price_col = price_col
@@ -347,9 +347,9 @@ class KDJ(IndicatorBase):
         """批量计算KDJ"""
         self._validate_data(data)
 
-        high = data['high'].astype(float)
-        low = data['low'].astype(float)
-        close = data['close'].astype(float)
+        high = data['最高价'].astype(float)
+        low = data['最低价'].astype(float)
+        close = data['收盘价'].astype(float)
 
         # 区间最高/最低（rolling窗口包含当前行）
         low_n = low.rolling(window=self.n, min_periods=self.n).min()

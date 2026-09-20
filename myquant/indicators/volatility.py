@@ -69,9 +69,9 @@ class ATR(IndicatorBase):
         """批量计算ATR（numpy向量化TR计算，替代pd.concat.max，零临时对象）"""
         self._validate_data(data)
 
-        high = data['high'].astype(float).values
-        low = data['low'].astype(float).values
-        close = data['close'].astype(float).values
+        high = data['最高价'].astype(float).values
+        low = data['最低价'].astype(float).values
+        close = data['收盘价'].astype(float).values
         n = len(close)
 
         # prev_close：第0根为NaN，之后为前一根close（防未来函数：只用历史）
@@ -207,14 +207,14 @@ class Volatility(IndicatorBase):
         """计算收益率序列"""
         if self.use_log_return:
             # 对数收益率: ln(close_t / close_{t-1})
-            close = data['close'].astype(float)
+            close = data['收盘价'].astype(float)
             returns = np.log(close / close.shift(1))
         else:
             # 简单收益率: 使用pct_chg列（百分比格式），除以100转小数
             if 'pct_chg' in data.columns:
                 returns = data['pct_chg'].astype(float) / 100.0
             else:
-                close = data['close'].astype(float)
+                close = data['收盘价'].astype(float)
                 returns = close.pct_change()
         return returns
 
@@ -336,7 +336,7 @@ class BollingerBands(IndicatorBase):
         self,
         period: int = 20,
         std_dev: float = 2.0,
-        price_col: str = "close",
+        price_col: str = "收盘价",
         **kwargs: Any,
     ):
         super().__init__(period=period, std_dev=std_dev, price_col=price_col, **kwargs)

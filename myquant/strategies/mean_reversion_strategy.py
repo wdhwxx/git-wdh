@@ -472,7 +472,7 @@ class MeanReversionStrategy(StrategyBase):
         need = max(self.bb_period, self.rsi_period) + 1
         if n < need:
             return np.zeros(n)
-        close = data["close"].astype(float)
+        close = data["收盘价"].astype(float)
         mid = close.rolling(self.bb_period).mean()
         std = close.rolling(self.bb_period).std()
         upper = mid + self.bb_std * std

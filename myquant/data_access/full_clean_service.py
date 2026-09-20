@@ -36,6 +36,7 @@ from myquant.core.logger import get_logger
 from myquant.database.connection import get_connection
 from myquant.database.queries import CleanDataQueries, DataQueries
 from myquant.data_access.cleaner import load_clean_config, run_clean_pipeline
+from myquant.data_access.cleaner.derived_metrics import compute_derived_metrics, compute_b_class_metrics
 
 logger = get_logger("full_clean_service")
 
@@ -268,12 +269,22 @@ def worker_clean(task: Tuple[str, str, Dict[str, Any]]) -> Dict[str, Any]:
             publish_events=False,  # 批量场景避免污染监控告警
         )
         cleaned = pipe_result["cleaned"]
+        # 派生量计算：涨跌幅/振幅/量比（清洗后按日排序数据上批量计算）
+        if cleaned:
+            compute_derived_metrics(cleaned)
+            # B类：换手率/流通股本/市盈(动)（需读financial_data）
+            try:
+                fin_rows = dq.conn.execute("SELECT report_date, circ_mv, total_mv, net_profit FROM financial_data WHERE symbol=? ORDER BY report_date", (symbol,))
+                if fin_rows:
+                    compute_b_class_metrics(cleaned, [dict(r) for r in fin_rows])
+            except Exception as _e:
+                logger.warning(f"B类派生量计算失败 {symbol}: {_e}")
         bad = pipe_result["bad"]
         stats = pipe_result["stats"]
         bad_file = pipe_result.get("bad_file")
 
-        # 判断是否需要写回：有脏数据剔除 或 有去重 或 行数变化
-        needs_write = (
+        # 判断是否需要写回：派生量已写入（强制写回），或有脏数据剔除/去重/行数变化
+        needs_write = True or (
             len(bad) > 0
             or (stats.get("removed_duplicates", 0) or 0) > 0
             or len(cleaned) != len(rows)
@@ -344,7 +355,7 @@ class FullCleanService:
             for k, v in overrides.items():
                 if k in ("max_price_jump_pct", "max_volume_ratio", "allow_zero_volume",
                          "check_ohlc_logic", "check_non_negative", "duplicate_strategy",
-                         "price_jump_action", "volume_anomaly_action"):
+                         "price_jump_action", "volume_anomaly_action", "reset_base_gap_days"):
                     bar_cfg[k] = v
 
         self.stats_summary: Dict[str, Any] = {}

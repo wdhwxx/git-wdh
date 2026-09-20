@@ -320,8 +320,8 @@ class KunpengStrategy(StrategyBase):
                 f"_compute_kunpeng: df 必须含 close/volume 列，实际列: {list(df.columns)}"
             )
 
-        close = df["close"].astype(float)
-        vol = df["volume"].astype(float)
+        close = df["收盘价"].astype(float)
+        vol = df["成交量"].astype(float)
 
         # ── 量能模块（本行使用的数据截至 t 时刻）──
         # 鲲鹏A：量比 = 当日成交量 / 前5日（T-5~T-1，不含当日）平均成交量
@@ -834,7 +834,7 @@ class KunpengStrategy(StrategyBase):
         if n < WARMUP_BARS:
             return np.zeros(n)
 
-        close = data["close"].astype(float)
+        close = data["收盘价"].astype(float)
         close_np = close.to_numpy(dtype=float)
         try:
             kp = self._compute_kunpeng(data)
@@ -876,7 +876,7 @@ class KunpengStrategy(StrategyBase):
                     else str(i),
                     timestamp=data.index[i],
                     price=c,
-                    volume=float(data["volume"].iloc[i]),
+                    volume=float(data["成交量"].iloc[i]),
                     m_value=float(kp["m_value"].iloc[i]),
                     s1=bool(kp["s1"].iloc[i]),
                     s2=bool(kp["s2"].iloc[i]),

@@ -62,7 +62,7 @@ from myquant.strategies.base import StrategyBase, StrategyContext
 from myquant.backtest.fee_common import FeeCalculator
 from myquant.backtest.order_matcher import OrderMatcher
 from myquant.backtest.metrics import MetricsCalculator
-from myquant.backtest.data_loader import DataProviderBase
+from myquant.backtest.data_loader import DataProviderBase, EN_TO_CN_COLUMN_MAP
 from myquant.core.lookahead_guard import LookaheadGuard  # #H2修复：防未来函数校验器
 
 logger = logging.getLogger(__name__)
@@ -428,6 +428,10 @@ class VectorizedBacktestEngine:
             ValueError: 数据列缺失、策略输出长度不符时抛出。
             NotImplementedError: 策略未实现 generate_signals_vectorized 时抛出。
         """
+        # 列名统一为中文：兼容英文列名的合成数据/数据库来源（内部全链路中文表头）
+        _rename = {en: cn for en, cn in EN_TO_CN_COLUMN_MAP.items() if en in df.columns}
+        if _rename:
+            df = df.rename(columns=_rename)
         # 按日期升序排序并过滤（防未来函数双重保障）
         df = df.sort_index()
         if self.config.start_date:
@@ -437,19 +441,19 @@ class VectorizedBacktestEngine:
         if len(df) == 0:
             raise ValueError(f"标的 {symbol} 在回测区间内无数据")
 
-        required = {"open", "high", "low", "close", "volume"}
+        required = {"开盘价", "最高价", "最低价", "收盘价", "成交量"}
         missing = required - set(df.columns)
         if missing:
             raise ValueError(f"标的 {symbol} 缺少列: {sorted(missing)}")
 
-        opens = df["open"].to_numpy(dtype=np.float64)
-        highs = df["high"].to_numpy(dtype=np.float64)
-        lows = df["low"].to_numpy(dtype=np.float64)
-        closes = df["close"].to_numpy(dtype=np.float64)
-        volumes = df["volume"].to_numpy(dtype=np.float64)
+        opens = df["开盘价"].to_numpy(dtype=np.float64)
+        highs = df["最高价"].to_numpy(dtype=np.float64)
+        lows = df["最低价"].to_numpy(dtype=np.float64)
+        closes = df["收盘价"].to_numpy(dtype=np.float64)
+        volumes = df["成交量"].to_numpy(dtype=np.float64)
         # 昨收价（用于撮合层涨跌停校验）：优先用数据列，否则前一日收盘近似
         if "pre_close" in df.columns:
-            pre_closes = df["pre_close"].to_numpy(dtype=np.float64)
+            pre_closes = df["前收盘价"].to_numpy(dtype=np.float64)
         else:
             pre_closes = np.concatenate([[np.nan], closes[:-1]])
         n = len(df)
@@ -841,7 +845,7 @@ class _DummyVectorStrategy(StrategyBase):
         self.target_shares = float(target_shares)
 
     def generate_signals_vectorized(self, data: pd.DataFrame) -> np.ndarray:
-        close = data["close"].to_numpy(dtype=np.float64)
+        close = data["收盘价"].to_numpy(dtype=np.float64)
         n = len(close)
         target = np.zeros(n, dtype=np.float64)
         if n < self.slow + 1:

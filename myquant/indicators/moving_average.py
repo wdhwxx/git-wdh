@@ -47,7 +47,7 @@ class SMA(IndicatorBase):
     name = "sma"
     output_columns = ["sma"]
 
-    def __init__(self, period: int = 20, price_col: str = "close", **kwargs: Any):
+    def __init__(self, period: int = 20, price_col: str = "收盘价", **kwargs: Any):
         super().__init__(period=period, price_col=price_col, **kwargs)
         self.period = period
         self.price_col = price_col
@@ -121,7 +121,7 @@ class EMA(IndicatorBase):
     name = "ema"
     output_columns = ["ema"]
 
-    def __init__(self, period: int = 12, price_col: str = "close", **kwargs: Any):
+    def __init__(self, period: int = 12, price_col: str = "收盘价", **kwargs: Any):
         super().__init__(period=period, price_col=price_col, **kwargs)
         self.period = period
         self.price_col = price_col
@@ -196,7 +196,7 @@ class WMA(IndicatorBase):
     name = "wma"
     output_columns = ["wma"]
 
-    def __init__(self, period: int = 20, price_col: str = "close", **kwargs: Any):
+    def __init__(self, period: int = 20, price_col: str = "收盘价", **kwargs: Any):
         super().__init__(period=period, price_col=price_col, **kwargs)
         self.period = period
         self.price_col = price_col
@@ -303,7 +303,7 @@ class MACD(IndicatorBase):
         fast: int = 12,
         slow: int = 26,
         signal: int = 9,
-        price_col: str = "close",
+        price_col: str = "收盘价",
         **kwargs: Any,
     ):
         super().__init__(fast=fast, slow=slow, signal=signal, price_col=price_col, **kwargs)

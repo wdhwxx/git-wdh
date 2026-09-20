@@ -62,6 +62,10 @@ CREATE TABLE IF NOT EXISTS market_data (
     amount      REAL,                        -- 成交额（元）
     pct_chg     REAL,                        -- 涨跌幅（百分比格式，-0.49表示-0.49%）
     turnover    REAL,                        -- 换手率（%）
+    amplitude   REAL,                        -- 振幅（%，(high-low)/pre_close*100）
+    volume_ratio REAL,                       -- 量比（当日成交量/过去5日均量）
+    float_share  REAL,                        -- 流通股本（股，近似值）
+    pe_dynamic   REAL,                        -- 市盈(动)（动态市盈率，年化净利润口径）
     is_suspended INTEGER DEFAULT 0,         -- 是否停牌 1=是 0=否
     data_source TEXT,                        -- 数据来源标识
     created_at  TEXT    DEFAULT (datetime('now')),  -- 记录创建时间
@@ -393,6 +397,30 @@ class DirtyDataStatsSchema:
 # 建表函数
 # ─────────────────────────────────────────────
 
+def _migrate_market_data_columns(connection) -> None:
+    """
+    迁移 market_data 表：补加派生量列（振幅 amplitude、量比 volume_ratio）。
+
+    对已存在的表幂等执行 ALTER TABLE ADD COLUMN。SQLite 的 ADD COLUMN
+    要求列不存在时才执行，先查 PRAGMA table_info 判断，避免重复加列报错。
+    """
+    existing_rows = connection.execute(
+        "PRAGMA table_info(market_data)"
+    )
+    existing_cols = {row["name"] for row in existing_rows}
+    new_columns = {
+        "amplitude": "REAL",
+        "volume_ratio": "REAL",
+        "float_share": "REAL",
+        "pe_dynamic": "REAL",
+    }
+    for col_name, col_type in new_columns.items():
+        if col_name not in existing_cols:
+            connection.execute_update(
+                f"ALTER TABLE market_data ADD COLUMN {col_name} {col_type}"
+            )
+
+
 def create_all_tables(connection) -> None:
     """
     创建所有表和索引
@@ -409,6 +437,8 @@ def create_all_tables(connection) -> None:
         # 建索引
         for sql in ALL_CREATE_INDEX_SQL:
             connection.execute_update(sql)
+        # 迁移：对已存在的 market_data 表补加派生量列（幂等）
+        _migrate_market_data_columns(connection)
 
 
 def drop_all_tables(connection) -> None:

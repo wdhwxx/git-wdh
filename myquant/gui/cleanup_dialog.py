@@ -77,6 +77,7 @@ PROGRESS_PLACEHOLDER: str = (
 # 保护清单提示（只读展示）
 PROTECT_HINT: str = (
     "自动跳过（永不删除）：quant.db / datasets/processed / 保留期内的报告族 / "
+    "批量回测 fingerprints.json 与 results.json 增量缓存 / "
     "所有 .gitkeep / backups 代码备份（*.bak_*.py）"
 )
 
@@ -270,6 +271,8 @@ class CleanupDialog(QDialog):
         self.chk_artifacts.setChecked(False)
         self.chk_bad = QCheckBox(f"G · {CATEGORY_NAMES['G']}（datasets/bad 脏数据归档，默认关闭）")
         self.chk_bad.setChecked(False)
+        self.chk_batch = QCheckBox(f"H · {CATEGORY_NAMES['H']}（results/batch_backtest 批量回测汇总/双强候选池，按时间戳归期）")
+        self.chk_batch.setChecked(False)
         grid.addWidget(self.chk_test)
         grid.addWidget(self.chk_backup)
         grid.addWidget(self.chk_pycache)
@@ -277,6 +280,7 @@ class CleanupDialog(QDialog):
         grid.addWidget(self.chk_legacy)
         grid.addWidget(self.chk_artifacts)
         grid.addWidget(self.chk_bad)
+        grid.addWidget(self.chk_batch)
         layout.addWidget(box_junk)
 
         # ===== 2. 回测输出（启用开关 + 保留期数） =====
@@ -356,6 +360,7 @@ class CleanupDialog(QDialog):
             include_legacy=self.chk_legacy.isChecked(),
             clean_artifacts=self.chk_artifacts.isChecked(),
             clean_bad=self.chk_bad.isChecked(),
+            clean_batch_results=self.chk_batch.isChecked(),
             clean_outputs=self.chk_outputs.isChecked(),
             keep=self.spin_keep.value(),
             execute=execute,

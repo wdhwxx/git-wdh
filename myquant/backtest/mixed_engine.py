@@ -893,7 +893,7 @@ class MixedBacktestEngine:
         try:
             import pandas as pd
 
-            close = self._benchmark_data["close"].astype(float)
+            close = self._benchmark_data["收盘价"].astype(float)
             if len(close) == 0 or close.iloc[0] <= 0:
                 return 1.0
             idx = self._benchmark_data.index
@@ -923,9 +923,14 @@ class MixedBacktestEngine:
     def _build_unified_bars(self) -> List[Bar]:
         """构建统一时间序列（多标的按日期对齐，防未来函数双重过滤）。"""
         all_bars: List[Bar] = []
+        from myquant.backtest.data_loader import EN_TO_CN_COLUMN_MAP
         for symbol, df in self.data.items():
             if df is None or len(df) == 0:
                 continue
+            # 列名统一为中文：兼容英文列名的合成数据/数据库来源
+            _rename = {en: cn for en, cn in EN_TO_CN_COLUMN_MAP.items() if en in df.columns}
+            if _rename:
+                df = df.rename(columns=_rename)
             # ★ 防未来函数：按日期范围过滤（双重保障）
             if self.config.start_date:
                 df = df[df.index.astype(str) >= self.config.start_date]
@@ -936,12 +941,12 @@ class MixedBacktestEngine:
                 all_bars.append(
                     Bar(
                         symbol=symbol,
-                        open=float(row.get("open", 0)),
-                        high=float(row.get("high", 0)),
-                        low=float(row.get("low", 0)),
-                        close=float(row.get("close", 0)),
-                        pre_close=float(row.get("pre_close", 0)),
-                        volume=float(row.get("volume", 0)),
+                        open=float(row.get("开盘价", 0)),
+                        high=float(row.get("最高价", 0)),
+                        low=float(row.get("最低价", 0)),
+                        close=float(row.get("收盘价", 0)),
+                        pre_close=float(row.get("前收盘价", 0)),
+                        volume=float(row.get("成交量", 0)),
                         timestamp=timestamp,
                     )
                 )
@@ -1164,7 +1169,7 @@ def _make_ohlcv(n: int, base: float = 10.0, drift: float = 0.02) -> pd.DataFrame
     low = close * 0.98
     volume = np.full(n, 1_000_000.0)
     return pd.DataFrame(
-        {"open": open_px, "high": high, "low": low, "close": close, "volume": volume},
+        {"开盘价": open_px, "最高价": high, "最低价": low, "收盘价": close, "成交量": volume},
         index=idx,
     )
 
@@ -1200,8 +1205,8 @@ def _run_self_test() -> int:
         end_date="2024-01-12",
         initial_capital=1_000_000.0,
     )
-    open_px = df["open"].to_numpy()
-    close = df["close"].to_numpy()
+    open_px = df["开盘价"].to_numpy()
+    close = df["收盘价"].to_numpy()
 
     # 1. 目标持仓模式基本运行（t>=3 目标 1000 股）
     targets = [0.0, 0.0, 0.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0]

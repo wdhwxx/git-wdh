@@ -70,6 +70,7 @@ OPTIONS: Dict[str, tuple] = {
     "full":        ("全量下载日线数据",           "约5000只,30-60分钟",           "常规"),
     "incremental": ("增量更新日线",               "盘后每日:1-5分钟",             "常规"),
     "finance":     ("下载财务数据",               "PE/PB/业绩报表",               "常规"),
+    "finance_import": ("财务数据入库",             "CSV导入DB+因子计算+中文报告",   "常规"),
     "all":         ("全部更新",                   "日线增量+财务",                "常规"),
     "validate":    ("数据质量校验",               "完整性/异常检测",              "常规"),
     "status":      ("查看同步状态报告",           "仅展示,不下载",                "常规"),
@@ -79,13 +80,13 @@ OPTIONS: Dict[str, tuple] = {
 
 # 勾选区显示顺序（与参考图 v2 一致：常规项在前，新增项沉底）
 DISPLAY_ORDER: List[str] = [
-    "full", "incremental", "finance", "all",
+    "full", "incremental", "finance", "finance_import", "all",
     "validate", "status", "tdx", "web",
 ]
 
 # 固定执行顺序（勾选后按此顺序串行执行）
 EXEC_ORDER: List[str] = [
-    "full", "incremental", "finance", "all",
+    "full", "incremental", "finance", "finance_import", "all",
     "tdx", "web", "validate", "status",
 ]
 
@@ -291,6 +292,47 @@ def _entry_finance(project_root: Path, progress_callback=None, finance_start_dat
     return run_finance(fetcher, project_root, progress_callback, finance_start_date, finance_end_date)
 
 
+def _entry_finance_import(project_root: Path, progress_callback=None) -> dict:
+    """
+    财务数据入库：CSV→financial_data表 + 因子计算→factor_data表 + 全中文报告。
+    调用 myquant.data_access.financial_service.FinancialImportService。
+    """
+    from myquant.data_access.financial_service import FinancialImportService
+
+    # 定位最新财务历史 CSV
+    fin_dir = project_root / "datasets" / "raw" / "financial"
+    csv_files = sorted(fin_dir.glob("financial_history_*.csv")) if fin_dir.exists() else []
+    if not csv_files:
+        if progress_callback:
+            progress_callback(1, 1, {"symbol": "未找到CSV", "status": "failed", "record_count": 0})
+        return {"total": 0, "success": 0, "failed": 1, "skipped": 0,
+                "error": "datasets/raw/financial/ 下未找到 financial_history_*.csv"}
+
+    def _adapt_cb(current: int, total: int, message: str) -> None:
+        if progress_callback:
+            progress_callback(current, total, {
+                "symbol": str(message)[:16], "status": "completed", "record_count": current,
+            })
+
+    svc = FinancialImportService(project_root)
+    try:
+        imp = svc.import_financial_csv(csv_files[-1], progress_callback=_adapt_cb)
+        fac = svc.compute_factors(lookback_days=1, progress_callback=_adapt_cb)
+        csv_out, html_out = svc.generate_report(imp, fac)
+        return {
+            "total": imp.symbol_count,
+            "success": imp.success_rows,
+            "failed": imp.error_rows,
+            "skipped": imp.skipped_rows,
+            "records": imp.success_rows,
+            "factor_values": fac.total_factor_values,
+            "report_csv": str(csv_out),
+            "report_html": str(html_out),
+        }
+    finally:
+        svc.close()
+
+
 def _entry_all(project_root: Path, progress_callback=None) -> dict:
     """全部更新：日线增量 + 财务数据（合并汇总到顶层，兼容 summary_total 统计）"""
     daily = _entry_incremental(project_root, progress_callback)
@@ -388,6 +430,7 @@ TASKS: Dict[str, tuple] = {
     "full":        (OPTIONS["full"][0], _entry_full, False),
     "incremental": (OPTIONS["incremental"][0], _entry_incremental, False),
     "finance":     (OPTIONS["finance"][0], _entry_finance, False),
+    "finance_import": (OPTIONS["finance_import"][0], _entry_finance_import, False),
     "all":         (OPTIONS["all"][0], _entry_all, False),
     "validate":    (OPTIONS["validate"][0], _entry_validate, False),
     "status":      (OPTIONS["status"][0], _entry_status, False),
@@ -712,7 +755,7 @@ class DataDownloadDialog(QDialog):
         # 标签页分组定义
         tab_defs = [
             ("行情数据", ["full", "incremental", "tdx", "web"]),
-            ("财务数据", ["finance", "all"]),
+            ("财务数据", ["finance", "finance_import", "all"]),
             ("数据管理", ["validate", "status"]),
         ]
 

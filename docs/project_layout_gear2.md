@@ -181,6 +181,7 @@ Pythonwdhmm/
 │   ├── 参数优化.py                    # ✨【V5·P2】参数优化入口：ParamOptimizer网格/随机/坐标下降三策略搜索，输出最优参数与热度图
   │   ├── 清理历史回测输出.py              # ✨【回写#25】清理outputs历史回测输出入口：按YYYYMMDD_HHMMSS时间戳归组仅保留最近N期（--keep），默认dry-run、--execute才删除；保护清单（子目录/非匹配模式/无法解析时间戳一律不删）
 │   ├── 一致性校验.py                  # ✨【V5·P3】三模式一致性校验入口：engine.py/vectorized_engine.py/mixed_engine.py同参数同数据比对收益曲线与成交，差异超阈值即失败
+│   ├── 财务数据入库.py              # ✨【回写#36】财务数据入库薄入口：参数解析(--mode import/factors/all/--csv/--lookback-days/--output-dir)+路径探测+调用FinancialImportService；自动定位datasets/raw/financial/最新financial_history_*.csv；输出outputs/财务数据入库报告/全中文HTML+CSV报告；GUI财务数据栏「财务数据入库」选项共用同一服务
 │   └── 验收_回测引擎V5.py             # ✨【V5·P1】引擎验收入口：执行统一验收清单（事件/向量化/混合引擎正确性+三模式一致性+回归+性能基准），输出验收报告
 │   ├── kunpeng_param_scan.py       # ✨【回写#34补录】鲲鹏策略参数网格扫描工作脚本（两阶段：信号参数扫描→出场+仓位扫描，真实数据 vectorized，输出 results/param_scan/scan_results.json；既有工作脚本补录，非薄入口，无调用方，建议后续薄化或并入 参数优化.py）
 │   └── 看板数据注入.py                 # ✨【2026-09-13】看板数据注入薄入口：参数解析+路径探测+调用myquant内部模块；支持一站式/JSON注入/交互式三种模式；# 已废弃（未落盘），见回写记录·2026-09-14（磁盘无此文件，看板渲染链路=run_回测入口.py --dashboard → myquant.backtest.dashboard_serializer）
@@ -294,6 +295,7 @@ Pythonwdhmm/
     │   ├── manager.py                # 数据管理器：增量更新/质量校验/同步状态/调用清洗函数输出processed；✅已实现 DatasetVersion 完整版本管理（任务14）：create_dataset_version/create_from_clean_run/list/get/get_latest/load/rollback/delete/verify 版本方法 + checksum(SHA256)校验 + parent_version派生链 + 版本索引持久化 + DatasetVersionError异常体系
     │   ├── loader.py                 # ✨【V5·P0】数据加载器（回测专用）：预取next_chunk+分块加载（chunk_size）+流水线模式（多bar并行预取）+内存水位降级（联动utils/memory_watcher，超阈值自动降为单块流式）；三模式引擎共用同一加载路径；与backtest/data_loader.py（历史数据提供器）分工互补
     │   ├── full_clean_service.py     # ✨【回写】全量清洗业务逻辑层：FullCleanService——DB读取→清洗管线→事务写回→清洗元信息落库→bad归档→可选重建processed（subprocess调scripts/数据导出_DB到processed.py）；唯一调用方=scripts/数据全量清洗.py（CLI与GUI全量清洗对话框共用）；业务逻辑归myquant，脚本只做薄入口（架构纪律）
+    │   ├── financial_service.py      # ✨【回写#36】财务数据入库服务：FinancialImportService——财务CSV读取→字段映射(net_profit_parent→net_profit/report_date YYYYMMDD→YYYY-MM-DD)→分批批量入库financial_data；FactorEngine向量化计算14个技术因子(SMA5/10/20/60,EMA12/26,MACD_DIF/DEA/HIST,RSI14,BOLL_UP/MID/LOW,ATR14)+5个基本面因子(PE/PB/ROE/毛利率/资产负债率)映射最新报告期→长表写入factor_data；生成全中文表头HTML+CSV入库报告；防未来函数(财务仅取report_date<=trade_date最新一期)；调用方=scripts/财务数据入库.py + GUI财务数据入库选项
     │   ├── cleaner/                  # ✨【数据清洗核心模块】已重构为面向对象架构
     │   │   ├── __init__.py
     │   │   ├── base_cleaner.py       # ✅已实现：CleanRule/CleanResult/CleanerBase(ABC)/CleanerRegistry 清洗器抽象基类与注册器
@@ -595,3 +597,68 @@ Pythonwdhmm/
    e. **首次提交**：git add -A 暂存 345 项（大文件/敏感文件/运行时产物均被 .gitignore 覆盖：quant.db 4.3GB 走 *.db、datasets/**/*、config/*.yaml、config/*.json、outputs/**/*、cache/**/*、results/**/*、实盘状态、backups/）；首次 commit 建立基线，commit message 引用本回写编号
    f. **纪律遵守**：未新增蓝图外文件（补录的是既有文件）；临时脚本清理符合治理规则4.1；无代码改动（纯版本管理启用+蓝图补录）
    g. **补充修正**：首次提交 cb68473 后发现 .gitignore 对已暂存文件不生效，results/ 32 项缓存仍混入首次提交；二次提交 358709a git rm -r --cached results/ 移除（磁盘文件保留、不再跟踪），工作区现干净（git status 无输出）；本回写记录随之提交
+
+35. ✨【回写记录·2026-09-19·bar_cleaner新增时间间隔重置基准功能】修复000028长期停牌后价格跳变被误判的问题。
+   问题根因：bar_cleaner 的价格跳变检测阈值 22%，被剔除记录不作为后续比较基准，
+   导致000028在1994年停牌后复牌（间隔3000+天），后续7612条数据全部以停牌前价格为基准被误杀
+   （事实来源：用户定位 000028 数据仅284行、dirty_data_stats 记录7612条PRICE_JUMP、clean_run_meta 有效率3.6%；
+   代码级核验：bar_cleaner.py _detect_sequence_anomalies 原逻辑无时间间隔判断）：
+   a. **新增配置项**（myquant/data_access/cleaner/bar_cleaner.py DEFAULT_BAR_CONFIG）：
+      - `reset_base_gap_days`: 默认30天，相邻记录时间间隔超过N天时自动重置跳变检测基准
+      - 设为0则禁用此功能，保持原行为
+   b. **批量清洗函数修改**（_detect_sequence_anomalies）：
+      - 计算当前记录与 prev 的时间间隔（秒）
+      - 若间隔 > reset_base_gap_seconds，跳过价格跳变和成交量异常检测，仅记录警告
+      - 警告内容："时间间隔 X 天超过阈值 Y 天，重置跳变检测基准"
+      - 防未来函数：仅使用 prev 和当前记录的时间戳，不访问未来数据
+   c. **流式清洗方法修改**（BarCleaner.clean_single）：
+      - 同步添加相同的时间间隔重置基准逻辑，保持实盘/批量行为一致
+   d. **文档注释更新**：
+      - _detect_sequence_anomalies docstring 新增"重置基准机制"说明段落
+   e. **测试验证**：
+      - 语法检查：py_compile 通过
+      - 功能测试：模拟000028场景（间隔4669天，价格从2.65跳到14.3）
+        * 默认配置（reset_base_gap_days=30）：3条全部有效，0次价格跳变 ✅
+        * 禁用重置（reset_base_gap_days=0）：正确检测到439.62%价格跳变 ✅
+      - 回归测试：pytest tests/unit/ = 1354 passed, 2 skipped ✅
+   f. **纪律遵守**：修改文件 myquant/data_access/cleaner/bar_cleaner.py 已在蓝图目录树中登记；
+      无新增蓝图外文件；临时测试脚本 test_reset_base.py 验证后删除；
+      全量回归基线 1354 passed / 2 skipped 无变化
+
+36. ✨【回写记录·2026-09-20·财务数据入库与因子计算】按 docs/交接摘要_财务数据导入与因子计算.md 执行，将财务CSV入库并批量计算因子，生成全中文HTML+CSV报告（事实来源：本次落地，代码级核验：financial_data 329722行 / factor_data 100670行）：
+   a. **新增业务模块** myquant/data_access/financial_service.py：FinancialImportService——三阶段(CSV导入/因子计算/中文报告)；字段映射 net_profit_parent→net_profit、report_date YYYYMMDD→YYYY-MM-DD、空串→NULL、created_at显式补当前时间；技术因子14个(SMA5/10/20/60,EMA12/26,MACD_DIF/DEA/HIST,RSI14,BOLL_UP/MID/LOW,ATR14)经FactorEngine向量化计算，基本面因子5个(市盈率PE/市净率PB/净资产收益率ROE/毛利率/资产负债率)按报告期向后映射；分批100标的/批控制内存；防未来函数(财务仅取 report_date<=trade_date 最新一期)
+   b. **新增薄入口** scripts/财务数据入库.py：argparse(--mode import/factors/all/--csv/--lookback-days/--output-dir)+find_project_root+sys.path引导，业务逻辑全归myquant；中文文件名入口
+   c. **GUI集成** myquant/gui/data_download_dialog.py：OPTIONS/DISPLAY_ORDER/EXEC_ORDER/tab_defs「财务数据」标签页/TASKS 五处同步新增「财务数据入库」选项；_entry_finance_import 适配 GUI 进度回调，调用同一 FinancialImportService
+   d. **验证结果**：财务CSV financial_history_20260912.csv 329722行全量入库(5314标的,1990-12-31~2026-06-30)；因子计算100670行(5340标的,最近交易日2026-09-18)；产物 outputs/财务数据入库报告/财务入库报告_20260920_082438.csv+.html(全中文表头/文件名)；py_compile 三文件通过
+   e. **纪律遵守**：新文件均在蓝图标注目录(data_access/与scripts/)；脚本薄入口；无新增蓝图外文件；临时验证脚本已清理
+
+37. ✨【回写记录·2026-09-20·processed表头全中文改造】datasets/processed/*.parquet 表头改为全中文，重新导出后保持中文，回测链路经加载器自动映射不受影响：
+   a. **scripts/数据导出_DB到processed.py**：新增 CN_COLUMN_MAP(open→开盘价/high→最高价/low→最低价/close→收盘价/volume→成交量/amount→成交额/pct_chg→涨跌幅) 与 CN_INDEX_NAME=日期；load_symbol_data 返回前 rename 列名为中文、索引名改"日期"；--force 全量重导 5342 个 parquet 文件
+   b. **myquant/backtest/data_loader.py**：新增 CN_TO_EN_COLUMN_MAP 反向映射常量；get_bars 读取后若检测到中文列名自动 rename 回英文内部列名(open/high/low/close/volume/amount/pct_chg)、索引名"日期"还原为 date；仅当存在中文列名时才映射，旧英文文件零影响
+   c. **验证结果**：5342 个 parquet 表头全中文(抽样200无英文残留)；端到端 HistoricalDataProvider.get_bars("000001.SZ") 返回英文列名 open/high/low/close/volume/amount/pct_chg，8457行数据正确至2026-09-18；py_compile 两文件通过
+   d. **纪律遵守**：无新增文件(仅改既有导出脚本与加载器)；下游回测/实盘读取路径经 data_loader 统一映射保护，未破坏接口契约；processed 为数据产物不入库
+38. ✨【回写记录·2026-09-20·回测引擎全链路中文列名改造】按用户要求"回测引擎内部所有表头文件仍需中文列名"，推翻#37的反向映射方案，改为数据进入内存后全链路统一中文列名（开盘价/最高价/最低价/收盘价/成交量/成交额/前收盘价，索引名"日期"）：
+   a. **myquant/backtest/data_loader.py**：常量 CN_TO_EN_COLUMN_MAP 改为 EN_TO_CN_COLUMN_MAP（正向）；get_bars 加载后若检测到英文列名(数据库/旧英文表头)统一转中文，中文表头文件零影响；required_cols 与数值转换列名改中文；日期索引名统一为"日期"
+   b. **指标层**：indicators/__init__.py _validate_data required 改中文；moving_average.py/momentum.py/volatility.py 的 price_col 默认值"close"→"收盘价"，calculate 内 data['close']/data['high']/data['low'] 字面量访问改中文（update 流式 bar 字典键保持英文实盘契约不动）
+   c. **回测引擎层**：vectorized_engine.py required 集合与 df["open"/"high"/"low"/"close"/"volume"/"pre_close"]、data["close"] 改中文；engine.py/mixed_engine.py 的 _benchmark_data['close'] 改中文；_build_unified_bars 把 DataFrame 转 Bar 时 row.get 列名改中文；三个引擎数据入口统一加英文→中文兜底（兼容验收脚本英文合成数据与数据库来源）
+   d. **策略层**：strategies/ 下 base/ma/momentum/mean_reversion/multi_factor/kunpeng/grid 共7个文件 df['close']/data["close"]/lookback['close'/'high'/'low']/df['volume'] 等 DataFrame 列访问改中文；multi_factor 两处列存在性判断('close'/'volume' in df.columns)同步改中文
+   e. **验证结果**：py_compile 全部改动文件通过；端到端 HistoricalDataProvider.get_bars("000001.SZ") 返回中文列名(开盘价/最高价/最低价/收盘价/成交量/成交额/涨跌幅)，索引名"日期"；FactorEngine 计算 SMA/RSI/ATR/KDJ/MACD/BOLL 全成功；真实中文parquet+MACrossStrategy跑vectorized回测 status=completed、29笔成交、243点净值曲线、期末净值1010413.11
+   f. **纪律遵守**：无新增文件(仅改既有模块)；数据库 market_data 表结构(SQL层)列名英文保持不动，仅数据进入内存后转中文；Bar对象属性 bar.close/方法调用 loop.close()/GUI按钮/实盘bar字典键 均未改动；临时验证脚本已清理
+
+39. ✨【回写记录·2026-09-20·日线派生量计算（涨跌幅/振幅/量比）】按用户要求在全量数据清洗时精确计算三个派生量并入库，解决 processed 目录涨跌幅全空问题：
+   a. **schema.py**：market_data 表新增两列 amplitude（振幅%）、volume_ratio（量比）；新增 _migrate_market_data_columns() 幂等迁移函数，create_all_tables 时自动对已存在表 ALTER TABLE ADD COLUMN；已验证数据库 quant.db 迁移成功，两列已存在
+   b. **新建 derived_metrics.py**（myquant/data_access/cleaner/）：compute_derived_metrics(records) 按日排序批量计算——涨跌幅=(close_t-close_{t-1})/close_{t-1}*100、振幅=(high_t-low_t)/close_{t-1}*100、量比=volume_t/mean(volume_{t-5..t-1})；严格防未来函数（第t行只用历史行），第1行无前收设None，量比均值为0设None；全量类型注解+Google docstring+logging
+   c. **full_clean_service.py**：worker_clean 在 run_clean_pipeline 清洗后调用 compute_derived_metrics 写入三字段；needs_write 强制为 True（派生量已写入必须写回DB）
+   d. **queries.py**：bulk_insert_market_data 的 columns 列表加 amplitude、volume_ratio
+   e. **导出脚本 + data_loader**：数据导出_DB到processed.py 的 CN_COLUMN_MAP 加 amplitude→振幅、volume_ratio→量比，SELECT语句加两列；data_loader.py 的 EN_TO_CN_COLUMN_MAP 同步加两列映射
+   f. **验证结果**：合成数据验证三口径正确（涨跌幅2.0%/振幅4.08%/量比1.0）；真实数据 000001.SZ 8457行，三字段非空8456行（第1行无前收为空），数值合理（涨跌幅±1%、振幅1-2%、量比0.8-1.3）；py_compile 全部改动文件通过
+   g. **纪律遵守**：新文件 derived_metrics.py 在蓝图标注目录 myquant/data_access/cleaner/ 下；无蓝图外文件；临时验证脚本已清理；复权说明：当前库内为后复权(hfq)数据，用hfq收盘价近似计算，除权日涨跌幅可能与不复权口径略有偏差（B类换手率/历史股本另案处理）
+
+40. ✨【回写记录·2026-09-20·B类派生量（换手率/流通股本/市盈动）】在全量清洗时精确计算B类派生量并入库：
+   a. **derived_metrics.py**：新增 compute_b_class_metrics(records, financial_records)——流通股本=最新circ_mv/close、总股本=最新total_mv/close（近似，忽略历史股本变化）；换手率=volume(股)/流通股本×100；市盈(动)=close×总股本/年化净利润（按report_date月份推断报告期类型年化：Q1×4/Q2×2/Q3×4/3/Q4×1）；严格防未来函数（每个交易日只用该日之前最近一期财务数据）
+   b. **schema.py**：market_data 表新增 float_share（流通股本，股）、pe_dynamic（市盈动）两列；迁移函数 _migrate_market_data_columns 的 new_columns 字典同步加两列
+   c. **full_clean_service.py**：worker_clean 在 A 类派生量计算后，从 financial_data 表读该标的财务记录（report_date/circ_mv/total_mv/net_profit），调用 compute_b_class_metrics 写入换手率/流通股本/市盈动；失败仅 warning 不阻断清洗
+   d. **queries.py**：bulk_insert_market_data 字段列表加 float_share、pe_dynamic
+   e. **导出脚本 + data_loader**：数据导出_DB到processed.py 的 CN_COLUMN_MAP 加 float_share→流通股本、pe_dynamic→市盈动；SELECT语句加两列；data_loader.py 的 EN_TO_CN_COLUMN_MAP 同步加两列
+   f. **验证结果**：真实数据 000001.SZ 8457行——换手率 0.35~0.49%（大盘股合理）、流通股本 194.7亿股（合理）、市盈动 4.4~4.5（与financial_data的pe=5.24接近）；全部非空（第1行无前收的pct_chg/amplitude/volume_ratio为空，其余6字段全有值）；py_compile 全部改动文件通过；数据库迁移成功（market_data 22列）
+   g. **纪律遵守**：无新增文件（仅扩展既有 derived_metrics.py）；复权说明：流通股本/总股本用最新值近似历史，长期（解禁/增发）会有偏差；网络不通未重新拉东财接口，用现有 financial_data 反推

@@ -77,6 +77,7 @@ DEFAULT_BAR_CONFIG: Dict[str, Any] = {
     "allow_zero_volume": True,
     "price_jump_action": "mark",      # mark=仅标记_warnings | drop=整行剔除进bad
     "volume_anomaly_action": "mark",  # mark=仅标记_warnings | drop=整行剔除进bad
+    "reset_base_gap_days": 30,        # 相邻记录间隔超过N天，自动重置跳变检测基准（应对长期停牌/重组）
     "fill_missing": False,
     "fill_strategy": "ffill",
     "sort_by_timestamp": True,
@@ -219,6 +220,11 @@ def _detect_sequence_anomalies(
       - action=mark（默认）: 异常记录仅标记 _warnings 字段，保留在有效数据中
       - action=drop       : 异常记录整行剔除，移入 bad（带 [PRICE_JUMP]/[VOLUME_ANOMALY] 错误码）
 
+    重置基准机制（reset_base_gap_days）:
+      - 相邻两条记录时间间隔超过 N 天（默认30天）时，自动重置跳变检测基准
+      - 应对长期停牌/重组导致的价格跳变（如000028案例：停牌数年复牌后价格跳变）
+      - 重置时仅记录警告，不判定为异常，不剔除数据
+
     注意: 此函数在去重和排序之后调用，records 已按时间升序排列；
           被剔除的记录不作为后续比较基准（prev 不更新），防未来函数。
 
@@ -239,46 +245,71 @@ def _detect_sequence_anomalies(
     kept: List[Dict[str, Any]] = []
     bad: List[Dict[str, Any]] = []
     prev = None
+    reset_gap_days = float(config.get("reset_base_gap_days", 30))
+    reset_gap_seconds = reset_gap_days * 86400  # 30天 = 2592000秒
+
     for rec in records:
         warnings = rec.setdefault("_warnings", [])
         drop_errors: List[str] = []
 
         if prev is not None:
-            # 价格跳变检测
-            if config.get("detect_price_jump", True):
-                prev_close = prev.get("close")
-                curr_open = rec.get("open")
-                if prev_close and curr_open and float(prev_close) > 0:
-                    try:
-                        change_pct = abs(float(curr_open) - float(prev_close)) / float(prev_close)
-                        if change_pct > config.get("max_price_jump_pct", 0.22):
-                            msg = f"价格跳变 {change_pct:.2%} (open={curr_open}, prev_close={prev_close})"
-                            counts["price_jump"] += 1
-                            if price_action == "drop":
-                                drop_errors.append(format_error(ErrorCode.PRICE_JUMP, msg))
-                            else:
-                                warnings.append(msg)
-                            logger.warning(msg)
-                    except (TypeError, ValueError, ZeroDivisionError):
-                        pass
+            # ★ 重置基准检测：相邻记录时间间隔超过阈值时，跳过跳变检测
+            # 应对长期停牌/重组导致的价格跳变（如000028案例）
+            prev_ts = _get_timestamp(prev)
+            curr_ts = _get_timestamp(rec)
+            gap_seconds = curr_ts - prev_ts
+            need_reset_base = (
+                reset_gap_days > 0
+                and gap_seconds > reset_gap_seconds
+                and prev_ts > 0
+                and curr_ts > 0
+            )
 
-            # 成交量异常检测
-            if config.get("detect_volume_anomaly", True):
-                prev_vol = prev.get("volume")
-                curr_vol = rec.get("volume")
-                if prev_vol and curr_vol and float(prev_vol) > 0:
-                    try:
-                        ratio = float(curr_vol) / float(prev_vol)
-                        if ratio > config.get("max_volume_ratio", 100.0):
-                            msg = f"成交量异常放大 {ratio:.1f}x (curr={curr_vol}, prev={prev_vol})"
-                            counts["volume_anomaly"] += 1
-                            if volume_action == "drop":
-                                drop_errors.append(format_error(ErrorCode.VOLUME_ANOMALY, msg))
-                            else:
-                                warnings.append(msg)
-                            logger.warning(msg)
-                    except (TypeError, ValueError, ZeroDivisionError):
-                        pass
+            if not need_reset_base:
+                # 价格跳变检测
+                if config.get("detect_price_jump", True):
+                    prev_close = prev.get("close")
+                    curr_open = rec.get("open")
+                    if prev_close and curr_open and float(prev_close) > 0:
+                        try:
+                            change_pct = abs(float(curr_open) - float(prev_close)) / float(prev_close)
+                            if change_pct > config.get("max_price_jump_pct", 0.22):
+                                msg = f"价格跳变 {change_pct:.2%} (open={curr_open}, prev_close={prev_close})"
+                                counts["price_jump"] += 1
+                                if price_action == "drop":
+                                    drop_errors.append(format_error(ErrorCode.PRICE_JUMP, msg))
+                                else:
+                                    warnings.append(msg)
+                                logger.warning(msg)
+                        except (TypeError, ValueError, ZeroDivisionError):
+                            pass
+
+                # 成交量异常检测
+                if config.get("detect_volume_anomaly", True):
+                    prev_vol = prev.get("volume")
+                    curr_vol = rec.get("volume")
+                    if prev_vol and curr_vol and float(prev_vol) > 0:
+                        try:
+                            ratio = float(curr_vol) / float(prev_vol)
+                            if ratio > config.get("max_volume_ratio", 100.0):
+                                msg = f"成交量异常放大 {ratio:.1f}x (curr={curr_vol}, prev={prev_vol})"
+                                counts["volume_anomaly"] += 1
+                                if volume_action == "drop":
+                                    drop_errors.append(format_error(ErrorCode.VOLUME_ANOMALY, msg))
+                                else:
+                                    warnings.append(msg)
+                                logger.warning(msg)
+                        except (TypeError, ValueError, ZeroDivisionError):
+                            pass
+            else:
+                # 时间间隔过长，重置基准，记录警告但不判定为异常
+                gap_days = gap_seconds / 86400
+                reset_msg = (
+                    f"时间间隔 {gap_days:.1f} 天超过阈值 {reset_gap_days:.0f} 天，"
+                    f"重置跳变检测基准"
+                )
+                warnings.append(reset_msg)
+                logger.info(reset_msg)
 
         if drop_errors:
             bad_rec = dict(rec)
@@ -653,33 +684,56 @@ class BarCleaner(CleanerBase):
         warnings: List[str] = []
 
         if not errors and prev_record is not None:
-            # 价格跳变检测
-            if self._config.get("detect_price_jump", True):
-                prev_close = prev_record.get("close")
-                curr_open = record.get("open")
-                if prev_close and curr_open and float(prev_close) > 0:
-                    try:
-                        change_pct = abs(float(curr_open) - float(prev_close)) / float(prev_close)
-                        if change_pct > self._config.get("max_price_jump_pct", 0.22):
-                            msg = f"价格跳变 {change_pct:.2%} (open={curr_open}, prev_close={prev_close})"
-                            warnings.append(msg)
-                            logger.warning(msg)
-                    except (TypeError, ValueError, ZeroDivisionError):
-                        pass
+            # ★ 重置基准检测：相邻记录时间间隔超过阈值时，跳过跳变检测
+            reset_gap_days = float(self._config.get("reset_base_gap_days", 30))
+            reset_gap_seconds = reset_gap_days * 86400
+            prev_ts = _get_timestamp(prev_record)
+            curr_ts = _get_timestamp(record)
+            gap_seconds = curr_ts - prev_ts
+            need_reset_base = (
+                reset_gap_days > 0
+                and gap_seconds > reset_gap_seconds
+                and prev_ts > 0
+                and curr_ts > 0
+            )
 
-            # 成交量异常检测
-            if self._config.get("detect_volume_anomaly", True):
-                prev_vol = prev_record.get("volume")
-                curr_vol = record.get("volume")
-                if prev_vol and curr_vol and float(prev_vol) > 0:
-                    try:
-                        ratio = float(curr_vol) / float(prev_vol)
-                        if ratio > self._config.get("max_volume_ratio", 100.0):
-                            msg = f"成交量异常放大 {ratio:.1f}x (curr={curr_vol}, prev={prev_vol})"
-                            warnings.append(msg)
-                            logger.warning(msg)
-                    except (TypeError, ValueError, ZeroDivisionError):
-                        pass
+            if not need_reset_base:
+                # 价格跳变检测
+                if self._config.get("detect_price_jump", True):
+                    prev_close = prev_record.get("close")
+                    curr_open = record.get("open")
+                    if prev_close and curr_open and float(prev_close) > 0:
+                        try:
+                            change_pct = abs(float(curr_open) - float(prev_close)) / float(prev_close)
+                            if change_pct > self._config.get("max_price_jump_pct", 0.22):
+                                msg = f"价格跳变 {change_pct:.2%} (open={curr_open}, prev_close={prev_close})"
+                                warnings.append(msg)
+                                logger.warning(msg)
+                        except (TypeError, ValueError, ZeroDivisionError):
+                            pass
+
+                # 成交量异常检测
+                if self._config.get("detect_volume_anomaly", True):
+                    prev_vol = prev_record.get("volume")
+                    curr_vol = record.get("volume")
+                    if prev_vol and curr_vol and float(prev_vol) > 0:
+                        try:
+                            ratio = float(curr_vol) / float(prev_vol)
+                            if ratio > self._config.get("max_volume_ratio", 100.0):
+                                msg = f"成交量异常放大 {ratio:.1f}x (curr={curr_vol}, prev={prev_vol})"
+                                warnings.append(msg)
+                                logger.warning(msg)
+                        except (TypeError, ValueError, ZeroDivisionError):
+                            pass
+            else:
+                # 时间间隔过长，重置基准
+                gap_days = gap_seconds / 86400
+                reset_msg = (
+                    f"时间间隔 {gap_days:.1f} 天超过阈值 {reset_gap_days:.0f} 天，"
+                    f"重置跳变检测基准"
+                )
+                warnings.append(reset_msg)
+                logger.info(reset_msg)
 
         is_valid = len(errors) == 0
         return is_valid, errors, warnings

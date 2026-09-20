@@ -43,13 +43,13 @@ from myquant.utils.parallel import ParallelManager
 PROJECT_ROOT = Path(r"D:\Projects\Pythonwdhmm")
 PROCESSED_DIR = str(PROJECT_ROOT / "datasets" / "processed")
 CONFIG_PATH = PROJECT_ROOT / "config" / "backtest_kunpeng.yaml"
-OUTPUT_DIR = PROJECT_ROOT / "outputs" / "kunpeng_param_opt"
+OUTPUT_DIR = PROJECT_ROOT / "outputs" / "kunpeng_param_opt_loose"  # 放宽信号版，独立目录不覆盖原结果
 START_DATE = "2024-01-01"
 END_DATE = "2026-09-16"
 INITIAL_CAPITAL = 1_000_000.0
 MODE = "vectorized"
 N_SYMBOLS = 300          # 参与优化的标的数（流动性 Top N）
-MIN_COVERAGE = 0.10      # 最优组合的信号覆盖率下限
+MIN_COVERAGE = 0.30      # 最优组合的信号覆盖率下限（放宽信号版：提高成交样本要求）
 TOP_N_SHOW = 15          # 榜单展示行数
 
 # 当前配置基线参数（同时作为第一轮/第二轮的非网格参数）
@@ -70,13 +70,13 @@ BASELINE_PARAMS: Dict[str, Any] = {
     "capital_base": 1_000_000.0,
 }
 
-# 第一轮：信号参数宽网格（出场固定 baseline）
+# 第一轮：信号参数宽网格（出场固定 baseline）—— 放宽信号版：阈值整体下调，更容易触发信号
 ROUND1_GRID: Dict[str, Tuple[Any, ...]] = {
-    "vol_ratio_threshold": (3.0, 4.5, 6.0),
-    "vol_active_days": (4, 5, 6),
-    "ma_sticky_threshold": (1.10, 1.18, 1.22, 1.30),
-    "diff_dea_ratio": (0.010, 0.018, 0.030),
-    "macd_rise_threshold": (0.00005, 0.0001, 0.0005),
+    "vol_ratio_threshold": (2.0, 3.0, 4.5),
+    "vol_active_days": (3, 4, 5),
+    "ma_sticky_threshold": (1.02, 1.08, 1.15),
+    "diff_dea_ratio": (0.003, 0.006, 0.010),
+    "macd_rise_threshold": (0.00002, 0.00005, 0.0001),
 }
 # 第二轮：出场参数网格（信号参数固定第一轮最优）
 ROUND2_GRID: Dict[str, Tuple[Any, ...]] = {
@@ -86,7 +86,7 @@ ROUND2_GRID: Dict[str, Tuple[Any, ...]] = {
 }
 # 第三轮：信号参数边界精扫（围绕第一轮最优外扩，出场固定第二轮最优）
 ROUND3_GRID: Dict[str, Tuple[Any, ...]] = {
-    "vol_ratio_threshold": (6.0, 8.0, 10.0),
+    "vol_ratio_threshold": (4.5, 5.0, 6.0),
     "vol_active_days": (6,),
     "ma_sticky_threshold": (1.02, 1.05, 1.10),
     "diff_dea_ratio": (0.005, 0.010),

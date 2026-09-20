@@ -539,7 +539,7 @@ class RSRSStrategy(StrategyBase):
         rsrs = self._get_or_create_rsrs("__vec__")
         cached = rsrs.calculate(data)
         vals = cached["rsrs"].to_numpy(dtype=float)
-        close = data["close"].astype(float).to_numpy()
+        close = data["收盘价"].astype(float).to_numpy()
         target = np.zeros(n)
         holding = False
         full_shares = 0.0
@@ -626,7 +626,7 @@ class MACrossStrategy(StrategyBase):
         if len(df) < self.slow_period + 1:
             return Signal(symbol=symbol, signal_type=SignalType.HOLD, reason="数据不足")
 
-        close = df['close'].astype(float)
+        close = df['收盘价'].astype(float)
         fast_ma = close.rolling(self.fast_period).mean()
         slow_ma = close.rolling(self.slow_period).mean()
 
@@ -709,7 +709,7 @@ class MACrossStrategy(StrategyBase):
         n = len(data)
         if n < self.slow_period + 1:
             return np.zeros(n)
-        close = data["close"].astype(float)
+        close = data["收盘价"].astype(float)
         fast = close.rolling(self.fast_period).mean()
         slow = close.rolling(self.slow_period).mean()
         target = np.zeros(n)

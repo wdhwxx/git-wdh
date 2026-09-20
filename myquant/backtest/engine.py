@@ -472,7 +472,7 @@ class BacktestEngine(BaseEngine):
         try:
             import pandas as pd
 
-            close = self._benchmark_data['close'].astype(float)
+            close = self._benchmark_data['收盘价'].astype(float)
             if len(close) == 0 or close.iloc[0] <= 0:
                 return 1.0
             # 基准数据时间轴：优先 index(DatetimeIndex)，其次 timestamp/date 列，最后字符串日期 index
@@ -666,9 +666,14 @@ class BacktestEngine(BaseEngine):
         此处再次按 config.start_date/end_date 过滤，确保不返回未来数据。
         """
         all_bars = []
+        from myquant.backtest.data_loader import EN_TO_CN_COLUMN_MAP
         for symbol, df in self.data.items():
             if df is None or len(df) == 0:
                 continue
+            # 列名统一为中文：兼容英文列名的合成数据/数据库来源
+            _rename = {en: cn for en, cn in EN_TO_CN_COLUMN_MAP.items() if en in df.columns}
+            if _rename:
+                df = df.rename(columns=_rename)
             # ★★★ 防未来函数：按日期范围过滤（双重保障）★★★
             if self.config.start_date:
                 mask = df.index.astype(str) >= self.config.start_date
@@ -681,11 +686,11 @@ class BacktestEngine(BaseEngine):
                 timestamp = self._row_to_timestamp(idx, row)
                 bar = Bar(
                     symbol=symbol,
-                    open=float(row.get('open', 0)),
-                    high=float(row.get('high', 0)),
-                    low=float(row.get('low', 0)),
-                    close=float(row.get('close', 0)),
-                    volume=float(row.get('volume', 0)),
+                    open=float(row.get('开盘价', 0)),
+                    high=float(row.get('最高价', 0)),
+                    low=float(row.get('最低价', 0)),
+                    close=float(row.get('收盘价', 0)),
+                    volume=float(row.get('成交量', 0)),
                     timestamp=timestamp,
                 )
                 all_bars.append(bar)
@@ -987,8 +992,8 @@ def _run_self_test() -> int:
     idx = pd.date_range("2024-01-01", periods=n, freq="B")
     close = 10.0 * 1.02 ** np.arange(n)
     df = pd.DataFrame(
-        {"open": close * 0.995, "high": close * 1.02, "low": close * 0.98,
-         "close": close, "volume": np.full(n, 1e6)},
+        {"开盘价": close * 0.995, "最高价": close * 1.02, "最低价": close * 0.98,
+         "收盘价": close, "成交量": np.full(n, 1e6)},
         index=idx,
     )
     data = {"600519.SH": df}

@@ -529,8 +529,8 @@ class MultiFactorStrategy(StrategyBase):
         if len(df) < self._min_factor_bars:
             return None
 
-        close = df['close'].astype(float)
-        volume = df['volume'].astype(float) if 'volume' in df.columns else None
+        close = df['收盘价'].astype(float)
+        volume = df['成交量'].astype(float) if '成交量' in df.columns else None
 
         result = pd.DataFrame(index=df.index)
         # 动量：N期收益率（trailing）
@@ -803,7 +803,7 @@ class MultiFactorStrategy(StrategyBase):
         """
         df = self._get_data_upto(context, symbol, bar)
         if df is not None and not df.empty and 'close' in df.columns:
-            close = df['close'].astype(float).dropna()
+            close = df['收盘价'].astype(float).dropna()
             if len(close) > 0:
                 return float(close.iloc[-1])
         return default_price
@@ -936,7 +936,7 @@ class MultiFactorStrategy(StrategyBase):
         n = len(df)
         if n < self._min_factor_bars:
             return np.zeros(n)
-        close = df["close"].astype(float)
+        close = df["收盘价"].astype(float)
         w_mom = float(self._base_factor_weights.get("momentum", 0.0))
         w_lv = float(self._base_factor_weights.get("low_vol", 0.0))
         mom = close.pct_change(self.momentum_period)
@@ -994,7 +994,7 @@ class MultiFactorStrategy(StrategyBase):
         if n < self._min_factor_bars:
             return np.zeros(n)
         score = self._vec_score_series(data)
-        close = data["close"].astype(float).to_numpy(dtype=float)
+        close = data["收盘价"].astype(float).to_numpy(dtype=float)
         target = np.zeros(n)
         holding = False
         full_shares = 0.0

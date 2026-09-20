@@ -447,7 +447,7 @@ class StrategyBase(ABC):
         df = context.get_data(symbol)
         if df is None or df.empty or 'close' not in df.columns:
             return None
-        return df['close'].astype(float)
+        return df['收盘价'].astype(float)
 
     def calc_volume_ratio(
         self, context: StrategyContext, symbol: str,
@@ -474,7 +474,7 @@ class StrategyBase(ABC):
         df = context.get_data(symbol)
         if df is None or df.empty or 'volume' not in df.columns:
             return None
-        volume = df['volume'].astype(float)
+        volume = df['成交量'].astype(float)
         # 需要至少 period+1 根数据（当日 + 过去N日）
         if len(volume) < period + 1:
             return None
@@ -586,7 +586,7 @@ class StockPoolBuilder:
                 continue
             if 'close' not in df.columns:
                 continue
-            close = df['close'].astype(float)
+            close = df['收盘价'].astype(float)
 
             # 波动率：20日收益率标准差
             returns = close.pct_change().dropna()

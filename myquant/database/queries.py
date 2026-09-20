@@ -201,7 +201,7 @@ class DataQueries:
         columns = [
             "symbol", "market", "period", "adjust", "trade_date", "trade_time",
             "open", "high", "low", "close", "volume", "amount",
-            "pct_chg", "turnover", "is_suspended", "data_source",
+            "pct_chg", "turnover", "amplitude", "volume_ratio", "float_share", "pe_dynamic", "is_suspended", "data_source",
         ]
         placeholders = ",".join(["?"] * len(columns))
         action = "REPLACE" if replace else "IGNORE"

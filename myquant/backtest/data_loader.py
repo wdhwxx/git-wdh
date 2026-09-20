@@ -37,6 +37,27 @@ from myquant.utils.time_utils import parse_datetime
 logger = get_logger("backtest.data_loader")
 
 
+#: 英文列名 → 中文列名映射（回测引擎内部统一使用中文表头）
+#: processed 导出脚本已将表头改为全中文；此处对来自数据库/旧英文表头的数据统一兜底转中文
+EN_TO_CN_COLUMN_MAP: Dict[str, str] = {
+    "open": "开盘价",
+    "high": "最高价",
+    "low": "最低价",
+    "close": "收盘价",
+    "volume": "成交量",
+    "amount": "成交额",
+    "pct_chg": "涨跌幅",
+    "amplitude": "振幅",
+    "volume_ratio": "量比",
+    "float_share": "流通股本",
+    "pe_dynamic": "市盈动",
+    "pre_close": "前收盘价",
+}
+
+#: 中文日期索引名（导出脚本与内部统一使用）
+CN_INDEX_NAME: str = "日期"
+
+
 # ═══════════════════════════════════════════
 #  DataProviderBase - 数据提供抽象基类
 # ═══════════════════════════════════════════
@@ -324,6 +345,14 @@ class HistoricalDataProvider(DataProviderBase):
         if df.empty:
             return pd.DataFrame()
 
+        # ★★★ 列名统一为中文：回测引擎内部全链路使用中文表头 ★★★
+        # 若存在英文列名（数据库/旧英文表头），统一转为中文；中文表头文件不受影响
+        rename_map = {en: cn for en, cn in EN_TO_CN_COLUMN_MAP.items() if en in df.columns}
+        if rename_map:
+            df = df.rename(columns=rename_map)
+        if df.index.name in (None, "date", "trade_date"):
+            df.index.name = CN_INDEX_NAME
+
         # ★ 日期处理：parquet 文件的 index 已经是日期（DatetimeIndex），
         #   csv 文件需要找日期列并设为 index
         if isinstance(df.index, pd.DatetimeIndex):
@@ -332,7 +361,7 @@ class HistoricalDataProvider(DataProviderBase):
         else:
             # csv 格式：确定日期列名（兼容 date / trade_date / datetime / timestamp）
             date_col = None
-            for col in ("date", "trade_date", "datetime", "timestamp"):
+            for col in ("日期", "date", "trade_date", "datetime", "timestamp"):
                 if col in df.columns:
                     date_col = col
                     break
@@ -341,8 +370,11 @@ class HistoricalDataProvider(DataProviderBase):
                 logger.error(f"{symbol} 数据文件缺少日期列: {list(df.columns)}")
                 return pd.DataFrame()
 
-            # 解析日期并设为index
-            df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+            # 解析日期并设为index（兼容整数YYYYMMDD和字符串两种格式）
+            if pd.api.types.is_integer_dtype(df[date_col]):
+                df[date_col] = pd.to_datetime(df[date_col].astype(str), format='%Y%m%d', errors="coerce")
+            else:
+                df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
             df = df.dropna(subset=[date_col])
             df.set_index(date_col, inplace=True)
             df.sort_index(inplace=True)
@@ -363,14 +395,14 @@ class HistoricalDataProvider(DataProviderBase):
             except (ValueError, TypeError):
                 logger.warning(f"end_date格式无效: {end_date}，不过滤截止日期")
 
-        # 标准化列名（确保包含核心OHLCV列）
-        required_cols = ["open", "high", "low", "close", "volume"]
+        # 标准化列名（确保包含核心OHLCV列，中文表头）
+        required_cols = ["开盘价", "最高价", "最低价", "收盘价", "成交量"]
         for col in required_cols:
             if col not in df.columns:
                 logger.warning(f"{symbol} 数据缺少列: {col}")
 
-        # 数值类型转换
-        for col in ("open", "high", "low", "close", "volume", "amount"):
+        # 数值类型转换（中文表头）
+        for col in ("开盘价", "最高价", "最低价", "收盘价", "成交量", "成交额"):
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
 

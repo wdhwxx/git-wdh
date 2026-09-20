@@ -35,6 +35,26 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
 
+#: 英文列名 → 中文显示名（导出到 processed 时表头全中文）
+#: 下游回测加载器 myquant/backtest/data_loader.py 读取时会自动映射回英文列名，不影响回测
+CN_COLUMN_MAP: Dict[str, str] = {
+    "open": "开盘价",
+    "high": "最高价",
+    "low": "最低价",
+    "close": "收盘价",
+    "volume": "成交量",
+    "amount": "成交额",
+    "pct_chg": "涨跌幅",
+    "amplitude": "振幅",
+    "volume_ratio": "量比",
+    "float_share": "流通股本",
+    "pe_dynamic": "市盈动",
+}
+
+#: DataFrame 索引（日期列）的中文显示名
+CN_INDEX_NAME: str = "日期"
+
+
 def find_project_root() -> Path:
     """自动探测项目根目录"""
     script_dir = Path(__file__).resolve().parent
@@ -74,7 +94,7 @@ def get_symbol_stats(conn: sqlite3.Connection, symbol: str) -> Tuple[int, str, s
 def load_symbol_data(conn: sqlite3.Connection, symbol: str) -> pd.DataFrame:
     """从 quant.db 读取单只标的的完整 hfq 日线数据"""
     query = """
-        SELECT trade_date, open, high, low, close, volume, amount, pct_chg
+        SELECT trade_date, open, high, low, close, volume, amount, pct_chg, amplitude, volume_ratio, float_share, pe_dynamic
         FROM market_data
         WHERE symbol=? AND period='daily' AND adjust='hfq'
         ORDER BY trade_date ASC
@@ -83,11 +103,33 @@ def load_symbol_data(conn: sqlite3.Connection, symbol: str) -> pd.DataFrame:
     # 转换日期为 datetime，设置为索引
     df['trade_date'] = pd.to_datetime(df['trade_date'])
     df = df.set_index('trade_date')
-    df.index.name = 'date'
+    df.index.name = CN_INDEX_NAME
     # 确保数值列为 float
-    for col in ['open', 'high', 'low', 'close', 'volume', 'amount', 'pct_chg']:
+    for col in ['open', 'high', 'low', 'close', 'volume', 'amount', 'pct_chg', 'amplitude', 'volume_ratio', 'float_share', 'pe_dynamic']:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
+    # 表头全中文显示（下游加载器自动映射回英文列名，不影响回测）
+    df = df.rename(columns=CN_COLUMN_MAP)
+    # 每股收益 = 按交易日匹配最近一期 financial_data.eps（防未来函数）
+    fin_cur = conn.cursor()
+    fin_cur.execute("SELECT report_date, eps FROM financial_data WHERE symbol=? ORDER BY report_date", (symbol,))
+    fin_rows = fin_cur.fetchall()
+    if fin_rows:
+        # 按交易日向后填充（只用该日之前最近一期）
+        fin_dates = [r[0] for r in fin_rows]
+        fin_eps = [r[1] for r in fin_rows]
+        eps_list = []
+        for trade_date_str in df.index.strftime('%Y-%m-%d'):
+            eps_val = None
+            for i, fd in enumerate(fin_dates):
+                if fd <= trade_date_str:
+                    eps_val = fin_eps[i]
+                else:
+                    break
+            eps_list.append(eps_val)
+        df["每股收益"] = eps_list
+    else:
+        df["每股收益"] = None
     return df
 
 

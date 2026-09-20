@@ -580,7 +580,7 @@ class MomentumStrategy(StrategyBase):
         n = len(data)
         if n < self.momentum_period + 1:
             return np.zeros(n)
-        close = data["close"].astype(float)
+        close = data["收盘价"].astype(float)
         close_np = close.to_numpy(dtype=float)
         target = np.zeros(n)
         holding = False

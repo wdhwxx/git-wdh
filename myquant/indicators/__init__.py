@@ -172,7 +172,7 @@ class IndicatorBase(ABC):
 
     def _validate_data(self, data: pd.DataFrame) -> None:
         """校验输入数据是否包含必要列"""
-        required = ['open', 'high', 'low', 'close']
+        required = ['开盘价', '最高价', '最低价', '收盘价']
         missing = [col for col in required if col not in data.columns]
         if missing:
             raise ValueError(

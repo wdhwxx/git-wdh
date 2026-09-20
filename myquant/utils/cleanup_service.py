@@ -16,11 +16,18 @@
      result_<unix秒>.json 单独排序保留最近 N 个（统一归本模块处理，
      不再提供"删光"语义，避免与归期逻辑冲突）。
 
+  3. 批量回测结果归期（H 类）：results/batch_backtest/ 下各策略子目录
+     （ma_cross/rsrs/kunpeng 等）中的 批量回测汇总_YYYYMMDD_HHMMSS.*
+     与 双强候选池_YYYYMMDD_HHMMSS.*，按时间戳分组每目录保留最新 N 批
+     （csv+html+pdf 三件套同期）；不触碰 fingerprints.json/results.json
+     增量缓存与非回测命名的人工产物。
+
 安全设计：
   - 所有扫描默认只收集不动手；execute=True 才删除。
   - 保护清单（永不触碰）：
     database/quant.db、datasets/processed/*.parquet、
     outputs/report_*/equity_*/trades_*/summary_*（保留期内的真实报告）、
+    results/batch_backtest/*/fingerprints.json 与 results.json（增量缓存）、
     非回测命名的人工产物、所有 .gitkeep、backups/ 代码备份（*.bak_*.py）、
     datasets/bad/ 真实脏数据归档（非孤儿）。
   - 时间戳无法解析 / 归属不明的文件一律保守保留。
@@ -88,6 +95,18 @@ BACKTEST_OUTPUT_PATTERNS: Tuple[str, ...] = (
 # 默认保守保留；勾选 G 类后一键清理）
 BAD_DATA_PATTERN: str = "bad_*.json"
 
+# H 类：批量回测结果文件模式（results/batch_backtest/ 各策略子目录下）
+BATCH_BACKTEST_RESULT_PATTERNS: Tuple[str, ...] = (
+    "批量回测汇总_*.csv",
+    "批量回测汇总_*.html",
+    "批量回测汇总_*.pdf",
+    "双强候选池_*.csv",
+    "双强候选池_*.html",
+    "双强候选池_*.pdf",
+)
+# 批量回测结果时间戳正则：从文件名提取 YYYYMMDD_HHMMSS
+BATCH_RESULT_TS_PATTERN: re.Pattern = re.compile(r"_(\d{8}_\d{6})\.[A-Za-z]+$")
+
 # 保护：真实 bad 归档（非测试、非孤儿）
 PROTECTED_BAD: frozenset = frozenset({"bad_bar_000001.SZ_20260827_195958.json"})
 # 保护：用户原有备份目录
@@ -102,6 +121,7 @@ CATEGORY_NAMES: Dict[str, str] = {
     "E": "旧格式冗余",
     "F": "回测产物输出",
     "G": "脏数据归档",
+    "H": "批量回测结果",
 }
 
 # ─────────────────────────────────────────────
@@ -185,13 +205,15 @@ class CleanupOptions:
         clean_artifacts: 是否包含 F 类（outputs 回测产物：报告族/result/回测看板）。
         clean_bad: 是否包含 G 类（datasets/bad 脏数据归档）。
         clean_outputs: 是否执行 outputs 回测输出归期。
-        keep: 保留的最近回测期数（≥1）。
+        clean_batch_results: 是否执行批量回测结果归期（results/batch_backtest/）。
+        keep: 保留的最近回测期数（≥1），同时作用于 outputs 与批量回测结果。
         execute: 是否真正删除（False 表示仅扫描预览）。
     """
     include_legacy: bool = False
     clean_artifacts: bool = False
     clean_bad: bool = False
     clean_outputs: bool = True
+    clean_batch_results: bool = False
     keep: int = DEFAULT_KEEP
     execute: bool = False
 
@@ -479,6 +501,89 @@ def scan_bad_data(project_root: Path, result: ScanResult) -> None:
 
 
 # ─────────────────────────────────────────────
+# H 类：批量回测结果归期
+# ─────────────────────────────────────────────
+
+def _scan_batch_dir(batch_dir: Path) -> Dict[str, List[Path]]:
+    """扫描单个批量回测策略子目录，按时间戳归组回测结果文件。
+
+    只匹配 BATCH_BACKTEST_RESULT_PATTERNS 中的已知命名模式，
+    不触碰 fingerprints.json / results.json / 非回测命名文件。
+
+    Args:
+        batch_dir: 策略子目录绝对路径（如 results/batch_backtest/rsrs/）。
+
+    Returns:
+        期时间戳(YYYYMMDD_HHMMSS) → 该期文件列表 的字典；
+        解析失败 / 不匹配模式的文件忽略。
+    """
+    periods: Dict[str, List[Path]] = {}
+    if not batch_dir.is_dir():
+        return periods
+    for entry in batch_dir.iterdir():
+        if not entry.is_file() or entry.name == GITKEEP_FILENAME:
+            continue
+        # 跳过增量缓存文件
+        if entry.name in ("fingerprints.json", "results.json"):
+            continue
+        # 匹配已知回测结果命名模式
+        matched = any(
+            fnmatch.fnmatch(entry.name, pat)
+            for pat in BATCH_BACKTEST_RESULT_PATTERNS
+        )
+        if not matched:
+            continue
+        ts_match = BATCH_RESULT_TS_PATTERN.search(entry.name)
+        if not ts_match:
+            logger.warning("批量回测结果文件时间戳解析失败，保守保留: %s", entry.name)
+            continue
+        periods.setdefault(ts_match.group(1), []).append(entry)
+    return periods
+
+
+def scan_batch_backtest_results(
+    project_root: Path,
+    result: ScanResult,
+    keep: int = DEFAULT_KEEP,
+) -> None:
+    """扫描 H 类批量回测结果（results/batch_backtest/ 各策略子目录）。
+
+    遍历 batch_backtest/ 下的直接子目录（含嵌套子目录如 kunpeng/refine/），
+    每个目录内按时间戳归组，保留最新 keep 批，旧批次加入待删列表。
+    根目录的 fingerprints.json / results.json 与各子目录的增量缓存均不触碰。
+
+    Args:
+        project_root: 项目根目录。
+        result: 扫描结果容器（原地追加）。
+        keep: 每个策略子目录保留的最近批次数，默认 1。
+    """
+    if keep < 1:
+        raise ValueError(f"keep 必须 ≥ 1，实际为 {keep}")
+    batch_root = project_root / "results" / "batch_backtest"
+    if not batch_root.is_dir():
+        logger.info("results/batch_backtest 目录不存在，跳过 H 类扫描")
+        return
+    # 递归扫描所有包含回测结果文件的子目录（含嵌套如 kunpeng/refine/）
+    for sub_dir in sorted(batch_root.rglob("*")):
+        if not sub_dir.is_dir():
+            continue
+        periods = _scan_batch_dir(sub_dir)
+        if not periods:
+            continue
+        sorted_periods = sorted(periods.keys(), reverse=True)
+        keep_periods = set(sorted_periods[:keep])
+        for period_ts, files in periods.items():
+            if period_ts in keep_periods:
+                continue
+            for fpath in files:
+                relative = fpath.relative_to(project_root)
+                result.add(
+                    fpath, "H",
+                    f"批量回测旧批次（{period_ts}，保留最近 {keep} 批）：{relative.parent.name}/",
+                )
+
+
+# ─────────────────────────────────────────────
 # outputs 归期
 # ─────────────────────────────────────────────
 
@@ -613,6 +718,9 @@ def run_cleanup_scan(project_root: Path, options: CleanupOptions) -> CleanupPlan
     # 可选 G 类
     if options.clean_bad:
         scan_bad_data(project_root, result)
+    # 可选 H 类（批量回测结果归期，复用 options.keep）
+    if options.clean_batch_results:
+        scan_batch_backtest_results(project_root, result, options.keep)
 
     keep_files: List[Path] = []
     delete_files: List[Path] = []

@@ -43,7 +43,7 @@ from PySide6.QtWidgets import (
 #   30.SZ  = 创业板(300/301开头.SZ)
 #   688.SH = 科创板(688开头.SH)
 #   4/8/92 = 北交所/老三板(4开头老三板、8开头北交所82/83/87/88、92北交所920新段)
-DEFAULT_EXCLUDE_RULES = "000.SH, 399, 880, 5.SH, 1.SZ, 30.SZ, 688.SH, 4, 8, 92"
+DEFAULT_EXCLUDE_RULES = "000.SH, 399, 880, 5.SH, 1.SZ, 30.SZ, 688.SH, 4, 8, 92, 68, 90, 20, 99"
 DEFAULT_PRESETS = [
     ("上证指数（000.SH）", "000.SH"),
     ("深证/中证指数（399）", "399"),

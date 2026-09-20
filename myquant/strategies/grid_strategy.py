@@ -211,12 +211,12 @@ class GridStrategy(StrategyBase):
             return
 
         lookback = df.tail(self.auto_grid_lookback)
-        close = lookback['close'].astype(float)
+        close = lookback['收盘价'].astype(float)
         mid = close.mean()
 
         # ATR 近似（high-low 均值，简化版）
         if 'high' in lookback.columns and 'low' in lookback.columns:
-            atr = (lookback['high'].astype(float) - lookback['low'].astype(float)).mean()
+            atr = (lookback['最高价'].astype(float) - lookback['最低价'].astype(float)).mean()
         else:
             atr = close.std()
 
@@ -485,7 +485,7 @@ class GridStrategy(StrategyBase):
                 self.grid_lower, self.grid_upper, self.grid_num + 1
             )
             self._grid_step = (self.grid_upper - self.grid_lower) / self.grid_num
-        close = data["close"].astype(float).to_numpy()
+        close = data["收盘价"].astype(float).to_numpy()
         stop_price = self.grid_lower * (1.0 - self.stop_loss_pct)
         target_price = self.grid_upper * (1.0 + self.take_profit_pct)
         target = np.zeros(n)
