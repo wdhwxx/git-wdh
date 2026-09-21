@@ -524,7 +524,7 @@ class MultiFactorStrategy(StrategyBase):
 
         返回 None 表示数据不足。
         """
-        if df is None or df.empty or 'close' not in df.columns:
+        if df is None or df.empty or '收盘价' not in df.columns:
             return None
         if len(df) < self._min_factor_bars:
             return None
@@ -759,7 +759,7 @@ class MultiFactorStrategy(StrategyBase):
         bar.timestamp<=0 时（无有效时间）不做截断，视为已增量数据。
         """
         df = context.get_data(symbol)
-        if df is None or df.empty or 'close' not in df.columns:
+        if df is None or df.empty or '收盘价' not in df.columns:
             return None
 
         ts = float(getattr(bar, "timestamp", 0) or 0)

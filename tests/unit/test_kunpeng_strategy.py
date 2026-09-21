@@ -47,6 +47,8 @@ from myquant.strategies import (
 )
 from myquant.strategies.base import Signal, SignalType, StrategyContext
 
+from tests.conftest import make_ohlcv_df
+
 # ═══════════════════════════════════════════════
 #  常量（禁魔法数字）
 # ═══════════════════════════════════════════════
@@ -88,19 +90,19 @@ def _make_df(
     volumes: Optional[List[float]] = None,
     symbol: str = SYMBOL,
 ) -> pd.DataFrame:
-    """从收盘价/成交量序列构造标准 OHLCV DataFrame。"""
+    """从收盘价/成交量序列构造标准 OHLCV DataFrame（中文列，#38 规范）。"""
     n = len(closes)
-    dates = pd.date_range("2024-01-01", periods=n, freq="B")
     if volumes is None:
         volumes = [BASE_VOLUME] * n
-    return pd.DataFrame({
-        "open": [c * 0.995 for c in closes],
-        "high": [c * 1.02 for c in closes],
-        "low": [c * 0.98 for c in closes],
-        "close": closes,
-        "volume": volumes,
-        "amount": [c * v for c, v in zip(closes, volumes)],
-    }, index=dates)
+    return make_ohlcv_df(
+        closes=closes,
+        volumes=volumes,
+        opens=[c * 0.995 for c in closes],
+        highs=[c * 1.02 for c in closes],
+        lows=[c * 0.98 for c in closes],
+        amounts=[c * v for c, v in zip(closes, volumes)],
+        start="2024-01-01",
+    )
 
 
 def _make_bar(symbol: str, close: float, ts: float, volume: float = BASE_VOLUME) -> Bar:
@@ -267,8 +269,8 @@ class TestKunpengStrategyFormula:
         st = KunpengStrategy()
         kp = st._compute_kunpeng(df)
         manual = _manual_kunpeng(
-            df["close"].to_numpy(dtype=float),
-            df["volume"].to_numpy(dtype=float),
+            df["收盘价"].to_numpy(dtype=float),
+            df["成交量"].to_numpy(dtype=float),
             st,
         )
         np.testing.assert_allclose(
@@ -487,7 +489,7 @@ class TestKunpengBoundary:
 
     def test_missing_volume_column(self):
         """缺 volume 列 → _compute_kunpeng 抛 ValueError；on_bar 防御返回空信号。"""
-        df = _make_df([10.0] * 70).drop(columns=["volume"])
+        df = _make_df([10.0] * 70).drop(columns=["成交量"])
         st = KunpengStrategy()
         with pytest.raises(ValueError):
             st._compute_kunpeng(df)
@@ -763,24 +765,24 @@ class TestKunpengNoLookahead:
         st1.on_init(ctx1)
         sig_dates1: List[pd.Timestamp] = []
         for i in range(len(df1)):
-            bar = _make_bar(SYMBOL, df1["close"].iloc[i],
+            bar = _make_bar(SYMBOL, df1["收盘价"].iloc[i],
                             df1.index[i].timestamp(),
-                            df1["volume"].iloc[i])
+                            df1["成交量"].iloc[i])
             for s in st1.on_bar(bar, ctx1):
                 if s.is_buy:
                     sig_dates1.append(df1.index[i])
 
         # 修改信号日(索引79)之后的数据（未来数据）：BUY 信号只依赖 [0..79]，不应漂移
         df2 = df1.copy()
-        df2.iloc[80:, df2.columns.get_loc("close")] *= 3.0
+        df2.iloc[80:, df2.columns.get_loc("收盘价")] *= 3.0
         ctx2 = _make_context(df2)
         st2 = KunpengStrategy()
         st2.on_init(ctx2)
         sig_dates2: List[pd.Timestamp] = []
         for i in range(len(df2)):
-            bar = _make_bar(SYMBOL, df2["close"].iloc[i],
+            bar = _make_bar(SYMBOL, df2["收盘价"].iloc[i],
                             df2.index[i].timestamp(),
-                            df2["volume"].iloc[i])
+                            df2["成交量"].iloc[i])
             for s in st2.on_bar(bar, ctx2):
                 if s.is_buy:
                     sig_dates2.append(df2.index[i])

@@ -30,14 +30,16 @@ live:
 # ========== 券商连接配置（为多券商对接预留）==========
 broker:
   # 券商类型：paper=本地模拟撮合 / xtp=中泰XTP / qmt=迅投QMT / ptrade=恒生Ptrade / custom=自定义
-  type: "paper"
+  type: "qmt"
   # 券商适配器（对应 myquant/live/brokers/ 下的实现类）
-  adapter: "paper_broker"               # 适配器名称：paper_broker / xtp_broker / qmt_broker / ptrade_broker
-  # 连接配置（实盘时填写，建议从环境变量读取，paper模式不需要）
-  # host: "${BROKER_HOST}"             # 券商交易服务器地址
-  # port: "${BROKER_PORT}"             # 端口
-  # account: "${BROKER_ACCOUNT}"       # 资金账号（从环境变量读取）
-  # password: "${BROKER_PASSWORD}"     # 交易密码（从环境变量读取）
+  adapter: "qmt_broker"               # 适配器名称：paper_broker / xtp_broker / qmt_broker / ptrade_broker
+  # 运行模式：SIM=本地模拟撮合（默认，无QMT环境可验证） / LIVE=真实QMT下单
+  # 注意：LIVE 模式会真实下单！先小额资金验证，再逐步放量。
+  mode: "LIVE"
+  # QMT 连接配置（LIVE 必填；建议从环境变量读取，不写真实密钥）
+  # 注意：引擎读取的字段名为 qmt_path / account / mode（见 engine.py build_broker_from_config）
+  # qmt_path: "${QMT_PATH}"            # QMT安装目录下 userdata_mini 的绝对路径（极简模式）
+  # account: "${QMT_ACCOUNT}"          # 资金账号（QMT客户端中的资金账号，纯数字）
   # 连接管理
   heartbeat_interval: 30                # 心跳间隔（秒）
   reconnect_times: 5                    # 断线重连次数
@@ -120,7 +122,8 @@ risk_control:
   max_order_value: 200000                 # 单笔最大下单金额（元）
   max_daily_trades: 20                     # 单日最大交易次数
   # 亏损限制
-  max_daily_loss_pct: 0.03                 # 单日最大亏损3%（触发后停止交易）
+  max_daily_loss_pct: 0.01                 # 单日最大亏损1%（任务46/P1：已接线 daily_loss_limit 规则，
+                                           #   触发后当日禁止新开仓，次日自动重置；引擎默认硬编码兜底1%）
   max_drawdown_pct: 0.15                   # 最大回撤15%（触发后清仓停止）
   # 涨跌停限制
   allow_buy_limit_up: false                # 涨停板是否可买入（false=不能买）

@@ -174,6 +174,10 @@ class BaseBroker(ExecutionInterface):
         # 订阅列表
         self._subscribed_symbols: Set[str] = set()
 
+        # 本地订单簿（order_id → Order）：提交的订单统一登记，供查单/补单对账；
+        # 子类（如 PaperBroker）若已有 self.orders 命名，get_orders() 会兼容兜底
+        self._orders: Dict[str, Order] = {}
+
         # 统计
         self._stats = {
             "total_orders": 0,
@@ -658,6 +662,105 @@ class BaseBroker(ExecutionInterface):
         List[Order] : 活跃订单列表
         """
         pass
+
+    # ═══════════════════════════════════════════
+    #  补单对账（任务45 / T3：断线重连后仅补发未成交订单）
+    # ═══════════════════════════════════════════
+
+    @_locked
+    def resubmit_order(self, order: Order) -> Order:
+        """
+        断线补单强制重发（默认实现 = submit_order）
+
+        语义: 对账确认【券商端无此单】后的显式补发通道。与 submit_order
+        的区别在于——子类若在 submit_order 中做订单幂等去重（如 QmtBroker
+        任务43 防桥接重发），补发副本（同一 order_id）会被幂等拦截而空转，
+        因此真实券商子类必须覆盖本方法跳过幂等、真正重新委托。
+
+        基类默认实现直接委托 submit_order（无幂等拦截的模拟券商天然兼容；
+        有幂等去重的子类必须覆盖）。
+
+        Parameters
+        ----------
+        order : Order
+            补发订单（BrokerManager 传入的 PENDING 干净副本，order_id 不变）
+
+        Returns
+        -------
+        Order : 补发后的订单（SUBMITTED 或 REJECTED）
+        """
+        return self.submit_order(order)
+
+    @_locked
+    def get_orders(self, symbol: Optional[str] = None) -> List[Order]:
+        """
+        查询本地订单簿全量订单（补单对账数据源）
+
+        返回订单簿中全部订单（含已成交/已撤/已拒终态），
+        供 BrokerManager.resend_pending_orders() 与本地状态对账使用。
+
+        Parameters
+        ----------
+        symbol : str | None
+            可选，按标的筛选
+
+        Returns
+        -------
+        List[Order] : 本地订单簿全量订单列表
+        """
+        store = getattr(self, "_orders", None)
+        if store is None:
+            # 兼容既有子类命名（PaperBroker 使用 self.orders）
+            store = getattr(self, "orders", {})
+        orders = list(store.values())
+        if symbol:
+            orders = [o for o in orders if o.symbol == symbol]
+        return orders
+
+    @_locked
+    def query_broker_orders(
+        self, symbol: Optional[str] = None
+    ) -> Optional[List[Dict[str, Any]]]:
+        """
+        查询券商端订单状态快照（补单对账用，子类可覆盖为真实 SDK 查询）
+
+        返回结构与真实券商查询对齐:
+          [{"order_id": str, "qmt_order_id": int|None, "status": OrderStatus,
+            "symbol": str, "quantity": float}, ...]
+
+        保守语义:
+          - 返回 None        = 查询失败/无法确认券商端状态 → 调用方【不补发】
+            （宁可漏单也不重复报单，防止断线期间查询失败触发补单风暴）
+          - 返回 []          = 券商端确实无任何订单
+          - 返回列表          = 券商端当日委托状态快照
+
+        基类默认基于本地订单簿快照（模拟/测试场景，券商端=本地）；
+        真实券商子类（QmtBroker）应覆盖为 SDK 当日委托查询（query_stock_orders）。
+
+        Parameters
+        ----------
+        symbol : str | None
+            可选，按标的筛选
+
+        Returns
+        -------
+        Optional[List[Dict[str, Any]]] : 券商端订单状态快照；查询失败返回 None
+        """
+        try:
+            result: List[Dict[str, Any]] = []
+            for order in self.get_orders(symbol):
+                extra = order.extra or {}
+                result.append({
+                    "order_id": str(order.order_id),
+                    "qmt_order_id": extra.get("qmt_order_id"),
+                    "status": order.status,
+                    "symbol": order.symbol,
+                    "quantity": order.quantity,
+                })
+            return result
+        except Exception as e:  # noqa: BLE001 - 查询异常按"无法确认"处理
+            logger.error(f"[{self.broker_name}] 券商端订单状态查询异常: {e}")
+            return None
 
     # ═══════════════════════════════════════════
     #  资金与持仓查询（继承自ExecutionInterface，子类必须实现）

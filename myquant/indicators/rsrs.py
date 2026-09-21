@@ -340,8 +340,8 @@ class RSRS(IndicatorBase):
         Returns:
             {rsrs, rsrs_raw, rsrs_r2, signal}
         """
-        high = float(bar["high"])
-        low = float(bar["low"])
+        high = float(bar["最高价"])
+        low = float(bar["最低价"])
 
         # 将当前bar加入历史缓冲区
         self._history.append({"high": high, "low": low})

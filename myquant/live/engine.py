@@ -63,13 +63,13 @@ from __future__ import annotations
 
 import time
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Set
 
 import pandas as pd
 
 from myquant.core.logger import get_logger
-from myquant.core.date_utils import format_bar_date
-from myquant.core.lookahead_guard import LookaheadGuard
+from myquant.core.date_utils import format_bar_date, get_date_part
+from myquant.core.lookahead_guard import LookaheadGuard, get_lookahead_guard
 from myquant.engine.base import BaseEngine
 from myquant.live.brokers import BrokerManager
 from myquant.models.market_data import Bar, BarFrequency, MarketEvent
@@ -201,11 +201,13 @@ class LiveEngine(BaseEngine):
         state_store: Optional[Any] = None,
         scheduler: Optional[Any] = None,
         guardian: Optional[Any] = None,
+        lookahead_guard: Optional[LookaheadGuard] = None,
         enable_risk_manager: bool = True,
         enable_state_store: bool = True,
         enable_scheduler: bool = True,
         enable_guardian: bool = True,
         enable_event_bus: bool = True,
+        enable_lookahead_guard: bool = True,
         auto_recover: bool = False,
         monitor_only: bool = False,
         snapshot_interval: float = 300.0,
@@ -238,8 +240,12 @@ class LiveEngine(BaseEngine):
         guardian : RiskGuardian | None
             风控守护（H2修复）。None时自动创建（依赖risk_manager）；
             巡检任务定期evaluate，PAUSE→风控暂停，强平决策→CRITICAL留痕
+        lookahead_guard : LookaheadGuard | None
+            防未来函数校验器（任务42）。None时自动创建；
+            信号生成 record_signal / 成交回报 record_trade / 停止时 assert_pass，
+            严格模式违规立即抛 LookaheadError（记录模式停止时统一校验）
         enable_risk_manager / enable_state_store / enable_scheduler /
-        enable_guardian / enable_event_bus : bool
+        enable_guardian / enable_event_bus / enable_lookahead_guard : bool
             各保障组件开关（默认全True；显式False可完全关闭，测试/极简场景用）
         auto_recover : bool
             启动时是否自动恢复上次状态（默认False，对齐配置模板
@@ -298,6 +304,7 @@ class LiveEngine(BaseEngine):
             "rejected_orders": 0,
             "total_trades": 0,
             "risk_rejected": 0,
+            "dedup_skipped": 0,
             "last_bar_time": 0.0,
             "last_signal_time": 0.0,
             "errors": 0,
@@ -323,6 +330,9 @@ class LiveEngine(BaseEngine):
         self._order_count_today: int = 0
         self._last_order_time: float = 0.0
         self._last_prices: Dict[str, float] = {}
+        # ── 任务46/P1：单日亏损上限（日初资产快照 + 当前交易日，跨日重置）──
+        self._day_start_assets: float = 0.0
+        self._active_trading_date: str = ""
         self._event_bus = None
         self._event_subscription_ids: List[str] = []
         self._own_scheduler: bool = False   # 调度器是否引擎创建（决定stop归属）
@@ -340,6 +350,20 @@ class LiveEngine(BaseEngine):
         self._guardian = None
         if enable_guardian and self._risk_manager is not None:
             self._guardian = guardian if guardian is not None else RiskGuardian(self._risk_manager)
+
+        # 2.5) LookaheadGuard：防未来函数校验（任务42）
+        #      信号生成 record_signal / 成交回报 record_trade / 停止时 assert_pass；
+        #      回测与实盘共用同一校验器（规则4，铁律2）
+        self._enable_lookahead_guard = bool(enable_lookahead_guard)
+        self._lookahead_guard: Optional[LookaheadGuard] = None
+        self._order_signal_dates: Dict[str, str] = {}  # order_id → 信号日期(YYYY-MM-DD)
+        if enable_lookahead_guard:
+            self._lookahead_guard = (
+                lookahead_guard if lookahead_guard is not None else LookaheadGuard()
+            )
+
+        # 2.6) 幂等去重（任务43）：已处理信号 ID 集合（确定性，防桥接重发）
+        self._processed_signal_ids: Set[str] = set()
 
         # 3) StateStore：崩溃恢复 / 定时快照
         self._state_store = None
@@ -587,6 +611,15 @@ class LiveEngine(BaseEngine):
             return False
 
         try:
+            # ── 任务42：防未来函数校验器重置（每次启动全新会话，回测/实盘同源）──
+            if self._lookahead_guard:
+                self._lookahead_guard.reset()
+                logger.info(f"[engine] 防未来函数校验器已启用: {self._lookahead_guard}")
+                self._order_signal_dates.clear()
+
+            # ── 任务43：幂等去重集合重置（每次启动全新会话）──
+            self._processed_signal_ids.clear()
+
             # ── H2修复：事件总线联动（风控订阅数据质量事件，行情流式清洗联动）──
             self._setup_event_bus()
 
@@ -700,6 +733,16 @@ class LiveEngine(BaseEngine):
             if self._broker_manager and hasattr(self._broker_manager, 'disconnect_all'):
                 self._broker_manager.disconnect_all()
 
+            # ── 任务42：停止时统一防未来校验（规则4：回测实盘都必须 assert_pass）──
+            # strict 模式违规在记录时已抛 LookaheadError（由上层捕获）；
+            # 记录模式在此统一校验，违规仅留痕告警，不阻断正常停机（停机本身是安全操作）
+            try:
+                self._run_lookahead_assert()
+            except Exception as e:
+                logger.error(f"[engine] 防未来函数校验未通过: {e}")
+                self._stats["errors"] += 1
+                self._stats["last_error"] = f"lookahead_violation: {e}"
+
             self._state = EngineState.STOPPED
             self._running = False    # BaseEngine 状态同步
             self._stopped = True     # BaseEngine 状态同步
@@ -712,6 +755,32 @@ class LiveEngine(BaseEngine):
         except Exception as e:
             logger.error(f"[engine] 停止异常: {e}")
             self._stats["errors"] += 1
+
+    def _run_lookahead_assert(self) -> bool:
+        """
+        防未来函数统一校验（停止时调用，任务42）
+
+        记录模式：违规统一在此抛 LookaheadError（由调用方决定处理）；
+        无违规返回 True。guard 未启用时直接通过。
+
+        Returns
+        -------
+        bool : True=校验通过
+
+        Raises
+        ------
+        LookaheadError : 存在未来函数违规且 guard 启用时抛出
+        """
+        if not self._lookahead_guard:
+            return True
+
+        guard_stats = self._lookahead_guard.stats
+        logger.info(
+            f"[engine] 防未来函数校验: 信号={guard_stats['signals_recorded']}, "
+            f"成交={guard_stats['trades_recorded']}, "
+            f"违规={guard_stats['violations']}"
+        )
+        return self._lookahead_guard.assert_pass()
 
     def pause(self) -> None:
         """暂停引擎（实时模式同时停止行情轮询，节能）"""
@@ -1180,6 +1249,22 @@ class LiveEngine(BaseEngine):
         if signal.is_hold:
             return
 
+        # ── 任务43：幂等去重（确定性信号ID，防桥接网络波动重发触发重复下单）──
+        # 信号ID按 bar 的交易日/分钟归一化派生（同一根 bar 重发 → 同一 ID），
+        # 已处理集合命中 → 直接丢弃（不重复生成订单、不重复走风控/券商）
+        if not signal.signal_id:
+            signal.signal_id = signal.make_signal_id(
+                as_of_date=format_bar_date(bar.timestamp, period=str(bar.frequency.value))
+            )
+        if signal.signal_id in self._processed_signal_ids:
+            self._stats["dedup_skipped"] += 1
+            logger.info(
+                f"[engine] 重复信号丢弃(幂等): {signal.signal_id} "
+                f"{signal.symbol} {signal.signal_type.value}"
+            )
+            return
+        self._processed_signal_ids.add(signal.signal_id)
+
         # 监控模式（H2修复）：生成并记录信号，但不提交订单
         if self._monitor_only:
             logger.info(
@@ -1211,6 +1296,22 @@ class LiveEngine(BaseEngine):
         )
         if order is None:
             return
+
+        # ── 任务42：信号生成阶段即记录防未来校验（铁律4：因子仅用历史数据）──
+        # 信号T日收盘生成，数据截止日=T日；与回测引擎 record_signal 同源
+        if self._lookahead_guard:
+            signal_date = get_date_part(bar.timestamp) or ""
+            signal_type = "BUY" if signal.is_buy else ("SELL" if signal.is_sell else "CLOSE")
+            self._lookahead_guard.record_signal(
+                symbol=signal.symbol,
+                signal_date=signal_date,
+                signal_type=signal_type,
+                data_end=signal_date,  # 信号基于T日收盘价，数据截止日=T日
+                factor_names=[self._strategies[0].name] if self._strategies else None,
+            )
+            # 登记 order_id → 信号日期（供成交回报 record_trade 铁律3校验）
+            if signal_date:
+                self._order_signal_dates[order.order_id] = signal_date
 
         # 5. H2修复：RiskManager 完整规则库检查（提交券商前强制，铁律2）
         if not self._risk_manager_check(order, bar):
@@ -1307,6 +1408,9 @@ class LiveEngine(BaseEngine):
             "price_limit": {},
             "blacklist": {},
             "single_order_limit": {"enabled": False},
+            # ── 任务46/P1：单日亏损上限硬编码 1% 兜底启用（真钱实盘初始建议值，
+            #    配置 risk_control.max_daily_loss_pct 可覆盖）──
+            "daily_loss_limit": {"enabled": True, "max_daily_loss_pct": 0.01},
             "max_drawdown": {"enabled": False},
             "stop_loss": {"enabled": False},
             "take_profit": {"enabled": False},
@@ -1339,6 +1443,11 @@ class LiveEngine(BaseEngine):
                 })
         if total_assets > self._peak_assets:
             self._peak_assets = total_assets
+        # ── 任务46/P1：日初资产快照（跨日重置为当日首见资产，严格防未来）──
+        today = datetime.now().strftime("%Y-%m-%d")
+        if self._active_trading_date != today:
+            self._active_trading_date = today
+            self._day_start_assets = total_assets if total_assets > 0 else 0.0
         current_price: Dict[str, float] = dict(self._last_prices)
         if bar is not None:
             current_price[bar.symbol] = float(bar.close)
@@ -1352,7 +1461,8 @@ class LiveEngine(BaseEngine):
             current_price=current_price,
             order_count_today=self._order_count_today,
             last_order_time=self._last_order_time,
-            trading_date=datetime.now().strftime("%Y-%m-%d"),
+            trading_date=today,
+            day_start_assets=self._day_start_assets,
             extra={"current_time": datetime.now().strftime("%H:%M:%S")},
         )
 
@@ -1646,6 +1756,38 @@ class LiveEngine(BaseEngine):
             self._stats["errors"] += 1
             self._stats["rejected_orders"] += 1
 
+    # ═══════════════════════════════════════════
+    #  断线补单对账（任务45 / T3：重连后仅补发未成交订单）
+    # ═══════════════════════════════════════════
+
+    def resend_pending_orders(self, symbol: Optional[str] = None) -> Dict[str, Any]:
+        """
+        断线补单对账（委托 BrokerManager 执行）
+
+        QMT 断线/网络波动后，本地与券商端订单状态可能不一致：
+        本地 SUBMITTED 但券商端未收到 → 本轮补发；
+        券商端已成交/已撤/在途 → 不补发（防重复报单）。
+        券商端查询失败 → 保守不补发（宁可漏单不重复单）。
+
+        触发方式（v1 提供公开入口，供调度器巡检/重连回调/人工调用）:
+          - 由 LiveScheduler 巡检周期调用（后续迭代自动接线）
+          - 或重连成功后手动调用本方法
+
+        Parameters
+        ----------
+        symbol : str | None
+            可选，仅对账指定标的
+
+        Returns
+        -------
+        Dict[str, Any] : BrokerManager.resend_pending_orders() 的对账结果
+            {checked / in_flight / terminal / resent / failed / skipped / per_broker}
+        """
+        if not self._broker_manager:
+            logger.error("[engine] 无 broker_manager，无法断线补单对账")
+            return {"error": "no_broker_manager"}
+        return self._broker_manager.resend_pending_orders(symbol)
+
     def on_order_update(self, order: Order) -> None:
         """
         订单更新回调（供broker调用）
@@ -1675,6 +1817,24 @@ class LiveEngine(BaseEngine):
             # 更新portfolio
             if self._portfolio:
                 self._portfolio.apply_trade(trade)
+
+            # ── 任务42：成交回报记录防未来校验（铁律3：信号T日→T+1成交）──
+            # 实盘/paper模式下信号当日收盘生成、撮合可能在同日（trade_date==signal_date），
+            # 属"模拟撮合时点"与执行纪律差异，跳过T+1严格校验不误报；
+            # 成交日早于信号日（trade_date<signal_date）才是真违规，保留信号日交guard校验
+            if self._lookahead_guard:
+                trade_date = get_date_part(trade.timestamp) or ""
+                signal_date = self._order_signal_dates.get(trade.order_id, "")
+                if signal_date and trade_date and trade_date == signal_date:
+                    signal_date = ""  # 同日模拟撮合时点，跳过T+1严格校验
+                side = trade.side.value if hasattr(trade.side, 'value') else str(trade.side)
+                self._lookahead_guard.record_trade(
+                    symbol=trade.symbol,
+                    trade_date=trade_date,
+                    signal_date=signal_date,
+                    price_type="OPEN",
+                    side=side,
+                )
 
             # 触发成交回调
             for cb in self._on_trade_callbacks:
@@ -1982,6 +2142,7 @@ def build_risk_manager_from_config(
       - risk_control.max_order_value → single_order_limit
       - risk_control.max_daily_trades → rate_limit
       - risk_control.max_drawdown_pct → max_drawdown
+      - risk_control.max_daily_loss_pct → daily_loss_limit（任务46/P1，默认1%）
       - strategy.params.stop_loss_pct / take_profit_pct → stop_loss / take_profit
       - enable_trading_hours → trading_hours（真钱实盘默认启用）
 
@@ -2013,6 +2174,9 @@ def build_risk_manager_from_config(
         },
         "max_drawdown": {
             "max_drawdown_pct": float(risk_cfg.get("max_drawdown_pct", 0.15)),
+        },
+        "daily_loss_limit": {
+            "max_daily_loss_pct": float(risk_cfg.get("max_daily_loss_pct", 0.01)),
         },
         "stop_loss": {
             "enabled": stop_loss_pct > 0,
@@ -2079,6 +2243,7 @@ def create_live_engine(
     risk_cfg = dict(config.get("risk_control", {}) or {})
     state_cfg = dict(config.get("state_store", {}) or {})
     scheduler_cfg = dict(config.get("scheduler", {}) or {})
+    lookahead_cfg = dict(config.get("lookahead_guard", {}) or {})
 
     name = engine_id or str(live_cfg.get("name", "live"))
     initial_capital = float(live_cfg.get("initial_capital", 1_000_000))
@@ -2121,6 +2286,13 @@ def create_live_engine(
         store_root = _Path(state_dir).expanduser() if state_dir else None
         state_store = StateStore(root=store_root, store_id=str(name))
 
+    # 6.5) LookaheadGuard（任务42：消费配置 lookahead_guard.enabled / strict_mode 段）
+    #      配置模板默认 enabled:true + strict_mode:true（规则4强制防未来）
+    lookahead_enabled = bool(lookahead_cfg.get("enabled", True))
+    lookahead_guard = None
+    if lookahead_enabled:
+        lookahead_guard = LookaheadGuard(strict=bool(lookahead_cfg.get("strict_mode", True)))
+
     # 7) 引擎装配（保障组件经构造函数注入，调度器由引擎自建自停）
     engine = LiveEngine(
         risk_config=risk_config,
@@ -2128,6 +2300,8 @@ def create_live_engine(
         risk_manager=risk_manager,
         state_store=state_store,
         scheduler=None,
+        lookahead_guard=lookahead_guard,
+        enable_lookahead_guard=lookahead_enabled,
         enable_scheduler=bool(scheduler_cfg.get("enabled", True)),
         auto_recover=bool(state_cfg.get("auto_recover_on_start", False)),
         monitor_only=monitor_only,

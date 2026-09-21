@@ -52,23 +52,21 @@ from myquant.models.market_data import Bar, BarFrequency, MarketEvent
 from myquant.models.trade import OrderSide, Trade
 from myquant.strategies.ma_strategy import MACrossStrategy
 
+from tests.conftest import make_ohlcv_df
+
 
 # ═══════════════════════════════════════════
 #  Fixture：行情数据构造工具
 # ═══════════════════════════════════════════
 
 def _make_df(closes: List[float], symbol: str = "000001.SZ") -> pd.DataFrame:
-    """从收盘价序列构造标准 OHLCV DataFrame"""
-    n = len(closes)
-    dates = pd.date_range("2024-01-01", periods=n, freq="B")
-    return pd.DataFrame({
-        "open":   [c * 0.995 for c in closes],
-        "high":   [c * 1.015 for c in closes],
-        "low":    [c * 0.985 for c in closes],
-        "close":  closes,
-        "volume": [100000.0] * n,
-        "amount": [c * 100000.0 for c in closes],
-    }, index=dates)
+    """从收盘价序列构造标准 OHLCV DataFrame（中文列，#38 规范）"""
+    return make_ohlcv_df(
+        closes=closes,
+        volumes=[100000.0] * len(closes),
+        amounts=[c * 100000.0 for c in closes],
+        start="2024-01-01",
+    )
 
 
 def _make_config(**kwargs) -> BacktestConfig:
@@ -665,7 +663,7 @@ class TestBacktestLookahead:
 
         # 修改未来数据（第25根之后）
         df2 = crossover_df.copy()
-        df2.iloc[25:, df2.columns.get_loc("close")] *= 2.0
+        df2.iloc[25:, df2.columns.get_loc("收盘价")] *= 2.0
         strategy2 = MACrossStrategy(fast_period=3, slow_period=10)
         engine2 = BacktestEngine(config=config, strategy=strategy2,
                                  data={"000001.SZ": df2})

@@ -103,6 +103,7 @@ class RiskContext:
     order_count_today: int = 0
     last_order_time: float = 0.0
     trading_date: str = ""
+    day_start_assets: float = 0.0  # 当日开盘时点资产快照（每日亏损基准，任务46/P1）
     extra: Dict[str, Any] = field(default_factory=dict)
 
     def get_position(self, symbol: str) -> Optional[Dict[str, Any]]:
@@ -125,6 +126,19 @@ class RiskContext:
         if self.peak_assets <= 0:
             return 0.0
         return max(0.0, (self.peak_assets - self.total_assets) / self.peak_assets)
+
+    @property
+    def daily_loss_pct(self) -> float:
+        """
+        当日亏损比例（0~1，0=当日未亏损）
+
+        以当日开盘时点资产快照为基准：当前资产低于日初 → 亏损比例；
+        当前资产不低于日初（持平/盈利）→ 0（只算负向；防未来：只依据
+        已发生的事实——日初快照与当前资产）。
+        """
+        if self.day_start_assets <= 0:
+            return 0.0
+        return max(0.0, (self.day_start_assets - self.total_assets) / self.day_start_assets)
 
 
 # ═══════════════════════════════════════════════
@@ -254,6 +268,30 @@ class MaxDrawdownRule(RiskRule):
             return self._reject(
                 f"账户回撤超限: 当前{drawdown*100:.1f}%, 上限{self.max_drawdown_pct*100:.1f}%, 禁止新开仓")
         return self._pass(drawdown=drawdown)
+
+
+# ═══════════════════════════════════════════════
+#  规则3.5：单日亏损上限（任务46 / P1）
+# ═══════════════════════════════════════════════
+
+class DailyLossLimitRule(RiskRule):
+    """单日亏损上限规则：当日账户亏损超阈值禁止新开仓（次日自动归零重置）"""
+    name = "daily_loss_limit"
+    description = "单日亏损上限：当日亏损超阈值禁止新开仓"
+
+    def __init__(self, max_daily_loss_pct: float = 0.01, **params):
+        super().__init__(**params)
+        self.max_daily_loss_pct = max_daily_loss_pct
+
+    def check(self, order: Order, context: RiskContext) -> RiskCheckResult:
+        if order.side != OrderSide.BUY:
+            return self._pass()
+        daily_loss = context.daily_loss_pct
+        if daily_loss > self.max_daily_loss_pct:
+            return self._reject(
+                f"当日亏损超限: 当前{daily_loss*100:.2f}%, "
+                f"上限{self.max_daily_loss_pct*100:.1f}%, 禁止新开仓（次日自动重置）")
+        return self._pass(daily_loss=daily_loss)
 
 
 # ═══════════════════════════════════════════════
@@ -470,6 +508,7 @@ RULE_REGISTRY: Dict[str, type] = {
     "position_limit": PositionLimitRule,
     "single_order_limit": SingleOrderLimitRule,
     "max_drawdown": MaxDrawdownRule,
+    "daily_loss_limit": DailyLossLimitRule,
     "stop_loss": StopLossRule,
     "take_profit": TakeProfitRule,
     "rate_limit": RateLimitRule,
@@ -593,6 +632,7 @@ def create_default_library() -> RiskRuleLibrary:
     library.add_rule(PositionLimitRule(max_position_pct=0.30, max_positions=5))
     library.add_rule(SingleOrderLimitRule(max_order_amount=200_000))
     library.add_rule(MaxDrawdownRule(max_drawdown_pct=0.20))
+    library.add_rule(DailyLossLimitRule(max_daily_loss_pct=0.01))
     library.add_rule(StopLossRule(max_loss_pct=0.10))
     library.add_rule(TakeProfitRule(max_profit_pct=0.50))
     library.add_rule(RateLimitRule(max_orders_per_day=100, min_interval_seconds=1.0))

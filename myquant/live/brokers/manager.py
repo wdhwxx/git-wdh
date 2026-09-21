@@ -41,11 +41,13 @@ manager.py - 多券商管理器（双券商并行核心）
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass, field
+import time
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
 from myquant.live.brokers.base_broker import BaseBroker, Order, Position
+from myquant.models.trade import OrderStatus
 
 try:
     from myquant.core.logger import get_logger
@@ -140,17 +142,38 @@ class BrokerManager:
         mgr.set_primary("ptrade")                    # 手动切换主券商
     """
 
-    def __init__(self, auto_failover: bool = True):
+    def __init__(self, auto_failover: bool = True, failover_cooldown: float = 60.0):
         """
         Parameters
         ----------
         auto_failover : bool
             提交订单时主券商失败是否自动切换到备券商重试
+        failover_cooldown : float
+            failover 冷却时间（秒）：全部备券商失败后，冷却期内不再触发
+            failover（防网络波动下信号重发触发 failover 风暴）；failover
+            成功切换到备券商后，同样冷却 failover_cooldown 秒才允许恢复原主。
         """
         self._lock = threading.RLock()
         self._registrations: Dict[str, BrokerRegistration] = {}
         self._primary_alias: Optional[str] = None
         self._auto_failover = auto_failover
+        self._failover_cooldown = float(failover_cooldown)
+
+        # ── 任务44：failover 盲目重试约束化（失败分类 / 副本重试 / 冷却熔断 / 健康恢复）──
+        self._last_failover_fail_at: float = 0.0      # 最近一次 failover 全部失败时刻（冷却计时）
+        self._last_failover_success_at: float = 0.0   # 最近一次 failover 成功时刻（恢复冷却计时）
+        self._pre_failover_primary: Optional[str] = None  # failover 前的原主（健康恢复切回用）
+        self._failover_stats: Dict[str, Any] = {
+            "attempts": 0,          # failover 触发总次数（含成功/失败）
+            "success": 0,           # failover 成功次数（订单经备券商提交成功）
+            "business_skipped": 0,  # 业务拒单（资金/持仓/风控等）不 failover 次数
+            "cooldown_skipped": 0,  # 冷却期内触发被拦截次数
+            "restore_count": 0,     # 主券商健康恢复切回次数
+            "last_reason": "",      # 最近一次 failover 原因
+            "last_at": 0.0,         # 最近一次 failover 时刻
+        }
+        # ── 任务45：断线补单对账（T3）── 最近一次 resend_pending_orders 结果（可观测）
+        self._last_resend: Dict[str, Any] = {}
         logger.info("[broker] 多券商管理器初始化")
 
     # ─────────────────────────────────────────────
@@ -236,7 +259,7 @@ class BrokerManager:
             return None
         return self._registrations[self._primary_alias].broker
 
-    def set_primary(self, alias: str) -> str:
+    def set_primary(self, alias: str, manual: bool = True) -> str:
         """
         主券商动态切换（实盘热切换：后续默认路由到新主券商）
 
@@ -244,6 +267,9 @@ class BrokerManager:
         ----------
         alias : str
             券商别名
+        manual : bool
+            True=手动切换（清除 failover 恢复记忆，不自动切回）；
+            False=failover 自动切换（保留原主别名，健康恢复后可切回）
 
         Returns
         -------
@@ -257,6 +283,9 @@ class BrokerManager:
             if old and old != alias:
                 self._registrations[old].role = "secondary"
             self._primary_alias = alias
+            if manual:
+                # 手动切换：无自动恢复语义（用户/上层决策优先）
+                self._pre_failover_primary = None
             logger.info(f"[broker] 主券商切换: {old} → {alias}")
             return alias
 
@@ -396,7 +425,9 @@ class BrokerManager:
                     ok = False
                 if ok:
                     logger.warning(f"[broker] 主券商故障，自动切换: {self._primary_alias} → {alias}")
-                    return self.set_primary(alias)
+                    self._pre_failover_primary = self._primary_alias
+                    self._last_failover_success_at = time.time()
+                    return self.set_primary(alias, manual=False)
             logger.error("[broker] 主券商故障，且无可用备券商")
             return None
 
@@ -428,6 +459,15 @@ class BrokerManager:
         Returns
         -------
         Order : 订单（状态已更新，通常为 SUBMITTED / REJECTED / FILLED）
+
+        failover 决策（任务44：约束化，杜绝盲目重试）:
+          1. 业务拒单（资金不足/持仓不足/T+1/风控/涨跌停/校验失败等，
+             拒绝原因含业务关键词或无法分类）→ 不 failover，
+             原样返回主券商拒单结果（换券商同样会拒，且防绕过主券商风控）。
+          2. 通道类故障（未连接/委托异常/断线/超时/SDK 等）→ 用干净副本
+             （同一 order_id、PENDING 状态）逐备券商重试，成功则切主。
+          3. 冷却熔断：最近一次 failover 全部失败后 failover_cooldown 秒内
+             不再触发 failover（防网络波动下信号重发导致 failover 风暴）。
         """
         do_failover = self._auto_failover if auto_failover is None else auto_failover
         alias = self._resolve_alias(broker_id)
@@ -436,42 +476,167 @@ class BrokerManager:
         try:
             result = self._registrations[alias].broker.submit_order(order)
         except Exception as e:
-            if do_failover:
-                return self._failover_submit(order, str(e))
-            raise BrokerManagerError(f"订单提交失败 ({alias}): {e}") from e
-        # 主券商拒单 / 主券商不可用 → 自动 failover 重试
+            if not do_failover:
+                raise BrokerManagerError(f"订单提交失败 ({alias}): {e}") from e
+            if self._in_failover_cooldown():
+                self._failover_stats["cooldown_skipped"] += 1
+                logger.warning(f"[broker] failover 冷却中，跳过重试: {e}")
+                raise BrokerManagerError(f"订单提交失败 ({alias}): {e}") from e
+            return self._failover_submit(order, str(e))
+        # 主券商拒单 → 分类判定后才决定是否 failover
         if do_failover and self._is_order_rejected(result):
-            return self._failover_submit(order, f"{alias} 拒单")
+            kind = self._classify_submit_failure(result)
+            if kind != "channel":
+                # 业务拒单/无法分类：不盲目 failover（安全第一，防绕过风控）
+                self._failover_stats["business_skipped"] += 1
+                logger.warning(
+                    f"[broker] {alias} 拒单为业务/未知原因({kind})，不 failover: "
+                    f"{result.extra.get('reject_reason', '')}"
+                )
+                return result
+            if self._in_failover_cooldown():
+                self._failover_stats["cooldown_skipped"] += 1
+                logger.warning(
+                    f"[broker] failover 冷却中，跳过重试: "
+                    f"{result.extra.get('reject_reason', '')}"
+                )
+                return result
+            return self._failover_submit(order, f"{alias} 拒单: {result.extra.get('reject_reason', '')}")
         return result
+
+    # ── 任务44：failover 约束化辅助 ─────────────────────────────
+
+    # 业务拒单关键词：订单/账户级问题，换券商同样拒绝（绝不盲目重试）
+    _BUSINESS_FAILURE_KEYWORDS = (
+        "资金不足", "可卖数量", "持仓不足", "无持仓", "T+1", "冻结",
+        "风控", "涨跌停", "涨停", "跌停", "校验失败", "订单状态无法提交",
+        "QMT废单", "委托数量", "价格", "quantity", "symbol 不能为空",
+    )
+    # 通道故障关键词：连接/通道级问题，可 failover 到备券商
+    _CHANNEL_FAILURE_KEYWORDS = (
+        "未连接", "未配置", "委托异常", "委托返回空", "断线", "超时",
+        "SDK", "连接失败", "connect", "心跳", "网络", "无法连接", "无法委托",
+    )
+
+    @classmethod
+    def _classify_submit_failure(cls, order: Order) -> str:
+        """
+        分类订单提交失败原因
+
+        Returns
+        -------
+        str : "channel"=通道故障（可 failover） / "business"=业务拒单（不可）
+        """
+        reason = str(getattr(order, "extra", {}).get("reject_reason", "") or "")
+        if not reason:
+            return "business"  # 无原因说明 → 保守不重试（安全第一）
+        text = reason.lower()
+        if any(k.lower() in text for k in cls._BUSINESS_FAILURE_KEYWORDS):
+            return "business"
+        if any(k.lower() in text for k in cls._CHANNEL_FAILURE_KEYWORDS):
+            return "channel"
+        return "business"  # 无法分类 → 保守不重试（未知拒单不盲目重试）
+
+    @staticmethod
+    def _clone_order_for_retry(order: Order) -> Order:
+        """
+        生成 failover 重试用的干净订单副本
+
+        原订单已被主券商置为终态（REJECTED），状态机不允许再提交；
+        副本重置为 PENDING、成交归零，保持 order_id 不变（确定性幂等键，
+        券商端按订单 ID 去重仍生效），extra 深拷贝避免与原单共享引用。
+        """
+        return replace(
+            order,
+            status=OrderStatus.PENDING,
+            filled_qty=0.0,
+            filled_price=0.0,
+            extra=dict(order.extra or {}),
+        )
+
+    def _in_failover_cooldown(self) -> bool:
+        """是否处于 failover 冷却期（全部失败后熔断，防重试风暴）"""
+        if self._last_failover_fail_at <= 0:
+            return False
+        return (time.time() - self._last_failover_fail_at) < self._failover_cooldown
+
+    def restore_primary_if_healthy(self) -> Optional[str]:
+        """
+        主券商健康恢复切回（failover 成功切换到备券商后调用）
+
+        条件:
+          1. 存在 failover 前的原主（_pre_failover_primary）
+          2. 距 failover 成功时刻已超过 failover_cooldown（防抖动反复切换）
+          3. 原主 health_check 健康（status in healthy/degraded 且 connected）
+
+        Returns
+        -------
+        str | None : 切回的原主别名；不满足条件返回 None
+        """
+        original = self._pre_failover_primary
+        if original is None or original == self._primary_alias:
+            return None
+        if original not in self._registrations:
+            self._pre_failover_primary = None
+            return None
+        if (time.time() - self._last_failover_success_at) < self._failover_cooldown:
+            return None
+        try:
+            hc = self._registrations[original].broker.health_check()
+            ok = hc.get("status") in ("healthy", "degraded") and hc.get("connected", False)
+        except Exception:  # pragma: no cover
+            ok = False
+        if not ok:
+            return None
+        logger.info(f"[broker] 主券商健康恢复，切回: {self._primary_alias} → {original}")
+        self.set_primary(original, manual=False)
+        self._failover_stats["restore_count"] += 1
+        self._pre_failover_primary = None
+        return original
 
     def _failover_submit(self, order: Order, reason: str) -> Order:
         """
-        failover 重试：逐备券商重试，成功后切为主
+        failover 重试（任务44 约束化）：仅通道故障进入本方法
 
-        注意：拒单场景主券商连接可能健康（如风控拒单/资金不足），
-        因此不能依赖连接健康检查（failover()），而是直接逐个尝试备券商。
+        流程:
+          1. 记录 failover 统计（attempts/last_reason/last_at）
+          2. 用干净副本（同 order_id、PENDING）逐备券商重试，
+             原订单保持主券商拒单结果留痕（不污染副本、不伪造状态）
+          3. 全部失败 → 记录冷却时刻（后续 submit_order 冷却期内熔断）
+          4. 成功 → 切换主券商（保留原主供健康恢复切回）
         """
         current = self._primary_alias
+        self._failover_stats["attempts"] += 1
+        self._failover_stats["last_reason"] = reason
+        self._failover_stats["last_at"] = time.time()
+        retry_order = self._clone_order_for_retry(order)
         with self._lock:
             tried = {current}
             for alias, reg in self._registrations.items():
                 if alias in tried:
                     continue
                 tried.add(alias)
-                order.extra = dict(order.extra or {})
-                order.extra["broker_id"] = alias
+                retry_order.extra = dict(retry_order.extra or {})
+                retry_order.extra["broker_id"] = alias
+                retry_order.extra["failover_from"] = current
                 try:
-                    result = reg.broker.submit_order(order)
+                    result = reg.broker.submit_order(retry_order)
                 except Exception as e:  # pragma: no cover
                     logger.warning(f"[broker] {alias} failover 重试失败: {e}")
                     continue
                 if not self._is_order_rejected(result):
-                    logger.warning(f"[broker] failover 重试成功: {current} → {alias}（{reason}）")
-                    self.set_primary(alias)
+                    logger.warning(
+                        f"[broker] failover 重试成功: {current} → {alias}（{reason}）"
+                    )
+                    self._failover_stats["success"] += 1
+                    self._last_failover_success_at = time.time()
+                    self._pre_failover_primary = current
+                    self.set_primary(alias, manual=False)
                     return result
-            # 全部备券商失败 → 回滚 broker_id 标记，返回原订单
+            # 全部备券商失败 → 熔断（冷却期内不再 failover），返回原订单
+            self._last_failover_fail_at = time.time()
             order.extra["broker_id"] = current
-            logger.error(f"[broker] failover 全部失败: {reason}")
+            logger.error(f"[broker] failover 全部失败: {reason}（已进入冷却期）")
             return order
 
     @staticmethod
@@ -481,6 +646,163 @@ class BrokerManager:
         if hasattr(status, "name"):
             status = status.name
         return "REJECT" in str(status).upper()
+
+    # ─────────────────────────────────────────────
+    #  断线补单对账（任务45 / T3）
+    # ─────────────────────────────────────────────
+
+    def resend_pending_orders(
+        self, symbol: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        断线补单对账（T3：重连后仅补发未成交订单，已成交订单不重发）
+
+        适用场景: 本地已提交（SUBMITTED）但 QMT 端断线/网络波动，无法确认
+        订单是否真正到达券商委托队列；重连后调用本方法对账。
+
+        判定规则（逐券商独立）:
+          1. 券商未连接 → 跳过（记 skipped；重连成功后再调用本方法）
+          2. 本地 SUBMITTED 订单与券商端当日委托快照（query_broker_orders）对账：
+             - 券商端【存在】该 order_id（任何状态）→ 不补发（证明 QMT 已收到）：
+               · 在途（SUBMITTED/PARTIAL_FILLED）→ in_flight 计数
+               · 终态（FILLED/CANCELLED/REJECTED）→ terminal 计数（已成交/已撤/废单
+                 绝不重发；本地状态待券商回报同步，本方法不伪造状态）
+             - 券商端【不存在】该 order_id → 判定丢失 → 用干净副本
+               （同一 order_id、PENDING，extra 深拷贝）幂等补发
+               （submit_order 重复 order_id 直接返回已有订单，防重复报单）
+          3. 券商端查询失败（query_broker_orders 返回 None）→ 无法确认 →
+             跳过不补发（保守：宁可漏单也不重复报单，防补单风暴）
+          4. 防未来：只依据已发生的本地状态与券商端查询结果，无任何预测
+
+        Parameters
+        ----------
+        symbol : str | None
+            可选，仅对账指定标的
+
+        Returns
+        -------
+        Dict[str, Any] :
+            {
+              "checked": 本地 SUBMITTED 且完成对账的订单数,
+              "in_flight": 券商端在途（不补发）,
+              "terminal":  券商端终态（不补发）,
+              "resent":    补发成功数,
+              "failed":    补发失败数,
+              "skipped":   跳过数（未连接/查询失败/异常）,
+              "per_broker": {alias: 同上各计数},
+            }
+        """
+        result: Dict[str, Any] = {
+            "checked": 0, "in_flight": 0, "terminal": 0,
+            "resent": 0, "failed": 0, "skipped": 0,
+            "per_broker": {},
+        }
+        with self._lock:
+            for alias, reg in self._registrations.items():
+                broker = reg.broker
+                per: Dict[str, Any] = {
+                    "checked": 0, "in_flight": 0, "terminal": 0,
+                    "resent": 0, "failed": 0, "skipped": 0,
+                }
+                try:
+                    # 1. 未连接 → 跳过（重连后由调用方再次触发）
+                    if not broker.is_connected:
+                        per["skipped"] += 1
+                        result["skipped"] += 1
+                        logger.info(f"[broker] 补单对账跳过({alias}): 券商未连接")
+                        result["per_broker"][alias] = per
+                        continue
+
+                    # 2. 本地 SUBMITTED 订单（补发候选）
+                    local_submitted = [
+                        o for o in broker.get_orders(symbol)
+                        if o.status is OrderStatus.SUBMITTED
+                    ]
+                    if not local_submitted:
+                        result["per_broker"][alias] = per
+                        continue
+
+                    # 3. 券商端当日委托快照（查询失败 → 不补发，防重复单）
+                    broker_orders = broker.query_broker_orders(symbol)
+                    if broker_orders is None:
+                        per["skipped"] += len(local_submitted)
+                        result["skipped"] += len(local_submitted)
+                        logger.warning(
+                            f"[broker] 补单对账跳过({alias}): 券商端查询失败，"
+                            f"无法确认 {len(local_submitted)} 笔在途单，不补发"
+                        )
+                        result["per_broker"][alias] = per
+                        continue
+
+                    # 4. 按 order_id 前 24 位建索引（与 QMT order_remark 写入规则一致）
+                    by_key = {
+                        str(o.get("order_id") or "")[:24]: o
+                        for o in broker_orders
+                    }
+                    for order in local_submitted:
+                        key = str(order.order_id)[:24]
+                        result["checked"] += 1
+                        per["checked"] += 1
+                        remote = by_key.get(key)
+                        if remote is None:
+                            # 券商端无此单 → 丢失 → 幂等补发（同 order_id、PENDING 副本）
+                            retry = self._clone_order_for_retry(order)
+                            retry.extra = dict(retry.extra or {})
+                            retry.extra["broker_id"] = alias
+                            retry.extra["resend"] = True
+                            try:
+                                # 走 resubmit_order 强制重发通道：跳过 submit_order
+                                # 的订单幂等查重（否则补发副本会被本地订单簿拦截而空转）；
+                                # 基类默认实现=submit_order，无幂等拦截的券商天然兼容
+                                res = broker.resubmit_order(retry)
+                                if res is not None and not self._is_order_rejected(res):
+                                    result["resent"] += 1
+                                    per["resent"] += 1
+                                    logger.warning(
+                                        f"[broker] 断线补单成功: {alias} "
+                                        f"{order.order_id} {order.symbol} "
+                                        f"{order.quantity:.0f}@{order.price if order.price else '市价'}"
+                                    )
+                                else:
+                                    result["failed"] += 1
+                                    per["failed"] += 1
+                                    logger.error(
+                                        f"[broker] 断线补单被拒: {alias} {order.order_id}"
+                                    )
+                            except Exception as e:  # noqa: BLE001 - 补发异常记失败
+                                result["failed"] += 1
+                                per["failed"] += 1
+                                logger.warning(f"[broker] {alias} 补单异常: {e}")
+                        elif remote["status"] in (
+                            OrderStatus.FILLED,
+                            OrderStatus.CANCELLED,
+                            OrderStatus.REJECTED,
+                            OrderStatus.PARTIAL_FILLED,
+                        ):
+                            # 券商端已有成交/撤单/废单痕迹 → 绝不重发（本地状态待回报同步）
+                            result["terminal"] += 1
+                            per["terminal"] += 1
+                            logger.info(
+                                f"[broker] 对账不补发({alias}): {order.order_id} "
+                                f"券商端={remote['status'].value}"
+                            )
+                        else:
+                            # 券商端在途 → QMT 已收到，不补
+                            result["in_flight"] += 1
+                            per["in_flight"] += 1
+                except Exception as e:  # noqa: BLE001 - 单券商对账异常不阻断其余
+                    per["skipped"] += 1
+                    result["skipped"] += 1
+                    logger.warning(f"[broker] {alias} 补单对账异常: {e}")
+                result["per_broker"][alias] = per
+        self._last_resend = result
+        logger.info(
+            f"[broker] 断线补单对账完成: checked={result['checked']} "
+            f"resent={result['resent']} failed={result['failed']} "
+            f"in_flight={result['in_flight']} terminal={result['terminal']} "
+            f"skipped={result['skipped']}"
+        )
+        return result
 
     def cancel_order(self, order_id: str, broker_id: Optional[str] = None) -> bool:
         """撤单（默认在全部券商中查找订单；指定 broker_id 则定向）"""
@@ -694,11 +1016,15 @@ class BrokerManager:
             self.set_primary(primary)
 
     def get_summary(self) -> Dict[str, Any]:
-        """管理器摘要（券商数 + 主券商 + 各券商健康/角色/连接）"""
+        """管理器摘要（券商数 + 主券商 + 各券商健康/角色/连接 + failover 统计 + 最近补单对账）"""
         return {
             "broker_count": len(self._registrations),
             "primary_alias": self._primary_alias,
             "auto_failover": self._auto_failover,
+            "failover_cooldown": self._failover_cooldown,
+            "failover_stats": dict(self._failover_stats),
+            "pre_failover_primary": self._pre_failover_primary,
+            "last_resend": dict(self._last_resend),
             "brokers": self.list_brokers(),
             "health": self.health_check_all(),
         }

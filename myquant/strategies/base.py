@@ -33,6 +33,7 @@ strategies/base.py - 策略抽象基类与股票池构建器
 __version__ = "0.1.0"
 __author__ = "Pythonwdhmm"
 
+import hashlib
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -42,6 +43,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import numpy as np
 import pandas as pd
 
+from myquant.core.date_utils import get_date_part
 from myquant.core.logger import get_logger
 from myquant.models.market_data import Bar
 from myquant.models.trade import Order, OrderSide, OrderType, Position
@@ -71,6 +73,12 @@ class Signal:
     交易信号
 
     策略生成信号后，由引擎或策略本身转换为订单。
+
+    幂等去重（任务43）:
+      - signal_id: 确定性信号ID（strategy_id:symbol:日期:signal_type 派生）。
+        引擎在信号处理时按 bar 的交易日/分钟归一化填充（同一根 bar 重发 → 同一 ID），
+        重复信号在引擎侧直接丢弃；to_order 将 signal_id 作为 order_id，
+        使同一信号的重复提交在券商端按 order_id 幂等去重（防桥接重发频繁报撤单）。
     """
     symbol: str
     signal_type: SignalType = SignalType.HOLD
@@ -79,6 +87,7 @@ class Signal:
     timestamp: float = field(default_factory=time.time)
     reason: str = ""
     strategy_id: str = ""
+    signal_id: str = ""
     extra: Dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -93,13 +102,39 @@ class Signal:
     def is_hold(self) -> bool:
         return self.signal_type == SignalType.HOLD
 
+    def make_signal_id(self, as_of_date: str = "") -> str:
+        """
+        构造确定性信号 ID（幂等去重键，任务43）
+
+        由 strategy_id / symbol / 日期 / signal_type 派生的 SHA-256 前 24 位，
+        同一信号（同策略、同标的、同 bar 时间、同方向）恒得到同一 ID；
+        不同信号碰撞概率可忽略（96 bit）。24 位亦适配 QMT order_remark 上限。
+
+        Parameters
+        ----------
+        as_of_date : str
+            信号对应的 bar 时间键（日线 "YYYY-MM-DD"，分钟线含时分秒）。
+            必须由调用方（引擎）按 bar.timestamp 传入，保证同一根 bar 重发
+            得到同一 ID；为空时回退信号自身时间戳的日期部分。
+
+        Returns
+        -------
+        str : 24 位十六进制确定性 ID（小写）
+        """
+        date_part = as_of_date or get_date_part(self.timestamp)
+        raw = (
+            f"{self.strategy_id or 'default'}:{self.symbol}:"
+            f"{date_part}:{self.signal_type.value}"
+        )
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+
     def to_order(self, quantity: float, order_type: OrderType = OrderType.MARKET,
                   price: Optional[float] = None) -> Optional[Order]:
         """将信号转换为订单"""
         if self.is_hold:
             return None
         side = OrderSide.BUY if self.is_buy else OrderSide.SELL
-        return Order(
+        kwargs: Dict[str, Any] = dict(
             symbol=self.symbol,
             side=side,
             order_type=order_type,
@@ -108,6 +143,10 @@ class Signal:
             strategy_id=self.strategy_id,
             tag=self.reason,
         )
+        # 幂等：有确定性 signal_id 时作为 order_id（重复提交可去重）
+        if self.signal_id:
+            kwargs["order_id"] = self.signal_id
+        return Order(**kwargs)
 
     def __repr__(self) -> str:
         return (
@@ -445,7 +484,7 @@ class StrategyBase(ABC):
         返回 None 表示数据不足。
         """
         df = context.get_data(symbol)
-        if df is None or df.empty or 'close' not in df.columns:
+        if df is None or df.empty or '收盘价' not in df.columns:
             return None
         return df['收盘价'].astype(float)
 
@@ -472,7 +511,7 @@ class StrategyBase(ABC):
         if period is None:
             period = self.volume_ratio_period
         df = context.get_data(symbol)
-        if df is None or df.empty or 'volume' not in df.columns:
+        if df is None or df.empty or '成交量' not in df.columns:
             return None
         volume = df['成交量'].astype(float)
         # 需要至少 period+1 根数据（当日 + 过去N日）
@@ -584,7 +623,7 @@ class StockPoolBuilder:
         for symbol, df in data_dict.items():
             if df is None or len(df) < max(self.volatility_period, self.momentum_period) + 1:
                 continue
-            if 'close' not in df.columns:
+            if '收盘价' not in df.columns:
                 continue
             close = df['收盘价'].astype(float)
 

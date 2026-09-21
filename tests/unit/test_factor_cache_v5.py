@@ -43,22 +43,21 @@ from myquant.indicators.factor_engine import (
 )
 from myquant.utils.data_fingerprint import compute_fingerprint
 
+from tests.conftest import make_ohlcv_df
+
 # ─────────────────────────────────────────────
 #  辅助
 # ─────────────────────────────────────────────
 
 def _make_df(n_rows: int = 60) -> pd.DataFrame:
-    """构造带 OHLCV 列的行情（SMA 计算所需）。"""
-    dates = pd.date_range("2023-01-02", periods=n_rows, freq="B")
-    return pd.DataFrame(
-        {
-            "open": 10.0,
-            "high": 10.5,
-            "low": 9.5,
-            "close": 10.0 + pd.Series(range(n_rows), index=dates) * 0.01,
-            "volume": 10000.0,
-        },
-        index=dates,
+    """构造带 OHLCV 列的行情（SMA 计算所需，中文列，#38 规范）。"""
+    return make_ohlcv_df(
+        closes=[10.0 + i * 0.01 for i in range(n_rows)],
+        opens=10.0,
+        highs=10.5,
+        lows=9.5,
+        volumes=10000.0,
+        start="2023-01-02",
     )
 
 
@@ -66,7 +65,7 @@ def _sma_compute(period: int = 20) -> Callable[[pd.DataFrame, dict[str, Any]], p
     """构造 SMA 计算函数（闭包参数透传）。"""
     def _compute(data: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
         p = int(params.get("period", period))
-        return pd.DataFrame({"sma": data["close"].rolling(p).mean()})
+        return pd.DataFrame({"sma": data["收盘价"].rolling(p).mean()})
     return _compute
 
 
@@ -97,7 +96,7 @@ class TestFactorCache:
 
         def _counting(df_: pd.DataFrame, p: dict[str, Any]) -> pd.DataFrame:
             calls.append(1)
-            return pd.DataFrame({"sma": df_["close"].rolling(20).mean()})
+            return pd.DataFrame({"sma": df_["收盘价"].rolling(20).mean()})
 
         result1, hit1 = cache.get_or_compute(
             "sma", "600519.SH", {"period": 20}, df, _counting, _fingerprint()
@@ -133,7 +132,7 @@ class TestFactorCache:
 
         def _counting(df_: pd.DataFrame, p: dict[str, Any]) -> pd.DataFrame:
             calls.append(1)
-            return pd.DataFrame({"sma": df_["close"].rolling(20).mean()})
+            return pd.DataFrame({"sma": df_["收盘价"].rolling(20).mean()})
 
         cache.get_or_compute(
             "sma", "600519.SH", {"period": 20}, df1, _counting, _fingerprint()
@@ -153,7 +152,7 @@ class TestFactorCache:
 
         def _counting(df_: pd.DataFrame, p: dict[str, Any]) -> pd.DataFrame:
             calls.append(1)
-            return pd.DataFrame({"sma": df_["close"].rolling(20).mean()})
+            return pd.DataFrame({"sma": df_["收盘价"].rolling(20).mean()})
 
         _, h1 = cache1.get_or_compute(
             "sma", "600519.SH", {"period": 20}, df, _counting, _fingerprint()
@@ -181,7 +180,7 @@ class TestFactorCache:
 
         def _counting(df_: pd.DataFrame, p: dict[str, Any]) -> pd.DataFrame:
             calls.append(1)
-            return pd.DataFrame({"sma": df_["close"].rolling(20).mean()})
+            return pd.DataFrame({"sma": df_["收盘价"].rolling(20).mean()})
 
         _, h2 = cache.get_or_compute(
             "sma", "600519.SH", {"period": 20}, df, _counting, _fingerprint()
@@ -234,7 +233,7 @@ class TestFactorCacheInvalidate:
 
         def _counting(df_: pd.DataFrame, p: dict[str, Any]) -> pd.DataFrame:
             calls.append(1)
-            return pd.DataFrame({"sma": df_["close"].rolling(20).mean()})
+            return pd.DataFrame({"sma": df_["收盘价"].rolling(20).mean()})
 
         cache.get_or_compute(
             "sma", "600519.SH", {"period": 20}, df, _counting, _fingerprint()

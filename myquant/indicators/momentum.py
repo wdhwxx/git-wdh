@@ -385,9 +385,9 @@ class KDJ(IndicatorBase):
         （替代原 list(deque)切片+dict生成器，消除对象创建与切片开销）
         K/D初始值匹配全量 ewm(adjust=False)：第一个有效值=RSV本身
         """
-        high = float(bar['high'])
-        low = float(bar['low'])
-        close = float(bar['close'])
+        high = float(bar['最高价'])
+        low = float(bar['最低价'])
+        close = float(bar['收盘价'])
 
         # 首次调用：初始化环形缓冲区（Python list，小窗口下比numpy快）
         if '_kdj_high_buf' not in self._state:

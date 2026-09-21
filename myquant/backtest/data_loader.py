@@ -57,6 +57,40 @@ EN_TO_CN_COLUMN_MAP: Dict[str, str] = {
 #: 中文日期索引名（导出脚本与内部统一使用）
 CN_INDEX_NAME: str = "日期"
 
+#: 核心 OHLCV 中文列（#38 中文列改造后的入口校验主口径）
+REQUIRED_CN_OHLCV_COLUMNS: Tuple[str, ...] = (
+    "开盘价", "最高价", "最低价", "收盘价", "成交量",
+)
+#: 对应英文列（兼容旧缓存 parquet / 旧英文表头数据源，引擎侧会做 EN→CN 转换）
+REQUIRED_EN_OHLCV_COLUMNS: Tuple[str, ...] = (
+    "open", "high", "low", "close", "volume",
+)
+
+
+def require_ohlcv(df: pd.DataFrame, symbol: str = "") -> None:
+    """校验 DataFrame 包含核心 OHLCV 列（中文列优先，兼容英文列）。
+
+    #38 中文列改造后，回测入口统一以中文列为主校验口径；
+    英文列作为旧缓存/旧数据源的兼容形态保留（引擎 get_bars 已做 EN→CN 转换）。
+
+    Args:
+        df: 待校验的行情 DataFrame。
+        symbol: 标的代码（仅用于错误信息定位，可空）。
+
+    Raises:
+        ValueError: 中英文 OHLCV 列均不完整时抛出。
+    """
+    cols = list(df.columns)
+    if all(c in cols for c in REQUIRED_CN_OHLCV_COLUMNS):
+        return
+    if all(c in cols for c in REQUIRED_EN_OHLCV_COLUMNS):
+        return
+    prefix = f"标的 {symbol} " if symbol else ""
+    raise ValueError(
+        f"{prefix}行情缺少 OHLCV 列（需中文列 {REQUIRED_CN_OHLCV_COLUMNS} "
+        f"或英文列 {REQUIRED_EN_OHLCV_COLUMNS}），实际列: {cols}"
+    )
+
 
 # ═══════════════════════════════════════════
 #  DataProviderBase - 数据提供抽象基类

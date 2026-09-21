@@ -61,23 +61,21 @@ from myquant.strategies import (
     register_strategy,
 )
 
+from tests.conftest import make_ohlcv_df
+
 
 # ═══════════════════════════════════════════
 #  Fixture：行情数据构造工具
 # ═══════════════════════════════════════════
 
 def _make_df(closes: List[float], symbol: str = "000001.SZ") -> pd.DataFrame:
-    """从收盘价序列构造标准 OHLCV DataFrame"""
-    n = len(closes)
-    dates = pd.date_range("2024-01-01", periods=n, freq="B")
-    return pd.DataFrame({
-        "open":   [c * 0.995 for c in closes],
-        "high":   [c * 1.015 for c in closes],
-        "low":    [c * 0.985 for c in closes],
-        "close":  closes,
-        "volume": [100000.0] * n,
-        "amount": [c * 100000.0 for c in closes],
-    }, index=dates)
+    """从收盘价序列构造标准 OHLCV DataFrame（中文列，#38 规范）"""
+    return make_ohlcv_df(
+        closes=closes,
+        volumes=[100000.0] * len(closes),
+        amounts=[c * 100000.0 for c in closes],
+        start="2024-01-01",
+    )
 
 
 def _make_bar(symbol: str, close: float, ts: float, idx: int = 0) -> Bar:
@@ -112,7 +110,7 @@ def _run_strategy_on_bars(strategy: StrategyBase, ctx: StrategyContext,
     signals: List[Signal] = []
     for i in range(len(df)):
         ts = df.index[i].timestamp()
-        bar = _make_bar(symbol, df["close"].iloc[i], ts, i)
+        bar = _make_bar(symbol, df["收盘价"].iloc[i], ts, i)
         sigs = strategy.on_bar(bar, ctx)
         if sigs:
             signals.extend(sigs)
@@ -332,7 +330,7 @@ class TestStrategyBase:
         ctx = _make_context(crossover_df)
         ma = MACrossStrategy(fast_period=3, slow_period=10)
         ma.on_init(ctx)
-        bar = _make_bar("000001.SZ", crossover_df["close"].iloc[0],
+        bar = _make_bar("000001.SZ", crossover_df["收盘价"].iloc[0],
                         crossover_df.index[0].timestamp())
         result = ma.on_bar(bar, ctx)
         assert isinstance(result, list)
@@ -352,7 +350,7 @@ class TestStrategyBase:
         ma.on_init(ctx)
         initial = ma.signal_count
         for i in range(len(crossover_df)):
-            bar = _make_bar("000001.SZ", crossover_df["close"].iloc[i],
+            bar = _make_bar("000001.SZ", crossover_df["收盘价"].iloc[i],
                             crossover_df.index[i].timestamp())
             ma.on_bar(bar, ctx)
         assert ma.signal_count >= initial
@@ -555,7 +553,7 @@ class TestMACrossStrategy:
 
         # 修改未来数据（第15根之后）
         df2 = crossover_df.copy()
-        df2.iloc[15:, df2.columns.get_loc("close")] *= 2.0
+        df2.iloc[15:, df2.columns.get_loc("收盘价")] *= 2.0
         ctx2 = _make_context(df2)
         ma2 = MACrossStrategy(fast_period=3, slow_period=10)
         signals2 = _run_strategy_on_bars(ma2, ctx2, df2)
@@ -596,7 +594,7 @@ class TestRSRSStrategy:
         rsrs = RSRSStrategy(rsrs_period=6)
         rsrs.on_init(ctx)
         for i in range(len(large_df)):
-            bar = _make_bar("000001.SZ", large_df["close"].iloc[i],
+            bar = _make_bar("000001.SZ", large_df["收盘价"].iloc[i],
                             large_df.index[i].timestamp())
             result = rsrs.on_bar(bar, ctx)
             assert isinstance(result, list)
@@ -661,7 +659,7 @@ class TestGridStrategy:
         grid = GridStrategy(grid_lower=9.0, grid_upper=11.0, grid_num=5)
         grid.on_init(ctx)
         for i in range(len(sideways_df)):
-            bar = _make_bar("000001.SZ", sideways_df["close"].iloc[i],
+            bar = _make_bar("000001.SZ", sideways_df["收盘价"].iloc[i],
                             sideways_df.index[i].timestamp())
             result = grid.on_bar(bar, ctx)
             assert isinstance(result, list)
@@ -680,7 +678,7 @@ class TestGridStrategy:
         grid = GridStrategy(auto_grid=True, auto_grid_lookback=10)
         grid.on_init(ctx)
         for i in range(min(15, len(sideways_df))):
-            bar = _make_bar("000001.SZ", sideways_df["close"].iloc[i],
+            bar = _make_bar("000001.SZ", sideways_df["收盘价"].iloc[i],
                             sideways_df.index[i].timestamp())
             result = grid.on_bar(bar, ctx)
             assert isinstance(result, list)
@@ -724,7 +722,7 @@ class TestMomentumStrategy:
         mom = MomentumStrategy(momentum_period=10, top_n=3)
         mom.on_init(ctx)
         for i in range(len(uptrend_df)):
-            bar = _make_bar("000001.SZ", uptrend_df["close"].iloc[i],
+            bar = _make_bar("000001.SZ", uptrend_df["收盘价"].iloc[i],
                             uptrend_df.index[i].timestamp())
             result = mom.on_bar(bar, ctx)
             assert isinstance(result, list)
@@ -786,7 +784,7 @@ class TestMeanReversionStrategy:
         mr = MeanReversionStrategy(bb_period=10, rsi_period=7)
         mr.on_init(ctx)
         for i in range(len(sideways_df)):
-            bar = _make_bar("000001.SZ", sideways_df["close"].iloc[i],
+            bar = _make_bar("000001.SZ", sideways_df["收盘价"].iloc[i],
                             sideways_df.index[i].timestamp())
             result = mr.on_bar(bar, ctx)
             assert isinstance(result, list)
@@ -848,7 +846,7 @@ class TestMultiFactorStrategy:
         mf = MultiFactorStrategy(momentum_period=10, top_n=3)
         mf.on_init(ctx)
         for i in range(len(uptrend_df)):
-            bar = _make_bar("000001.SZ", uptrend_df["close"].iloc[i],
+            bar = _make_bar("000001.SZ", uptrend_df["收盘价"].iloc[i],
                             uptrend_df.index[i].timestamp())
             result = mf.on_bar(bar, ctx)
             assert isinstance(result, list)
@@ -927,7 +925,7 @@ class TestAllStrategiesParametrized:
         ctx = _make_context(large_df)
         strategy = strategy_cls(**kwargs)
         strategy.on_init(ctx)
-        bar = _make_bar("000001.SZ", large_df["close"].iloc[0],
+        bar = _make_bar("000001.SZ", large_df["收盘价"].iloc[0],
                         large_df.index[0].timestamp())
         result = strategy.on_bar(bar, ctx)
         assert isinstance(result, list)

@@ -40,6 +40,8 @@ from myquant.indicators.moving_average import SMA, EMA, WMA, MACD
 from myquant.indicators.momentum import ROC, MOM, RSI, KDJ
 from myquant.indicators.volatility import ATR, Volatility, BollingerBands
 
+from tests.conftest import make_ohlcv_df
+
 
 # ═══════════════════════════════════════════
 #  Fixture：标准 OHLCV 数据
@@ -47,60 +49,66 @@ from myquant.indicators.volatility import ATR, Volatility, BollingerBands
 
 @pytest.fixture
 def ohlcv_df() -> pd.DataFrame:
-    """标准 OHLCV DataFrame（30个交易日，含真实波动）"""
+    """标准 OHLCV DataFrame（30个交易日，含真实波动，中文列）"""
     np.random.seed(42)
-    dates = pd.date_range("2024-01-01", periods=30, freq="B")
     base = 10.0
     closes = [base]
     for _ in range(29):
         closes.append(closes[-1] * (1 + np.random.normal(0, 0.02)))
     closes = np.array(closes)
-    return pd.DataFrame({
-        "open":   closes * (1 + np.random.normal(0, 0.005, 30)),
-        "high":   closes * (1 + np.abs(np.random.normal(0, 0.015, 30))),
-        "low":    closes * (1 - np.abs(np.random.normal(0, 0.015, 30))),
-        "close":  closes,
-        "volume": np.random.randint(50000, 500000, 30).astype(float),
-    }, index=dates)
+    return make_ohlcv_df(
+        closes=closes,
+        opens=closes * (1 + np.random.normal(0, 0.005, 30)),
+        highs=closes * (1 + np.abs(np.random.normal(0, 0.015, 30))),
+        lows=closes * (1 - np.abs(np.random.normal(0, 0.015, 30))),
+        volumes=np.random.randint(50000, 500000, 30).astype(float),
+        start="2024-01-01",
+    )
 
 
 @pytest.fixture
 def small_df() -> pd.DataFrame:
-    """少量数据（5行，用于测试数据不足场景）"""
-    dates = pd.date_range("2024-01-01", periods=5, freq="B")
-    return pd.DataFrame({
-        "open":  [10.0, 10.2, 10.5, 10.3, 10.8],
-        "high":  [10.5, 10.8, 11.0, 10.6, 11.2],
-        "low":   [9.8, 10.0, 10.2, 10.0, 10.5],
-        "close": [10.2, 10.6, 10.8, 10.5, 11.0],
-        "volume": [100000, 120000, 110000, 95000, 130000],
-    }, index=dates)
+    """少量数据（5行，用于测试数据不足场景，中文列）"""
+    return make_ohlcv_df(
+        closes=[10.2, 10.6, 10.8, 10.5, 11.0],
+        opens=[10.0, 10.2, 10.5, 10.3, 10.8],
+        highs=[10.5, 10.8, 11.0, 10.6, 11.2],
+        lows=[9.8, 10.0, 10.2, 10.0, 10.5],
+        volumes=[100000, 120000, 110000, 95000, 130000],
+        start="2024-01-01",
+    )
 
 
 @pytest.fixture
 def empty_df() -> pd.DataFrame:
-    """空 DataFrame"""
-    return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+    """空 DataFrame（中文列）"""
+    return make_ohlcv_df(closes=[], start="2024-01-01")
 
 
 @pytest.fixture
 def single_row_df() -> pd.DataFrame:
-    """单行 DataFrame"""
-    return pd.DataFrame({
-        "open": [10.0], "high": [10.5], "low": [9.8],
-        "close": [10.2], "volume": [100000.0],
-    }, index=pd.DatetimeIndex(["2024-01-01"]))
+    """单行 DataFrame（中文列）"""
+    return make_ohlcv_df(
+        closes=[10.2],
+        opens=[10.0], highs=[10.5], lows=[9.8],
+        volumes=[100000.0],
+        start="2024-01-01",
+    )
 
 
 def _bar_from_row(df: pd.DataFrame, idx: int) -> dict:
-    """从 DataFrame 行构造流式 bar dict（供 update 接口使用）"""
+    """从 DataFrame 行构造流式 bar dict（供 update 接口使用）。
+
+    #38 中文列改造后，update 接口统一收中文 key 的 bar dict
+    （'开盘价'/'最高价'/'最低价'/'收盘价'/'成交量'），与 calculate 同口径。
+    """
     row = df.iloc[idx]
     return {
-        "open": float(row["open"]),
-        "high": float(row["high"]),
-        "low": float(row["low"]),
-        "close": float(row["close"]),
-        "volume": float(row["volume"]),
+        "开盘价": float(row["开盘价"]),
+        "最高价": float(row["最高价"]),
+        "最低价": float(row["最低价"]),
+        "收盘价": float(row["收盘价"]),
+        "成交量": float(row["成交量"]),
     }
 
 
@@ -152,10 +160,12 @@ class TestSMA:
 
     def test_calculate_known_value(self):
         """已知值对照：SMA(3) of [1,2,3] = 2"""
-        df = pd.DataFrame({
-            "open": [1, 2, 3], "high": [1, 2, 3], "low": [1, 2, 3],
-            "close": [1.0, 2.0, 3.0], "volume": [100, 100, 100],
-        })
+        df = make_ohlcv_df(
+            closes=[1.0, 2.0, 3.0],
+            opens=[1, 2, 3], highs=[1, 2, 3], lows=[1, 2, 3],
+            volumes=[100, 100, 100],
+            start="2024-01-01",
+        )
         sma = SMA(window=3)
         result = sma.calculate(df)
         assert not result["sma"].iloc[-1] != 2.0 or True  # 容差校验
@@ -216,7 +226,7 @@ class TestSMA:
         r1 = sma.calculate(ohlcv_df)
         # 修改未来数据（第15根之后）
         df2 = ohlcv_df.copy()
-        df2.iloc[15:, df2.columns.get_loc("close")] *= 2.0
+        df2.iloc[15:, df2.columns.get_loc("收盘价")] *= 2.0
         sma2 = SMA(window=window)
         r2 = sma2.calculate(df2)
         # 第10根（在修改点之前）的值应不变
@@ -268,7 +278,7 @@ class TestEMA:
         window = 5
         e1 = EMA(window=window).calculate(ohlcv_df)
         df2 = ohlcv_df.copy()
-        df2.iloc[20:, df2.columns.get_loc("close")] *= 1.5
+        df2.iloc[20:, df2.columns.get_loc("收盘价")] *= 1.5
         e2 = EMA(window=window).calculate(df2)
         if not np.isnan(e1["ema"].iloc[10]):
             assert abs(e1["ema"].iloc[10] - e2["ema"].iloc[10]) < 1e-9
@@ -414,7 +424,7 @@ class TestRSI:
         window = 14
         r1 = RSI(window=window).calculate(ohlcv_df)
         df2 = ohlcv_df.copy()
-        df2.iloc[20:, df2.columns.get_loc("close")] *= 1.5
+        df2.iloc[20:, df2.columns.get_loc("收盘价")] *= 1.5
         r2 = RSI(window=window).calculate(df2)
         if not np.isnan(r1["rsi"].iloc[18]):
             assert abs(r1["rsi"].iloc[18] - r2["rsi"].iloc[18]) < 1e-9

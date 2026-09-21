@@ -35,6 +35,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
+from myquant.backtest.data_loader import require_ohlcv
 from myquant.backtest.engine import BacktestEngine
 from myquant.models.backtest import BacktestConfig
 from myquant.strategies.ma_strategy import MACrossStrategy
@@ -230,8 +231,7 @@ class IncrementalBacktester:
         for symbol, df in data.items():
             if not isinstance(df, pd.DataFrame):
                 raise TypeError(f"标的 {symbol} 的数据必须为 DataFrame")
-            if "close" not in df.columns:
-                raise ValueError(f"标的 {symbol} 的行情缺少 close 列")
+            require_ohlcv(df, symbol=symbol)
 
         self.strategy_name = strategy_name
         self.params = dict(params)

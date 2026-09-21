@@ -315,9 +315,9 @@ class KunpengStrategy(StrategyBase):
         """
         if df is None or df.empty:
             raise ValueError("_compute_kunpeng: df 为空")
-        if "close" not in df.columns or "volume" not in df.columns:
+        if "收盘价" not in df.columns or "成交量" not in df.columns:
             raise ValueError(
-                f"_compute_kunpeng: df 必须含 close/volume 列，实际列: {list(df.columns)}"
+                f"_compute_kunpeng: df 必须含 收盘价/成交量 列，实际列: {list(df.columns)}"
             )
 
         close = df["收盘价"].astype(float)

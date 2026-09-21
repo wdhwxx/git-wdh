@@ -105,9 +105,9 @@ class ATR(IndicatorBase):
             从第1根开始递推（y₀=TR₀），前 N-1 根 min_periods 屏蔽为 NaN
           - sma 模式匹配 rolling(window=N, min_periods=N)
         """
-        high = float(bar['high'])
-        low = float(bar['low'])
-        close = float(bar['close'])
+        high = float(bar['最高价'])
+        low = float(bar['最低价'])
+        close = float(bar['收盘价'])
 
         if 'prev_close' not in self._state:
             # 首次调用：第一根 TR = high - low（无prev_close）
@@ -241,7 +241,7 @@ class Volatility(IndicatorBase):
         递推公式: 新总和 = 旧总和 - 最老收益率 + 新收益率
                  std = sqrt((sum_sq/N - mean²) * N/(N-1))  (ddof=1)
         """
-        close = float(bar['close'])
+        close = float(bar['收盘价'])
 
         if 'prev_close' not in self._state:
             self._state['prev_close'] = close
