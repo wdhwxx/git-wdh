@@ -183,6 +183,16 @@ class QmtBroker(BaseBroker):
     # QMT 支持 A股 限价单与市价单
     supported_order_types: List[OrderType] = [OrderType.LIMIT, OrderType.MARKET]
 
+    @staticmethod
+    def _mask_account_id(account_id: str) -> str:
+        """日志脱敏：#P3-2 资金账号仅保留前3后2，中间掩码；空账号返回 (未绑定)"""
+        raw = str(account_id or "")
+        if not raw:
+            return "(未绑定)"
+        if len(raw) <= 6:
+            return "****"
+        return f"{raw[:3]}****{raw[-2:]}"
+
     def __init__(
         self,
         qmt_path: str = "",
@@ -248,7 +258,7 @@ class QmtBroker(BaseBroker):
 
         logger.info(
             f"[qmt_broker] 初始化: mode={self._mode} "
-            f"account_id={self._account_id or '(未绑定)'} "
+            f"account_id={self._mask_account_id(self._account_id)} "
             f"qmt_path={self._qmt_path or '(未配置)'}"
         )
 
@@ -303,7 +313,7 @@ class QmtBroker(BaseBroker):
         self._config = dict(cfg)
         logger.info(
             f"[qmt_broker] 配置加载: mode={self._mode} "
-            f"account_id={self._account_id or '(未绑定)'}"
+            f"account_id={self._mask_account_id(self._account_id)}"
         )
 
     # ═══════════════════════════════════════════════
@@ -332,7 +342,7 @@ class QmtBroker(BaseBroker):
             if not self._call_qmt_sdk("connect"):
                 logger.error(
                     f"[qmt_broker] LIVE 连接失败: qmt_path={self._qmt_path or '(未配置)'} "
-                    f"account_id={self._account_id or '(未绑定)'}"
+                    f"account_id={self._mask_account_id(self._account_id)}"
                 )
                 self._connected = False
                 self._stats["last_error"] = "qmt connect failed"
@@ -349,7 +359,7 @@ class QmtBroker(BaseBroker):
         self._stats["connect_count"] += 1
         logger.info(
             f"[qmt_broker] 连接成功: mode={self._mode} "
-            f"account_id={self._account_id or '(未绑定)'}"
+            f"account_id={self._mask_account_id(self._account_id)}"
         )
         return True
 
@@ -1534,7 +1544,7 @@ class QmtBroker(BaseBroker):
             self._qmt_login_ok = True
             logger.info(
                 f"[qmt_broker] LIVE 连接成功: session_id={self._qmt_session_id} "
-                f"account_id={self._account_id}"
+                f"account_id={self._mask_account_id(self._account_id)}"
             )
             return True
         except Exception as e:  # noqa: BLE001 - 连接失败统一记录并返回 False
@@ -1934,7 +1944,7 @@ class QmtBroker(BaseBroker):
         account_id = str(getattr(response, "account_id", "") or "")
         if status == 0:
             self._qmt_login_ok = True
-            logger.debug(f"[qmt_broker] 账户登录正常: account_id={account_id}")
+            logger.debug(f"[qmt_broker] 账户登录正常: account_id={self._mask_account_id(account_id)}")
         else:
             self._qmt_login_ok = False
             logger.error(

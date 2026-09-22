@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-sys.path.insert(0, r"D:\Projects\Pythonwdhmm")
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # #P3-3修复：动态项目根，替换硬编码绝对路径
 
 from myquant.models.backtest import (
     BacktestConfig,

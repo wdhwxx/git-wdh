@@ -202,8 +202,8 @@ class BatchSummaryReportGenerator:
             if tc is not None:
                 try:
                     trades.append(int(tc))
-                except (TypeError, ValueError):
-                    pass
+                except (TypeError, ValueError) as e:
+                    logger.debug("trade_count 字段容错跳过: %s", e)
 
         avg_return = float(np.mean(returns)) if returns else 0.0
         positive_ratio = (

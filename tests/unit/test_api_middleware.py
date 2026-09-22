@@ -141,18 +141,16 @@ class TestCorsFix:
 
 
 class TestRunApiArgs:
-    """C1: scripts/运行API.py 参数解析"""
+    """C1: API 入口参数解析（P3-7：逻辑已下沉 myquant/api/cli.py，不再反向导入 scripts）"""
 
-    def test_disable_参数(self, monkeypatch) -> None:  # noqa: ANN001
-        monkeypatch.setattr(sys, "argv", ["运行API.py", "--disable-auth", "--disable-rate-limit"])
-        from scripts.运行API import parse_args
-        args = parse_args()
+    def test_disable_参数(self) -> None:
+        from myquant.api.cli import parse_api_args
+        args = parse_api_args(["--disable-auth", "--disable-rate-limit"])
         assert args.disable_auth is True
         assert args.disable_rate_limit is True
 
-    def test_默认开启(self, monkeypatch) -> None:  # noqa: ANN001
-        monkeypatch.setattr(sys, "argv", ["运行API.py"])
-        from scripts.运行API import parse_args
-        args = parse_args()
+    def test_默认开启(self) -> None:
+        from myquant.api.cli import parse_api_args
+        args = parse_api_args([])
         assert args.disable_auth is False
         assert args.disable_rate_limit is False

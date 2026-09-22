@@ -24,7 +24,6 @@
 
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
 
@@ -32,73 +31,12 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from myquant.api.cli import parse_api_args
 from myquant.core.logger import get_logger
 
 logger = get_logger("scripts.run_api")
 
 
-def parse_args() -> argparse.Namespace:
-    """解析命令行参数"""
-    parser = argparse.ArgumentParser(
-        description="Pythonwdhmm 量化交易系统 - API服务入口",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-示例:
-  python scripts/运行API.py                          # 默认 0.0.0.0:8000
-  python scripts/运行API.py --host 127.0.0.1       # 本地访问
-  python scripts/运行API.py --port 9000             # 指定端口
-  python scripts/运行API.py --reload                 # 开发模式热重载
-
-安装依赖:
-  pip install fastapi uvicorn
-        """,
-    )
-    parser.add_argument(
-        "--host",
-        type=str,
-        default="0.0.0.0",
-        help="监听地址（默认: 0.0.0.0，允许外部访问）",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=8000,
-        help="监听端口（默认: 8000）",
-    )
-    parser.add_argument(
-        "--reload",
-        action="store_true",
-        help="启用热重载（开发模式，代码修改自动重启）",
-    )
-    parser.add_argument(
-        "--workers",
-        type=int,
-        default=1,
-        help="工作进程数（默认: 1，生产环境建议设为CPU核心数）",
-    )
-    parser.add_argument(
-        "--title",
-        type=str,
-        default="Pythonwdhmm 量化交易系统 API",
-        help="API标题（默认: Pythonwdhmm 量化交易系统 API）",
-    )
-    parser.add_argument(
-        "--version",
-        type=str,
-        default="v1.0.0",
-        help="API版本（默认: v1.0.0）",
-    )
-    parser.add_argument(
-        "--disable-auth",
-        action="store_true",
-        help="禁用API Key认证（仅开发环境使用；默认开启，密钥经环境变量 QUANT_API_KEYS 配置）",
-    )
-    parser.add_argument(
-        "--disable-rate-limit",
-        action="store_true",
-        help="禁用IP限流（仅开发环境使用；默认开启）",
-    )
-    return parser.parse_args()
 
 
 def check_dependencies() -> bool:
@@ -162,7 +100,7 @@ def print_banner(args: argparse.Namespace) -> None:
 
 def main() -> None:
     """主函数"""
-    args = parse_args()
+    args = parse_api_args()
 
     # 检查依赖
     if not check_dependencies():

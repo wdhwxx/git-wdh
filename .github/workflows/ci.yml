@@ -106,7 +106,7 @@ jobs:
       - name: 安装项目（dev + benchmark 依赖）
         run: pip install -e ".[dev,benchmark]"
 
-      - name: 关键工具版本断言（L5修复: 依赖未锁定，防版本漂移导致基线失真）
+      - name: "关键工具版本断言（L5修复: 依赖未锁定，防版本漂移导致基线失真）"
         run: |
           python -c "
           import pytest
@@ -291,4 +291,43 @@ jobs:
                                             'mean_reversion', 'multi_factor'), '回测策略名非法'
           print('  ✓ 回测策略 {} / 实盘策略 {} 定义有效'.format(
               bt['strategy']['name'], live['strategy']['name']))
+          "
+
+
+
+  # ============================================================
+  # 任务7：数据清洗专项（P3-8：清洗单测 + 配置检查，无行情数据依赖）
+  # ============================================================
+  data-clean:
+    name: 数据清洗专项
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置Python环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: 安装项目
+        run: pip install -e ".[dev]"
+
+      - name: 数据清洗单元测试 + 配置完整性（含第4批BUG-07开关消费用例）
+        run: pytest tests/unit/test_data_clean.py tests/unit/test_config_live_check.py -q --tb=short
+
+      - name: 清洗规则库加载冒烟（无数据源依赖，仅验证配置→规则映射）
+        run: |
+          python -c "
+          from myquant.data_access.cleaner.rules_loader import load_clean_config, load_clean_rules
+          cfg = load_clean_config(use_settings=False)
+          assert cfg.get('enabled') is True, '清洗总开关缺失'
+          assert 'log_bad_records' in cfg and 'log_quality_report' in cfg, 'BUG-07 开关缺失'
+          rules = load_clean_rules(use_settings=False)
+          assert len(rules['bar']) > 0 and len(rules['tick']) > 0, '规则映射为空'
+          print(f"  清洗配置: bar={len(rules['bar'])}条规则 / tick={len(rules['tick'])}条规则" +
+                f" 开关=log_bad:{cfg['log_bad_records']}/log_report:{cfg['log_quality_report']}")
+          print('  ✓ 数据清洗规则库加载冒烟通过')
           "

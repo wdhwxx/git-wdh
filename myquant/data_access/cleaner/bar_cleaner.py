@@ -101,8 +101,8 @@ def _get_timestamp(record: Dict[str, Any]) -> float:
     if ts is not None:
         try:
             return float(ts)
-        except (TypeError, ValueError):
-            pass
+        except (TypeError, ValueError) as e:
+            logger.debug("timestamp 字段非数值容错，尝试 date 解析: %s", e)
     date_str = record.get("date") or record.get("trade_date") or record.get("datetime")
     if date_str:
         try:

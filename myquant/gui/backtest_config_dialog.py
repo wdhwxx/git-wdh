@@ -46,6 +46,10 @@ from typing import Dict, List, Optional, Tuple
 
 import yaml
 
+from myquant.core.logger import get_logger
+
+logger = get_logger(__name__)
+
 from PySide6.QtCore import QDate, QObject, QRect, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QMouseEvent
 from PySide6.QtWidgets import (
@@ -167,8 +171,8 @@ def load_registered_strategies() -> List[str]:
         names = list_strategies()
         if names:
             return names
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("策略发现失败，使用兜底列表: %s", e)
     return FALLBACK_STRATEGIES
 
 

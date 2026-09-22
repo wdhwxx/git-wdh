@@ -523,18 +523,24 @@ class ReportGenerator:
     # ------------------------------------------------------------------
 
     def generate_trades_csv(self, result: BacktestResult, output_path: str = "outputs/trades.csv") -> str:
-        """导出交易明细CSV"""
+        """导出交易明细CSV（#P3-1修复：无成交时跳过导出，不抛空表异常）"""
         os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
         data = [t.to_dict() for t in result.trades]
+        if not data:
+            logger.info(f"无成交记录，跳过交易明细CSV导出: {output_path}")
+            return output_path
         df = pd.DataFrame(data)
         export_csv_cn(df, output_path, header_map=CSV_HEADER_MAPS["trades"])
         logger.info(f"交易明细已导出: {output_path} ({len(df)} 行)")
         return output_path
 
     def generate_equity_csv(self, result: BacktestResult, output_path: str = "outputs/equity.csv") -> str:
-        """导出净值曲线CSV"""
+        """导出净值曲线CSV（#P3-1修复：空净值时跳过导出，不抛空表异常）"""
         os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
         data = [ep.to_dict() for ep in result.equity_curve]
+        if not data:
+            logger.info(f"净值曲线为空，跳过净值CSV导出: {output_path}")
+            return output_path
         df = pd.DataFrame(data)
         export_csv_cn(df, output_path, header_map=CSV_HEADER_MAPS["equity"])
         logger.info(f"净值曲线已导出: {output_path} ({len(df)} 行)")

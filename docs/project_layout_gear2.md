@@ -104,7 +104,7 @@ Pythonwdhmm/
 │                                 # 已废弃，见回写记录·2026-09-13（功能并入回测配置GUI「看板生成」页，文件已删除）
 │
 ├── 一键部署.bat                     # ✨【V5·P3】一键部署脚本（v3.0，2026-09-04）：自动查找Anaconda→创建/更新conda环境quant(Py3.12)→复用scripts/初始化项目目录.py创建必要目录（已消除data/旧路径，新增V5缓存目录cache/benchmark）→pip install -e ".[dev,benchmark,web,live]"（失败自动切清华镜像重试）→初始化数据库quant.db→验证核心模块导入（含防未来函数lookahead_guard+4项V5新模块：一致性校验/性能基准/内存监控/数据指纹）→通达信路径检测提示+快速开始；双击或命令行运行
-├── 自定义配置速查卡.html              # ✨【回写】GUI与配置项速查卡（HTML参考文档）：三个GUI对话框的操作步骤与配置字段速查，配合config/*.yaml模板使用
+│                                 # P3-4 修正：自定义配置速查卡.html 实际位于 docs/，已移至 docs/ 段登记（2026-09-22）
 │
 ├── datasets/                         # 数据存储根目录，按加工层级分子目录
 │   ├── raw/                          # 【原始只读】原始行情数据，任何场景禁止修改此目录文件；原样保存数据源返回内容
@@ -124,7 +124,7 @@ Pythonwdhmm/
 ├── logs/                             # 运行时日志目录；专门分出data_quality子目录存放清洗告警日志，已加入.gitignore
 ├── cache/                            # ✨【V5·P0】运行时缓存目录（gitignore已忽略，保留骨架）：factor因子L2磁盘缓存 / fingerprint数据指纹仓库 / backtest回测结果缓存 / tmp临时文件；由scripts/缓存管理.py查看清理、scripts/初始化项目目录.py自动创建；L1内存缓存在myquant/indicators/factor_cache.py
     │
-├── docs/                             # 项目文档目录（共45个文件：6核心文档+6其他+4 mockups设计稿+29归档存档(archive_20260905/)）
+├── docs/                             # 项目文档目录（共46个文件：6核心文档+7其他+4 mockups设计稿+29归档存档(archive_20260905/)，P3-4 速查卡归位计入）
 │   ├── architecture.md               # 架构设计图、模块依赖关系、数据流与同步/异步边界说明
 │   ├── data_dictionary.md            # 数据库表结构、字段说明、数据源规范、数据版本、清洗规则文档
 │   ├── strategy_specs.md             # 策略逻辑规格、参数说明与回测/实盘注意事项
@@ -137,6 +137,7 @@ Pythonwdhmm/
 │   ├── 回测性能优化实施报告_v5.md      # ✨【V5·P3】完整方案文档（约32KB，8章）：三模式引擎架构/分阶段实施明细/性能验证/风险矩阵12项/局限L1-L10与中长期演进路线
 │   ├── 回测性能优化 V5｜任务完成度摘要.md # ✨【V5】阶段归档/评审附件：P0-P3共35/35项完成、验收A/B/C、全量回归1187 passed/2 skipped、落地红线5条
 │   ├── 回测性能优化V5_收官总结.html    # ✨【V5】收官可视化总结（HTML参考文档）
+│   ├── 自定义配置速查卡.html          # ✨【回写】GUI与配置项速查卡（HTML参考文档）：三个GUI对话框的操作步骤与配置字段速查，配合config/*.yaml模板使用；# P3-4 从根目录段更正归位（磁盘实际位于 docs/）
 │   ├── mockups/                      # ✨【回写】GUI设计稿目录（5文件）：数据下载对话框设计稿与渲染图、用户面板参考图、预览页、看板生成板面预览（2026-09-13并入）；对应gui/data_download_dialog.py/backtest_config_dialog.py等已实现对话框，设计存档
 │   └── archive_20260905/             # ✨【回写·2026-09-05】历史存档目录（29文件）：26个交接摘要+交接文档_20260830+根目录早期文档2个（项目交接文档/优化后期迭代项目结构图）；仅追溯历史，不参与当前蓝图主结构
 │
@@ -370,6 +371,7 @@ Pythonwdhmm/
     │   ├── batch_report.py           # ✨【2026-09-12】批量回测汇总报告生成器：BatchSummaryReportGenerator+BatchReportMeta，输入批量汇总行（与CSV同构），输出HTML（统计卡+收益/夏普分布直方图+Top30榜）+PDF（同内容fpdf2离线）；与批量回测汇总_<时间戳>.csv同目录同前缀一套；被batch_backtest_tab.py Worker调用（失败不阻断）
     │   ├── candidate_report.py       # ✨【2026-09-12】候选池报告生成器：CandidatePoolReportGenerator+CandidateReportMeta，输入候选池DataFrame（英文列），输出HTML（统计卡+综合夏普分布+TopN榜+全量绩效表）+PDF（精简8列自动分页）；与双强候选池_<时间戳>.csv同前缀一套；被scripts/候选池交叉验证.py调用（失败仅告警）
     │   └── candidate_pool.py         # ✨【2026-09-09】双策略交叉验证候选池业务模块（第3批自 tests/ 段错位更正归位）：读批量回测results.json（completed）→各自硬过滤→交集双强→综合夏普降序→TopN标记→CSV导出（utf-8-sig）；供scripts/候选池交叉验证.py调用；✨【2026-09-12】新增CSV_HEADERS_ZH中文表头映射（导出时仅替换表头，内部列名保持英文）
+    │   ├── kunpeng_param_scanner.py # ✨【P3-6】鲲鹏策略参数网格扫描器（自 scripts/kunpeng_param_scan.py 下沉）：KunpengParamScanner类（BASE_PARAMS/SIGNAL_GRID/EXIT_GRID等常量 + load_active_symbols/load_data/run_one/expand_grid/run(stage,top_n,min_trades)），路径可注入默认 project_root=parents[2]；真实数据 vectorized 两阶段扫描、聚合口径与排序与原脚本一致；供 scripts/kunpeng_param_scan.py 薄入口调用（已重写）
     │   ├── config_builder.py         # ✨【回写#32】回测配置构建模块（L4修复：load_stock_pool_from_csv/apply_exclude_prefixes/build_backtest_config 自 run_回测入口.py 下沉，供入口与 scripts/生成回测报告.py 共用，消除脚本反向导入）
     │   ├── dashboard_serializer.py   # ✨【2026-09-13】看板数据序列化器（V1瘦身版）：引擎输出→看板格式，含equity_curve/trades构建+commission拆分+timestamp规范化；✨【2026-09-14】新增 build_ohlcv()/ohlcv 注入通道（processed 清洗日线→看板 K线四窗格数据源，HistoricalDataProvider 读取 + end_date 严格过滤防未来）+ render_dashboard() 承担 §DATA 注入（占位符 __DASHBOARD_DATA_JSON__ 替换，仅替换代码行不动注释）
     │   └── dashboard_injector.py     # ✨【2026-09-13】看板数据注入器核心逻辑：§DATA区块精确定位+JS数据块构建+HTML注入+注入后验证；# 已废弃（未落盘），见回写记录·2026-09-14（磁盘无此文件，功能由 dashboard_serializer.render_dashboard 承担）
@@ -445,6 +447,7 @@ Pythonwdhmm/
     │   ├── __init__.py                 # API包统一导出：create_app/run_api/FASTAPI_AVAILABLE + 11个响应/请求模型 + APIKeyAuth + FixedWindowLimiter/TokenBucketLimiter/RateLimitResult + ServiceContainer（__all__全量导出，供运行API.py与外部导入）
     │   ├── routes.py                 # 路由聚合
     │   │                             # ✅已实现：6个数据质量端点(/api/data/quality, /overview, /runs, /runs/{id}, /dirty, /metrics) + 告警管理端点
+    │   ├── cli.py                  # ✨【P3-7】API 服务命令行参数解析（自 scripts/运行API.py 下沉）：build_api_parser()/parse_api_args(argv=None)，纯解析无业务；消除 tests/unit/test_api_middleware.py 反向导入 scripts 分层违规；scripts/运行API.py 改为薄入口调用
     │   ├── middleware/
     │   │   ├── __init__.py             # 中间件包统一导出：APIKeyAuth/create_auth + RateLimiter/FixedWindowLimiter/TokenBucketLimiter/RateLimitResult + 工厂create_fixed_window_limiter/create_token_bucket_limiter
     │   │   ├── auth.py                 # API Key认证中间件（v1基础骨架）：APIKeyAuth认证类（Header/Query取Key+恒时比较secrets.compare_digest）+ verify_api_key()/get_current_user()（FastAPI依赖注入）；多Key配置（环境变量/配置）；JWT/OAuth2/RBAC预留TODO；防未来函数：只验证当前凭证，不预测未来
@@ -745,3 +748,15 @@ Pythonwdhmm/
    e. **新增 tests/unit/test_config_live_check.py（15项）**：4 个 example 配置存在且 YAML 可解析（backtest_config/live_config/strategy_params/data_clean）+ risk_params.example.yaml 已删除断言（防死配置回归）+ live_config/strategy_params/data_clean 结构完整性（含防未来开关强制开启断言）+ BUG-07 开关四象限（log_bad_records False 不写盘/True 写盘、log_quality_report False 不生成/True 生成、无 config 旧调用方默认开启）+ BUG-08/10「预留·未消费」标注存在断言；蓝图目录树 tests/unit 段补登记（计数 46→47/36→37）
    f. **验收结果**：py_compile pipeline.py/test_config_live_check.py 通过；全量 `pytest tests/unit` = 1507 passed / 2 skipped（第3批基线 1492 + 新增 15）；lookahead 专项 19 passed；入口冒烟 `run_实盘入口.py --dry-run --paper-trading` exit=0、`run_回测入口.py --symbols 600519.SH,000001.SZ --start 2024-01-01 --end 2024-03-31` exit=0（无成交空表 warning 为既有行为，见 P3 清单「交易 HTML 报告空表兜底」，非本批引入）；CI live-config-check 配置校验逻辑与本地测试口径一致
    g. **纪律遵守**：业务逻辑改动仅 pipeline.py 一处（消费既有配置开关，无新文件/无蓝图外文件）；新增测试文件按蓝图 tests/unit 段登记；配置文件仅注释标注（yaml 结构不变，解析兼容）；删除文件按治理规则 3.3 在蓝图标注「已废弃」；未涉及实盘下单/真实 QMT/密钥
+51. ✨【回写记录·2026-09-22·P3 择机清单（P3-1~P3-9 全部闭环）】按交接文档 P3 清单 + 补充篇实施，9 项全部落盘：
+   a. **P3-1 交易 HTML 报告空表兜底**：myquant/backtest/report.py generate_trades_csv/generate_equity_csv 空数据时跳过导出（logger.info + return output_path），不再抛 csv_utils.to_chinese_headers 的 ValueError（第4批冒烟所见「报告生成失败：待导出 DataFrame 不能为空」）
+   b. **P3-2 qmt_broker account_id 脱敏**：myquant/live/brokers/qmt_broker.py 新增 @staticmethod _mask_account_id（空→「(未绑定)」/len≤6→「****」/否则前3→****←后2），6 处日志打印替换；数据字段（get_account/委托 404/935/947/962）保留原值不动
+   c. **P3-3 run_鲲鹏参数优化.py sys.path 动态化**：硬编码 D:\\Projects\\Pythonwdhmm → str(Path(__file__).resolve().parent)（LF 换行文件）
+   d. **P3-4 速查卡蓝图位置**：自定义配置速查卡.html 从根目录段移入 docs/ 段（计数 45→46），根目录原位置留说明行
+   e. **P3-5 except 纯 pass 补 debug 日志（审计 BUG-12）**：全项目扫描 except+pass 共 53 处，审计只点名 6 处补日志：run_实盘入口.py（新增 logger=logging.getLogger("run_live") + _print_signal/_print_trade/信号注册 3 处）、backtest_config_dialog.py（新增 get_logger(__name__) + load_registered_strategies 兜底 1 处）、batch_report.py（trade_count 容错 1 处）、bar_cleaner.py（timestamp 容错 1 处）；余 47 处为有意容错（ImportError 探测/清理兜底/测试）未动
+   f. **P3-6 scripts/kunpeng_param_scan.py 薄化**：业务全部下沉新模块 myquant/backtest/kunpeng_param_scanner.py（见目录树登记）；脚本重写为 argparse(--stage/--top/--min-trades) + scanner.run 薄入口；py_compile + --help exit=0 已验
+   g. **P3-7 test_api_middleware.py 反向导入 scripts 解除**：parse_args 下沉新模块 myquant/api/cli.py（见目录树登记）；scripts/运行API.py 删本地 parse_args、改调 parse_api_args 薄入口；测试改从 myquant.api.cli 导入；test_api_middleware.py 13 passed
+   h. **P3-8 CI 补 data-clean job**：.github/workflows/ci.yml 新增第7 job data-clean（needs lint+test）：清洗单测专项（test_data_clean + test_config_live_check）+ 清洗规则库加载冒烟（load_clean_config/load_clean_rules，无数据源依赖）；顺手修复既有 109 行 name 内「L5修复:」被 YAML 解析为 mapping 的语法错（加引号）——该错会直接阻断整个 CI；yaml.safe_load 验证 7 job 全部可解析；deploy job 仍待业务方定部署目标（未做）
+   i. **P3-9 alerting 异步 SMTP handler（补充篇）**：myquant/monitoring/alerting.py EmailAlertChannel 改异步队列发送：__init__ 新增 async_mode=True/queue_size=100 + queue.Queue + daemon 工作线程 _mail_worker_loop；send() 默认建消息入队立即返回（队列满报错），async_mode=False 保留同步直发；新增 _build_message/_send_sync/close；原同步 SMTP I/O 不再阻塞告警主流程；自测：类结构完整、其余通道不受影响
+   j. **验收结果**：全量 py_compile 改动文件通过；全量 pytest tests/unit = 1507 passed / 2 skipped（与第4批基线一致）；lookahead 专项 19 passed；实盘入口冒烟 exit=0；回测入口小回测 exit=0且报告五件套齐（html/pdf/text/trades_csv/equity_csv/json），P3-1 空表兜底不影响正常路径；CI ci.yml yaml.safe_load 通过
+   k. **纪律遵守**：新增 2 文件（kunpeng_param_scanner.py/api／cli.py）均已登记目录树；业务都归 myquant，scripts 仅薄入口；未涉及实盘下单/真实 QMT/密钥；未 push；无日期系统日志相关改动

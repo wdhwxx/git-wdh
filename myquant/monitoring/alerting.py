@@ -62,6 +62,7 @@ alerting.py - 告警通道管理（阶段9任务10增强：DataQualityEvent自�
 from __future__ import annotations
 
 import json
+import queue
 import smtplib
 import threading
 import time
@@ -536,6 +537,8 @@ class EmailAlertChannel(AlertChannel):
         use_ssl: bool = False,
         subject_template: str = "[{level}] {message}",
         timeout: float = 30.0,
+        async_mode: bool = True,
+        queue_size: int = 100,
     ):
         super().__init__(name=name, min_level=min_level)
         self.smtp_host = smtp_host
@@ -548,6 +551,16 @@ class EmailAlertChannel(AlertChannel):
         self.use_ssl = use_ssl
         self.subject_template = subject_template
         self.timeout = timeout
+        # P3-9：异步发送队列（同步 SMTP I/O 不阻塞告警主流程）
+        self.async_mode = async_mode
+        self._mail_queue: queue.Queue = queue.Queue(maxsize=max(1, queue_size))
+        self._mail_stop = threading.Event()
+        self._mail_worker = threading.Thread(
+            target=self._mail_worker_loop,
+            name=f"email-alert-{name}",
+            daemon=True,
+        )
+        self._mail_worker.start()
 
     def _build_subject(self, alert: Alert) -> str:
         """构建邮件主题"""
@@ -628,29 +641,53 @@ class EmailAlertChannel(AlertChannel):
 
     def send(self, alert: Alert) -> bool:
         """
-        发送邮件告警
+        发送邮件告警（P3-9：默认异步入队，不阻塞告警主流程；async_mode=False 走同步直发）
 
         Returns
         -------
-        bool : 是否发送成功
+        bool : 异步模式下为「已入队」；同步模式下为「是否发送成功」
         """
         if not self.smtp_host or not self.recipients:
             logger.warning(f"邮件通道未配置SMTP或收件人，跳过发送: {alert.summary()}")
             self._record_failure("SMTP not configured")
             return False
 
+        # 构建消息（模板/正文异常在此兜底，不进入发送队列）
         try:
-            subject = self._build_subject(alert)
-            html_body = self._build_html_body(alert)
-            text_body = self._build_text_body(alert)
+            msg = self._build_message(alert)
+        except Exception as e:
+            self._record_failure(str(e))
+            logger.error(f"邮件消息构建失败: {e}", exc_info=True)
+            return False
 
-            msg = MIMEMultipart("alternative")
-            msg["Subject"] = subject
-            msg["From"] = self.from_addr
-            msg["To"] = ", ".join(self.recipients)
-            msg.attach(MIMEText(text_body, "plain", "utf-8"))
-            msg.attach(MIMEText(html_body, "html", "utf-8"))
+        if not self.async_mode:
+            return self._send_sync(alert, msg)
 
+        try:
+            self._mail_queue.put_nowait((alert, msg))
+        except queue.Full:
+            self._record_failure("mail queue full")
+            logger.error(f"邮件告警队列已满，丢弃: {alert.summary()}")
+            return False
+        return True
+
+    def _build_message(self, alert: Alert) -> MIMEMultipart:
+        """构建 MIME 邮件消息（主题/HTML/纯文本）"""
+        subject = self._build_subject(alert)
+        html_body = self._build_html_body(alert)
+        text_body = self._build_text_body(alert)
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = self.from_addr
+        msg["To"] = ", ".join(self.recipients)
+        msg.attach(MIMEText(text_body, "plain", "utf-8"))
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
+        return msg
+
+    def _send_sync(self, alert: Alert, msg: MIMEMultipart) -> bool:
+        """同步 SMTP 直发（async_mode=False 与工作线程共用）"""
+        try:
             if self.use_ssl:
                 server = smtplib.SMTP_SSL(self.smtp_host, self.smtp_port, timeout=self.timeout)
             else:
@@ -673,7 +710,21 @@ class EmailAlertChannel(AlertChannel):
             logger.error(f"邮件告警发送失败: {e}", exc_info=True)
             return False
 
+    def _mail_worker_loop(self) -> None:
+        """后台工作线程：消费邮件队列，逐条同步发送（daemon，不阻塞进程退出）"""
+        while not self._mail_stop.is_set():
+            try:
+                alert, msg = self._mail_queue.get(timeout=1.0)
+            except queue.Empty:
+                continue
+            try:
+                self._send_sync(alert, msg)
+            finally:
+                self._mail_queue.task_done()
 
+    def close(self) -> None:
+        """停止后台发送线程（置停止事件；队列剩余任务不再处理）"""
+        self._mail_stop.set()
 # ═══════════════════════════════════════════════
 #  Webhook告警通道（阶段9任务10增强：实际HTTP发送）
 # ═══════════════════════════════════════════════

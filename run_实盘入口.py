@@ -61,6 +61,8 @@ from __future__ import annotations
 import argparse
 import logging
 import signal as os_signal
+
+logger = logging.getLogger("run_live")
 import sys
 import threading
 import time
@@ -401,8 +403,8 @@ def _print_signal(sig: Any) -> None:
     try:
         print(f"  📈 [信号] {sig.symbol} {sig.signal_type.value} "
               f"@{sig.price:.2f} reason={sig.reason}")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("信号回调打印失败: %s", e)
 
 
 def _print_trade(trade: Any) -> None:
@@ -410,8 +412,8 @@ def _print_trade(trade: Any) -> None:
     try:
         print(f"  ✅ [成交] {trade.symbol} {trade.side.value} "
               f"{trade.quantity:.0f}@{trade.price:.2f} 手续费={trade.commission:.2f}")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("成交回调打印失败: %s", e)
 
 
 # ═══════════════════════════════════════════════
@@ -575,8 +577,8 @@ def run_live_trading(args: argparse.Namespace) -> int:
     try:
         os_signal.signal(os_signal.SIGINT, _request_stop)
         os_signal.signal(os_signal.SIGTERM, _request_stop)
-    except (ValueError, OSError):
-        pass  # 非主线程环境降级为仅 KeyboardInterrupt
+    except (ValueError, OSError) as e:
+        logger.debug("信号处理器注册失败（非主线程降级为仅 KeyboardInterrupt）: %s", e)
 
     try:
         while not stop_event.is_set():
