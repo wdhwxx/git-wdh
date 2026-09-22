@@ -99,6 +99,7 @@ Pythonwdhmm/
 ├── run_批量回测.py                # ✨【回写·2026-09-05】批量回测薄入口（从scripts/迁移至根目录）：参数解析→BatchBacktester.run()→分阶段计时输出；engine.mode三模式切换（auto/vectorized/mixed/event）；数据指纹增量只重算变更标的；内存水位自动降级；支持--force-full/--mode/--cpu/--batch-size/--mem-warning/--mem-critical/--output
 ├── run_鲲鹏批量回测.py             # ✨【回写#26】鲲鹏壹号策略全池批量回测薄入口（M2方案A两段式）：阶段一 vectorized 全池扫描（3226标的，多进程+指纹增量，无资金约束）→ 按成交笔数取 top N → 阶段二 mixed 精算（max_position_pct 资金约束生效）；读 config/backtest_kunpeng.yaml（stock_pool.codes + strategy.params + backtest/sim_broker 段）；支持 --mode/--cpu/--batch-size/--refine-top/--no-refine/--symbols/--start/--end/--output 覆盖
 ├── run_鲲鹏参数优化.py             # ✨【回写#34补录】鲲鹏壹号策略参数优化工作脚本（真实行情三轮网格：信号宽网格→出场网格→边界精扫，输出 outputs/kunpeng_param_opt/ CSV+JSON+控制台Top榜；既有工作脚本补录，非薄入口，建议后续薄化）；对应产物见回写#28
+├── run_鲲鹏一键应用推荐参数.py     # ✨【回写#37补录】固定参数一键应用薄入口（FIXED_PARAMS文本段替换写回config/backtest_kunpeng.yaml strategy.params→可选跑全池批量回测验证；--dry-run/--no-backtest/--refine-top；退出码0/1/2），第3批补录蓝图登记
 ├── 看板快速生成.py                # ✨【2026-09-13】看板快速生成薄入口（根目录，与run_回测入口.py等根入口同级）：读取config/dashboard_targets.yaml → 交互式菜单选标的 → subprocess调run_回测入口.py跑回测+生成看板HTML；支持--start/--end覆盖、--symbol直选跳过菜单、全部生成、自定义标的；引擎模式走配置文件engine.mode（不传CLI）
 │                                 # 已废弃，见回写记录·2026-09-13（功能并入回测配置GUI「看板生成」页，文件已删除）
 │
@@ -122,8 +123,7 @@ Pythonwdhmm/
 ├── notebooks/                        # Jupyter探索性分析、策略原型验证、数据质量探查Notebook
 ├── logs/                             # 运行时日志目录；专门分出data_quality子目录存放清洗告警日志，已加入.gitignore
 ├── cache/                            # ✨【V5·P0】运行时缓存目录（gitignore已忽略，保留骨架）：factor因子L2磁盘缓存 / fingerprint数据指纹仓库 / backtest回测结果缓存 / tmp临时文件；由scripts/缓存管理.py查看清理、scripts/初始化项目目录.py自动创建；L1内存缓存在myquant/indicators/factor_cache.py
-    │   ├── 候选池交叉验证.py             # ✨【2026-09-09】双策略交叉验证候选池入口（薄入口）：rsrs×ma_cross各自硬过滤（夏普/交易/回撤）→交集→综合夏普降序标记TopN→导出CSV+HTML+PDF一套（双强候选池/<时间戳>前缀，表头中文）；调用myquant.backtest.candidate_pool + candidate_report；✨【2026-09-12】文件名/表头中文化+报告三件套+产物收进 results/batch_backtest/双强候选池/ 子文件夹
-│
+    │
 ├── docs/                             # 项目文档目录（共45个文件：6核心文档+6其他+4 mockups设计稿+29归档存档(archive_20260905/)）
 │   ├── architecture.md               # 架构设计图、模块依赖关系、数据流与同步/异步边界说明
 │   ├── data_dictionary.md            # 数据库表结构、字段说明、数据源规范、数据版本、清洗规则文档
@@ -144,7 +144,7 @@ Pythonwdhmm/
 │   ├── backtest_config.example.yaml  # 回测参数模板：初始资金、手续费、滑点、时间范围等；✨【V5】新增engine.mode（event/vectorized/mixed三模式选择）+ performance段（workers/chunk_size/memory_pool/预取开关），由BatchBacktest与run_批量回测.py读取
 │   ├── live_config.example.yaml     # 实盘参数模板：券商连接、风控阈值、订阅合约等
 │   ├── strategy_params.example.yaml # 策略参数模板：全部7策略参数块（ma_cross/rsrs/grid/momentum/mean_reversion/multi_factor/kunpeng）
-│   ├── risk_params.example.yaml      # 风控参数模板：最大回撤、单笔限额、流控阈值等
+│   ├── risk_params.example.yaml      # 风控参数模板：最大回撤、单笔限额、流控阈值等；# 已废弃（未落盘），见回写记录·2026-09-22（第4批BUG-09：整文件无消费，风控实际读 live_config.risk_control，已删除）
 │   ├── data_clean.example.yaml       # ✨【新增】数据清洗规则配置模板：校验开关、异常阈值、去重策略、缺失处理策略、白黑名单标的
 │   │                                  # ✅已实现：CleanRuleLibrary规则对象映射（data_access/cleaner/rules_loader.py），支持yaml配置加载
 │   ├── data_clean_run.json       # ✨【回写】全量清洗运行时状态文件（不入库）：由gui/data_clean_dialog.py生成、供scripts/数据全量清洗.py --config读取；✅已修复【回写#32】：.gitignore 已追加 config/*.json 覆盖该文件（原⚠️误提交风险已消除）；同类核验：config/ 其余运行时文件（真实 yaml/stock_pool.yaml）均已被 config/*.yaml 覆盖，无同类遗漏
@@ -153,7 +153,9 @@ Pythonwdhmm/
 │
 ├── docker/                           # 容器化部署配置
 │   ├── Dockerfile                    # 基于Python官方镜像，安装项目与依赖，设置工作目录
-│   └── docker-compose.yml            # 编排服务：应用容器、数据库容器（可选）、监控容器
+│   ├── docker-compose.yml            # 编排服务：应用容器、数据库容器（可选）、监控容器
+│   └── nginx/
+│       └── dashboard_auth.conf       # ✨【回写补录】Nginx看板基础认证配置（htpasswd保护回测看板/API入口反代），第3批补录蓝图登记
 │
 ├── .github/                          # CI/CD配置
 │   └── workflows/
@@ -184,13 +186,14 @@ Pythonwdhmm/
 │   ├── 财务数据入库.py              # ✨【回写#36】财务数据入库薄入口：参数解析(--mode import/factors/all/--csv/--lookback-days/--output-dir)+路径探测+调用FinancialImportService；自动定位datasets/raw/financial/最新financial_history_*.csv；输出outputs/财务数据入库报告/全中文HTML+CSV报告；GUI财务数据栏「财务数据入库」选项共用同一服务
 │   └── 验收_回测引擎V5.py             # ✨【V5·P1】引擎验收入口：执行统一验收清单（事件/向量化/混合引擎正确性+三模式一致性+回归+性能基准），输出验收报告
 │   ├── kunpeng_param_scan.py       # ✨【回写#34补录】鲲鹏策略参数网格扫描工作脚本（两阶段：信号参数扫描→出场+仓位扫描，真实数据 vectorized，输出 results/param_scan/scan_results.json；既有工作脚本补录，非薄入口，无调用方，建议后续薄化或并入 参数优化.py）
-│   └── 看板数据注入.py                 # ✨【2026-09-13】看板数据注入薄入口：参数解析+路径探测+调用myquant内部模块；支持一站式/JSON注入/交互式三种模式；# 已废弃（未落盘），见回写记录·2026-09-14（磁盘无此文件，看板渲染链路=run_回测入口.py --dashboard → myquant.backtest.dashboard_serializer）
+│   ├── 候选池交叉验证.py             # ✨【2026-09-09】双策略交叉验证候选池入口（薄入口）：rsrs×ma_cross各自硬过滤（夏普/交易/回撤）→交集→综合夏普降序标记TopN→导出CSV+HTML+PDF一套（双强候选池/<时间戳>前缀，表头中文）；调用myquant.backtest.candidate_pool + candidate_report；✨【2026-09-12】文件名/表头中文化+报告三件套+产物收进 results/batch_backtest/双强候选池/ 子文件夹（第3批自 cache/ 段错位更正归位）
+│   └── 一键平仓.py                   # ✨【回写#47补录】紧急平仓薄入口（LIVE模式未加--confirm仅预览）：argparse（--config/--symbol/--confirm/--output）→ 加载live_config装配券商 → EmergencyLiquidationService.execute；预览输出控制台+落盘 outputs/emergency/一键平仓_<时间戳>.txt
 
 │
-├── tests/                            # 测试体系（标准pytest单元测试 + 性能基准，43文件，2026-09-05 V5全量回归实测 1187 passed / 2 skipped）
+├── tests/                            # 测试体系（标准pytest单元测试 + 性能基准，47文件，2026-09-22 第4批磁盘对拍实测 47 个非__init__ py）
   │   ├── __init__.py
   │   ├── conftest.py                   # pytest全局配置，通过pytest_plugins加载fixtures目录
-  │   ├── unit/                         # ✨【目录重构】标准pytest单元测试（被pytest收集运行，30文件，V5全量回归1187 passed/2 skipped）
+  │   ├── unit/                         # ✨【目录重构】标准pytest单元测试（被pytest收集运行，37文件，2026-09-22 第4批磁盘对拍实测 37 个 test_*.py）
   │   │   ├── __init__.py
   │   │   ├── test_indicators.py        # 指标计算正确性（11指标，145项）✅已完成
   │   │   ├── test_strategies.py        # 策略信号生成逻辑与参数边界（6策略，115项）✅已完成
@@ -224,8 +227,11 @@ Pythonwdhmm/
   │   │   ├── test_qmt_broker_live.py  # ✨【回写#41】QMT实盘通道测试（fake SDK不连真实QMT：模式隔离/连接流程/委托撤单/成交回调/资金持仓/状态映射，23项）✅已完成
   │   │   ├── test_live_lookahead.py   # ✨【回写#42】实盘LookaheadGuard防未来校验测试（接线/信号记录/HOLD与风控拒绝不记录/T+1成交/同日跳过/早于信号日真违规/停止校验/工厂配置消费，19项）✅已完成
   │   │   ├── test_signal_idempotency.py # ✨【回写#43】幂等去重测试（Signal确定性ID/to_order映射/引擎去重/分钟线粒度/start重置/QMT端按订单ID去重/统计双计修复验证，19项）✅已完成
-  │   │   └── test_broker_manager_failover.py # ✨【回写#44】failover盲目重试约束化测试（业务拒单不failover/通道故障副本重试/冷却熔断/健康恢复/手动切换清除恢复记忆/统计摘要，27项）✅已完成
-    │   ├── candidate_pool.py         # ✨【2026-09-09】双策略交叉验证候选池业务模块：读批量回测results.json（completed）→各自硬过滤→交集双强→综合夏普降序→TopN标记→CSV导出（utf-8-sig）；供scripts/候选池交叉验证.py调用；✨【2026-09-12】新增CSV_HEADERS_ZH中文表头映射（导出时仅替换表头，内部列名保持英文）
+  │   │   ├── test_broker_manager_failover.py # ✨【回写#44】failover盲目重试约束化测试（业务拒单不failover/通道故障副本重试/冷却熔断/健康恢复/手动切换清除恢复记忆/统计摘要，27项）✅已完成
+  │   │   ├── test_broker_resend_pending.py # ✨【回写#45】断线补单对账测试（重连后仅补发未成交/多笔全补/已成交已撤废单不补/部成零重发不伪造/券商在途不补/查询失败异常不补/重复对账不重复报单/多券商独立统计/get_summary暴露last_resend/空订单簿零动作/引擎委托转发/无broker_manager错误码，16项）✅已完成
+  │   │   ├── test_daily_loss_limit.py # ✨【回写#46】每日亏损限制测试（比例计算4项/规则判定4项/注册装配4项/引擎接线5项：跨日重置日初快照/硬编码1%兜底/配置工厂消费/缺省1%/端到端拒买放行卖，17项）✅已完成
+  │   │   ├── test_emergency_liquidation.py # ✨【回写#47】紧急平仓服务测试（预览不下单/预览列撤单计划/确认全仓市价卖出/先撤挂单再卖/优先可卖数量/可卖0跳过/无可卖字段回退全仓/连接失败安全返回/断线重连恢复/单标异常不阻断/拒单记录/指定标只平该标的/无匹配持仓/空仓成功/报告结构完整，15项）✅已完成
+  │   │   └── test_config_live_check.py # ✨【回写#50】配置模板完整性+第4批配置死项修复验证（4 example可解析/risk_params已删除断言/结构完整/BUG-07开关四象限消费/预留·未消费标注存在，15项）✅已完成
   │   ├── fixtures/                     # 按领域拆分fixture，避免conftest膨胀
   │   │   ├── __init__.py
   │   │   ├── market_data.py            # 行情fixture：正常+脏数据样本
@@ -308,7 +314,8 @@ Pythonwdhmm/
     │   │   ├── tick_cleaner.py       # ✅已实现：TickCleaner(CleanerBase) Tick数据清洗器
     │   │   ├── pipeline.py           # ✅已实现：PipelineStep/PipelineResult/CleanPipeline 完整流水线编排对象
     │   │   ├── rules_loader.py       # ✅已实现：CleanRuleLibrary 规则对象映射与yaml配置加载
-    │   │   └── quality_reporter.py   # ✅已实现：质量报告生成器（json统计+分级告警+脏数据归档）
+    │   │   ├── quality_reporter.py   # ✅已实现：质量报告生成器（json统计+分级告警+脏数据归档）
+│   │   └── derived_metrics.py    # ✨【回写#41补录】派生指标计算（compute_derived_metrics：涨跌幅/振幅/量比，严格防未来-第t行只用历史行；compute_b_class_metrics：流通股本/总股本/换手率/市盈动，财务取report_date<=trade_date最新一期）；被full_clean_service.py调用
     │   └── sources/                  # 多数据源适配器，只负责拿到外部原始数据，不做业务清洗
     │       ├── __init__.py
     │       ├── base.py               # 数据源抽象基类
@@ -361,7 +368,8 @@ Pythonwdhmm/
     │   ├── engine_benchmark.py       # ✨【V5·P3】三模式性能基准：合成K线（随机游走防未来）+吞吐/耗时/P95统计+阈值断言，供scripts/性能基准测试.py --engine-benchmark-only调用
     │   ├── async_monte_carlo.py      # ✨【V5·P2】异步蒙特卡洛：asyncio并发模拟（asyncio.to_thread多进程池），大幅缩短置信区间计算耗时
     │   ├── batch_report.py           # ✨【2026-09-12】批量回测汇总报告生成器：BatchSummaryReportGenerator+BatchReportMeta，输入批量汇总行（与CSV同构），输出HTML（统计卡+收益/夏普分布直方图+Top30榜）+PDF（同内容fpdf2离线）；与批量回测汇总_<时间戳>.csv同目录同前缀一套；被batch_backtest_tab.py Worker调用（失败不阻断）
-    │   └── candidate_report.py       # ✨【2026-09-12】候选池报告生成器：CandidatePoolReportGenerator+CandidateReportMeta，输入候选池DataFrame（英文列），输出HTML（统计卡+综合夏普分布+TopN榜+全量绩效表）+PDF（精简8列自动分页）；与双强候选池_<时间戳>.csv同前缀一套；被scripts/候选池交叉验证.py调用（失败仅告警）
+    │   ├── candidate_report.py       # ✨【2026-09-12】候选池报告生成器：CandidatePoolReportGenerator+CandidateReportMeta，输入候选池DataFrame（英文列），输出HTML（统计卡+综合夏普分布+TopN榜+全量绩效表）+PDF（精简8列自动分页）；与双强候选池_<时间戳>.csv同前缀一套；被scripts/候选池交叉验证.py调用（失败仅告警）
+    │   └── candidate_pool.py         # ✨【2026-09-09】双策略交叉验证候选池业务模块（第3批自 tests/ 段错位更正归位）：读批量回测results.json（completed）→各自硬过滤→交集双强→综合夏普降序→TopN标记→CSV导出（utf-8-sig）；供scripts/候选池交叉验证.py调用；✨【2026-09-12】新增CSV_HEADERS_ZH中文表头映射（导出时仅替换表头，内部列名保持英文）
     │   ├── config_builder.py         # ✨【回写#32】回测配置构建模块（L4修复：load_stock_pool_from_csv/apply_exclude_prefixes/build_backtest_config 自 run_回测入口.py 下沉，供入口与 scripts/生成回测报告.py 共用，消除脚本反向导入）
     │   ├── dashboard_serializer.py   # ✨【2026-09-13】看板数据序列化器（V1瘦身版）：引擎输出→看板格式，含equity_curve/trades构建+commission拆分+timestamp规范化；✨【2026-09-14】新增 build_ohlcv()/ohlcv 注入通道（processed 清洗日线→看板 K线四窗格数据源，HistoricalDataProvider 读取 + end_date 严格过滤防未来）+ render_dashboard() 承担 §DATA 注入（占位符 __DASHBOARD_DATA_JSON__ 替换，仅替换代码行不动注释）
     │   └── dashboard_injector.py     # ✨【2026-09-13】看板数据注入器核心逻辑：§DATA区块精确定位+JS数据块构建+HTML注入+注入后验证；# 已废弃（未落盘），见回写记录·2026-09-14（磁盘无此文件，功能由 dashboard_serializer.render_dashboard 承担）
@@ -415,6 +423,7 @@ Pythonwdhmm/
     │   ├── portfolio.py              # 实时持仓、市值、可用冻结资金
     │   ├── scheduler.py              # 定时任务、巡检、日报
     │   ├── state_store.py            # 状态持久化，崩溃恢复
+    │   ├── emergency_liquidation.py  # ✨【回写#47补录】紧急平仓服务（EmergencyLiquidationService：execute(confirm=False默认dry_run)生成撤单+平仓计划；先撤挂单再卖/优先可卖数量/单标异常不阻断/报告结构化）；被engine._setup_force_close与scripts/一键平仓.py调用
     │   └── brokers/                  # 券商适配层，只负责对接券商原始接口，不做清洗
     │       ├── __init__.py
     │       ├── base_broker.py        # 券商抽象基类
@@ -432,7 +441,7 @@ Pythonwdhmm/
     │   │                             # ✅已实现：11个内置数据质量指标(dirty_count/ratio/grade/repair等) + collect_from_data_quality_event + subscribe_to_event_bus自动采集 + Prometheus导出
     │   └── data_quality_explorer.py # ✨【#S2修复】数据质量探查器（从web/dashboard.py迁移到monitoring底层，消除API依赖Web的架构倒置）：DataQualityExplorer类13方法（实时指标/清洗运行列表/运行详情/等级分布/脏数据统计/总览），纯Python数据层不依赖streamlit，API层和Web层均从此导入；数据源=CleanDataQueries+MetricsCollector；source过滤区分offline/live为实盘对接预留
     │
-    ├──- 项目留下多余文件                        # REST API模块
+    ├── api/                                     # REST API模块
     │   ├── __init__.py                 # API包统一导出：create_app/run_api/FASTAPI_AVAILABLE + 11个响应/请求模型 + APIKeyAuth + FixedWindowLimiter/TokenBucketLimiter/RateLimitResult + ServiceContainer（__all__全量导出，供运行API.py与外部导入）
     │   ├── routes.py                 # 路由聚合
     │   │                             # ✅已实现：6个数据质量端点(/api/data/quality, /overview, /runs, /runs/{id}, /dirty, /metrics) + 告警管理端点
@@ -711,3 +720,28 @@ Pythonwdhmm/
    b. **新增 scripts/一键平仓.py（薄入口，蓝图补录）**：find_project_root+sys.path 引导；argparse（--config/--symbol/--confirm/--output）；加载 live_config.yaml → build_broker_from_config 装配券商 → EmergencyLiquidationService.execute；LIVE 模式未加 --confirm 时打印醒目警告仅预览；报告格式化为可打印文本（控制台 + 落盘 outputs/emergency/一键平仓_<时间戳>.txt）；退出码 0=成功/2=存在异常
    c. **验证结果**：py_compile 全部改动文件通过；新增 tests/unit/test_emergency_liquidation.py 15项（预览不下单/预览列撤单计划/确认全仓市价卖出（SELL/MARKET/quantity/price=0/strategy_id）/先撤挂单再卖/优先可卖数量/可卖0跳过/无可卖字段回退全仓/连接失败安全返回/断线重连后恢复平仓/单标异常不阻断/拒单记录失败/指定标只平该标的/无匹配持仓/空仓成功/报告结构完整）全部通过；PaperBroker SIM 端到端实测：当日建仓 T+1 冻结→平仓拒单如实上报（ok=False, 原因含"T+1冻结"），隔日解冻→卖单提交成功→行情撮合成交→持仓清零；薄入口 CLI 预览跑通（连接→报告→退出码0）；实盘链路+风控+平仓筛选回归 446 passed + 20 failed（20 failed 全部为既有 pandas 3.0.5 KeyError '收盘价' 基线，与本次改动无关）
    d. **纪律遵守**：业务逻辑归 myquant（服务模块），scripts 只做薄入口；两个新文件蓝图回写补录（live/emergency_liquidation.py + scripts/一键平仓.py）；严格防未来（只操作已查询持仓/挂单，市价单不假设成交价）；未决项：M1 三项代码待办全部收口（P3 断线补单✅/P1 每日亏损1%✅/P2 一键平仓✅），剩余阻塞=QMT 客户端安装（用户自定义盘位置，安装包从券商获取）+ xtquant 实连后 T1-T8 冒烟验收
+
+48. ✨【回写记录·2026-09-22·第2批P2实盘安全（BUG-03引擎TOCTOU竞态 + BUG-04 guardian一键平仓接线 + 补充P2 rules.from_config静默失效）】按 `docs/修复补丁计划交接.md` 第 2 批推进：
+   a. **BUG-03 引擎 TOCTOU 竞态（myquant/live/engine.py）**：data_feed 回调单线程串行，但调度/成交回报/外部调用可并发进入 _process_signal，paper 异步撮合下持仓不即时更新，多标的并发 BUY 信号会基于过时持仓同时通过 max_positions 检查。修复=引擎新增 `_order_lock`(RLock) + `_pending_buy_order_ids`(Set[str]) 待成交 BUY 占位：① `_process_signal` 把「风控检查→数量计算→信号转订单→lookahead 记录→RiskManager 检查→BUY 占位登记」包入同一锁域（RLock 可重入，_risk_check/_build_risk_context 读占位亦加锁），提交 `_submit_order` 在锁外（锁内不做网络 I/O）；② `_risk_check` 检查2 与 `_build_risk_context.position_count` 均计入占位（内置风控与 RiskManager 规则库口径一致）；③ 占位生命周期：锁内登记 → 成交回报 on_trade（BUY）移除 → on_order_update 终态（REJECTED/CANCELLED）移除 → _submit_order 提交被拒（REJECTED）回滚，防"在途占位"永久悬挂
+   b. **BUG-04 guardian 一键平仓接线（myquant/live/engine.py）**：guardian.evaluate 产出 FORCE_CLOSE_ALL（UNHEALTHY 且 force_close_on_unhealthy=True）后，原 _guardian_patrol 仅 CRITICAL 留痕不执行；engine.__init__ 也未装配 force_close 回调。修复=新增 `_setup_force_close()`（start 内 broker 就绪后、调度器挂载前调用：broker_manager 或 broker 存在时创建 EmergencyLiquidationService 并 `guardian.set_force_close_callback(self._on_force_close)`，接线失败仅告警、人工 SOP 兜底）+ `_on_force_close(action, symbol)`（调 service.execute(confirm=False) 默认 dry_run：paper/sim 只生成平仓计划不下真单，真实平仓走 scripts/一键平仓.py --confirm 人工 SOP）+ `_guardian_patrol` FORCE_CLOSE_* 分支改为「先 risk_manager.pause 暂停新开仓 → 再 force_close_all/force_close_symbol 触发回调」
+   c. **补充 P2 rules.from_config 静默失效（myquant/risk/rules.py）**：原单条规则构造失败被 except 吞掉仅 error 日志、不补默认值 → 规则静默缺失。修复=失败时从 create_default_library 取同名规则补默认兜底（真钱安全第一）；默认库无同名规则（无法兜底）时 raise ValueError 启动硬失败，配置错误显式暴露
+   d. **验收测试（tests/unit/test_live_concurrency.py 既有文件内新增 2 用例，蓝图 #25 条目文件）**：① test_engine_并发多标的买信号不超最大持仓——2 个不同标的同时 BUY 信号并发调用 _process_signal（max_positions=1），断言提交 BUY 订单 ≤1 且第二个被风控拒绝（待成交占位生效）；② test_guardian_health_unhealthy_强平回调接线且paper不下真单——mock check_health 返回 UNHEALTHY → _guardian_patrol 触发 FORCE_CLOSE_ALL 决策，断言 EmergencyLiquidationService.execute 被调用且 confirm=False、风控已 PAUSE、paper 无真实 SELL 平仓单、决策记录留痕
+   e. **验证结果**：py_compile 全部改动文件通过（engine/rules/test）；test_live_concurrency.py 7 passed（原5+新2）；风控相关回归（live_risk/daily_loss_limit/live_guard_failover）110 passed；全量 `pytest tests/unit -q --disable-warnings` = 1492 passed / 2 skipped（基线 1490，净增 2，无回归）；lookahead 19 passed；入口冒烟 `run_实盘入口.py --dry-run --paper-trading` exit=0（保障组件全 ✅）、`run_回测入口.py --symbols 600519.SH,000001.SZ --start 2024-01-01 --end 2024-03-31` exit=0
+   f. **纪律遵守**：改动均在蓝图已标注文件（live/engine.py、risk/rules.py）+ 既有测试文件（tests/unit/test_live_concurrency.py 蓝图 #25 条目，无新增文件）；无蓝图外文件（临时替换脚本在系统 Temp，未落项目）；严格防未来（占位只依据"已发生"的提交/成交/拒绝事实，锁内决策只用当前持仓与已登记占位）；未决项：第 3 批（参数优化入口 --help + 蓝图 3 笔误/8 项未回写）、第 4 批（配置死项，业务方决策）；本机回归环境为 conda_wdh（Python 3.11.16 + pandas 3.0.5，与交接文档 quant 环境 pandas 版本一致）
+
+49. ✨【回写记录·2026-09-22·第3批P2入口+蓝图（BUG-06 参数优化入口 --help + BUG-05 蓝图3笔误/8项未回写）】按 `docs/修复补丁计划交接.md` 第 3 批推进：
+   a. **BUG-06 run_鲲鹏参数优化.py --help 崩溃（根目录入口）**：原文件无 argparse，--help 直接进入真实三轮网格优化（重负载且候选文件缺失即崩溃）。修复=新增 parse_args()（argparse 前置：--help 在业务加载前返回，不触碰候选文件/行情）+ 4 个参数（--n-symbols/--start/--end/--output，默认值=原常量）+ load_symbols 候选文件缺失友好提示（打印「请先运行候选池生成（scripts/候选池交叉验证.py 或 scripts/标的预筛选.py）」后 SystemExit(2)）+ load_data/run_grid/main 全链参数化（start_date/end_date/n_symbols/out_dir 贯通，常量默认值不变）；验收 `python run_鲲鹏参数优化.py --help` exit=0 usage 正常
+   b. **BUG-05 蓝图 3 笔误**：①435 行 `├──- 项目留下多余文件` → `├── api/`（REST API 树头还原）；②cache/ 段误置的 `候选池交叉验证.py` 移回 scripts/ 段（原 125 行，2026-09-09 固化候选池入口时误挂 cache/ 子树）；③tests/ 段错位 `candidate_pool.py` 条目删除，归位 myquant/backtest/ 段（candidate_report.py 之后），并修正 myquant/backtest 段 candidate_pool 条目缩进
+   c. **BUG-05 蓝图 8 项补登记**：myquant/data_access/cleaner/derived_metrics.py（回写#41 文件未入树）、myquant/live/emergency_liquidation.py（回写#47）、scripts/一键平仓.py（回写#47）、scripts/候选池交叉验证.py（随错位更正一并登记）、根目录 run_鲲鹏一键应用推荐参数.py（回写#37）、docker/nginx/dashboard_auth.conf（新建 nginx 子树）、tests/unit 新增 test_broker_resend_pending.py（#45）+ test_daily_loss_limit.py（#46）+ test_emergency_liquidation.py（#47）；tests/ 计数注释 43→46、tests/unit 30→36（对拍磁盘实测）
+   d. **过程修正（对拍发现）**：E3E10 批量替换时误删 tests/unit 段 #44 test_broker_manager_failover.py 条目（补回）+ 补回时换行写为 LF 导致 #45 行并入 #44 行（已拆为 CRLF）；候选池交叉验证.py 移 scripts/ 段后与 一键平仓.py 缩进统一；全部新增条目缩进对齐（tests/unit 段 2 空格、myquant 段 4 空格）
+   e. **验收结果**：`python run_鲲鹏参数优化.py --help` exit=0（usage/n-symbols/start/end/output 完整）；蓝图↔磁盘 Glob 对拍 7 段 0 错位（tests/unit 36/36、scripts 26/26、根目录 run_*.py 11/11、myquant/live 顶层 6/6、brokers 5/5、docker dashboard_auth.conf 1/1、myquant/backtest 顶层 23/23，含已废弃条目豁免）；py_compile run_鲲鹏参数优化.py 通过
+   f. **纪律遵守**：改动仅 1 个既有入口脚本 + 蓝图文档（无新增文件、无蓝图外文件）；run_鲲鹏参数优化.py 仍为既有工作脚本补修（非薄入口，建议后续薄化，见 P3 清单 kunpeng_param_scan.py 同类）；未决项：第 4 批（配置死项 4 条，业务方决策）、P3 择机清单（alerting 异步 handler 等）
+
+50. ✨【回写记录·2026-09-22·第4批P2配置死项（BUG-07~10，业务方决策已确认）】按 `docs/修复补丁计划交接.md` 第 4 批推进，4 项配置死项全部闭环：
+   a. **BUG-07 data_clean.example.yaml log_bad_records/log_quality_report 无消费** → 选择「清洗器消费」：myquant/data_access/cleaner/pipeline.py run_clean_pipeline 脏数据落盘/质量报告生成前读取 config.log_bad_records/log_quality_report（False 时跳过写盘/报告；无 config 旧调用方默认开启，行为不变），所有调用方（scripts/数据清洗.py、GUI、实盘清洗链路）一致生效
+   b. **BUG-08 live_config.example.yaml signal_output/intraday_monitor/notification 无引用** → 选择「标预留」：三段各加「【预留·未消费】…仅作配置模板声明」注释（signal_output 信号报告生成属后续迭代；notification 多渠道推送属后续迭代 v1 仅写本地日志；intraday_monitor 需分钟级行情支持属后续迭代），无代码改动
+   c. **BUG-09 risk_params.example.yaml 整文件无消费** → 选择「删除」：风控实际由 live_config.risk_control 驱动（engine.py 已接线 max_order_value/max_daily_trades/max_daily_loss_pct/max_drawdown_pct 等），独立文件会造成双源歧义；已删除 config/risk_params.example.yaml（无任何代码引用、config/ 下无真实 risk_params.yaml）+ CI live-config-check 同步移除该校验条目（.github/workflows/ci.yml 第4批注释说明）+ 蓝图目录树 config/ 段该条目标「已废弃（未落盘）」
+   d. **BUG-10 strategy_params.example.yaml 顶层 active_strategy/common/three_factor_pool 未消费** → 选择「标预留」：active_strategy（当前激活策略由回测/实盘入口 --strategy 或配置文件 strategy.name 指定）、common（数据频率/复权方式由回测与实盘配置各自指定）、three_factor_pool（三因子交集选池属后续迭代）三处各加「【预留·未消费】」注释；策略参数块（rsrs/kunpeng 等 12 块）已被 GUI backtest_config_dialog.load_strategy_params 消费，不受影响
+   e. **新增 tests/unit/test_config_live_check.py（15项）**：4 个 example 配置存在且 YAML 可解析（backtest_config/live_config/strategy_params/data_clean）+ risk_params.example.yaml 已删除断言（防死配置回归）+ live_config/strategy_params/data_clean 结构完整性（含防未来开关强制开启断言）+ BUG-07 开关四象限（log_bad_records False 不写盘/True 写盘、log_quality_report False 不生成/True 生成、无 config 旧调用方默认开启）+ BUG-08/10「预留·未消费」标注存在断言；蓝图目录树 tests/unit 段补登记（计数 46→47/36→37）
+   f. **验收结果**：py_compile pipeline.py/test_config_live_check.py 通过；全量 `pytest tests/unit` = 1507 passed / 2 skipped（第3批基线 1492 + 新增 15）；lookahead 专项 19 passed；入口冒烟 `run_实盘入口.py --dry-run --paper-trading` exit=0、`run_回测入口.py --symbols 600519.SH,000001.SZ --start 2024-01-01 --end 2024-03-31` exit=0（无成交空表 warning 为既有行为，见 P3 清单「交易 HTML 报告空表兜底」，非本批引入）；CI live-config-check 配置校验逻辑与本地测试口径一致
+   g. **纪律遵守**：业务逻辑改动仅 pipeline.py 一处（消费既有配置开关，无新文件/无蓝图外文件）；新增测试文件按蓝图 tests/unit 段登记；配置文件仅注释标注（yaml 结构不变，解析兼容）；删除文件按治理规则 3.3 在蓝图标注「已废弃」；未涉及实盘下单/真实 QMT/密钥

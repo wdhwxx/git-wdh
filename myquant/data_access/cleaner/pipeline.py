@@ -195,14 +195,14 @@ def run_clean_pipeline(
     else:
         raise ValueError(f"不支持的数据类型: {data_type}，仅支持 bar/tick")
 
-    # 脏数据落盘
+    # 脏数据落盘（#B7修复：config.log_bad_records=False 时关闭写盘，兼容无config调用方默认开启）
     bad_file = None
-    if save_bad and bad:
+    if save_bad and bad and (config or {}).get("log_bad_records", True):
         bad_file = _save_bad_records(bad, symbol, data_type, resolved_bad_dir)
 
-    # 生成质量报告
+    # 生成质量报告（#B7修复：config.log_quality_report=False 时关闭，兼容无config调用方默认开启）
     report_file = None
-    if save_report:
+    if save_report and (config or {}).get("log_quality_report", True):
         report_file = generate_quality_report(
             stats=stats,
             symbol=symbol,

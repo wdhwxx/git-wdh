@@ -179,6 +179,7 @@ scheduler:
       action: "push_daily_report"
 
 # ========== 信号输出配置 ==========
+# 【预留·未消费】本段暂无代码消费（信号报告生成属后续迭代），仅作配置模板声明
 signal_output:
   enabled: true
   signal_dir: "./outputs/live_signals"    # 信号报告输出目录
@@ -186,6 +187,7 @@ signal_output:
   signal_time: "15:00"                     # 每日信号生成时间（收盘后）
 
 # ========== 消息推送配置 ==========
+# 【预留·未消费】本段暂无代码消费（多渠道推送属后续迭代，v1仅写本地日志），仅作配置模板声明
 notification:
   enabled: false                           # 是否启用推送（false=仅写本地日志）
   # 推送渠道（可同时启用多个，后续迭代实现）
@@ -215,6 +217,7 @@ notification:
 
 # ========== 盘中止盈提醒（实时监控持仓，v1预留TODO）==========
 # TODO: 后续迭代实现盘中实时监控，需要分钟级行情支持
+# 【预留·未消费】本段暂无代码消费（需分钟级行情支持，属后续迭代），仅作配置模板声明
 intraday_monitor:
   enabled: false                           # v1暂不启用，需要分钟级行情支持
   check_interval: 60                       # 检查间隔（秒）

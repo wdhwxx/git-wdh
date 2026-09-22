@@ -12,12 +12,19 @@ C2 修复回归测试：实盘多线程并发修改持仓/资金无锁
 回归依据: 审计问题 C2（live/portfolio.py 与 live/brokers/*.py 无锁竞态）
 """
 import threading
+import time
+from unittest import mock
 
 import pytest
 
 from myquant.live.brokers.paper_broker import PaperBroker
+from myquant.live.engine import LiveEngine, RiskConfig
 from myquant.live.portfolio import LivePortfolio
+from myquant.models.market_data import Bar, BarFrequency
 from myquant.models.trade import Order, OrderSide, OrderType, Trade
+from myquant.risk import DecisionType, RiskManager, RiskStatus
+from myquant.risk.guardian import HealthCheckResult, HealthStatus
+from myquant.strategies.base import Signal, SignalType
 
 
 @pytest.fixture()
@@ -181,3 +188,96 @@ def test_限价单并发撮合守恒(paper_broker: PaperBroker) -> None:
     assert filled == total, f"成交 {filled} != {total}"
     assert abs(broker.get_position("000005.SZ").quantity - total * 100) < 1e-6
     assert broker.get_account()["cash"] > 0
+
+
+def test_engine_并发多标的买信号不超最大持仓() -> None:
+    """BUG-03 验收：2 个不同标的同时 BUY 信号并发提交，提交订单数不超 max_positions"""
+    engine = LiveEngine(
+        risk_config=RiskConfig(max_positions=1, max_position_pct=0.5),
+        enable_risk_manager=False,
+        enable_state_store=False,
+        enable_scheduler=False,
+        enable_guardian=False,
+        enable_event_bus=False,
+        enable_lookahead_guard=False,
+    )
+    pf = LivePortfolio(initial_capital=1_000_000.0)
+    broker = PaperBroker(initial_capital=1_000_000.0)
+    broker.connect()
+    broker.update_market_price("000001.SZ", 10.0)
+    broker.update_market_price("000002.SZ", 10.0)
+    engine.set_portfolio(pf)
+    engine.set_broker(broker)
+
+    ts = time.time()
+    bar_a = Bar(symbol="000001.SZ", frequency=BarFrequency.DAILY, timestamp=ts,
+                open=10.0, high=10.0, low=10.0, close=10.0,
+                volume=1_000_000, amount=10_000_000)
+    bar_b = Bar(symbol="000002.SZ", frequency=BarFrequency.DAILY, timestamp=ts,
+                open=10.0, high=10.0, low=10.0, close=10.0,
+                volume=1_000_000, amount=10_000_000)
+    sig_a = Signal(symbol="000001.SZ", signal_type=SignalType.BUY, price=10.0, reason="并发测试A")
+    sig_b = Signal(symbol="000002.SZ", signal_type=SignalType.BUY, price=10.0, reason="并发测试B")
+
+    errors: list = []
+
+    def fire(sig: Signal, bar: Bar) -> None:
+        try:
+            engine._process_signal(sig, bar)
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"{sig.symbol}: {e}")
+
+    t1 = threading.Thread(target=fire, args=(sig_a, bar_a))
+    t2 = threading.Thread(target=fire, args=(sig_b, bar_b))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert not errors, f"并发信号处理异常: {errors[:3]}"
+    buy_orders = [o for o in engine._orders if o.side == OrderSide.BUY]
+    assert len(buy_orders) <= 1, f"并发 BUY 订单 {len(buy_orders)} 超 max_positions=1"
+    assert engine._stats["risk_rejected"] >= 1, "第二个并发 BUY 信号应被风控拒绝（待成交占位生效）"
+
+
+def test_guardian_health_unhealthy_强平回调接线且paper不下真单() -> None:
+    """BUG-04 验收：mock health=UNHEALTHY → guardian 决策 FORCE_CLOSE_ALL，
+    engine 先 PAUSE 风控、触发强平回调（EmergencyLiquidationService dry_run），
+    paper 通道不产生真实平仓单。"""
+    risk_mgr = RiskManager()
+    engine = LiveEngine(
+        risk_config=RiskConfig(max_positions=5),
+        risk_manager=risk_mgr,
+        enable_state_store=False,
+        enable_scheduler=False,
+        enable_guardian=True,
+        enable_event_bus=False,
+        enable_lookahead_guard=False,
+    )
+    pf = LivePortfolio(initial_capital=1_000_000.0)
+    broker = PaperBroker(initial_capital=1_000_000.0)
+    broker.connect()
+    engine.set_portfolio(pf)
+    engine.set_broker(broker)
+    # 手动装配（不 start，避免真实轮询/调度线程）
+    engine._setup_force_close()
+    assert engine._emergency_service is not None, "guardian 一键平仓服务应已装配"
+
+    unhealthy = HealthCheckResult()
+    unhealthy.add_check("mock_position_risk", False, "模拟风控异常（测试）")
+    assert unhealthy.status == HealthStatus.UNHEALTHY
+
+    with mock.patch.object(engine._guardian, "check_health", return_value=unhealthy), \
+         mock.patch.object(engine._emergency_service, "execute",
+                           return_value={"ok": True, "mode": "DRY_RUN",
+                                         "liquidation": {"total_symbols": 0}}) as fake_execute:
+        engine._guardian_patrol()
+
+    # 回调被调用且为 dry_run（confirm=False → paper 不下真单）
+    fake_execute.assert_called_once()
+    assert fake_execute.call_args.kwargs.get("confirm") is False
+    assert risk_mgr.get_status() == RiskStatus.PAUSED, "强平前置应先 PAUSE 新开仓"
+    sell_orders = [o for o in broker.orders.values() if o.side == OrderSide.SELL]
+    assert not sell_orders, "dry_run 模式下 paper 不应产生真实平仓单"
+    decisions = engine._guardian.get_decisions()
+    assert decisions and decisions[0].decision_type == DecisionType.FORCE_CLOSE_ALL

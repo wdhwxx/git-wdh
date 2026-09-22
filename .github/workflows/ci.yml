@@ -252,11 +252,11 @@ jobs:
           from pathlib import Path
 
           # 1. 4个 example 配置文件都存在且可解析
+          # 第4批BUG-09：risk_params.example.yaml 整文件无消费（风控实际读 live_config.risk_control），已删除
           config_files = [
               'config/backtest_config.example.yaml',
               'config/live_config.example.yaml',
               'config/strategy_params.example.yaml',
-              'config/risk_params.example.yaml',
           ]
           for f in config_files:
               path = Path(f)

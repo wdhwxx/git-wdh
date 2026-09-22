@@ -14,7 +14,7 @@
 
 # ========== 当前使用的策略 ==========
 # 可选策略：rsrs / ma_cross / grid / momentum / mean_reversion / multi_factor / kunpeng
-active_strategy: "rsrs"                   # 当前激活的策略名称
+active_strategy: "rsrs"                   # 【预留·未消费】当前激活策略由回测/实盘入口 --strategy 或配置文件 strategy.name 指定，本键暂未消费
 
 # ========== RSRS策略（阶段六最优，核心策略）==========
 rsrs:
@@ -124,6 +124,7 @@ kunpeng:
   capital_base: 1000000                     # 仓位资金基准（元，默认100万）
 
 # ========== 三因子交集股票池（阶段六E最优）==========
+# 【预留·未消费】本段暂无代码消费（三因子交集选池属后续迭代），仅作配置模板声明
 # 说明：这不是策略，而是股票池筛选配置，被回测和实盘共同引用
 three_factor_pool:
   volatility_window: 20                     # 波动率窗口（20日收益率标准差）
@@ -161,6 +162,7 @@ bollinger:
   breakout_buy: false                        # 突破上轨是否追涨
 
 # ========== 通用参数（所有策略共用）==========
+# 【预留·未消费】本段暂无代码消费（数据频率/复权方式由回测与实盘配置各自指定），仅作配置模板声明
 common:
   data_frequency: "daily"                    # 数据频率：daily / 60m / 30m / 15m / 5m / 1m
   use_adjusted: true                         # 是否使用复权数据

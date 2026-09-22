@@ -602,8 +602,16 @@ class RiskRuleLibrary:
 
     @classmethod
     def from_config(cls, config: Dict[str, Any]) -> "RiskRuleLibrary":
-        """从配置字典加载规则库"""
+        """
+        从配置字典加载规则库
+
+        单条规则构造失败时（参数非法等）：
+          - 默认库（create_default_library）存在同名规则 → 补默认规则兜底，
+            防止风控规则静默缺失（真钱安全第一）；
+          - 默认库无同名规则（无法兜底）→ 硬失败，配置错误必须显式暴露。
+        """
         library = cls()
+        default_library = create_default_library()
         for rule_name, rule_config in config.items():
             if rule_name not in RULE_REGISTRY:
                 logger.warning(f"[risk] 未知规则，跳过: {rule_name}")
@@ -615,7 +623,16 @@ class RiskRuleLibrary:
                 rule = rule_class(enabled=enabled, **params)
                 library.add_rule(rule)
             except Exception as e:
-                logger.error(f"[risk] 创建规则失败: {rule_name} - {e}")
+                fallback = default_library.get_rule(rule_name)
+                if fallback is None:
+                    raise ValueError(
+                        f"[risk] 规则 {rule_name} 配置构造失败且默认库无同名规则"
+                        f"可兜底，启动硬失败: {e}"
+                    ) from e
+                logger.error(
+                    f"[risk] 创建规则失败: {rule_name} - {e}；已补默认规则兜底"
+                )
+                library.add_rule(fallback)
         return library
 
     def __repr__(self) -> str:

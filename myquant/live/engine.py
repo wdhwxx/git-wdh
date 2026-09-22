@@ -61,6 +61,7 @@ TODO(后续迭代):
 
 from __future__ import annotations
 
+import threading
 import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set
@@ -72,6 +73,7 @@ from myquant.core.date_utils import format_bar_date, get_date_part
 from myquant.core.lookahead_guard import LookaheadGuard, get_lookahead_guard
 from myquant.engine.base import BaseEngine
 from myquant.live.brokers import BrokerManager
+from myquant.live.emergency_liquidation import EmergencyLiquidationService
 from myquant.models.market_data import Bar, BarFrequency, MarketEvent
 from myquant.models.trade import Order, OrderSide, OrderType, OrderStatus, Trade
 from myquant.strategies.base import Signal, SignalType, StrategyBase, StrategyContext
@@ -272,6 +274,8 @@ class LiveEngine(BaseEngine):
         self._broker_manager: Optional[BrokerManager] = None  # 唯一执行通道（任务27）
         self._portfolio = None
         self._strategies: List[StrategyBase] = []
+        # ── BUG-04：guardian 一键平仓服务（延迟装配，默认 dry_run 不下真单）──
+        self._emergency_service: Optional[Any] = None
 
         # 策略上下文
         self._context: Optional[StrategyContext] = None
@@ -292,6 +296,13 @@ class LiveEngine(BaseEngine):
         # 订单记录
         self._orders: List[Order] = []
         self._max_orders = 1000
+
+        # ── BUG-03：订单决策锁 + BUY 待成交订单占位（TOCTOU 竞态防护）──
+        # data_feed 回调单线程串行，但调度/成交回报/外部调用可并发进入；
+        # 决策（读 portfolio 风控检查→数量→RiskManager 检查）与 BUY 占位登记
+        # 在同一锁域内原子完成，锁内不做网络 I/O。
+        self._order_lock = threading.RLock()
+        self._pending_buy_order_ids: Set[str] = set()
 
         # 统计
         self._stats = {
@@ -668,6 +679,9 @@ class LiveEngine(BaseEngine):
                 # C项：历史预热（频率自适应 + 清洗过滤），策略启动即有足够窗口
                 if self._enable_warmup and self._warmup_bars > 0 and symbols:
                     self._warmup_history(symbols)
+
+            # ── BUG-04：guardian 一键平仓接线（broker 已就绪，先于调度器巡检）──
+            self._setup_force_close()
 
             # ── H2修复：调度器挂载启动（巡检/日报/风控守护/定时快照）──
             self._setup_scheduler()
@@ -1273,52 +1287,62 @@ class LiveEngine(BaseEngine):
             )
             return
 
-        # 2. 风控检查
-        if not self._risk_check(signal, bar):
-            self._stats["risk_rejected"] += 1
-            logger.info(
-                f"[engine] 风控拒绝: {signal.symbol} "
-                f"{signal.signal_type.value} reason={signal.reason}"
+        # ── BUG-03：订单决策原子化（TOCTOU 竞态防护）──
+        # 决策（读 portfolio 风控检查→数量计算→RiskManager 检查）与
+        # BUY 待成交占位登记在同一锁域内完成；锁内不做网络 I/O（提交在锁外）。
+        # paper 异步撮合下持仓不即时更新，占位使并发信号感知"在途买入"，
+        # 防止多标的并发信号基于过时持仓同时放行、超 max_positions。
+        with self._order_lock:
+            # 2. 风控检查
+            if not self._risk_check(signal, bar):
+                self._stats["risk_rejected"] += 1
+                logger.info(
+                    f"[engine] 风控拒绝: {signal.symbol} "
+                    f"{signal.signal_type.value} reason={signal.reason}"
+                )
+                return
+
+            # 3. 计算下单数量
+            quantity = self._calc_order_quantity(signal, bar)
+            if quantity <= 0:
+                logger.info(f"[engine] 下单数量为0，跳过: {signal.symbol}")
+                return
+
+            # 4. 信号转订单
+            order = signal.to_order(
+                quantity=quantity,
+                order_type=OrderType.MARKET,
+                price=bar.close,  # 市价单，价格参考当前收盘价
             )
-            return
+            if order is None:
+                return
 
-        # 3. 计算下单数量
-        quantity = self._calc_order_quantity(signal, bar)
-        if quantity <= 0:
-            logger.info(f"[engine] 下单数量为0，跳过: {signal.symbol}")
-            return
+            # ── 任务42：信号生成阶段即记录防未来校验（铁律4：因子仅用历史数据）──
+            # 信号T日收盘生成，数据截止日=T日；与回测引擎 record_signal 同源
+            if self._lookahead_guard:
+                signal_date = get_date_part(bar.timestamp) or ""
+                signal_type = "BUY" if signal.is_buy else ("SELL" if signal.is_sell else "CLOSE")
+                self._lookahead_guard.record_signal(
+                    symbol=signal.symbol,
+                    signal_date=signal_date,
+                    signal_type=signal_type,
+                    data_end=signal_date,  # 信号基于T日收盘价，数据截止日=T日
+                    factor_names=[self._strategies[0].name] if self._strategies else None,
+                )
+                # 登记 order_id → 信号日期（供成交回报 record_trade 铁律3校验）
+                if signal_date:
+                    self._order_signal_dates[order.order_id] = signal_date
 
-        # 4. 信号转订单
-        order = signal.to_order(
-            quantity=quantity,
-            order_type=OrderType.MARKET,
-            price=bar.close,  # 市价单，价格参考当前收盘价
-        )
-        if order is None:
-            return
+            # 5. H2修复：RiskManager 完整规则库检查（提交券商前强制，铁律2）
+            if not self._risk_manager_check(order, bar):
+                self._stats["risk_rejected"] += 1
+                return
 
-        # ── 任务42：信号生成阶段即记录防未来校验（铁律4：因子仅用历史数据）──
-        # 信号T日收盘生成，数据截止日=T日；与回测引擎 record_signal 同源
-        if self._lookahead_guard:
-            signal_date = get_date_part(bar.timestamp) or ""
-            signal_type = "BUY" if signal.is_buy else ("SELL" if signal.is_sell else "CLOSE")
-            self._lookahead_guard.record_signal(
-                symbol=signal.symbol,
-                signal_date=signal_date,
-                signal_type=signal_type,
-                data_end=signal_date,  # 信号基于T日收盘价，数据截止日=T日
-                factor_names=[self._strategies[0].name] if self._strategies else None,
-            )
-            # 登记 order_id → 信号日期（供成交回报 record_trade 铁律3校验）
-            if signal_date:
-                self._order_signal_dates[order.order_id] = signal_date
+            # ── BUG-03：BUY 待成交占位（锁内登记；成交回报/拒绝/撤销时移除）──
+            if signal.is_buy:
+                self._pending_buy_order_ids.add(order.order_id)
 
-        # 5. H2修复：RiskManager 完整规则库检查（提交券商前强制，铁律2）
-        if not self._risk_manager_check(order, bar):
-            self._stats["risk_rejected"] += 1
-            return
-
-        # 6. 提交订单
+        # 6. 提交订单（锁外：broker 调用含网络 I/O，锁内不做网络 I/O）
         self._submit_order(order)
 
     def _risk_check(self, signal: Signal, bar: Bar) -> bool:
@@ -1355,8 +1379,11 @@ class LiveEngine(BaseEngine):
                 logger.debug(f"[engine] 风控: 可用资金不足 {signal.symbol}")
                 return False
 
-            # 检查2：最大持仓数
-            current_positions = self._portfolio.get_position_count()
+            # 检查2：最大持仓数（BUG-03：计入 BUY 待成交占位，防并发超限）
+            # 本行使用的数据截至当前时刻：持仓为已发生事实 + 锁内登记的待成交占位
+            with self._order_lock:
+                pending_buy = len(self._pending_buy_order_ids)
+            current_positions = self._portfolio.get_position_count() + pending_buy
             if not self._portfolio.has_position(signal.symbol) and current_positions >= rc.max_positions:
                 logger.debug(f"[engine] 风控: 持仓数已满 {signal.symbol}")
                 return False
@@ -1451,12 +1478,16 @@ class LiveEngine(BaseEngine):
         current_price: Dict[str, float] = dict(self._last_prices)
         if bar is not None:
             current_price[bar.symbol] = float(bar.close)
+        # ── BUG-03：position_count 计入 BUY 待成交占位（RiskManager 规则库
+        # 与内置风控检查口径一致，防并发信号超 max_positions）──
+        with self._order_lock:
+            pending_buy = len(self._pending_buy_order_ids)
         return RiskContext(
             cash=cash,
             total_assets=total_assets,
             initial_capital=initial_capital,
             positions=positions,
-            position_count=len(positions),
+            position_count=len(positions) + pending_buy,
             peak_assets=self._peak_assets,
             current_price=current_price,
             order_count_today=self._order_count_today,
@@ -1580,6 +1611,73 @@ class LiveEngine(BaseEngine):
         except Exception as e:
             logger.warning(f"[engine] 状态快照保存失败（不影响交易）: {e}")
 
+    # ═══════════════════════════════════════════
+    #  BUG-04：guardian 一键平仓接线（P2 实盘安全）
+    # ═══════════════════════════════════════════
+
+    def _setup_force_close(self) -> None:
+        """
+        装配 guardian 一键平仓回调（BUG-04）
+
+        guardian.evaluate 产出 FORCE_CLOSE_* 决策后，由 _guardian_patrol
+        触发 force_close_all/force_close_symbol → 回调本引擎接线的
+        EmergencyLiquidationService（默认 dry_run/confirm=False）：
+        paper/sim 通道只生成平仓计划并记录，绝不真实下单；
+        真实平仓由人工 SOP（scripts/一键平仓.py --confirm）接管。
+
+        装配时机：start 内 broker 就绪后、调度器挂载前。
+        全部 try-except 包裹：接线失败不影响交易主链路（人工 SOP 兜底）。
+        """
+        if self._guardian is None:
+            return
+        broker = self._broker_manager or self._broker
+        if broker is None:
+            logger.warning("[engine] 无券商通道，guardian 一键平仓回调未装配（人工 SOP 兜底）")
+            return
+        try:
+            self._emergency_service = EmergencyLiquidationService(broker)
+            self._guardian.set_force_close_callback(self._on_force_close)
+            logger.info("[engine] guardian 一键平仓已接线（EmergencyLiquidationService，dry_run 模式）")
+        except Exception as e:
+            self._emergency_service = None
+            logger.warning(f"[engine] guardian 一键平仓接线失败（人工 SOP 兜底）: {e}")
+
+    def _on_force_close(self, action: str, symbol: Optional[str] = None) -> bool:
+        """
+        guardian 强平回调执行（BUG-04）
+
+        v1 安全语义：confirm=False（dry_run）→ 只生成平仓计划/记录，
+        paper/sim 通道不下真实平仓单；真实执行由人工 SOP 确认后触发。
+
+        Parameters
+        ----------
+        action : str
+            强平动作（"all"=全部平仓 / "symbol"=单标的平仓）
+        symbol : str | None
+            action="symbol" 时指定标的
+
+        Returns
+        -------
+        bool : True=服务执行成功（dry_run 生成计划）
+        """
+        if self._emergency_service is None:
+            logger.error("[engine] 强平回调触发但紧急平仓服务未装配（人工 SOP 介入）")
+            return False
+        try:
+            report = self._emergency_service.execute(
+                confirm=False,  # BUG-04 v1 安全：只记录/生成计划，不下真单
+                symbol=symbol if action == "symbol" else None,
+            )
+            ok = bool(report.get("ok"))
+            logger.critical(
+                f"[engine] 强制平仓回调执行: action={action} symbol={symbol or '-'} "
+                f"mode={report.get('mode', '?')} ok={ok}"
+            )
+            return ok
+        except Exception as e:
+            logger.error(f"[engine] 强制平仓回调异常: {e}")
+            return False
+
     def _setup_scheduler(self) -> None:
         """
         调度器挂载与启动（H2修复）
@@ -1633,7 +1731,8 @@ class LiveEngine(BaseEngine):
 
         决策处理:
           - PAUSE → RiskManager.pause（禁止新开仓，自动联动告警）
-          - FORCE_CLOSE_* → v1记录CRITICAL日志（实际平仓预留后续迭代）
+          - FORCE_CLOSE_* → 先 PAUSE 新开仓，再触发 guardian 强平回调
+            （v1 dry_run 只记录/生成计划，paper/sim 不下真单）
           - ALERT → 仅记录
         只使用"已发生"事实（当前上下文），防未来函数。
         """
@@ -1654,8 +1753,16 @@ class LiveEngine(BaseEngine):
         elif decision.decision_type in (
             DecisionType.FORCE_CLOSE_ALL, DecisionType.FORCE_CLOSE_SYMBOL
         ):
-            # v1：CRITICAL留痕（logger错误通道落盘）；实际平仓预留后续迭代
-            logger.critical(f"[engine] 守护决策-强制平仓（v1仅记录）: {decision.reason}")
+            # ── BUG-04：先 PAUSE 新开仓 → 再触发强平（v1 dry_run：只记录/生成计划，
+            # paper/sim 不下真单；真实平仓由人工 SOP（scripts/一键平仓.py --confirm）执行）──
+            if self._risk_manager is not None:
+                self._risk_manager.pause(decision.reason or "强制平仓前置暂停")
+                logger.critical(f"[engine] 强制平仓前置：风控已暂停新开仓: {decision.reason}")
+            if decision.decision_type == DecisionType.FORCE_CLOSE_ALL:
+                self._guardian.force_close_all(decision.reason or "风控守护强制平仓")
+            else:
+                sym = (decision.details or {}).get("symbol") or ""
+                self._guardian.force_close_symbol(sym, decision.reason or "风控守护强制平仓")
         else:
             logger.info(
                 f"[engine] 守护决策-{decision.decision_type.value}: {decision.reason}"
@@ -1737,6 +1844,12 @@ class LiveEngine(BaseEngine):
             # 提交到 broker_manager（路由主券商 + 主备 failover 统一处理）
             result = self._broker_manager.submit_order(order)
 
+            # ── BUG-03：提交被拒（REJECTED）时回滚 BUY 待成交占位
+            # （锁外回滚与锁内登记互斥，避免"在途占位"永久悬挂）──
+            if order.side == OrderSide.BUY and getattr(result, "status", None) == OrderStatus.REJECTED:
+                with self._order_lock:
+                    self._pending_buy_order_ids.discard(order.order_id)
+
             # 触发订单回调
             for cb in self._on_order_callbacks:
                 try:
@@ -1801,6 +1914,10 @@ class LiveEngine(BaseEngine):
             self._stats["filled_orders"] += 1
             price = order.price if order.price is not None else 0.0
             logger.info(f"[engine] 订单已成交: {order.symbol} {order.quantity:.0f}@{price:.2f}")
+        # ── BUG-03：BUY 订单终态（拒绝/撤销）移除待成交占位（不再产生成交）──
+        elif order.status in (OrderStatus.REJECTED, OrderStatus.CANCELLED) and order.side == OrderSide.BUY:
+            with self._order_lock:
+                self._pending_buy_order_ids.discard(order.order_id)
 
     def on_trade(self, trade: Trade) -> None:
         """
@@ -1813,6 +1930,11 @@ class LiveEngine(BaseEngine):
         """
         try:
             self._stats["total_trades"] += 1
+
+            # ── BUG-03：BUY 成交后移除待成交占位（持仓已由 apply_trade 计入 portfolio）──
+            if trade.side == OrderSide.BUY:
+                with self._order_lock:
+                    self._pending_buy_order_ids.discard(trade.order_id)
 
             # 更新portfolio
             if self._portfolio:

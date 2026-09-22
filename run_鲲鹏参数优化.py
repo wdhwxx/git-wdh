@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+import argparse
 import csv
 import itertools
 import json
@@ -112,6 +113,11 @@ def load_commission_slippage(cfg: Dict[str, Any]) -> Tuple[CommissionModel, Slip
 def load_symbols(n: int) -> List[str]:
     """从候选清单取流动性 Top n 标的代码。"""
     cand = PROJECT_ROOT / "_candidates.csv"
+    if not cand.exists():
+        # 文件缺失友好提示（BUG-06）：--help 前置后，此处已是解析后业务路径
+        print(f"[错误] 候选池文件不存在: {cand}")
+        print("请先运行候选池生成（scripts/候选池交叉验证.py 或 scripts/标的预筛选.py）后再执行参数优化。")
+        raise SystemExit(2)
     symbols: List[str] = []
     with open(cand, "r", encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
@@ -123,13 +129,14 @@ def load_symbols(n: int) -> List[str]:
     return symbols
 
 
-def load_data(symbols: List[str]) -> Dict[str, Any]:
+def load_data(symbols: List[str], start_date: str = START_DATE,
+              end_date: str = END_DATE) -> Dict[str, Any]:
     """加载真实行情（统一 end_date 防未来函数）。"""
     provider = HistoricalDataProvider(
         processed_dir=PROCESSED_DIR, default_adjust="hfq", data_format="parquet",
     )
     data = provider.load_multiple(
-        symbols, start_date=START_DATE, end_date=END_DATE, adjust="hfq",
+        symbols, start_date=start_date, end_date=end_date, adjust="hfq",
     )
     missing = [s for s in symbols if s not in data]
     if missing:
@@ -249,12 +256,13 @@ def fmt_params(p: Dict[str, Any]) -> str:
 
 def run_grid(params_list: List[Dict[str, Any]], data: Dict[str, Any],
              commission: CommissionModel, slippage: SlippageModel,
-             round_name: str) -> List[Dict[str, Any]]:
+             round_name: str, start_date: str = START_DATE,
+             end_date: str = END_DATE) -> List[Dict[str, Any]]:
     """并行评估参数网格并聚合。"""
     items = [
         {
             "symbol": sym, "df": df, "params_list": params_list,
-            "mode": MODE, "start_date": START_DATE, "end_date": END_DATE,
+            "mode": MODE, "start_date": start_date, "end_date": end_date,
             "initial_capital": INITIAL_CAPITAL,
             "commission": commission, "slippage": slippage,
         }
@@ -345,26 +353,49 @@ def merge_metrics(r: Dict[str, Any]) -> Dict[str, Any]:
                               "avg_drawdown", "total_trades", "signal_count")}
 
 
-def main() -> int:
-    """主流程：加载数据 -> 三轮网格扫描 -> 基线对照 -> 推荐 -> 输出。"""
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+def parse_args() -> argparse.Namespace:
+    """解析命令行参数（argparse 前置：--help 在业务加载前返回，不触碰候选文件/行情）。"""
+    parser = argparse.ArgumentParser(
+        description="鲲鹏壹号策略参数优化（三轮网格搜索：信号宽网格→出场网格→边界精扫，真实行情）",
+    )
+    parser.add_argument("--n-symbols", type=int, default=N_SYMBOLS,
+                        help=f"参与优化标的数（默认 {N_SYMBOLS}）")
+    parser.add_argument("--start", default=START_DATE,
+                        help=f"回测起始日（默认 {START_DATE}）")
+    parser.add_argument("--end", default=END_DATE,
+                        help=f"回测截止日（默认 {END_DATE}）")
+    parser.add_argument("--output", type=Path, default=OUTPUT_DIR,
+                        help=f"输出目录（默认 {OUTPUT_DIR.name}）")
+    return parser.parse_args()
+
+
+def main(args: Optional[argparse.Namespace] = None) -> int:
+    """主流程：解析参数 -> 加载数据 -> 三轮网格扫描 -> 基线对照 -> 推荐 -> 输出。"""
+    if args is None:
+        args = parse_args()
+    n_symbols = int(args.n_symbols)
+    start_date = str(args.start)
+    end_date = str(args.end)
+    out_dir = Path(args.output)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. 配置与数据
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     commission, slippage = load_commission_slippage(cfg)
-    symbols = load_symbols(N_SYMBOLS)
-    print(f"[数据] 标的 {len(symbols)} 个（流动性 Top {N_SYMBOLS}），"
-          f"区间 {START_DATE} ~ {END_DATE}", flush=True)
-    data = load_data(symbols)
+    symbols = load_symbols(n_symbols)
+    print(f"[数据] 标的 {len(symbols)} 个（流动性 Top {n_symbols}），"
+          f"区间 {start_date} ~ {end_date}", flush=True)
+    data = load_data(symbols, start_date=start_date, end_date=end_date)
     print(f"[数据] 实际加载 {len(data)} 个标的", flush=True)
 
     # 2. 第一轮：信号参数宽网格
     round1_params = build_grid(BASELINE_PARAMS, ROUND1_GRID)
     print(f"\n[第一轮] 信号参数宽网格: {len(round1_params)} 组合", flush=True)
-    rows1 = run_grid(round1_params, data, commission, slippage, "第一轮")
+    rows1 = run_grid(round1_params, data, commission, slippage, "第一轮",
+                     start_date=start_date, end_date=end_date)
     rows1_sorted = sort_rows(rows1, "avg_sharpe_all")
-    save_csv(rows1_sorted, OUTPUT_DIR / "round1_signal.csv")
+    save_csv(rows1_sorted, out_dir / "round1_signal.csv")
     print_board("第一轮 Top 榜（信号参数宽网格，出场=当前配置）", rows1_sorted)
     best1 = pick_best(rows1)
     print(f"[第一轮最优] {fmt_params(best1['params'])} | "
@@ -374,9 +405,10 @@ def main() -> int:
     # 3. 第二轮：出场参数网格（信号参数固定第一轮最优）
     round2_params = build_grid(best1["params"], ROUND2_GRID)
     print(f"\n[第二轮] 出场参数网格: {len(round2_params)} 组合", flush=True)
-    rows2 = run_grid(round2_params, data, commission, slippage, "第二轮")
+    rows2 = run_grid(round2_params, data, commission, slippage, "第二轮",
+                     start_date=start_date, end_date=end_date)
     rows2_sorted = sort_rows(rows2, "avg_sharpe_all")
-    save_csv(rows2_sorted, OUTPUT_DIR / "round2_exit.csv")
+    save_csv(rows2_sorted, out_dir / "round2_exit.csv")
     print_board("第二轮 Top 榜（出场参数，信号参数=第一轮最优）", rows2_sorted)
     best2 = pick_best(rows2)
     print(f"[第二轮最优] {fmt_params(best2['params'])} | "
@@ -386,9 +418,10 @@ def main() -> int:
     # 4. 第三轮：信号参数边界精扫（出场参数固定第二轮最优）
     round3_params = build_grid(best2["params"], ROUND3_GRID)
     print(f"\n[第三轮] 信号参数边界精扫: {len(round3_params)} 组合", flush=True)
-    rows3 = run_grid(round3_params, data, commission, slippage, "第三轮")
+    rows3 = run_grid(round3_params, data, commission, slippage, "第三轮",
+                     start_date=start_date, end_date=end_date)
     rows3_sorted = sort_rows(rows3, "avg_sharpe_all")
-    save_csv(rows3_sorted, OUTPUT_DIR / "round3_refine.csv")
+    save_csv(rows3_sorted, out_dir / "round3_refine.csv")
     print_board("第三轮 Top 榜（信号参数精扫，出场=第二轮最优）", rows3_sorted)
     best3 = pick_best(rows3)
     print(f"[第三轮最优] {fmt_params(best3['params'])} | "
@@ -397,7 +430,8 @@ def main() -> int:
 
     # 5. 基线对照
     print(f"\n[基线] 当前配置参数评估 ...", flush=True)
-    base_rows = run_grid([BASELINE_PARAMS], data, commission, slippage, "基线")
+    base_rows = run_grid([BASELINE_PARAMS], data, commission, slippage, "基线",
+                         start_date=start_date, end_date=end_date)
     base_row = base_rows[0]
     print("\n" + "=" * 122)
     print("  基线对照（当前 config/backtest_kunpeng.yaml 参数）")
@@ -425,7 +459,7 @@ def main() -> int:
     summary = {
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "scope": {
-            "symbols": len(data), "start": START_DATE, "end": END_DATE,
+            "symbols": len(data), "start": start_date, "end": end_date,
             "mode": MODE, "initial_capital": INITIAL_CAPITAL,
             "symbol_source": f"流动性Top{N_SYMBOLS}且覆盖区间",
             "min_coverage": MIN_COVERAGE,
@@ -438,12 +472,12 @@ def main() -> int:
         "recommended": best_final["params"],
         "recommended_metrics": merge_metrics(best_final),
     }
-    with open(OUTPUT_DIR / "summary.json", "w", encoding="utf-8") as f:
+    with open(out_dir / "summary.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
-    print(f"\n[已保存] {OUTPUT_DIR / 'summary.json'}")
-    print(f"[已保存] {OUTPUT_DIR / 'round1_signal.csv'}")
-    print(f"[已保存] {OUTPUT_DIR / 'round2_exit.csv'}")
-    print(f"[已保存] {OUTPUT_DIR / 'round3_refine.csv'}")
+    print(f"\n[已保存] {out_dir / 'summary.json'}")
+    print(f"[已保存] {out_dir / 'round1_signal.csv'}")
+    print(f"[已保存] {out_dir / 'round2_exit.csv'}")
+    print(f"[已保存] {out_dir / 'round3_refine.csv'}")
     return 0
 
 
