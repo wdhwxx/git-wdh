@@ -2371,6 +2371,13 @@ def create_live_engine(
     initial_capital = float(live_cfg.get("initial_capital", 1_000_000))
     trade_mode = str(live_cfg.get("trade_mode", "paper")).lower()
 
+    # 0.5) 运行模式一致性校验（切割接口：防误接入，即使绕过 CLI 直调工厂也拦截）
+    from myquant.live.run_mode import check_mode_consistency
+
+    consistency_issues = check_mode_consistency(config)
+    if consistency_issues:
+        raise ValueError("运行模式配置不一致: " + "; ".join(consistency_issues))
+
     # 1) 引擎级风控参数（与 position 段一致，双层风控同源）
     risk_config = RiskConfig(
         max_position_pct=float(position_cfg.get("max_single_position", 0.20)),

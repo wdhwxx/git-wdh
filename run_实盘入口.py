@@ -59,6 +59,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import signal as os_signal
 
@@ -68,7 +69,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 
 # ═══════════════════════════════════════════════
@@ -190,6 +191,25 @@ def setup_argument_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="试运行（装配全部组件但不进入交易循环，用于配置验证）",
     )
+    parser.add_argument(
+        "--mode",
+        type=str,
+        default=None,
+        choices=["monitor", "paper", "sim", "live"],
+        help="运行模式（切割接口）：monitor=仅监控 / paper=本地模拟盘(默认) / "
+             "sim=券商同源仿真 / live=真钱实盘",
+    )
+    parser.add_argument(
+        "--confirm-live",
+        action="store_true",
+        help="显式确认进入实盘(LIVE)模式（配合 --mode live，防止误接入）",
+    )
+    parser.add_argument(
+        "--stats-json",
+        type=str,
+        default=None,
+        help="运行结束将引擎统计写入指定 JSON 路径（绩效留痕，供准入评估消费）",
+    )
 
     # 日志
     parser.add_argument(
@@ -245,21 +265,46 @@ def load_live_config(config_path: str, project_root: Path) -> Dict[str, Any]:
     return loader.load(config_path)
 
 
-def apply_cli_overrides(config: Dict[str, Any], args: argparse.Namespace) -> Dict[str, Any]:
-    """命令行参数覆盖配置（模拟盘/券商类型/监控模式）"""
+def apply_cli_overrides(config: Dict[str, Any], args: argparse.Namespace) -> Any:
+    """命令行参数覆盖配置（运行模式 / 券商类型 / 监控模式）。
+
+    以 RunMode（切割接口）为单一真相源：解析统一运行模式后写回配置，
+    保证 create_live_engine 消费到与 CLI 一致的 trade_mode / broker.mode。
+
+    Returns
+    -------
+    Any : 解析出的统一运行模式（myquant.live.run_mode.RunMode）。
+
+    Raises
+    ------
+    ValueError : --mode live 与 --paper-trading 冲突，或非法模式。
+    """
+    from myquant.live.run_mode import RunMode, apply_mode_to_config, resolve_run_mode
+
     config.setdefault("live", {})
     config.setdefault("broker", {})
 
-    if args.paper_trading:
-        config["live"]["trade_mode"] = "paper"
-        config["broker"]["type"] = "paper"
+    if args.mode and args.mode.lower() == "live" and args.paper_trading:
+        raise ValueError("--mode live 与 --paper-trading 冲突，请明确选择仿真或实盘")
+
+    if args.mode:
+        run_mode = resolve_run_mode(config, cli_mode=args.mode)
+    elif args.paper_trading:
+        run_mode = RunMode.PAPER
+    else:
+        run_mode = resolve_run_mode(
+            config, monitor_only=bool(getattr(args, "monitor_only", False))
+        )
+
+    apply_mode_to_config(config, run_mode)
+
     if args.broker:
         config["broker"]["type"] = args.broker
     if args.monitor_only:
         config["live"]["monitor_only"] = True
     if args.dry_run:
         config["live"]["dry_run"] = True
-    return config
+    return run_mode
 
 
 def validate_broker_platform(broker_type: Optional[str]) -> Optional[str]:
@@ -395,6 +440,53 @@ def show_live_status(project_root: Path) -> int:
 
 
 # ═══════════════════════════════════════════════
+#  绩效留痕（--stats-json）
+# ═══════════════════════════════════════════════
+
+def write_stats_json(
+    engine: Any,
+    run_mode: Any,
+    output_path: str,
+    project_root: Path,
+) -> Optional[str]:
+    """运行结束导出引擎统计到 JSON（绩效留痕，供准入评估消费）。
+
+    Args:
+        engine: 已装配的 LiveEngine 实例。
+        run_mode: 本次运行模式（myquant.live.run_mode.RunMode）。
+        output_path: 输出 JSON 路径（相对路径以项目根为基准）。
+        project_root: 项目根目录。
+
+    Returns:
+        写入的绝对路径；失败返回 None（仅告警，不阻断）。
+    """
+    try:
+        from myquant.live.run_mode import describe
+
+        stats = engine.stats
+        status = engine.get_status()
+        payload: Dict[str, Any] = {
+            "engine_id": status.get("engine_id"),
+            "run_mode": run_mode.value,
+            "mode_desc": describe(run_mode),
+            "strategies": status.get("strategies"),
+            "timestamp": datetime.now().isoformat(),
+            "stats": stats,
+            "risk": status.get("risk"),
+        }
+        out = Path(output_path)
+        if not out.is_absolute():
+            out = project_root / out
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
+        return str(out)
+    except Exception as e:
+        logger.warning("写入统计 JSON 失败: %s", e)
+        return None
+
+
+# ═══════════════════════════════════════════════
 #  信号/成交可视化回调
 # ═══════════════════════════════════════════════
 
@@ -446,7 +538,42 @@ def run_live_trading(args: argparse.Namespace) -> int:
     except Exception as e:
         print(f"[错误] 配置加载失败: {e}")
         return 1
-    config = apply_cli_overrides(config, args)
+    try:
+        run_mode = apply_cli_overrides(config, args)
+    except ValueError as e:
+        print(f"[错误] 运行模式参数冲突: {e}")
+        return 1
+
+    # ── 1.4 运行模式一致性校验 + 实盘安全门（切割接口）──
+    from myquant.live.run_mode import RunMode, check_mode_consistency, describe, validate_live
+
+    consistency_issues = check_mode_consistency(config)
+    if consistency_issues:
+        print("[错误] 运行模式配置不一致：")
+        for issue in consistency_issues:
+            print(f"  - {issue}")
+        print("       请修正 config/live_config.yaml 的 trade_mode / broker.type / broker.mode 组合。")
+        return 1
+
+    if run_mode is RunMode.LIVE:
+        live_errors = validate_live(run_mode, config, confirm_live=bool(args.confirm_live))
+        if args.dry_run:
+            # dry-run 为装配预览：confirm 不足不阻断，仅提示；其余安全项仍拦
+            live_errors = [e for e in live_errors if "--confirm-live" not in e]
+            if live_errors:
+                print("[安全拦截] 无法预览实盘(LIVE)装配：")
+                for err in live_errors:
+                    print(f"  - {err}")
+                return 1
+            if not args.confirm_live:
+                print("[提示] 正在预览实盘(LIVE)装配；正式实盘（去掉 --dry-run）必须携带 --confirm-live 确认。")
+        else:
+            if live_errors:
+                print("[安全拦截] 无法进入实盘(LIVE)模式：")
+                for err in live_errors:
+                    print(f"  - {err}")
+                print("       实盘需同时满足：--confirm-live + 券商为 qmt/ptrade + 已配置账户。")
+                return 1
 
     # ── 1.5 券商平台校验（疑点3确认：qmt/ptrade 仅 Windows，Linux/Docker 提前拦截）──
     broker_type = str(config.get("broker", {}).get("type", "paper")).lower()
@@ -458,14 +585,14 @@ def run_live_trading(args: argparse.Namespace) -> int:
     live_cfg = config.get("live", {}) or {}
     trade_mode = str(live_cfg.get("trade_mode", "paper")).lower()
 
-    # ── 2. 交易时间检查（安全机制：仅约束真钱实盘模式）──
-    if not args.force and not args.paper_trading and not args.monitor_only and not args.dry_run:
-        if trade_mode == "live" and not is_trading_time():
+    # ── 2. 交易时间检查（安全机制：仅约束真钱实盘 LIVE 模式）──
+    if not args.force and not args.dry_run and run_mode is RunMode.LIVE:
+        if not is_trading_time():
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             print(f"[安全拦截] 当前时间 {now} 不在A股交易时段内。")
             print("  交易时段：周一至周五 9:30-11:30, 13:00-15:00")
             print("  如需强制启动，请添加 --force 参数。")
-            print("  模拟盘(--paper-trading)/监控模式(--monitor-only)不受此限制。")
+            print("  仿真模式(--mode paper/sim)/监控模式(--mode monitor)不受此限制。")
             return 3
 
     # ── 3. 初始化日志 ──
@@ -482,13 +609,9 @@ def run_live_trading(args: argparse.Namespace) -> int:
     print("=" * 62)
     print(f"项目根目录：  {project_root}")
     print(f"配置文件：    {config_path}")
-    run_mode = (
-        "监控模式(不下单)" if args.monitor_only
-        else "模拟盘" if (trade_mode == "paper" or args.paper_trading)
-        else "实盘(真钱)"
-    )
-    print(f"运行模式：    {run_mode}")
-    print(f"券商适配器：  {args.broker or config.get('broker', {}).get('type', 'paper')}")
+    print(f"运行模式：    {describe(run_mode)}")
+    print(f"券商适配器：  {args.broker or config.get('broker', {}).get('type', 'paper')}"
+          f" / mode={config.get('broker', {}).get('mode', 'SIM')}")
     print(f"策略：        {config.get('strategy', {}).get('name', 'ma_cross')}")
     print(f"试运行：      {'是' if args.dry_run else '否'}")
     print("-" * 62)
@@ -608,6 +731,14 @@ def run_live_trading(args: argparse.Namespace) -> int:
         except Exception as e:
             print(f"[警告] 引擎停止异常: {e}")
             return 4
+
+    # ── 10.5 绩效留痕：--stats-json 导出引擎统计（供准入评估消费）──
+    if args.stats_json:
+        stats_path = write_stats_json(engine, run_mode, args.stats_json, project_root)
+        if stats_path:
+            print(f"[绩效] 引擎统计已导出: {stats_path}")
+        else:
+            print("[警告] 引擎统计导出失败（详见日志）")
 
     # ── 11. 运行总结 ──
     st = engine.stats

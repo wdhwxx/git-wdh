@@ -124,13 +124,14 @@ Pythonwdhmm/
 ├── logs/                             # 运行时日志目录；专门分出data_quality子目录存放清洗告警日志，已加入.gitignore
 ├── cache/                            # ✨【V5·P0】运行时缓存目录（gitignore已忽略，保留骨架）：factor因子L2磁盘缓存 / fingerprint数据指纹仓库 / backtest回测结果缓存 / tmp临时文件；由scripts/缓存管理.py查看清理、scripts/初始化项目目录.py自动创建；L1内存缓存在myquant/indicators/factor_cache.py
     │
-├── docs/                             # 项目文档目录（共46个文件：6核心文档+7其他+4 mockups设计稿+29归档存档(archive_20260905/)，P3-4 速查卡归位计入）
+├── docs/                             # 项目文档目录（共47个文件：6核心文档+8其他+4 mockups设计稿+29归档存档(archive_20260905/)，P3-4 速查卡归位计入）
 │   ├── architecture.md               # 架构设计图、模块依赖关系、数据流与同步/异步边界说明
 │   ├── data_dictionary.md            # 数据库表结构、字段说明、数据源规范、数据版本、清洗规则文档
 │   ├── strategy_specs.md             # 策略逻辑规格、参数说明与回测/实盘注意事项
 │   ├── project_layout_gear2.md       # 【本文件】折中档位2架构蓝图
 │   ├── stage_completion.md           # 【阶段完成度总表】
 │   ├── py文件代码规则.md              # ✨【V5·P3】代码规范：文件头中文文件名标注、中文命名、导入顺序、防御式编程显式校验输入边界
+│   ├── 仿真模拟盘运行制度.md       # ✨【回写#52】仿真模拟盘运行制度：运行模式与切割接口/仿真运行规范/绩效准入评估与实盘准入双控/异常预案(表8+一键平仓)/券商量化权限确认清单/合规报备/职责分工/仿真→实盘迁移检查单
 │   ├── 未完成事项摘要_实盘前待办.md    # 实盘上线前待办事项汇总；✨【回写#33】已同步至 2026-09-18 真实进度（评估报告第2节全部闭环、GUI行✅、_verify脚本无法复现注记、pytest 1374 passed）
 │   ├── 结构相符性评估报告_20260901.md # ✨【回写】项目结构与本蓝图相符性评估报告（偏差清单+代码级核验结论，偏差①/②已修复）
 │   ├── 系统权威评估报告_20260901.md  # ✨【V5】系统断链审计报告（H1/H2实盘入口断链、L1 GUI入口QuantApp断链、L4脚本反向导入；H1/H2/L1已修复【#30/#31】，L2/L3/L4/L5/L6/L7/L8低危项已闭环【#32】）
@@ -188,13 +189,14 @@ Pythonwdhmm/
 │   └── 验收_回测引擎V5.py             # ✨【V5·P1】引擎验收入口：执行统一验收清单（事件/向量化/混合引擎正确性+三模式一致性+回归+性能基准），输出验收报告
 │   ├── kunpeng_param_scan.py       # ✨【回写#34补录】鲲鹏策略参数网格扫描工作脚本（两阶段：信号参数扫描→出场+仓位扫描，真实数据 vectorized，输出 results/param_scan/scan_results.json；既有工作脚本补录，非薄入口，无调用方，建议后续薄化或并入 参数优化.py）
 │   ├── 候选池交叉验证.py             # ✨【2026-09-09】双策略交叉验证候选池入口（薄入口）：rsrs×ma_cross各自硬过滤（夏普/交易/回撤）→交集→综合夏普降序标记TopN→导出CSV+HTML+PDF一套（双强候选池/<时间戳>前缀，表头中文）；调用myquant.backtest.candidate_pool + candidate_report；✨【2026-09-12】文件名/表头中文化+报告三件套+产物收进 results/batch_backtest/双强候选池/ 子文件夹（第3批自 cache/ 段错位更正归位）
-│   └── 一键平仓.py                   # ✨【回写#47补录】紧急平仓薄入口（LIVE模式未加--confirm仅预览）：argparse（--config/--symbol/--confirm/--output）→ 加载live_config装配券商 → EmergencyLiquidationService.execute；预览输出控制台+落盘 outputs/emergency/一键平仓_<时间戳>.txt
+│   ├── 一键平仓.py                   # ✨【回写#47补录】紧急平仓薄入口（LIVE模式未加--confirm仅预览）：argparse（--config/--symbol/--confirm/--output）→ 加载live_config装配券商 → EmergencyLiquidationService.execute；预览输出控制台+落盘 outputs/emergency/一键平仓_<时间戳>.txt
+│   └── 仿真准入评估.py             # ✨【回写#52】仿真绩效准入评估薄入口(任务T10)：argparse(--metrics/--thresholds/--backtest/--run-mode/--output)→加载JSON→SimulationAcceptanceEvaluator.evaluate→打印报告+可落盘.txt/.csv；退出码0=通过/2=不通过或输入错误
 
 │
-├── tests/                            # 测试体系（标准pytest单元测试 + 性能基准，47文件，2026-09-22 第4批磁盘对拍实测 47 个非__init__ py）
+├── tests/                            # 测试体系（标准pytest单元测试 + 性能基准，49文件，2026-09-22 第4批磁盘对拍实测 49 个非__init__ py）
   │   ├── __init__.py
   │   ├── conftest.py                   # pytest全局配置，通过pytest_plugins加载fixtures目录
-  │   ├── unit/                         # ✨【目录重构】标准pytest单元测试（被pytest收集运行，37文件，2026-09-22 第4批磁盘对拍实测 37 个 test_*.py）
+  │   ├── unit/                         # ✨【目录重构】标准pytest单元测试（被pytest收集运行，39文件，2026-09-22 第4批磁盘对拍实测 39 个 test_*.py）
   │   │   ├── __init__.py
   │   │   ├── test_indicators.py        # 指标计算正确性（11指标，145项）✅已完成
   │   │   ├── test_strategies.py        # 策略信号生成逻辑与参数边界（6策略，115项）✅已完成
@@ -232,7 +234,9 @@ Pythonwdhmm/
   │   │   ├── test_broker_resend_pending.py # ✨【回写#45】断线补单对账测试（重连后仅补发未成交/多笔全补/已成交已撤废单不补/部成零重发不伪造/券商在途不补/查询失败异常不补/重复对账不重复报单/多券商独立统计/get_summary暴露last_resend/空订单簿零动作/引擎委托转发/无broker_manager错误码，16项）✅已完成
   │   │   ├── test_daily_loss_limit.py # ✨【回写#46】每日亏损限制测试（比例计算4项/规则判定4项/注册装配4项/引擎接线5项：跨日重置日初快照/硬编码1%兜底/配置工厂消费/缺省1%/端到端拒买放行卖，17项）✅已完成
   │   │   ├── test_emergency_liquidation.py # ✨【回写#47】紧急平仓服务测试（预览不下单/预览列撤单计划/确认全仓市价卖出/先撤挂单再卖/优先可卖数量/可卖0跳过/无可卖字段回退全仓/连接失败安全返回/断线重连恢复/单标异常不阻断/拒单记录/指定标只平该标的/无匹配持仓/空仓成功/报告结构完整，15项）✅已完成
-  │   │   └── test_config_live_check.py # ✨【回写#50】配置模板完整性+第4批配置死项修复验证（4 example可解析/risk_params已删除断言/结构完整/BUG-07开关四象限消费/预留·未消费标注存在，15项）✅已完成
+  │   │   ├── test_config_live_check.py # ✨【回写#50】配置模板完整性+第4批配置死项修复验证（4 example可解析/risk_params已删除断言/结构完整/BUG-07开关四象限消费/预留·未消费标注存在，15项）✅已完成
+  │   │   ├── test_run_mode.py       # ✨【回写#52】运行模式切割接口测试(枚举/resolve优先级/apply写回/validate_live安全门/check一致性，19项)✅已完成
+  │   │   └── test_acceptance.py     # ✨【回写#52】仿真绩效准入评估测试(全达标/回测比较/未达标/数据缺失NA/阈值覆盖/非法输入/序列化，11项)✅已完成
   │   ├── fixtures/                     # 按领域拆分fixture，避免conftest膨胀
   │   │   ├── __init__.py
   │   │   ├── market_data.py            # 行情fixture：正常+脏数据样本
@@ -426,6 +430,8 @@ Pythonwdhmm/
     │   ├── scheduler.py              # 定时任务、巡检、日报
     │   ├── state_store.py            # 状态持久化，崩溃恢复
     │   ├── emergency_liquidation.py  # ✨【回写#47补录】紧急平仓服务（EmergencyLiquidationService：execute(confirm=False默认dry_run)生成撤单+平仓计划；先撤挂单再卖/优先可卖数量/单标异常不阻断/报告结构化）；被engine._setup_force_close与scripts/一键平仓.py调用
+    │   ├── run_mode.py               # ✨【回写#52】运行模式切割接口：RunMode枚举(MONITOR/PAPER/SIM/LIVE)+describe+resolve(专先CLI>配置>默认paper)+apply_mode_to_config写回+validate_live实盘安全门(--confirm-live+证券qmt/ptrade+账户)+check_mode_consistency配置一致性；被run_实盘入口与create_live_engine消费；未来实盘切割 --mode sim→--mode live --confirm-live 一步切换
+    │   ├── acceptance.py             # ✨【回写#52】仿真绩效准入评估器(任务T10)：SimulationAcceptanceEvaluator对照表5阈值(DEFAULT_THRESHOLDS可覆盖)逐项判定8指标，缺数据判NA不误通过，产出AcceptanceReport(to_dict/to_text)；供scripts/仿真准入评估.py消费
     │   └── brokers/                  # 券商适配层，只负责对接券商原始接口，不做清洗
     │       ├── __init__.py
     │       ├── base_broker.py        # 券商抽象基类
@@ -760,3 +766,14 @@ Pythonwdhmm/
    i. **P3-9 alerting 异步 SMTP handler（补充篇）**：myquant/monitoring/alerting.py EmailAlertChannel 改异步队列发送：__init__ 新增 async_mode=True/queue_size=100 + queue.Queue + daemon 工作线程 _mail_worker_loop；send() 默认建消息入队立即返回（队列满报错），async_mode=False 保留同步直发；新增 _build_message/_send_sync/close；原同步 SMTP I/O 不再阻塞告警主流程；自测：类结构完整、其余通道不受影响
    j. **验收结果**：全量 py_compile 改动文件通过；全量 pytest tests/unit = 1507 passed / 2 skipped（与第4批基线一致）；lookahead 专项 19 passed；实盘入口冒烟 exit=0；回测入口小回测 exit=0且报告五件套齐（html/pdf/text/trades_csv/equity_csv/json），P3-1 空表兜底不影响正常路径；CI ci.yml yaml.safe_load 通过
    k. **纪律遵守**：新增 2 文件（kunpeng_param_scanner.py/api／cli.py）均已登记目录树；业务都归 myquant，scripts 仅薄入口；未涉及实盘下单/真实 QMT/密钥；未 push；无日期系统日志相关改动
+
+52. ✨【回写记录·2026-09-23·仿真模拟盘运行模式切割接口+绩效准入评估落地】按 docs/挖金量化仿真模拟盘_任务实施细则摘要.md 实施仿真模拟盘(用户确认：仿真阶段用 paper 纯本地模拟盘零外部依赖，未来实盘走 QMT/Ptrade 同源切割；新增便捷切割接口为实盘留出平滑切换)(事实来源：本次落地；代码级核验：py_compile 通过 + 单测全绿 + 入口冒烟 + 全量回归见下）：
+   a. **新增 myquant/live/run_mode.py（运行模式切割接口）**：RunMode枚举(MONITOR/PAPER/SIM/LIVE)+describe+resolve_run_mode(专先CLI>paper_flag>monitor_only>配置推导>默认paper)+apply_mode_to_config(写回trade_mode/broker.type/broker.mode，PAPER清除broker.mode残留LIVE冲突)+validate_live(实盘安全门：--confirm-live+券商qmt/ptrade+账户非空)+check_mode_consistency(配置一致性：trade_mode=live须broker qmt+LIVE；paper券商不接受mode=LIVE)
+   b. **run_实盘入口.py 接入切割接口**：新增 --mode{monitor,paper,sim,live}/--confirm-live/--stats-json；apply_cli_overrides返回RunMode(互斥校验：--mode live与--paper-trading冲突)；装配前 check_mode_consistency 拦截不一致(exit1)；LIVE 走 validate_live 安全门(dry-run预览仅拦账户/券商，正式实盘强制--confirm-live)；交易时间检查改用 RunMode.LIVE；banner 显示统一模式+券商mode；--stats-json 运行结束导出引擎统计(绩效留痕)
+   c. **myquant/live/engine.py create_live_engine 装配前一致性校验**：check_mode_consistency 有误即 raise ValueError（即使绕过 CLI 直调工厂也拦得住，防御式防误接入）
+   d. **新增 myquant/live/acceptance.py（仿真绩效准入评估器，任务T10）**：SimulationAcceptanceEvaluator 对照表5阈值(DEFAULT_THRESHOLDS示例值可按策略类型调整)逐项判定8指标(运行时长/年化/回撤/夏普/滑点/漏单/风控违规/中断)，缺失字段判NA(待补充)不误判通过，overall=全部项有结论且无FAIL；产出AcceptanceReport(to_dict/to_text)；回测基线用于年化/回撤“不显著劣于回测”比较
+   e. **新增 scripts/仿真准入评估.py（薄入口）**：argparse(--metrics/--thresholds/--backtest/--run-mode/--output)+find_project_root+sys.path引导；加载JSON→evaluate→打印报告+可选落盘.txt/.csv(utf-8-sig)；退出码0=通过/2=不通过或输入错误
+   f. **新增 config/live_config.yaml（本地真实配置，不入蓝图树/被gitignore忽略）**：基于example改 broker.type=paper(仿真默认)+去mode，state_store/scheduler启用(仿真留痕崩溃恢复)，保留sim/live切换注释；敏感信息走环境变量
+   g. **新增 docs/仿真模拟盘运行制度.md（制度文档，任务T04/T05/T12）**：运行模式与切割接口/仿真运行规范/绩效准入双控/异常预案(表8+一键平仓)/券商量化权限确认清单(实盘前外部依赖)/合规报备/职责分工/仿真→实盘迁移检查单
+   h. **验证结果**：py_compile 全部改动文件通过；单测 test_run_mode.py 19项 + test_acceptance.py 11项全绿；入口冒烟 --dry-run --mode paper exit=0(保障组件全✅) / --mode live 无confirm被安全门拦 exit=1；scripts/仿真准入评估.py 示例JSON报告8项全通过+CSV落盘；A类实盘子集回归见回写后段最终核验
+   i. **纪律遵守**：业务逻辑全部归 myquant（run_mode/acceptance），scripts 只做薄入口；新增文件均登记蓝图目录树(myquant/live/run_mode.py+acceptance.py、scripts/仿真准入评估.py、tests/unit/test_run_mode.py+test_acceptance.py、docs/仿真模拟盘运行制度.md)+回写记录；config/live_config.yaml 为真实配置按约定不入蓝图树(被config/*.yaml忽略)；严格防未来(模式/判定仅依据已发生配置与指标)；临时脚本在系统Temp已清理
