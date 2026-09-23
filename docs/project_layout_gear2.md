@@ -221,6 +221,7 @@ Pythonwdhmm/
   │   │   ├── test_logger.py            # ✨【回写】统一日志配置与data_quality专用通道测试（路由/级别阈值/双写/结构化字段/统一告警API，18项）✅已完成
   │   │   ├── test_backtest_consistency_v5.py  # ✨【V5·P3】三模式一致性校验测试（event/vectorized/mixed同参数同数据比对收益曲线与成交，差异超阈值即失败，28项）
   │   │   ├── test_data_clean_incremental.py # ✨【回写#57】增量更新日线走清洗管线测试（清洗合并保留全历史/重叠日去重/脏行剔除/前收盘上下文触发跳变剔除/清洗关闭返回None/无数据返回None/存量损坏仍写入，7项）✅已完成
+  │   │   ├── test_data_download_pool_scope.py # ✨【回写#58】GUI日线下载标的范围=配置股票池测试（读池代码/文件缺失/解析失败/空池返回空不回退全市场/自定义池路径/run_daily用池列表而非全市场，6项）✅已完成
   │   │   ├── test_data_fingerprint.py  # ✨【V5·P0】数据指纹测试（哈希级差异检测：指纹生成/查询/缓存失效/旧数据替换，20项）
   │   │   ├── test_factor_cache_v5.py   # ✨【V5·P0】三级因子缓存测试（L1/L2/L3命中/穿透/失效/内存降级切换，20项）
   │   │   ├── test_memory_watcher.py    # ✨【V5·P0】内存监控测试（水位跟踪/OOM防护/降级开关/策略上下文切换，23项）
@@ -816,3 +817,10 @@ Pythonwdhmm/
    d. **实施要点（本轮关键修复）**：① 原始 bar 无 symbol 字段而 check_symbol=true → 清洗前为记录统一注入 symbol（生产必改，否则增量整批误判脏而静默丢弃新数据）；② 前收盘上下文行 date 来自 parquet 数值 YYYYMMDD（可能 float），直接 str() 得 "20260918.0" 致 parse_datetime 失败 → 先 int() 再去 .0 转字符串（否则上下文行被判脏→失去跳变基准→跳变不剔除）；③ 清洗后英文→中文列再日期归一化 int64 对齐存量 schema
    e. **验证结果**：py_compile myquant/data_access/manager.py 与 myquant/gui/data_download_dialog.py 通过；tests/unit/test_data_clean_incremental.py 7 passed；沙箱复现确认前收盘上下文触发跳变剔除生效（open=1000 vs 前收盘10，9900%>22%，action=drop 剔除）；全量 pytest tests/ = 全绿（净变化见当日回归日志）
    f. **纪律遵守**：业务逻辑归 myquant/data_access/manager.py（清洗合并方法）与 myquant/gui/data_download_dialog.py（入口改调），两文件均已在蓝图登记；删除文件 test_data_download_save_parquet.py 同步移出目录树；新增测试文件 test_data_clean_incremental.py 已登记目录树；临时脚本在系统Temp已清理
+
+58. ✨【回写记录·2026-09-23·GUI日线下载标的范围改为配置股票池（根治增量更新把processed扩成全市场）】排查发现 processed 被扩到 5288/5325 只全市场（原 3226 三因子池 + ~2100 只池外标的，含 B 股 200xxx 等）：根因=GUI"增量更新日线/全量下载"（run_daily）的标的来源是 fetcher.get_stock_list()（akshare 全市场 stock_zh_a_spot_em，无三因子过滤），把 processed 扩成全市场；而 paper 引擎仍按配置(live_config)3226 只订阅、未跑偏。本次按用户拍板方案 A 落地（事实来源：本次落地；代码级核验：py_compile 通过 + 新增单测 6 passed + 全量 pytest 回归无下降）：
+   a. **myquant/gui/data_download_dialog.py run_daily 标的来源改为配置股票池**：新增模块常量 DEFAULT_STOCK_POOL_CONFIG="config/backtest_kunpeng.yaml"（三因子 3226 只权威池，版本化）+ helper _load_pool_codes(project_root, pool_config=None) 读取 stock_pool.codes；run_daily 增参 pool_config 并以 _load_pool_codes 替代 fetcher.get_stock_list()（不再用全市场列表）；池文件缺失/读取失败/解析失败/codes 为空一律返回空列表（调用方空转，**不回退全市场**，避免重新扩池）。日线下载覆盖全量/增量/_entry_all 三条路径；财务数据（run_finance，落 raw/financial 非 processed 日线）维持原全市场列表不动
+   b. **新增 tests/unit/test_data_download_pool_scope.py（6项）**：读取配置股票池代码 / 文件缺失返回空列表(不回退全市场) / YAML解析失败返回空列表 / 空池返回空列表 / 自定义池配置文件路径 / run_daily 用池列表而非全市场（fetcher=None 不崩溃证明已不再调 get_stock_list）
+   c. **根因与影响面**：根因=GUI 日线下载标的列表未按三因子池过滤；修复仅改 myquant/gui/data_download_dialog.py run_daily 的标的来源，业务/回测/实盘引擎零改动；已扩到 5288 只的 processed（含 ~2100 只池外标的）如需收回 3226，属数据清理决策（方案 B），由用户另行拍板，本回写不自动删数据
+   d. **验证结果**：py_compile myquant/gui/data_download_dialog.py 通过；tests/unit/test_data_download_pool_scope.py 6 passed；全量 pytest tests/ = 全绿（净变化见当日回归日志）
+   e. **纪律遵守**：业务逻辑归 myquant/gui/data_download_dialog.py（唯一业务改动文件，蓝图已登记）；新增测试文件 test_data_download_pool_scope.py 已登记蓝图 tests/unit 树；临时脚本在系统Temp已清理

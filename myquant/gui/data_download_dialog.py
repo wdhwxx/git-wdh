@@ -49,6 +49,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import yaml
+
 from myquant.core.logger import get_logger
 from myquant.data_access import (
     DataFetcher,
@@ -125,7 +127,48 @@ def _save_financial_csv(data_list: List[dict], project_root: Path, is_history: b
     return output_path
 
 
-def run_daily(fetcher, manager, project_root: Path, progress_callback=None, force_full: bool = False) -> dict:
+DEFAULT_STOCK_POOL_CONFIG: str = "config/backtest_kunpeng.yaml"
+
+
+def _load_pool_codes(project_root: Path, pool_config: Optional[str] = None) -> List[str]:
+    """读取股票池配置文件的标的代码列表。
+
+    从 YAML 配置文件（默认 config/backtest_kunpeng.yaml）读取 stock_pool.codes，
+    作为日线全量/增量下载的标的范围（与回测/实盘三因子股票池一致），
+    避免用全市场 get_stock_list() 把 processed 扩成全市场。
+
+    【防未来函数】仅读取配置的静态标的列表，不含任何时点数据。
+
+    Args:
+        project_root: 项目根目录。
+        pool_config: 股票池配置文件路径（相对 project_root）；None 用默认。
+
+    Returns:
+        List[str]: 标的代码列表；文件缺失/读取失败/解析失败/codes 为空时返回空列表，
+            （调用方此时空转，不回退全市场，避免重新扩池）。
+    """
+    pool_path = project_root / (pool_config or DEFAULT_STOCK_POOL_CONFIG)
+    if not pool_path.exists():
+        logger.warning("股票池配置文件不存在，日线下载标的列表为空: %s", pool_path)
+        return []
+    try:
+        text = pool_path.read_text(encoding="utf-8")
+    except OSError as e:
+        logger.warning("股票池配置读取失败，日线下载标的列表为空: %s (%s)", pool_path, e)
+        return []
+    try:
+        data = yaml.safe_load(text) or {}
+    except yaml.YAMLError as e:
+        logger.warning("股票池配置解析失败，日线下载标的列表为空: %s (%s)", pool_path, e)
+        return []
+    codes = (data.get("stock_pool", {}) or {}).get("codes") or []
+    symbols = [str(c) for c in codes if c]
+    if not symbols:
+        logger.warning("股票池配置 codes 为空，日线下载标的列表为空: %s", pool_path)
+    return symbols
+
+
+def run_daily(fetcher, manager, project_root: Path, progress_callback=None, force_full: bool = False, pool_config: Optional[str] = None) -> dict:
     """
     下载日线数据
     force_full=True=全量重下（忽略数据库同步状态，从头拉取全部历史）；
@@ -136,8 +179,9 @@ def run_daily(fetcher, manager, project_root: Path, progress_callback=None, forc
     ensure_dir(project_root / "datasets" / "raw" / "daily")
     ensure_dir(project_root / "datasets" / "processed")
 
-    stocks = fetcher.get_stock_list()
-    symbols = [s["symbol"] for s in stocks if s.get("symbol")]
+    # 标的范围取自配置股票池（三因子 3226 只，与回测/实盘一致）；
+    # 不用全市场 get_stock_list()，避免把 processed 扩成全市场（池空则空转）
+    symbols = _load_pool_codes(project_root, pool_config)
     if not symbols:
         return {"total": 0, "success": 0, "failed": 0, "skipped": 0, "parquet_saved": 0}
 
