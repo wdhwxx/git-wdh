@@ -865,6 +865,158 @@ class DataManager:
 
         return result
 
+    def save_cleaned_incremental_parquet(
+        self,
+        symbol: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        period: str = "daily",
+        adjust: Optional[str] = "hfq",
+    ) -> Optional[str]:
+        """
+        增量区间清洗后按中文列合并写回 processed 扁平 parquet。
+
+        与全量清洗共用同一套规则（run_clean_pipeline + config/data_clean.yaml），
+        仅处理有新增数据的标的与区间（带前一收盘上下文），规避全池全量慢扫，
+        根治增量更新日线"直写原始数据弄脏 processed"的问题。
+
+        【防未来函数】end_date 之后的数据不获取、不清洗；只读存量历史作上下文。
+
+        Args:
+            symbol: 标的代码，如 000001.SZ。
+            start_date: 增量区间开始日期（YYYY-MM-DD），None 表示全量。
+            end_date: 增量区间截止日期（YYYY-MM-DD）。
+            period: K线周期，默认 daily。
+            adjust: 复权方式，默认 hfq。
+
+        Returns:
+            Optional[str]: 清洗合并后写出的 processed parquet 路径；
+                无数据或清洗后为空返回 None。
+        """
+        import pandas as pd
+
+        from myquant.utils.file_utils import write_parquet
+
+        # 与全量清洗同一份规则配置
+        clean_config = load_clean_config()
+        if not clean_config.get("enabled", True):
+            logger.info("清洗功能已关闭，跳过增量清洗: %s", symbol)
+            return None
+
+        # 拉取增量区间原始数据（绕过缓存，英文字段 date/open/...）
+        data_result = self._fetcher.get_market_data(
+            symbol, start_date=start_date, end_date=end_date,
+            period=period, adjust=adjust, use_cache=False,
+        )
+        if not data_result or data_result.count == 0:
+            return None
+        interval_records: List[Dict[str, Any]] = list(data_result.data)
+
+        # 中英字段映射（fetcher/清洗管线用英文字段，扁平 parquet 用中文字段）
+        _en_to_cn: Dict[str, str] = {
+            "date": "日期", "open": "开盘价", "high": "最高价",
+            "low": "最低价", "close": "收盘价", "volume": "成交量",
+            "amount": "成交额", "pct_chg": "涨跌幅", "amplitude": "振幅",
+            "volume_ratio": "量比", "float_share": "流通股本",
+            "pe_dynamic": "市盈动",
+        }
+        _cn_to_en: Dict[str, str] = {v: k for k, v in _en_to_cn.items()}
+
+        def _row_cn_to_en(row: "pd.Series") -> Dict[str, Any]:
+            """将存量中文字段行转为清洗管线英文字段行。"""
+            result: Dict[str, Any] = {}
+            for cn, en in _cn_to_en.items():
+                if cn in row.index:
+                    val = row.get(cn)
+                    if en == "date" and val is not None:
+                        # parquet 日期为数值 YYYYMMDD（可能 float），先转 int 去掉 .0 再转字符串，
+                        # 供清洗解析与后续上下文行剔除时精确匹配
+                        try:
+                            val = str(int(val))
+                        except (ValueError, TypeError):
+                            val = str(val)
+                    result[en] = val
+            return result
+
+        def _row_en_to_cn(rec: Dict[str, Any]) -> Dict[str, Any]:
+            """将清洗后英文字段行转为中文字段行。"""
+            return {
+                cn: rec.get(en)
+                for en, cn in _en_to_cn.items() if en in rec
+            }
+
+        # 读存量扁平 parquet（一次读，既取前收盘上下文又用于最终合并）
+        processed_dir = get_project_path("datasets", "processed")
+        output_path = processed_dir / f"{symbol}.parquet"
+        existing_df: Optional["pd.DataFrame"] = None
+        if output_path.exists():
+            try:
+                existing_df = pd.read_parquet(output_path)
+            except Exception:
+                logger.warning("存量 processed parquet 读取失败，跳过合并: %s", output_path)
+
+        # 前一根收盘作上下文（供涨跌幅/连续性判定，仅用于清洗，不写入）
+        prior_row: Optional[Dict[str, Any]] = None
+        if existing_df is not None and not existing_df.empty and start_date:
+            start_int = int(start_date.replace("-", ""))
+            before = existing_df[existing_df["日期"].astype(int) < start_int]
+            if not before.empty:
+                prior_row = _row_cn_to_en(before.iloc[-1])
+
+        # 组装清洗输入：前收盘上下文 + 增量区间
+        records_to_clean: List[Dict[str, Any]] = []
+        if prior_row:
+            records_to_clean.append(prior_row)
+        records_to_clean.extend(interval_records)
+
+        # 原始 bar 记录可能不含 symbol 字段，而清洗管线 check_symbol=true 默认校验；
+        # 为同一标的的记录统一注入 symbol，避免整批误判为脏数据
+        for rec in records_to_clean:
+            rec.setdefault("symbol", symbol)
+
+        # 执行清洗（同全量清洗规则）
+        clean_result = run_clean_pipeline(
+            records=records_to_clean,
+            data_type="bar",
+            symbol=symbol,
+            config=clean_config,
+            save_bad=False,
+            save_report=False,
+        )
+        cleaned = clean_result["cleaned"]
+        if not cleaned:
+            return None
+
+        # 剔除上下文行（已存在存量中，不重复写入）
+        if prior_row:
+            prior_date = prior_row.get("date")
+            cleaned = [r for r in cleaned if r.get("date") != prior_date]
+            if not cleaned:
+                return None
+
+        # 清洗后英文字段 → 中文字段
+        cleaned_cn = [_row_en_to_cn(r) for r in cleaned]
+        cleaned_df = pd.DataFrame(cleaned_cn)
+        # 日期统一为整数 YYYYMMDD，对齐存量 parquet 的 日期 列 dtype
+        if "日期" in cleaned_df.columns:
+            cleaned_df["日期"] = pd.to_numeric(
+                cleaned_df["日期"].astype(str).str.replace("-", ""), errors="coerce"
+            )
+
+        # 与存量合并（按日期去重 keep=last、升序），列对齐存量 schema
+        merged = cleaned_df
+        if existing_df is not None and not existing_df.empty:
+            if not cleaned_df.empty:
+                cleaned_df = cleaned_df.reindex(columns=existing_df.columns)
+            merged = pd.concat([existing_df, cleaned_df], ignore_index=True)
+            if "日期" in merged.columns:
+                merged = merged.drop_duplicates(subset=["日期"], keep="last")
+                merged = merged.sort_values("日期").reset_index(drop=True)
+
+        write_parquet(output_path, merged)
+        return str(output_path)
+
+
     def load_processed_data(
         self,
         symbol: str,

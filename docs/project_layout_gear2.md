@@ -220,7 +220,7 @@ Pythonwdhmm/
   │   │   ├── test_allocation.py        # 组合资金分配逻辑（63项）✅已完成
   │   │   ├── test_logger.py            # ✨【回写】统一日志配置与data_quality专用通道测试（路由/级别阈值/双写/结构化字段/统一告警API，18项）✅已完成
   │   │   ├── test_backtest_consistency_v5.py  # ✨【V5·P3】三模式一致性校验测试（event/vectorized/mixed同参数同数据比对收益曲线与成交，差异超阈值即失败，28项）
-  │   │   ├── test_data_download_save_parquet.py # ✨【回写#56】数据下载GUI _save_parquet合并去重测试（增量追加不丢历史/重叠日keep=last/无存量新建/空结果不改写/损坏降级/缺日期列不抛，6项）✅已完成
+  │   │   ├── test_data_clean_incremental.py # ✨【回写#57】增量更新日线走清洗管线测试（清洗合并保留全历史/重叠日去重/脏行剔除/前收盘上下文触发跳变剔除/清洗关闭返回None/无数据返回None/存量损坏仍写入，7项）✅已完成
   │   │   ├── test_data_fingerprint.py  # ✨【V5·P0】数据指纹测试（哈希级差异检测：指纹生成/查询/缓存失效/旧数据替换，20项）
   │   │   ├── test_factor_cache_v5.py   # ✨【V5·P0】三级因子缓存测试（L1/L2/L3命中/穿透/失效/内存降级切换，20项）
   │   │   ├── test_memory_watcher.py    # ✨【V5·P0】内存监控测试（水位跟踪/OOM防护/降级开关/策略上下文切换，23项）
@@ -809,3 +809,10 @@ Pythonwdhmm/
    d. **验证结果**：py_compile myquant/gui/data_download_dialog.py 通过；tests/unit/test_data_download_save_parquet.py 6 passed；沙箱实测：存量3行+增量4行(含1重叠)→合并6行、日期升序、重叠日 keep=last 取新值、最早历史保留
    e. **纪律遵守**：业务逻辑归 myquant/gui/data_download_dialog.py（唯一业务改动文件）；无蓝图外新增文件；新增测试文件 test_data_download_save_parquet.py 已在本回写同步登记蓝图 tests/unit 树；临时脚本在系统Temp已清理
 
+57. ✨【回写记录·2026-09-23·增量更新日线改走清洗管线（根治增量直写弄脏 processed）】用户拍板方案 C（增量清洗规则=全量清洗规则，按标的按区间执行，规避全池慢扫），把 GUI"增量更新日线"的数据写入路径从"直写原始数据"改为"经清洗管线清洗后合并写回"，根治增量直写弄脏干净 processed 的问题（事实来源：本次落地；代码级核验：py_compile 通过 + 沙箱复现/调试 + 新增单测 7 passed + 全量 pytest 回归无下降）：
+   a. **myquant/data_access/manager.py 新增 save_cleaned_incremental_parquet**（插在 load_processed_data 前）：与全量清洗共用 run_clean_pipeline + config/data_clean.yaml（同一份规则）；拉增量区间英文字段原始记录 → 读存量扁平 parquet 取"前一根收盘"作上下文（供涨跌幅/连续性判定，仅清洗用不写入）→ 统一注入 symbol（原始记录无 symbol 而 check_symbol=true，避免整批误判脏）→ run_clean_pipeline(save_bad=False, save_report=False) → 剔除上下文行 → 英文转中文字段（内部 en↔cn 映射与 data_loader 一致：date/open/high/low/close/volume/amount/pct_chg/amplitude/volume_ratio/float_share/pe_dynamic ↔ 日期/开盘价/最高价/最低价/收盘价/成交量/成交额/涨跌幅/振幅/量比/流通股本/市盈动）→ 日期归一化 int YYYYMMDD（对齐存量 dtype）→ 与存量 concat、按日期去重 keep=last、升序 → write_parquet 写回 processed/<symbol>.parquet；清洗后为空（如区间唯一新行被剔除）返回 None 不写入。防未来函数：end_date 之后不获取不清洗，只读存量历史作上下文
+   b. **myquant/gui/data_download_dialog.py**：删除整个 _save_parquet（原覆盖写/合并去重逻辑被清洗管线取代）；run_daily 循环改调 manager.save_cleaned_incremental_parquet(r["symbol"], start_date=r.get("start_date"), end_date=r.get("end_date"))，返回非 None 则 success_count++
+   c. **删除 tests/unit/test_data_download_save_parquet.py（#56 的 _save_parquet 单测，被 #57 取代）；新增 tests/unit/test_data_clean_incremental.py（7项）**：清洗合并保留全历史并追加新日 / 重叠日去重保留最新值 / 脏行被清洗剔除 / 前收盘上下文触发涨跌跳变剔除（action=drop 时区间唯一新行被剔除→方法返回 None 不写脏）/ 清洗功能关闭返回None / 无数据返回None / 存量损坏仍写入且列对齐；用 _MockFetcher + monkeypatch 重定向 processed 目录 + mock load_clean_config
+   d. **实施要点（本轮关键修复）**：① 原始 bar 无 symbol 字段而 check_symbol=true → 清洗前为记录统一注入 symbol（生产必改，否则增量整批误判脏而静默丢弃新数据）；② 前收盘上下文行 date 来自 parquet 数值 YYYYMMDD（可能 float），直接 str() 得 "20260918.0" 致 parse_datetime 失败 → 先 int() 再去 .0 转字符串（否则上下文行被判脏→失去跳变基准→跳变不剔除）；③ 清洗后英文→中文列再日期归一化 int64 对齐存量 schema
+   e. **验证结果**：py_compile myquant/data_access/manager.py 与 myquant/gui/data_download_dialog.py 通过；tests/unit/test_data_clean_incremental.py 7 passed；沙箱复现确认前收盘上下文触发跳变剔除生效（open=1000 vs 前收盘10，9900%>22%，action=drop 剔除）；全量 pytest tests/ = 全绿（净变化见当日回归日志）
+   f. **纪律遵守**：业务逻辑归 myquant/data_access/manager.py（清洗合并方法）与 myquant/gui/data_download_dialog.py（入口改调），两文件均已在蓝图登记；删除文件 test_data_download_save_parquet.py 同步移出目录树；新增测试文件 test_data_clean_incremental.py 已登记目录树；临时脚本在系统Temp已清理

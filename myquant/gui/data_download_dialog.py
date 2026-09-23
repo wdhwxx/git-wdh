@@ -113,58 +113,6 @@ def _make_manager(fetcher, project_root: Path):
     return manager, conn
 
 
-def _save_parquet(
-    result: "MarketDataResult",
-    project_root: Path,
-) -> Path:
-    """保存行情数据到 processed（Parquet），增量区间与存量历史合并去重后回写。
-
-    增量更新（force_full=False）只拉取缺失区间，若直接覆盖写会丢弃存量全历史；
-    本函数先读存量 parquet，与本次数据按日期合并、去重（保留最新）、升序排序后回写，
-    保证 processed 恒为全量规范数据。
-
-    【防未来函数】仅合并已取得的历史与本次新数据，不生成任何未来信息（只读存量）。
-
-    Args:
-        result: 行情数据结果，需含 symbol 与 to_dataframe() 方法。
-        project_root: 项目根目录。
-
-    Returns:
-        Path: 写出的 parquet 文件路径。
-
-    Raises:
-        TypeError: result 缺少 symbol 或 to_dataframe 属性时抛出。
-    """
-    import pandas as pd
-
-    from myquant.data_access import MarketDataResult
-    from myquant.utils.file_utils import ensure_dir, write_parquet
-
-    processed_dir = ensure_dir(project_root / "datasets" / "processed")
-    output_path = processed_dir / f"{result.symbol}.parquet"
-    df_new = result.to_dataframe()
-    if df_new.empty:
-        return output_path
-
-    merged = df_new
-    if output_path.exists():
-        try:
-            df_existing = pd.read_parquet(output_path)
-        except Exception:
-            logger.warning(
-                "processed parquet 读取失败，跳过存量合并（仅写入本次区间）: %s",
-                output_path,
-            )
-            df_existing = None
-        if df_existing is not None and not df_existing.empty:
-            merged = pd.concat([df_existing, df_new], ignore_index=True)
-            if "日期" in merged.columns:
-                merged = merged.drop_duplicates(subset=["日期"], keep="last")
-                merged = merged.sort_values("日期").reset_index(drop=True)
-    write_parquet(output_path, merged)
-    return output_path
-
-
 def _save_financial_csv(data_list: List[dict], project_root: Path, is_history: bool = False) -> Path:
     """保存财务数据到 raw/financial（CSV），is_history=True 时文件名加 _history"""
     from myquant.utils.file_utils import ensure_dir, write_csv
@@ -204,13 +152,14 @@ def run_daily(fetcher, manager, project_root: Path, progress_callback=None, forc
     success_count = 0
     for r in results:
         if r["status"] == "completed" and r.get("record_count", 0) > 0:
-            result = fetcher.get_market_data(
+            # 走清洗管线：同全量清洗规则（run_clean_pipeline + config/data_clean.yaml），
+            # 按标的按区间清洗后合并写回 processed（根治增量直写弄脏数据）
+            processed_file = manager.save_cleaned_incremental_parquet(
                 r["symbol"],
                 start_date=r.get("start_date"),
                 end_date=r.get("end_date"),
             )
-            if result and result.count > 0:
-                _save_parquet(result, project_root)
+            if processed_file:
                 success_count += 1
 
     return {
