@@ -230,6 +230,7 @@ Pythonwdhmm/
   │   │   ├── test_live_guard_failover.py # ✨【回写#31】实盘保障组件故障注入（审计H2降级：事件总线断连/订阅失败/挂载失败/风控异常拒单/调度失败/巡检异常/快照失败/全组件关闭，10项）✅已完成
   │   │   ├── test_qmt_broker_live.py  # ✨【回写#41】QMT实盘通道测试（fake SDK不连真实QMT：模式隔离/连接流程/委托撤单/成交回调/资金持仓/状态映射，23项）✅已完成
   │   │   ├── test_live_lookahead.py   # ✨【回写#42】实盘LookaheadGuard防未来校验测试（接线/信号记录/HOLD与风控拒绝不记录/T+1成交/同日跳过/早于信号日真违规/停止校验/工厂配置消费，19项）✅已完成
+  │   │   ├── test_live_warmup.py       # ✨【回写#55】实盘本地parquet历史预热+context.data中文列测试（_load_local_history读取/升序限count/缺失缺列降级/_sync_context_data中文列/_warmup_history优先本地/降级akshare，7项）✅已完成
   │   │   ├── test_signal_idempotency.py # ✨【回写#43】幂等去重测试（Signal确定性ID/to_order映射/引擎去重/分钟线粒度/start重置/QMT端按订单ID去重/统计双计修复验证，19项）✅已完成
   │   │   ├── test_broker_manager_failover.py # ✨【回写#44】failover盲目重试约束化测试（业务拒单不failover/通道故障副本重试/冷却熔断/健康恢复/手动切换清除恢复记忆/统计摘要，27项）✅已完成
   │   │   ├── test_broker_resend_pending.py # ✨【回写#45】断线补单对账测试（重连后仅补发未成交/多笔全补/已成交已撤废单不补/部成零重发不伪造/券商在途不补/查询失败异常不补/重复对账不重复报单/多券商独立统计/get_summary暴露last_resend/空订单簿零动作/引擎委托转发/无broker_manager错误码，16项）✅已完成
@@ -787,3 +788,16 @@ Pythonwdhmm/
    c. **不改业务代码的根因**：引擎、指标、策略本就读取中文列（engine.py:689-692 row.get('开盘价'/'收盘价')、indicators 校验 开盘价/最高价/最低价/收盘价、ma_strategy df['收盘价']），英文列仅存在于基准合成数据自身
    d. **验证结果**：py_compile 改动文件通过；pytest tests/benchmarks/ = 20 passed（含此前13条失败修复 + 7条执行层延迟）；全量回归 tests/ = 1557 passed / 2 skipped（修复前 1544 passed/13 failed/2 skipped）零失败
    e. **纪律遵守**：仅改既有文件（_benchmark_utils.py / test_indicator_perf.py 均在蓝图目录树 tests/benchmarks/ 段已有登记），无新增/删除文件，目录树仅更新 _benchmark_utils.py 描述；myquant/ 业务代码零改动；回归日志 outputs/仿真_全量_pytest_20260923_修复后.log 按 outputs/ 不入蓝图树约定不登记
+
+
+55. ✨【回写记录·2026-09-23·实盘历史预热改为本地datasets/processed parquet + context.data中文列修复（paper仿真3226只预热提速）】交接#52待办第3项：3226只走 akshare 预热过慢（173s仅332根、约2900只无数据→信号0），改为 daily 优先读本地 datasets/processed/<symbol>.parquet（离线秒级补齐历史窗口）再对最新bar走 akshare；同时修复 live context.data 英文列与策略中文列(收盘价)不一致的潜在KeyError（预热生效≥21根即崩）（事实来源：本次落地；代码级核验：py_compile通过 + 新增test_live_warmup.py 7 passed + 全量回归 1564 passed/2 skipped）：
+   a. **myquant/live/engine.py 新增 _local_history_dir 属性**（默认 datasets/processed，配置外置）
+   b. **myquant/live/engine.py 新增 _load_local_history(symbol, count)**：读本地日线parquet（中文列 开盘价/最高价/最低价/收盘价/成交量/成交额/日期），按日期升序取最近count根转标准bar dict；文件缺失/损坏/缺列→空列表降级akshare，不阻断启动；严格防未来（只读存量历史、不生成信号）
+   c. **myquant/live/engine.py _warmup_history 优先本地**：daily 频率先 _load_local_history，空则降级 _fetch_history_bars(akshare)
+   d. **myquant/live/engine.py _sync_context_data 列名中文化**：open/high/low/close/volume/amount → 开盘价/最高价/最低价/收盘价/成交量/成交额，与回测 context.data 同构（铁律2 回测/实盘策略零修改）
+   e. **myquant/live/engine.py create_live_engine 消费 market_data.local_history_dir**（默认 datasets/processed）
+   f. **config/live_config.yaml 新增 market_data.local_history_dir**（真实配置不入蓝图树/gitignore，仅本机生效）
+   g. **新增 tests/unit/test_live_warmup.py（7项）**：_load_local_history 读取/升序限count/文件缺失/缺列降级；_sync_context_data 中文列；_warmup_history 优先本地/本地空降级akshare
+   h. **纪律遵守**：业务逻辑归 myquant/live/engine.py（唯一业务改动文件）；无蓝图外新增业务文件；新增测试文件 test_live_warmup.py 已在蓝图 tests/unit 树登记（本回写同步更新目录树）；临时脚本在系统Temp已清理
+   i. **验证结果**：py_compile myquant/live/engine.py 通过；tests/unit/test_live_warmup.py 7 passed；全量 pytest tests/ = 1564 passed / 2 skipped（修复前 1557 passed/2 skipped，净增7项无回归）；paper装配自检 create_live_engine(--dry-run) 通过
+

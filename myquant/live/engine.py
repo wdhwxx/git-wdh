@@ -267,6 +267,8 @@ class LiveEngine(BaseEngine):
         self._realtime_poll_interval = max(1, int(realtime_poll_interval))
         self._warmup_bars = max(0, int(warmup_bars))
         self._enable_warmup = bool(enable_warmup)
+        # 本地日线parquet目录（历史预热优先读本地，配置外置；create_live_engine 消费 market_data.local_history_dir）
+        self._local_history_dir: str = "datasets/processed"
 
         # 组件
         self._data_feed = None
@@ -1031,12 +1033,12 @@ class LiveEngine(BaseEngine):
         for b in bars:
             index.append(datetime.fromtimestamp(b.timestamp))
             rows.append({
-                "open": float(b.open),
-                "high": float(b.high),
-                "low": float(b.low),
-                "close": float(b.close),
-                "volume": float(b.volume),
-                "amount": float(b.amount),
+                "开盘价": float(b.open),
+                "最高价": float(b.high),
+                "最低价": float(b.low),
+                "收盘价": float(b.close),
+                "成交量": float(b.volume),
+                "成交额": float(b.amount),
             })
         try:
             self._context.data[symbol] = pd.DataFrame(rows, index=index)
@@ -1046,6 +1048,82 @@ class LiveEngine(BaseEngine):
     # ═══════════════════════════════════════════
     #  历史预热（C项：实盘无缝对接关键）
     # ═══════════════════════════════════════════
+
+    def _load_local_history(
+        self, symbol: str, count: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        从本地日线 parquet 读取历史bar（离线秒级，替代逐只 akshare 拉取）
+
+        仅用于 daily 频率。数据源为 datasets/processed/<symbol>.parquet（已前复权清洗，
+        中文列：开盘价/最高价/最低价/收盘价/成交量/成交额/日期）。本地文件缺失、
+        结构不符或读取失败一律返回空列表，由调用方降级到 akshare，不阻断启动。
+
+        ★★★ 防未来函数（规则4）★★★
+        本方法只读取存量历史数据（截至数据文件最后日期），不生成信号、
+        不引用当前时点之后的数据；返回 bar 按时间升序，仅保留最近 count 根。
+
+        Parameters
+        ----------
+        symbol : str
+            标的代码（如 "000001.SZ"）。
+        count : int
+            需要的最近根数。
+
+        Returns
+        -------
+        List[Dict[str, Any]]
+            标准 bar dict 列表（升序，至多 count 根）；失败/无数据返回空列表。
+        """
+        if not self._local_history_dir or count <= 0:
+            return []
+        parquet_path = _Path(self._local_history_dir) / f"{symbol}.parquet"
+        try:
+            df = pd.read_parquet(parquet_path)
+        except Exception as e:  # 文件缺失/损坏 -> 降级 akshare
+            logger.debug(f"[engine] 本地预热无parquet {symbol}: {type(e).__name__}: {e}")
+            return []
+        if df is None or df.empty or "日期" not in df.columns:
+            return []
+        required = {"开盘价", "最高价", "最低价", "收盘价", "成交量"}
+        if not required.issubset(df.columns):
+            logger.warning(f"[engine] 本地parquet缺列 {symbol}: 需{required}")
+            return []
+        try:
+            df = df.sort_values("日期").tail(count)
+        except Exception as e:
+            logger.warning(f"[engine] 本地parquet排序失败 {symbol}: {e}")
+            return []
+        bars: List[Dict[str, Any]] = []
+        for _, row in df.iterrows():
+            try:
+                date_val = row.get("日期")
+                if isinstance(date_val, (int, float)):
+                    d = int(date_val)
+                    date_str = (
+                        f"{d // 10000:04d}-{(d % 10000) // 100:02d}-{d % 100:02d}"
+                        if d >= 10000000 else ""
+                    )
+                else:
+                    date_str = str(date_val)[:10] if date_val is not None else ""
+                ts = (
+                    datetime.strptime(date_str, "%Y-%m-%d").timestamp()
+                    if date_str else time.time()
+                )
+                bars.append({
+                    "symbol": symbol,
+                    "date": date_str,
+                    "open": float(row["开盘价"]),
+                    "high": float(row["最高价"]),
+                    "low": float(row["最低价"]),
+                    "close": float(row["收盘价"]),
+                    "volume": float(row.get("成交量", 0)),
+                    "amount": float(row.get("成交额", 0)),
+                    "timestamp": ts,
+                })
+            except (ValueError, TypeError, KeyError):
+                continue
+        return bars
 
     def _warmup_history(self, symbols: List[str], count: Optional[int] = None) -> None:
         """
@@ -1076,7 +1154,9 @@ class LiveEngine(BaseEngine):
 
         for symbol in symbols:
             try:
-                bars = self._fetch_history_bars(symbol, count, freq)
+                bars = self._load_local_history(symbol, count) if freq == "daily" else []
+                if not bars:
+                    bars = self._fetch_history_bars(symbol, count, freq)
                 if not bars:
                     logger.info(f"[engine] 预热无数据: {symbol}（运行中累积）")
                     continue
@@ -2446,5 +2526,8 @@ def create_live_engine(
     pool_codes = list((config.get("stock_pool", {}) or {}).get("codes", []) or [])
     for symbol in dict.fromkeys(subscriptions + pool_codes):
         feed.subscribe(str(symbol), engine.on_market_data)
+
+    # 本地历史预热目录（配置外置：market_data.local_history_dir）
+    engine._local_history_dir = str(market_cfg.get("local_history_dir", "datasets/processed"))
 
     return engine
