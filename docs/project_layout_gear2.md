@@ -246,7 +246,7 @@ Pythonwdhmm/
   │   │   └── database.py               # 数据库fixture：临时数据库、初始化schema
   │   └── benchmarks/                   # 性能基准测试目录（marker控制开关，默认不跑）
   │       ├── __init__.py
-  │       ├── _benchmark_utils.py       # 轻量级性能基准工具（纯Python无外部依赖）：BenchmarkResult/BenchmarkRunner（预热+测量+均值/中位数/P95/P99/ops/sec+阈值断言）+ make_synthetic_bars()合成K线（历史日期随机游走防未来函数）；不依赖pytest-benchmark，可独立运行也可被pytest收集
+  │       ├── _benchmark_utils.py       # 轻量级性能基准工具（纯Python无外部依赖）：BenchmarkResult/BenchmarkRunner（预热+测量+均值/中位数/P95/P99/ops/sec+阈值断言）+ make_synthetic_bars()合成K线（历史日期随机游走防未来函数）；不依赖pytest-benchmark，可独立运行也可被pytest收集；✨【回写#54】合成K线列名对齐系统中文OHLCV（开盘价/最高价/最低价/收盘价/成交量）
   │       ├── conftest.py               # 基准测试专用fixture与阈值配置
   │       ├── test_indicator_perf.py    # 技术指标计算耗时基准
   │       ├── test_engine_throughput.py  # 引擎每秒处理bar数基准
@@ -780,3 +780,10 @@ Pythonwdhmm/
    i. **纪律遵守**：业务逻辑全部归 myquant（run_mode/acceptance），scripts 只做薄入口；新增文件均登记蓝图目录树(myquant/live/run_mode.py+acceptance.py、scripts/仿真准入评估.py、tests/unit/test_run_mode.py+test_acceptance.py、docs/仿真模拟盘运行制度.md)+回写记录；config/live_config.yaml 为真实配置按约定不入蓝图树(被config/*.yaml忽略)；严格防未来(模式/判定仅依据已发生配置与指标)；临时脚本在系统Temp已清理
 
 53. ✨【回写记录·2026-09-23·仿真模拟盘交接摘要归档】应用户要求“做交接开新对话”，新增 docs/交接摘要_20260923_仿真模拟盘实施.md（包含任务背景/选型定案/P0-P6成果/关键命令/待办/验证基线/T01-T14要点）；蓝图 docs/ 段登记（计数47→48）；未本地验证项：全量 pytest 回归未补跑（基线1507 passed/2 skipped）、live_config.yaml 占位参数待用户确认、paper 正式运行待用户参数对齐后启动
+
+54. ✨【回写记录·2026-09-23·benchmarks合成K线列名对齐系统中文OHLCV（修复13条既有失败）】tests/benchmarks 合成数据英文列(open/high/low/close/volume/amount)与系统规范中文列(开盘价/最高价/最低价/收盘价/成交量)不匹配，导致 test_engine_throughput×3(KeyError '收盘价')、test_indicator_perf×10(指标缺中文列ValueError)全量回归13条失败；交接摘要已登记该批次为既有问题(pandas 3.0.5 KeyError '收盘价'，与#52无关)。本次对齐修复，无需改任何业务代码（事实来源：本次落地；代码级核验：py_compile通过 + benchmarks 20 passed + 全量回归 1557 passed/2 skipped）：
+   a. **tests/benchmarks/_benchmark_utils.py make_synthetic_bars 列名中文化**：英文键 open/high/low/close/volume → 中文键 开盘价/最高价/最低价/收盘价/成交量；移除未被引擎/指标/策略消费的 amount 字段；docstring 注明列名与系统规范数据 schema 一致（引擎 engine._build_unified_bars 按中文列构造 Bar、指标/策略统一读中文列）；合成数据严格历史日期防未来不变
+   b. **tests/benchmarks/test_indicator_perf.py 增量更新列名同步**：SMA/RSI 单根推送基准两处 new_bar["close"] → new_bar["收盘价"]
+   c. **不改业务代码的根因**：引擎、指标、策略本就读取中文列（engine.py:689-692 row.get('开盘价'/'收盘价')、indicators 校验 开盘价/最高价/最低价/收盘价、ma_strategy df['收盘价']），英文列仅存在于基准合成数据自身
+   d. **验证结果**：py_compile 改动文件通过；pytest tests/benchmarks/ = 20 passed（含此前13条失败修复 + 7条执行层延迟）；全量回归 tests/ = 1557 passed / 2 skipped（修复前 1544 passed/13 failed/2 skipped）零失败
+   e. **纪律遵守**：仅改既有文件（_benchmark_utils.py / test_indicator_perf.py 均在蓝图目录树 tests/benchmarks/ 段已有登记），无新增/删除文件，目录树仅更新 _benchmark_utils.py 描述；myquant/ 业务代码零改动；回归日志 outputs/仿真_全量_pytest_20260923_修复后.log 按 outputs/ 不入蓝图树约定不登记

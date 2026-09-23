@@ -156,7 +156,7 @@ def test_sma_incremental_update_perf():
     ind = SMA(period=20)
     ind.calculate(df)  # 先全量计算初始化
     new_bar = df.iloc[-1].copy()  # Series（非单行DataFrame）
-    new_bar["close"] = new_bar["close"] * 1.001
+    new_bar["收盘价"] = new_bar["收盘价"] * 1.001
     runner = BenchmarkRunner(warmup=BENCH_WARMUP, iterations=BENCH_ITERATIONS)
     runner.run("SMA 增量更新(单根)", lambda: ind.update(new_bar), threshold_ms=5.0)
     print(runner.results[-1].format())
@@ -170,7 +170,7 @@ def test_rsi_incremental_update_perf():
     ind = RSI(period=14)
     ind.calculate(df)
     new_bar = df.iloc[-1].copy()  # Series
-    new_bar["close"] = new_bar["close"] * 1.001
+    new_bar["收盘价"] = new_bar["收盘价"] * 1.001
     runner = BenchmarkRunner(warmup=BENCH_WARMUP, iterations=BENCH_ITERATIONS)
     runner.run("RSI 增量更新(单根)", lambda: ind.update(new_bar), threshold_ms=5.0)
     print(runner.results[-1].format())

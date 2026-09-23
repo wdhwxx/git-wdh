@@ -175,6 +175,11 @@ def make_synthetic_bars(n: int = 10000, start_date: str = "2024-01-02", seed: in
     """
     生成合成K线数据（随机游走，历史日期，跳过周末）
     用于性能基准测试，严格使用历史数据防未来函数。
+
+    列名与系统规范数据 schema 保持一致（中文 OHLCV）：
+      symbol / date / 开盘价 / 最高价 / 最低价 / 收盘价 / 成交量，
+    以兼容回测引擎（engine._build_unified_bars 按中文列构造 Bar）与
+    技术指标/策略（统一读取 开盘价/最高价/最低价/收盘价/成交量）。
     """
     import random
     random.seed(seed)
@@ -194,12 +199,11 @@ def make_synthetic_bars(n: int = 10000, start_date: str = "2024-01-02", seed: in
         bars.append({
             "symbol": "PERF.SZ",
             "date": date.strftime("%Y-%m-%d"),
-            "open": round(open_p, 4),
-            "high": round(high_p, 4),
-            "low": round(low_p, 4),
-            "close": round(close_p, 4),
-            "volume": volume,
-            "amount": round(volume * close_p, 2),
+            "开盘价": round(open_p, 4),
+            "最高价": round(high_p, 4),
+            "最低价": round(low_p, 4),
+            "收盘价": round(close_p, 4),
+            "成交量": volume,
         })
         price = close_p
         date += timedelta(days=1)
