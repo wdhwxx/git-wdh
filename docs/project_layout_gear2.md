@@ -220,6 +220,7 @@ Pythonwdhmm/
   │   │   ├── test_allocation.py        # 组合资金分配逻辑（63项）✅已完成
   │   │   ├── test_logger.py            # ✨【回写】统一日志配置与data_quality专用通道测试（路由/级别阈值/双写/结构化字段/统一告警API，18项）✅已完成
   │   │   ├── test_backtest_consistency_v5.py  # ✨【V5·P3】三模式一致性校验测试（event/vectorized/mixed同参数同数据比对收益曲线与成交，差异超阈值即失败，28项）
+  │   │   ├── test_data_download_save_parquet.py # ✨【回写#56】数据下载GUI _save_parquet合并去重测试（增量追加不丢历史/重叠日keep=last/无存量新建/空结果不改写/损坏降级/缺日期列不抛，6项）✅已完成
   │   │   ├── test_data_fingerprint.py  # ✨【V5·P0】数据指纹测试（哈希级差异检测：指纹生成/查询/缓存失效/旧数据替换，20项）
   │   │   ├── test_factor_cache_v5.py   # ✨【V5·P0】三级因子缓存测试（L1/L2/L3命中/穿透/失效/内存降级切换，20项）
   │   │   ├── test_memory_watcher.py    # ✨【V5·P0】内存监控测试（水位跟踪/OOM防护/降级开关/策略上下文切换，23项）
@@ -800,4 +801,11 @@ Pythonwdhmm/
    g. **新增 tests/unit/test_live_warmup.py（7项）**：_load_local_history 读取/升序限count/文件缺失/缺列降级；_sync_context_data 中文列；_warmup_history 优先本地/本地空降级akshare
    h. **纪律遵守**：业务逻辑归 myquant/live/engine.py（唯一业务改动文件）；无蓝图外新增业务文件；新增测试文件 test_live_warmup.py 已在蓝图 tests/unit 树登记（本回写同步更新目录树）；临时脚本在系统Temp已清理
    i. **验证结果**：py_compile myquant/live/engine.py 通过；tests/unit/test_live_warmup.py 7 passed；全量 pytest tests/ = 1564 passed / 2 skipped（修复前 1557 passed/2 skipped，净增7项无回归）；paper装配自检 create_live_engine(--dry-run) 通过
+
+56. ✨【回写记录·2026-09-23·数据下载GUI _save_parquet 增量合并去重写入（修复增量更新丢全历史bug）】实盘仿真数据咨询发现风险并经沙箱实测确认：增量更新日线（run_daily→update_symbol force_full=False 只拉缺失区间）后，GUI _save_parquet 用 write_parquet（df.to_parquet）直接覆盖写 processed，会把存量全历史截断成只剩增量区间（000001.SZ 实测 8338 行→1 行）。本次修复（事实来源：本次落地；代码级核验：py_compile通过 + 沙箱实测合并去重不丢历史 + 新增单测 6 passed）：
+   a. **myquant/gui/data_download_dialog.py _save_parquet 改为合并去重写入**：先读存量 parquet（缺失/损坏→warning 降级仅写本次区间，不阻断启动），与本次区间 pd.concat 后按日期去重（keep=last 保留最新）、升序排序回写；保证 processed 恒为全量规范数据；新增 Google docstring + 全量类型注解（result: MarketDataResult），符合 py文件代码规则
+   b. **新增 tests/unit/test_data_download_save_parquet.py（6项）**：增量追加保留全历史并追加新日 / 重叠日去重保留最新值 / 无存量新建 / 空结果不改写存量 / 存量损坏降级不崩溃 / 缺日期列不抛异常
+   c. **根因与影响面**：根因=增量只拉缺失区间 + _save_parquet 覆盖写无合并；修复仅改 GUI 数据保存函数，业务/回测/实盘引擎零改动；现有 processed 全历史不受影响（当前全历史由全量/清洗路径维护，尚未实际跑过增量截断）
+   d. **验证结果**：py_compile myquant/gui/data_download_dialog.py 通过；tests/unit/test_data_download_save_parquet.py 6 passed；沙箱实测：存量3行+增量4行(含1重叠)→合并6行、日期升序、重叠日 keep=last 取新值、最早历史保留
+   e. **纪律遵守**：业务逻辑归 myquant/gui/data_download_dialog.py（唯一业务改动文件）；无蓝图外新增文件；新增测试文件 test_data_download_save_parquet.py 已在本回写同步登记蓝图 tests/unit 树；临时脚本在系统Temp已清理
 
