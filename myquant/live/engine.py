@@ -2478,6 +2478,9 @@ def create_live_engine(
     # 4) 策略（与回测共用同一注册器，无缝迁移，铁律2）
     strategy_name = str(strategy_cfg.get("name", "ma_cross"))
     strategy_params = dict(strategy_cfg.get("params", {}) or {})
+    # 任务二修复：策略资金基准与账户一致（读 live 配置 initial_capital，避免默认 100 万口径错位）。
+    # 配置已显式指定 capital_base 时尊重配置；否则注入账户资金。
+    strategy_params.setdefault("capital_base", initial_capital)
     strategy = create_strategy(strategy_name, **strategy_params)
 
     # 5) RiskManager（真钱实盘启用交易时段规则；模拟盘不启用）
