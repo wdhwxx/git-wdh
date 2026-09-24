@@ -1185,18 +1185,23 @@ class LiveEngine(BaseEngine):
 
         均线交叉等策略依赖跨 bar 的前后比较（prev_diff vs current_diff），
         仅填充 context 数据而不逐根驱动 on_bar 会导致状态永远初始、无交叉信号。
-        这里按时间升序逐根驱动，仅重建策略状态；当日新信号由 feed 推送的当天 bar 触发。
-        异常只告警不阻断启动。
+        这里按时间升序逐根驱动重建策略状态；最新一根 bar 的信号在此产出并推进
+        （本地数据场景 processed 已含最新交易日，当日信号由 warmup 产出，feed 无更新 bar）。
+        历史信号丢弃避免全池下单触发风控熔断；异常只告警不阻断启动。
         """
         n = len(bar_objs)
         if n == 0:
             return
         for strategy in self._strategies:
             try:
-                # 仅驱动策略状态累积（如均线 prev_diff），历史信号丢弃不交易，
-                # 避免预热阶段对全池下单触发风控熔断；当日新信号由 feed 推送的当天 bar 触发。
-                for b in bar_objs:
+                # 逐根回放重建策略状态（如均线 prev_diff）；历史信号丢弃不交易。
+                # 本地数据场景：processed 已含最新交易日，feed 无更新 bar 可推，
+                # 当日信号由最新一根 bar 在此产出并推进（订单进入活跃队列，T+1 下一交易日撮合）。
+                for b in bar_objs[:-1]:
                     strategy.on_bar(b, self._context)
+                latest = bar_objs[-1]
+                for sig in (strategy.on_bar(latest, self._context) or []):
+                    self._process_signal(sig, latest)
             except Exception as e:
                 logger.warning(
                     f"[engine] 预热驱动策略失败 {symbol} "
@@ -2507,6 +2512,7 @@ def create_live_engine(
         source=str(market_cfg.get("source", "akshare")),
         frequency=str(market_cfg.get("frequency", "daily")),
         enable_clean=bool(market_cfg.get("enable_clean", True)),
+        local_history_dir=str(market_cfg.get("local_history_dir", "datasets/processed")),
     )
 
     # 4) 策略（与回测共用同一注册器，无缝迁移，铁律2）

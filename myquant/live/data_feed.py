@@ -49,6 +49,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
+from pathlib import Path as _Path
 from myquant.core.logger import get_logger
 from myquant.data_access.cleaner import clean_bar_records, load_clean_config
 from myquant.data_access.cleaner.bar_cleaner import _validate_single_bar
@@ -737,6 +738,7 @@ class MarketDataFeed:
         mock_source: Optional[MockRealtimeSource] = None,
         bar_period: Optional[int] = None,
         backoff_cap: int = 60,
+        local_history_dir: Optional[str] = None,
     ):
         """
         初始化实时行情接入
@@ -766,6 +768,7 @@ class MarketDataFeed:
             指数退避上限（秒），默认60
         """
         self._source = source
+        self._local_history_dir = local_history_dir
         self._frequency = frequency
         self._enable_clean = enable_clean
         self._max_retry = max_retry
@@ -1223,6 +1226,61 @@ class MarketDataFeed:
 
         return new_bars
 
+    def _fetch_from_local_history(self, symbol: str) -> List[Dict[str, Any]]:
+        """
+        从本地日线 parquet 读取最新 bar（tdx 本地源，离线秒级，零网络零限流）
+
+        processed/<symbol>.parquet 由增量清洗通道（tdx）补齐到最新交易日，
+        中文列：开盘价/最高价/最低价/收盘价/成交量/成交额/日期。
+        文件缺失/损坏/缺列返回空列表，不阻断轮询。
+        """
+        if not self._local_history_dir:
+            return []
+        parquet_path = _Path(self._local_history_dir) / f"{symbol}.parquet"
+        try:
+            import pandas as pd
+            df = pd.read_parquet(parquet_path)
+        except Exception as e:
+            logger.debug(f"[data_feed] 本地无parquet {symbol}: {type(e).__name__}: {e}")
+            return []
+        if df is None or df.empty or "日期" not in df.columns:
+            return []
+        required = {"开盘价", "最高价", "最低价", "收盘价"}
+        if not required.issubset(df.columns):
+            logger.warning(f"[data_feed] 本地parquet缺列 {symbol}: 需{required}")
+            return []
+        try:
+            df = df.sort_values("日期").tail(1)
+        except Exception as e:
+            logger.warning(f"[data_feed] 本地parquet排序失败 {symbol}: {e}")
+            return []
+        bars: List[Dict[str, Any]] = []
+        for _, row in df.iterrows():
+            try:
+                date_val = row.get("日期")
+                if isinstance(date_val, (int, float)):
+                    d = int(date_val)
+                    date_str = (f"{d // 10000:04d}-{(d % 10000) // 100:02d}-{d % 100:02d}"
+                                if d >= 10000000 else "")
+                else:
+                    date_str = str(date_val)[:10] if date_val is not None else ""
+                ts = (datetime.strptime(date_str, "%Y-%m-%d").timestamp()
+                      if date_str else time.time())
+                bars.append({
+                    "symbol": symbol,
+                    "date": date_str,
+                    "open": float(row["开盘价"]),
+                    "high": float(row["最高价"]),
+                    "low": float(row["最低价"]),
+                    "close": float(row["收盘价"]),
+                    "volume": float(row.get("成交量", 0)),
+                    "amount": float(row.get("成交额", 0)),
+                    "timestamp": ts,
+                })
+            except (ValueError, TypeError, KeyError):
+                continue
+        return bars
+
     def _fetch_latest_bars(self, symbol: str) -> List[Dict[str, Any]]:
         """
         从数据源获取最新行情（原有模式: akshare轮询）
@@ -1239,9 +1297,8 @@ class MarketDataFeed:
         if self._source == "akshare":
             return self._fetch_from_akshare(symbol)
         elif self._source == "tdx":
-            # TODO: 后续迭代实现通达信行情获取
-            logger.debug(f"[data_feed] tdx行情获取预留: {symbol}")
-            return []
+            # 本地通达信/processed：离线秒级读取最新bar，零网络零限流
+            return self._fetch_from_local_history(symbol)
         else:
             logger.debug(f"[data_feed] 自定义行情源: {symbol}")
             return []
