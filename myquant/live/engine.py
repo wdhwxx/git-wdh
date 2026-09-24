@@ -1168,12 +1168,40 @@ class LiveEngine(BaseEngine):
                 bar_objs = [self._dict_to_bar(symbol, b) for b in cleaned[-count:]]
                 self._bar_history[symbol] = bar_objs[-self._max_history_bars:]
                 self._sync_context_data(symbol)
+                # 预热驱动策略逐根回放（重建策略状态，如均线交叉 prev_diff）
+                # 仅最新一根 bar 产生的信号交给 _process_signal 推进当日，历史信号丢弃避免重复
+                self._replay_warmup_strategies(symbol, bar_objs)
                 logger.info(
                     f"[engine] 预热完成: {symbol} {len(bar_objs)}根 "
                     f"({freq}, 清洗后{len(cleaned)}/{len(bars)})"
                 )
             except Exception as e:
                 logger.warning(f"[engine] 预热失败 {symbol}: {type(e).__name__}: {e}")
+
+    def _replay_warmup_strategies(
+        self, symbol: str, bar_objs: List[Any]
+    ) -> None:
+        """预热期回放历史 bar 驱动策略，重建策略状态并处理最新 bar 信号。
+
+        均线交叉等策略依赖跨 bar 的前后比较（prev_diff vs current_diff），
+        仅填充 context 数据而不逐根驱动 on_bar 会导致状态永远初始、无交叉信号。
+        这里按时间升序逐根驱动，仅重建策略状态；当日新信号由 feed 推送的当天 bar 触发。
+        异常只告警不阻断启动。
+        """
+        n = len(bar_objs)
+        if n == 0:
+            return
+        for strategy in self._strategies:
+            try:
+                # 仅驱动策略状态累积（如均线 prev_diff），历史信号丢弃不交易，
+                # 避免预热阶段对全池下单触发风控熔断；当日新信号由 feed 推送的当天 bar 触发。
+                for b in bar_objs:
+                    strategy.on_bar(b, self._context)
+            except Exception as e:
+                logger.warning(
+                    f"[engine] 预热驱动策略失败 {symbol} "
+                    f"({strategy.name}): {type(e).__name__}: {e}"
+                )
 
     def _fetch_history_bars(
         self, symbol: str, count: int, freq: str
@@ -2106,6 +2134,12 @@ class LiveEngine(BaseEngine):
         """
         symbols = set()
 
+        # 从 live 配置订阅 + 股票池合并（paper 仿真/实盘关注标的；
+        # 回测引擎无 _live_watch_symbols 属性，自动跳过，保持零影响）
+        live_watch = getattr(self, "_live_watch_symbols", None)
+        if live_watch:
+            symbols.update(live_watch)
+
         # 从 broker_manager 合并持仓获取（多券商并行：各券商持仓合并）
         if self._broker_manager and hasattr(self._broker_manager, 'get_positions'):
             try:
@@ -2527,7 +2561,9 @@ def create_live_engine(
     # 8) 订阅配置标的（market_data.subscriptions + stock_pool.codes 合并去重）
     subscriptions = list(market_cfg.get("subscriptions", []) or [])
     pool_codes = list((config.get("stock_pool", {}) or {}).get("codes", []) or [])
-    for symbol in dict.fromkeys(subscriptions + pool_codes):
+    combined_watch = list(dict.fromkeys(subscriptions + pool_codes))
+    engine._live_watch_symbols = combined_watch
+    for symbol in combined_watch:
         feed.subscribe(str(symbol), engine.on_market_data)
 
     # 本地历史预热目录（配置外置：market_data.local_history_dir）

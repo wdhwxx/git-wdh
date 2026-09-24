@@ -840,3 +840,11 @@ Pythonwdhmm/
    a. **myquant/live/engine.py create_live_engine 策略资金基准注入**：strategy_params.setdefault("capital_base", initial_capital) 后 create_strategy(strategy_name, **strategy_params)；initial_capital 从 live 配置读（2451 行），配置显式指定 capital_base 时尊重配置（不覆盖）
    b. **验证结果**：验证脚本 create_live_engine(monitor_only=True) 断言策略 capital_base==2000000==账户资金；tests/unit 相关 live 单测 251 passed
    c. **纪律遵守**：业务逻辑归 myquant/live/engine.py（唯一业务改动文件，蓝图已登记）；无新增文件；临时脚本在系统Temp已清理
+61. ✨【回写记录·2026-09-24·30天Paper仿真·引擎每日推进修复】任务三（正式启动 30 天 Paper 仿真）核心卡点修复：此前 paper 引擎启动后关注标的为空、data_feed 未连接、bar=0/信号=0，定时托管无法推进。本次落地（事实来源：本次落地；代码级核验：py_compile 通过 + live 相关单测 184 passed + 真实 paper 运行 bar=210/信号=14/订单=5 全推进）：
+   a. **关注标的合并配置订阅**：myquant/live/engine.py create_live_engine 记录 combined_watch（market_data.subscriptions + stock_pool.codes 合并去重）到 engine._live_watch_symbols；_get_watch_symbols() 开头合并 _live_watch_symbols（paper 无持仓时关注标的不再为空，warmup 得以触发；回测引擎无该属性，getattr 跳过，零影响）
+   b. **warmup 回放驱动策略（解决 0 信号根因）**：ma_cross 需跨 bar 前后比较（prev_diff vs current_diff）才触发金叉/死叉，但 paper 引擎 warmup 仅填充 context 数据、不驱动策略 on_bar，导致策略状态恒初始、单根当日 bar 无法产生交叉信号。_warmup_history 新增 _replay_warmup_strategies：按时间升序逐根调用 strategy.on_bar 重建策略状态（丢弃历史信号不交易，避免预热期全池下单触发风控熔断）；当日新信号由 feed 推送的当天 bar 触发
+   c. **环境依赖补齐**：anaconda3 缺 akshare 导致 data_feed.connect() 报'未连接'（仅检测 import），pip 安装 akshare 后连接成功
+   d. **验证结果**：engine.py 改动后 184 live 相关单测 passed；真实 paper 短运行 bar=210/信号=14(买8卖6)/订单=5/风控拒绝=9；成交=0 符合 PaperBroker T+1 撮合设计（T 日订单 T+1 日 bar 撮合，30 天仿真每日推进自然成交）；feed 逐只 akshare 拉 3226 只偏慢（90s 约拉 200 只），不影响推进成立
+   e. **配置参数自洽**：config/live_config.yaml risk_control.max_order_value 200000→500000（策略按 capital_base 200万×20%=40万下单，原 20 万限额致 BUY 全被拒；真实配置不入蓝图树/gitignore）
+   f. **A 定时托管已建**：doubao-cron 定时任务「30天Paper仿真·每日收盘推进」（rrule FREQ=WEEKLY;BYDAY=MO-FR;COUNT=30，DTSTART 20260924T170500，每交易日 17:05 推进一天，截止 2026-11-05），query 含增量清洗+run_实盘入口命令+产出路径；B GUI 常驻为预留选项（未来弹窗面板加勾选 A/B）
+   g. **纪律遵守**：业务逻辑归 myquant/live/engine.py（唯一业务改动文件，蓝图已登记）；live_config.yaml 为真实配置不入蓝图树；无新增业务文件；临时脚本在系统Temp已清理
