@@ -192,3 +192,32 @@ def test_存量损坏仍写入且列对齐(monkeypatch, tmp_path: Path) -> None:
     assert len(df) == 1
     assert int(df["日期"].iloc[0]) == 20260919
     assert "收盘价" in df.columns
+
+
+def test_传入records后不再重新拉取(monkeypatch, tmp_path: Path) -> None:
+    """M1修复：save 传入 records 时不再调用 fetcher.get_market_data（消除增量链路双拉取）。"""
+    symbol = "TST.SZ"
+    records = [_bar("20260919", 11, 11.5, 10.8, 11.2)]
+
+    class _ExplodeFetcher:
+        """若被调用则测试失败（M1 后 save 不应再拉取）。"""
+
+        def get_market_data(self, *args: Any, **kwargs: Any):
+            raise AssertionError("M1 修复后不应重新拉取数据源")
+
+    manager = DataManager(_ExplodeFetcher())
+    processed = tmp_path / "datasets" / "processed"
+    processed.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(
+        "myquant.data_access.manager.get_project_path",
+        lambda *parts: (tmp_path / Path(*parts).as_posix()) if parts else tmp_path,
+    )
+    _write_existing(processed, symbol, [{"日期": 19910403, "收盘价": 1.0}])
+
+    out = manager.save_cleaned_incremental_parquet(
+        symbol, start_date="2026-09-19", end_date="2026-09-19", records=records,
+    )
+    assert out is not None
+    df = pd.read_parquet(Path(out))
+    assert int((df["日期"] == 20260919).sum()) == 1  # 复用 records 清洗后写入
+    assert int(df["日期"].min()) == 19910403  # 存量保留

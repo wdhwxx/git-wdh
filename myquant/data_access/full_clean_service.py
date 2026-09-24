@@ -596,3 +596,161 @@ class FullCleanService:
         path = OUTPUT_DIR / f"clean_all_{self.batch_id}.json"
         path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         return path
+
+
+# ═══════════════════════════════════════════════
+#  增量清洗通道（M0-M4 方案：DB + processed 双写，语义="仅清洗"）
+# ═══════════════════════════════════════════════
+
+def _normalize_incremental_date(value: Any) -> Any:
+    """把增量记录的 date 规范化为 YYYY-MM-DD（兼容暂存文件里的 YYYYMMDD 数值）。"""
+    if value is None:
+        return None
+    s = str(value).strip().replace("/", "-").replace(".", "-")
+    s = s.replace("-", "")
+    if len(s) == 8 and s.isdigit():
+        return f"{s[:4]}-{s[4:6]}-{s[6:]}"
+    return str(value)
+
+
+def _load_incremental_records(
+    project_root: Optional[Path] = None,
+    date_tag: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    读取增量暂存文件 database/incremental_YYYYMMDD.parquet。
+
+    Args:
+        project_root: 项目根目录；None 用模块默认。
+        date_tag: 日期标签 YYYYMMDD；None 取最近一个文件。
+
+    Returns:
+        List[Dict]: 记录列表（date 已规范化为 YYYY-MM-DD）。
+    """
+    import pandas as pd
+
+    root = Path(project_root) if project_root else PROJECT_ROOT
+    db_dir = root / "database"
+    if not db_dir.exists():
+        return []
+    if date_tag:
+        files = [db_dir / f"incremental_{date_tag}.parquet"]
+    else:
+        files = sorted(db_dir.glob("incremental_*.parquet"), reverse=True)
+    for f in files:
+        if not f.exists():
+            continue
+        try:
+            df = pd.read_parquet(f)
+            recs: List[Dict[str, Any]] = df.to_dict("records")
+            for r in recs:
+                if "date" in r:
+                    r["date"] = _normalize_incremental_date(r.get("date"))
+            return recs
+        except Exception as e:
+            logger.warning("增量暂存文件读取失败: %s: %s", f, e)
+    return []
+
+
+def run_incremental_clean(
+    project_root: Optional[Path] = None,
+    records: Optional[List[Dict[str, Any]]] = None,
+    date_tag: Optional[str] = None,
+    db_path: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """
+    增量清洗通道核心：对增量暂存记录做清洗 + DB/processed 双写（不重新拉取）。
+
+    与全量清洗共用 run_clean_pipeline + config/data_clean.yaml；与「增量更新日线」一键闭环
+    （拉取→写DB→清洗→写processed）互补：本函数只处理已暂存的增量记录
+    （database/incremental_*.parquet 或外部传入 records），语义="仅清洗"模式，供审计/重跑。
+    M0-M4 落地：M1 复用记录不重拉；M3 DB 上下文优先；M4 单标的失败隔离。
+
+    Args:
+        project_root: 项目根目录；None 用模块默认。
+        records: 增量记录列表（含 symbol/date/open/...）；None 则从暂存文件读取。
+        date_tag: 暂存文件日期标签 YYYYMMDD；None 取最近一个。
+        db_path: quant.db 路径；None 用默认。
+
+    Returns:
+        Dict: {status, cleaned_symbols, db_written, processed_written, errors}。
+    """
+    from myquant.data_access.factory import create_default_fetcher
+    from myquant.data_access.manager import DataManager
+    from myquant.database import get_connection
+    from myquant.database.queries import DataQueries
+    from myquant.database.schema import table_exists, TABLE_NAMES
+    from myquant.database.migrations import migrate_to_latest
+
+    root = Path(project_root) if project_root else PROJECT_ROOT
+    db_path = Path(db_path) if db_path else root / "database" / "quant.db"
+
+    if records is None:
+        records = _load_incremental_records(root, date_tag)
+    if not records:
+        return {"status": "no_records", "cleaned_symbols": [], "db_written": 0,
+                "processed_written": 0, "errors": []}
+
+    by_symbol: Dict[str, List[Dict[str, Any]]] = {}
+    for rec in records:
+        sym = rec.get("symbol") or rec.get("code")
+        if not sym:
+            continue
+        r = dict(rec)
+        if "date" in r:
+            r["date"] = _normalize_incremental_date(r.get("date"))
+        by_symbol.setdefault(str(sym), []).append(r)
+
+    fetcher = create_default_fetcher()
+    conn = get_connection(db_path)
+    try:
+        if not table_exists(conn, TABLE_NAMES["sync_status"]):
+            migrate_to_latest(conn)
+        dq = DataQueries(conn)
+        manager = DataManager(fetcher, db_connection=conn)
+        out: Dict[str, Any] = {"status": "ok", "cleaned_symbols": [],
+                               "db_written": 0, "processed_written": 0, "errors": []}
+        for symbol, recs in by_symbol.items():
+            try:
+                # 0) 先清洗过滤脏数据（DB 与 processed 同源一致；脏数据剔除不算失败）
+                clean_config = load_clean_config()
+                pipe = run_clean_pipeline(
+                    records=recs, data_type="bar", symbol=symbol,
+                    config=clean_config, save_bad=False, save_report=False,
+                )
+                cleaned = pipe.get("cleaned") or []
+                if not cleaned:
+                    continue  # 全部为脏/无有效增量，跳过该标的（不写 DB/processed）
+                # 1) 写 DB（清洗后记录 INSERT OR REPLACE upsert）
+                db_rows = []
+                for cc in cleaned:
+                    db_rows.append({
+                        "symbol": symbol, "market": "A股", "period": "daily",
+                        "adjust": "hfq", "trade_date": cc.get("date", ""),
+                        "open": cc.get("open"), "high": cc.get("high"),
+                        "low": cc.get("low"), "close": cc.get("close"),
+                        "volume": cc.get("volume"), "amount": cc.get("amount"),
+                        "pct_chg": cc.get("pct_chg"), "turnover": cc.get("turnover"),
+                        "data_source": cc.get("data_source", "incremental_clean"),
+                    })
+                db_written = dq.bulk_insert_market_data(db_rows, replace=True) if db_rows else 0
+                # 2) 写 processed（复用 save_cleaned_incremental_parquet，records 传入内部同规则再清洗）
+                dates = [cc.get("date") for cc in cleaned if cc.get("date")]
+                start_date = min(dates) if dates else None
+                end_date = max(dates) if dates else None
+                pf = manager.save_cleaned_incremental_parquet(
+                    symbol, start_date=start_date, end_date=end_date, records=recs,
+                )
+                out["cleaned_symbols"].append(symbol)
+                out["db_written"] += 1 if db_written else 0
+                if pf:
+                    out["processed_written"] += 1
+            except Exception as e:
+                out["errors"].append({"symbol": symbol, "error": f"{type(e).__name__}: {e}"})
+                logger.warning("增量清洗失败 [%s]: %s", symbol, e)
+        return out
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass

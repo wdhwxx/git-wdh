@@ -239,6 +239,12 @@ class DataCleanDialog(QDialog):
         btns.addStretch(1)
         btn_cancel = QPushButton("取消")
         btn_cancel.clicked.connect(self.reject)
+        # 增量清洗通道（M0-M4 方案）：对 database/incremental_*.parquet 暂存增量做清洗 + DB/processed 双写，不重新拉取
+        btn_incremental = QPushButton("增量清洗")
+        btn_incremental.setToolTip(
+            "对 database/incremental_*.parquet 暂存增量做清洗 + DB/processed 双写（仅清洗，不重新拉取）"
+        )
+        btn_incremental.clicked.connect(self._on_incremental_clean)
         btn_start = QPushButton("开始清洗")
         btn_start.setDefault(True)
         btn_start.setStyleSheet(
@@ -247,6 +253,7 @@ class DataCleanDialog(QDialog):
         )
         btn_start.clicked.connect(self._on_start)
         btns.addWidget(btn_cancel)
+        btns.addWidget(btn_incremental)
         btns.addWidget(btn_start)
         root.addLayout(btns)
 
@@ -344,6 +351,40 @@ class DataCleanDialog(QDialog):
             f"outputs/clean_all_{config['run_id']}.json",
         )
         self.accept()
+
+    def _on_incremental_clean(self) -> None:
+        """增量清洗通道：对最近暂存增量文件做清洗 + DB/processed 双写（仅清洗模式，不重新拉取）。"""
+        from myquant.data_access.full_clean_service import run_incremental_clean
+
+        incr_dir = self.project_root / "database"
+        files = sorted(incr_dir.glob("incremental_*.parquet"), reverse=True) if incr_dir.exists() else []
+        if not files:
+            QMessageBox.warning(
+                self, "提示",
+                "未找到增量暂存文件 database/incremental_*.parquet。\n请先运行「增量更新日线」生成后再执行增量清洗。",
+            )
+            return
+
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            res = run_incremental_clean(project_root=self.project_root)
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"增量清洗异常：\n{type(e).__name__}: {e}")
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+
+        if res.get("status") == "no_records":
+            QMessageBox.information(self, "增量清洗", "暂存文件中无有效增量记录。")
+            return
+        msg = (
+            f"增量清洗完成：\n"
+            f"  处理标的：{len(res.get('cleaned_symbols', []))}\n"
+            f"  写入 DB：{res.get('db_written', 0)}\n"
+            f"  写入 processed：{res.get('processed_written', 0)}\n"
+            f"  失败标的：{len(res.get('errors', []))}"
+        )
+        QMessageBox.information(self, "增量清洗", msg)
 
 
 def run_dialog(project_root: Path) -> int:

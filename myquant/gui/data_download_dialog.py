@@ -168,6 +168,43 @@ def _load_pool_codes(project_root: Path, pool_config: Optional[str] = None) -> L
     return symbols
 
 
+def _save_incremental_audit_file(project_root: Path, records: List[Dict]) -> Optional[Path]:
+    """M0：本轮增量拉取记录暂存 database/incremental_YYYYMMDD.parquet（审计/可重跑）。
+
+    按日累积、按 symbol+date 去重 keep=last、按 date 升序。仅审计暂存，不影响 processed 主链路。
+
+    Args:
+        project_root: 项目根目录。
+        records: 本轮增量拉取记录（含 symbol、date 等原始字段）。
+
+    Returns:
+        Optional[Path]: 写入的增量文件路径；无记录返回 None。
+    """
+    import pandas as pd
+
+    from myquant.utils.file_utils import ensure_dir, write_parquet
+
+    if not records:
+        return None
+    ensure_dir(project_root / "database")
+    out = project_root / "database" / f"incremental_{datetime.now().strftime('%Y%m%d')}.parquet"
+    new_df = pd.DataFrame(records)
+    if out.exists():
+        try:
+            new_df = pd.concat([pd.read_parquet(out), new_df], ignore_index=True)
+        except Exception:
+            pass
+    if "date" in new_df.columns:
+        new_df["date"] = new_df["date"].astype(str).str.replace("-", "", regex=False)
+    keys = [c for c in ("symbol", "date") if c in new_df.columns]
+    if keys:
+        new_df = new_df.drop_duplicates(subset=keys, keep="last")
+    if "date" in new_df.columns:
+        new_df = new_df.sort_values("date").reset_index(drop=True)
+    write_parquet(out, new_df)
+    return out
+
+
 def run_daily(fetcher, manager, project_root: Path, progress_callback=None, force_full: bool = False, pool_config: Optional[str] = None) -> dict:
     """
     下载日线数据
@@ -194,17 +231,39 @@ def run_daily(fetcher, manager, project_root: Path, progress_callback=None, forc
     )
 
     success_count = 0
+    save_failed = 0
+    save_failed_symbols: List[str] = []
+    incremental_records: List[Dict] = []  # M0：审计暂存
     for r in results:
         if r["status"] == "completed" and r.get("record_count", 0) > 0:
+            # M0：收集已拉取增量记录，供落审计文件（database/incremental_YYYYMMDD.parquet）
+            if r.get("data"):
+                for rec in r["data"]:
+                    rec = dict(rec)
+                    rec.setdefault("symbol", r["symbol"])
+                    incremental_records.append(rec)
             # 走清洗管线：同全量清洗规则（run_clean_pipeline + config/data_clean.yaml），
             # 按标的按区间清洗后合并写回 processed（根治增量直写弄脏数据）
-            processed_file = manager.save_cleaned_incremental_parquet(
-                r["symbol"],
-                start_date=r.get("start_date"),
-                end_date=r.get("end_date"),
-            )
+            # M4修复：单标的"拉取→清洗→写 processed"原子隔离，失败只影响该标的，不影响批次
+            try:
+                processed_file = manager.save_cleaned_incremental_parquet(
+                    r["symbol"],
+                    start_date=r.get("start_date"),
+                    end_date=r.get("end_date"),
+                    # M1修复：复用 update_symbol 已拉记录，消除 save 阶段二次网络请求
+                    records=r.get("data"),
+                )
+            except Exception as e:
+                processed_file = None
+                save_failed += 1
+                save_failed_symbols.append(r["symbol"])
+                logger.warning("增量清洗写 processed 失败 [%s]: %s", r["symbol"], e)
             if processed_file:
                 success_count += 1
+
+    # M0：落当日增量审计文件（可重跑；不影响 processed 主链路）
+    if incremental_records:
+        _save_incremental_audit_file(project_root, incremental_records)
 
     return {
         "total": len(results),
@@ -212,6 +271,8 @@ def run_daily(fetcher, manager, project_root: Path, progress_callback=None, forc
         "failed": sum(1 for r in results if r["status"] == "failed"),
         "skipped": sum(1 for r in results if r["status"] == "skipped"),
         "parquet_saved": success_count,
+        "save_failed": save_failed,
+        "save_failed_symbols": save_failed_symbols,
     }
 
 

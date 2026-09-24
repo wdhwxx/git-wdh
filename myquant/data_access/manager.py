@@ -25,6 +25,7 @@ manager.py - 数据管理器（更新/校验/同步/自动维护）
 from __future__ import annotations
 
 import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -302,6 +303,8 @@ class DataManager:
             "end_date": None,
             "data_source": "",
             "error_message": "",
+            # M1修复：携带已拉取记录，供 save_cleaned_incremental_parquet 复用，消除增量双拉取
+            "data": None,
         }
 
         try:
@@ -331,6 +334,8 @@ class DataManager:
                 result["start_date"] = data_result.start_date
                 result["end_date"] = data_result.end_date
                 result["data_source"] = data_result.source
+                # M1修复：记录写入 result 供清洗复用（增量区间仅1~3根，内存开销可忽略）
+                result["data"] = list(data_result.data)
 
                 # 持久化到数据库（如果有连接）
                 if self._db:
@@ -370,6 +375,8 @@ class DataManager:
         batch_size: int = DEFAULT_BATCH_SIZE,
         progress_callback: Optional[Callable] = None,
         force_full: bool = False,
+        batch_sleep: Optional[float] = None,
+        max_retries: Optional[int] = None,
     ) -> List[Dict]:
         """
         批量更新股票数据
@@ -392,6 +399,12 @@ class DataManager:
             False=增量（只补缺失，默认）。
             增量/全量共用本函数：DataManager 依据数据库 sync_status 自动判断，
             force_full=True 时跳过增量判断直接全量拉取，strictly end_date=today 防未来函数。
+        batch_sleep : float | None
+            批间限速间隔（秒）。None 时从 config/data_clean.yaml 的 incremental.batch_sleep 读取，
+            未配置则 0（本地通达信源零限流，可不等待）。
+        max_retries : int | None
+            失败（failed/no_data）退避重试次数。None 时从 config/data_clean.yaml 的 incremental.max_retries 读取，
+            未配置则 0（不重试）。
 
         Returns
         -------
@@ -399,14 +412,34 @@ class DataManager:
         """
         results = []
         total = len(symbols)
+        # M2修复：限速/重试参数配置外置（config/data_clean.yaml 的 incremental 段），未配置则不生效
+        if batch_sleep is None or max_retries is None:
+            _inc = (load_clean_config().get("incremental") or {})
+            if batch_sleep is None:
+                batch_sleep = float(_inc.get("batch_sleep", 0.0))
+            if max_retries is None:
+                max_retries = int(_inc.get("max_retries", 0))
+        batch_sleep = float(batch_sleep or 0.0)
+        max_retries = max(0, int(max_retries or 0))
         for i, symbol in enumerate(symbols):
             result = self.update_symbol(symbol, period, adjust, force_full=force_full)
+            # M2修复：失败退避重试（网络兜底防限流；本地通达信成功则零开销）
+            if max_retries and result.get("status") in ("failed", "no_data"):
+                for _ in range(max_retries):
+                    time.sleep(batch_sleep if batch_sleep > 0 else 0.3)
+                    retry = self.update_symbol(symbol, period, adjust, force_full=force_full)
+                    if retry.get("status") == "completed":
+                        result = retry
+                        break
             results.append(result)
             if progress_callback:
                 try:
                     progress_callback(i + 1, total, result)
                 except Exception as e:
                     logger.debug(f"进度回调异常: {e}")
+            # M2修复：按批限速（网络兜底防限流；本地源 batch_sleep 可配为 0 不等待）
+            if batch_sleep > 0 and (i + 1) % batch_size == 0 and i + 1 < total:
+                time.sleep(batch_sleep)
         return results
 
     def update_all_symbols(
@@ -865,6 +898,58 @@ class DataManager:
 
         return result
 
+    def _read_db_prior_close(
+        self,
+        symbol: str,
+        start_date: str,
+        period: str = "daily",
+        adjust: Optional[str] = "hfq",
+    ) -> Optional[Dict[str, Any]]:
+        """
+        从 quant.db 读取 < start_date 的最新一根收盘，作增量清洗前收盘上下文。
+
+        M3修复：DB 是增量写入权威（quant.db 往往领先 processed），
+        优先用 DB 保证跳变检测基准正确；processed 落后时不再作为唯一上下文来源。
+
+        【防未来函数】只读 start_date 之前的已发生数据，绝不读取未来。
+
+        Args:
+            symbol: 标的代码，如 000001.SZ。
+            start_date: 增量区间开始日期（YYYY-MM-DD）。
+            period / adjust: 查询口径，与增量拉取一致。
+
+        Returns:
+            Optional[Dict]: 最新一根行（英文字段 date/close/...），无数据或读取失败返回 None。
+        """
+        if not self._db:
+            return None
+        try:
+            from ..database.queries import DataQueries
+            queries = DataQueries(self._db)
+            prior_end = (datetime.strptime(start_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+            rows = queries.get_market_data(
+                symbol, end_date=prior_end, period=period, adjust=adjust,
+            )
+            if not rows:
+                return None
+            last = rows[-1]
+            # DB 行字段为 trade_date/open/close/...，转成清洗管线英文字段 date/close/...
+            en: Dict[str, Any] = {
+                "date": last.get("trade_date"),
+                "open": last.get("open"),
+                "high": last.get("high"),
+                "low": last.get("low"),
+                "close": last.get("close"),
+                "volume": last.get("volume"),
+                "amount": last.get("amount"),
+                "pct_chg": last.get("pct_chg"),
+                "turnover": last.get("turnover"),
+            }
+            return {k: v for k, v in en.items() if v is not None}
+        except Exception as e:
+            logger.warning("DB 前收盘上下文读取失败，回退 processed: %s: %s", symbol, e)
+            return None
+
     def save_cleaned_incremental_parquet(
         self,
         symbol: str,
@@ -872,6 +957,7 @@ class DataManager:
         end_date: Optional[str] = None,
         period: str = "daily",
         adjust: Optional[str] = "hfq",
+        records: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[str]:
         """
         增量区间清洗后按中文列合并写回 processed 扁平 parquet。
@@ -888,6 +974,8 @@ class DataManager:
             end_date: 增量区间截止日期（YYYY-MM-DD）。
             period: K线周期，默认 daily。
             adjust: 复权方式，默认 hfq。
+            records: 可选，调用方已拉取的增量区间原始记录（update_symbol 的 result["data"]）；
+                传入则不重新拉取（消除增量双拉取），None 时按 start_date/end_date 自行拉取（向后兼容）。
 
         Returns:
             Optional[str]: 清洗合并后写出的 processed parquet 路径；
@@ -903,14 +991,19 @@ class DataManager:
             logger.info("清洗功能已关闭，跳过增量清洗: %s", symbol)
             return None
 
-        # 拉取增量区间原始数据（绕过缓存，英文字段 date/open/...）
-        data_result = self._fetcher.get_market_data(
-            symbol, start_date=start_date, end_date=end_date,
-            period=period, adjust=adjust, use_cache=False,
-        )
-        if not data_result or data_result.count == 0:
-            return None
-        interval_records: List[Dict[str, Any]] = list(data_result.data)
+        # M1修复：优先复用调用方已拉取记录（update_symbol result["data"]），
+        # 消除增量链路 save 阶段二次网络请求；records 未传入（单调用/测试）才重新拉取，向后兼容。
+        if records:
+            interval_records: List[Dict[str, Any]] = list(records)
+        else:
+            # 拉取增量区间原始数据（绕过缓存，英文字段 date/open/...）
+            data_result = self._fetcher.get_market_data(
+                symbol, start_date=start_date, end_date=end_date,
+                period=period, adjust=adjust, use_cache=False,
+            )
+            if not data_result or data_result.count == 0:
+                return None
+            interval_records = list(data_result.data)
 
         # 中英字段映射（fetcher/清洗管线用英文字段，扁平 parquet 用中文字段）
         _en_to_cn: Dict[str, str] = {
@@ -955,13 +1048,18 @@ class DataManager:
             except Exception:
                 logger.warning("存量 processed parquet 读取失败，跳过合并: %s", output_path)
 
-        # 前一根收盘作上下文（供涨跌幅/连续性判定，仅用于清洗，不写入）
+        # M3修复：前收盘上下文优先读 quant.db（增量写入权威），processed 兜底，
+        # 避免 processed 落后导致跳变检测基准错；仅用于清洗，不写入。
         prior_row: Optional[Dict[str, Any]] = None
-        if existing_df is not None and not existing_df.empty and start_date:
-            start_int = int(start_date.replace("-", ""))
-            before = existing_df[existing_df["日期"].astype(int) < start_int]
-            if not before.empty:
-                prior_row = _row_cn_to_en(before.iloc[-1])
+        if start_date:
+            db_prior = self._read_db_prior_close(symbol, start_date, period, adjust)
+            if db_prior:
+                prior_row = db_prior
+            elif existing_df is not None and not existing_df.empty:
+                start_int = int(start_date.replace("-", ""))
+                before = existing_df[existing_df["日期"].astype(int) < start_int]
+                if not before.empty:
+                    prior_row = _row_cn_to_en(before.iloc[-1])
 
         # 组装清洗输入：前收盘上下文 + 增量区间
         records_to_clean: List[Dict[str, Any]] = []
