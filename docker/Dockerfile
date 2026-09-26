@@ -3,7 +3,8 @@
 # 基于Python官方镜像，安装项目与所有依赖，为回测和实盘运行提供一致环境
 
 # ===== 基础镜像 =====
-FROM python:3.10-slim
+# P3-D13-005 整改：3.10 → 3.12，与 CI（Ubuntu/Windows py3.12）及 conda quant 环境对齐
+FROM python:3.12-slim
 
 # ===== 维护者信息 =====
 LABEL maintainer="Pythonwdhmm"
@@ -39,9 +40,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml README.md ./
 
 # ===== 安装Python依赖 =====
-# 安装核心依赖 + 实盘依赖 + 开发依赖
+# 安装核心依赖 + 实盘依赖 + 开发依赖 + web依赖
 # 实盘依赖（websocket/aiohttp/schedule）为实时行情和券商对接预留
-RUN pip install --no-cache-dir -e ".[live,dev]"
+# P1-D13-001 整改：补 web extras —— compose app 服务（运行API.py 需 fastapi/uvicorn）与
+# dashboard 服务（streamlit run）均依赖 web 组，缺此 extras 容器启动即 ImportError
+RUN pip install --no-cache-dir -e ".[live,dev,web]"
 
 # ===== 复制项目代码 =====
 COPY . .

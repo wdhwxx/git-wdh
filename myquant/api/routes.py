@@ -139,6 +139,12 @@ except ImportError:
     def Query(*args: Any, **kwargs: Any) -> Any:  # type: ignore[no-redef]
         return None
 
+    class BaseHTTPMiddleware:  # type: ignore[no-redef]
+        """fastapi未安装时的占位类，保证模块顶层中间件类可正常定义。"""
+
+        def __init__(self, app: Any, **kwargs: Any):
+            self.app = app
+
 
 # ═══════════════════════════════════════════════
 #  内存存储（v1使用，后续迭代替换为数据库）

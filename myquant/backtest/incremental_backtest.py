@@ -53,7 +53,7 @@ logger = logging.getLogger("myquant.backtest.incremental_backtest")
 DEFAULT_INITIAL_CAPITAL: float = 1_000_000.0
 DEFAULT_FREQUENCY: str = "1d"
 DEFAULT_DATA_SOURCE: str = "incremental"
-RESULTS_FORMAT_VERSION: str = "1.0"
+from myquant.core.constants import RESULTS_FORMAT_VERSION  # P3-D10-001 整改：双源收敛为单一权威（myquant/core/constants.py）
 
 # 策略注册表：策略名 -> 策略类（扩展只需在此注册）
 STRATEGY_REGISTRY: Dict[str, type] = {

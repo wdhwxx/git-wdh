@@ -11,7 +11,8 @@
 #
 # 说明：
 #   - Python 版本 3.12（与 conda 环境 quant 一致，pyproject requires-python>=3.10）
-#   - 测试套件不引用 web/live 可选组，安装 ".[dev,benchmark]" 即可
+#   - 测试套件引用 gui 可选组（test_paper_run_dialog.py 依赖 PySide6），test job 安装 ".[dev,benchmark,gui]"
+#     （P2-D12-001 整改；该测试文件内部已设 QT_QPA_PLATFORM=offscreen，无需额外无头配置）
 #   - ruff 固定 0.16.3（与 P3-4 基线 530 项测量版本一致）；规则契约见 pyproject [tool.ruff]
 #   - 历史 ruff lint 债 530 项（E4/E7/E9/F/I 契约下）列入
 #     docs/回测性能优化实施报告_v5.md 遗留债清单，CI 通过基线护栏防新增回退
@@ -103,8 +104,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: 安装项目（dev + benchmark 依赖）
-        run: pip install -e ".[dev,benchmark]"
+      - name: 安装项目（dev + benchmark + gui 依赖）
+        # P2-D12-001 整改：补 gui extras —— test_paper_run_dialog.py 依赖 PySide6，
+        # 缺此组 CI 在收集阶段即失败（该文件 L19 已设 QT_QPA_PLATFORM=offscreen）
+        run: pip install -e ".[dev,benchmark,gui]"
 
       - name: "关键工具版本断言（L5修复: 依赖未锁定，防版本漂移导致基线失真）"
         run: |

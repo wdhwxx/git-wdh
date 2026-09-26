@@ -306,7 +306,17 @@ def run_backtest(args: argparse.Namespace) -> int:
     from myquant.core.lookahead_guard import get_lookahead_guard
     guard = get_lookahead_guard()
     guard.reset()
-    logger.info(f"防未来函数校验器已重置: {guard}")
+    # P2-D7-001 整改：消费配置 lookahead_guard.enabled/strict_mode（回测端与实盘端对齐）。
+    # BacktestScheduler 统一注入全局单例（engine.py create_engine），此处同步即引擎全局生效；
+    # 使 GUI/backtest_config.example.yaml 中 strict_mode: true 的声明不再被环境变量默认 false 覆盖。
+    lg_cfg = config_dict.get("lookahead_guard", {}) or {}
+    if "enabled" in lg_cfg:
+        guard.enabled = bool(lg_cfg["enabled"])
+        logger.info("lookahead_guard.enabled 已消费: %s", guard.enabled)
+    if "strict_mode" in lg_cfg:
+        guard.strict = bool(lg_cfg["strict_mode"])
+        logger.info("lookahead_guard.strict_mode 已消费: %s（违规将立即抛异常，否则记录至 assert_pass 统一校验）", guard.strict)
+    logger.info(f"防未来函数校验器已重置: {guard} (enabled={guard.enabled}, strict={guard.strict})")
 
     # ── 8. 创建回测引擎（三模式调度，从DataProvider加载数据）──
     try:

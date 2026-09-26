@@ -16,6 +16,10 @@ lookahead_guard.py - 防未来函数校验器（规则4核心）
   3. 信号T日收盘→T+1开盘：T日收盘产生信号，T+1开盘价成交
   4. 因子仅用历史数据：股票池筛选只用信号日之前的数据
 
+P2-D7-003 整改声明：
+  铁律1由结构（RSRS闭式OLS+shift(1)/derived_metrics严格因果）+测试锚点保障；
+  铁律2由止损逻辑顺序保障；guard 运行期记录覆盖铁律3/4（record_indicator/record_stop_loss 无生产调用，蓝图已如实声明）。
+
 环境变量:
   LOOKAHEAD_GUARD_ENABLED=true   强制开启校验（默认开启）
   LOOKAHEAD_GUARD_STRICT=true    严格模式，违规立即抛异常（默认仅记录）

@@ -1557,9 +1557,11 @@ def attach_engine(
     report_output_dir: Optional[Path] = None,
     enable_patrol: bool = True,
     enable_daily_report: bool = True,
+    enable_resend_pending: bool = False,
+    resend_pending_interval: float = 60.0,
 ) -> Dict[str, str]:
     """
-    将实盘引擎一键挂载到调度器：自动注册巡检任务 + 收盘日报任务。
+    将实盘引擎一键挂载到调度器：自动注册巡检任务 + 收盘日报任务 + 断线补单对账任务。
 
     Parameters
     ----------
@@ -1578,10 +1580,15 @@ def attach_engine(
         是否注册巡检任务
     enable_daily_report : bool
         是否注册日报任务
+    enable_resend_pending : bool
+        P3-D11-001 整改：是否注册断线补单对账周期任务（默认关闭，保守；
+        需 engine 非空且有 broker_manager 时生效），对账调用 engine.resend_pending_orders()
+    resend_pending_interval : float
+        断线补单对账间隔（秒），默认 60
 
     Returns
     -------
-    Dict[str, str] : {"patrol": task_id, "daily_report": task_id}
+    Dict[str, str] : {"patrol": task_id, "daily_report": task_id, "resend_pending": task_id}
     """
     task_ids: Dict[str, str] = {}
 
@@ -1628,8 +1635,25 @@ def attach_engine(
             cron_expr=daily_report_cron,
         )
 
+    if enable_resend_pending and engine is not None:
+        # P3-D11-001 整改：断线补单对账自动接线（默认关闭，开启后按周期调用
+        # engine.resend_pending_orders()；引擎无 broker_manager 时该方法安全返回 error，不抛异常）
+        def _resend_job(**kw) -> None:  # noqa: ARG001
+            result = engine.resend_pending_orders()
+            if isinstance(result, dict) and result.get("error"):
+                logger.warning(f"[attach] 断线补单对账跳过: {result['error']}")
+            else:
+                logger.info(f"[attach] 断线补单对账完成: {result}")
+
+        task_ids["resend_pending"] = scheduler.add_interval_task(
+            _resend_job,
+            name="断线补单对账",
+            interval_seconds=resend_pending_interval,
+        )
+
     logger.info(
         f"[attach] 实盘引擎已挂载: patrol={task_ids.get('patrol')}, "
-        f"daily_report={task_ids.get('daily_report')}"
+        f"daily_report={task_ids.get('daily_report')}, "
+        f"resend_pending={task_ids.get('resend_pending')}"
     )
     return task_ids

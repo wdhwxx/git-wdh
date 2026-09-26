@@ -254,9 +254,10 @@ class CleanupDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
 
-        # ===== 1. 清理项目（勾选网格，2 列） =====
+        # ===== 1. 清理项目（双排网格） =====
+        from PySide6.QtWidgets import QGridLayout
         box_junk = QGroupBox("清理项目")
-        grid = QVBoxLayout(box_junk)
+        grid = QGridLayout(box_junk)
         self.chk_test = QCheckBox(f"A · {CATEGORY_NAMES['A']}（测试命名 / 孤儿 bad / clean 报告）")
         self.chk_test.setChecked(True)
         self.chk_backup = QCheckBox(f"B · {CATEGORY_NAMES['B']}（backup_*_quant_before_clean.db）")
@@ -273,14 +274,24 @@ class CleanupDialog(QDialog):
         self.chk_bad.setChecked(False)
         self.chk_batch = QCheckBox(f"H · {CATEGORY_NAMES['H']}（results/batch_backtest 批量回测汇总/双强候选池，按时间戳归期）")
         self.chk_batch.setChecked(False)
-        grid.addWidget(self.chk_test)
-        grid.addWidget(self.chk_backup)
-        grid.addWidget(self.chk_pycache)
-        grid.addWidget(self.chk_rotlog)
-        grid.addWidget(self.chk_legacy)
-        grid.addWidget(self.chk_artifacts)
-        grid.addWidget(self.chk_bad)
-        grid.addWidget(self.chk_batch)
+        self.chk_outputs_subdirs = QCheckBox(f"I · {CATEGORY_NAMES['I']}（kunpeng_batch/param_opt/冒烟残留）")
+        self.chk_outputs_subdirs.setChecked(False)
+        self.chk_cache = QCheckBox(f"J · {CATEGORY_NAMES['J']}（param_scan/tmp/factor 缓存）")
+        self.chk_cache.setChecked(False)
+        self.chk_old_logs = QCheckBox(f"K · {CATEGORY_NAMES['K']}（按日期命名日志，保留最近7天）")
+        self.chk_old_logs.setChecked(False)
+        # 双排：左列 A/B/C/D/I，右列 E/F/G/H/J/K
+        grid.addWidget(self.chk_test, 0, 0)
+        grid.addWidget(self.chk_legacy, 0, 1)
+        grid.addWidget(self.chk_backup, 1, 0)
+        grid.addWidget(self.chk_artifacts, 1, 1)
+        grid.addWidget(self.chk_pycache, 2, 0)
+        grid.addWidget(self.chk_bad, 2, 1)
+        grid.addWidget(self.chk_rotlog, 3, 0)
+        grid.addWidget(self.chk_batch, 3, 1)
+        grid.addWidget(self.chk_outputs_subdirs, 4, 0)
+        grid.addWidget(self.chk_cache, 4, 1)
+        grid.addWidget(self.chk_old_logs, 5, 0)
         layout.addWidget(box_junk)
 
         # ===== 2. 回测输出（启用开关 + 保留期数） =====
@@ -362,6 +373,9 @@ class CleanupDialog(QDialog):
             clean_bad=self.chk_bad.isChecked(),
             clean_batch_results=self.chk_batch.isChecked(),
             clean_outputs=self.chk_outputs.isChecked(),
+            clean_outputs_subdirs=self.chk_outputs_subdirs.isChecked(),
+            clean_cache=self.chk_cache.isChecked(),
+            clean_old_logs=self.chk_old_logs.isChecked(),
             keep=self.spin_keep.value(),
             execute=execute,
         )

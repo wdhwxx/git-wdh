@@ -248,8 +248,10 @@ class RSRS(IndicatorBase):
         """
         self._validate_data(data)
 
-        high = data["high"].astype(float)
-        low = data["low"].astype(float)
+        # #38中文列改造：批量计算入口改中文列（最高价/最低价），与实盘 update() 及
+        # volatility 等指标口径一致；此前漏改用英文 high/low，导致向量化回测抛 KeyError: 'high'
+        high = data["最高价"].astype(float)
+        low = data["最低价"].astype(float)
         n = len(data)
 
         # ==================================================================

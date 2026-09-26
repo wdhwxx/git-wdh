@@ -149,6 +149,11 @@ SLIPPAGE_RATE = 0.0002        # 滑点：万2（0.0002），买卖双向
 #  系统常量
 # ═══════════════════════════════════════════════
 
+# 回测结果缓存格式版本（P3-D10-001 整改：batch/incremental 双源收敛为单一权威）
+# 1.1：batch 缓存含 config_signature；incremental 缓存按 fingerprint_hash 匹配（无 config_signature），
+#     两者同属一代格式，统一由本常量声明，避免两处独立定义漂移
+RESULTS_FORMAT_VERSION: str = "1.1"
+
 DEFAULT_ENCODING = "utf-8"
 DEFAULT_DATE_FMT = "%Y-%m-%d"
 DEFAULT_DATETIME_FMT = "%Y-%m-%d %H:%M:%S"

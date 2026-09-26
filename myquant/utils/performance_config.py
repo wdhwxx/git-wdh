@@ -28,7 +28,7 @@
   - engine.mode    -> 由入口传给 BacktestScheduler / run_backtest（三模式调度）
   - backtest_logging -> enable_backtest_logging（root logger 降级 + 异步队列，防日志风暴）
   - timer          -> reset_stage_timers（分阶段计时就绪）
-  - light_lookahead_guard -> 单例 enabled/strict + 同步环境变量（引擎逐 bar 校验）
+  - light_lookahead_guard -> 单例 enabled/strict + 同步环境变量（P2-D7-002 整改：当前仅同步开关、未接入引擎，属独立可选模块；接入需在事件/混合引擎逐 bar 检查点挂载 on_bar_close/check_*）
   - parallel / monte_carlo / incremental / memory -> 解析为配置值，由各执行器消费
     （并行上下文由 parallel_factor_context 包裹时生效、MC skip 由分析器构造时传入、
      增量/内存阈值由批量与增量调度器消费）

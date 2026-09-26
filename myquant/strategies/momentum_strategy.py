@@ -628,10 +628,10 @@ if __name__ == "__main__":
     rng = np.random.default_rng(11)
     close = 10.0 * np.exp(np.cumsum(rng.normal(0.0005, 0.012, n)))
     df = pd.DataFrame(
-        {"open": close * 0.995, "high": close * 1.02, "low": close * 0.98,
-         "close": close, "volume": np.full(n, 1e6)},
+        {"开盘价": close * 0.995, "最高价": close * 1.02, "最低价": close * 0.98,
+         "收盘价": close, "成交量": np.full(n, 1e6)},
         index=idx,
-    )
+    )  # P3-D8-001/002 整改：合成数据列与生产链路一致（中文列），自测经引擎消费与 data_loader 归一后链路同构
     data = {"600519.SH": df}
     config = BacktestConfig(
         symbols=["600519.SH"], start_date="2024-01-01", end_date="2024-06-30",

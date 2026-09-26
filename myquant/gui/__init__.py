@@ -18,5 +18,6 @@ TODO(后续迭代):
 """
 
 from myquant.gui.main_window import MainWindow
+from myquant.gui.paper_run_dialog import PaperRunDialog
 
-__all__ = ["MainWindow"]
+__all__ = ["MainWindow", "PaperRunDialog"]

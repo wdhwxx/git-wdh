@@ -99,9 +99,9 @@ Pythonwdhmm/
 ├── run_批量回测.py                # ✨【回写·2026-09-05】批量回测薄入口（从scripts/迁移至根目录）：参数解析→BatchBacktester.run()→分阶段计时输出；engine.mode三模式切换（auto/vectorized/mixed/event）；数据指纹增量只重算变更标的；内存水位自动降级；支持--force-full/--mode/--cpu/--batch-size/--mem-warning/--mem-critical/--output
 ├── run_鲲鹏批量回测.py             # ✨【回写#26】鲲鹏壹号策略全池批量回测薄入口（M2方案A两段式）：阶段一 vectorized 全池扫描（3226标的，多进程+指纹增量，无资金约束）→ 按成交笔数取 top N → 阶段二 mixed 精算（max_position_pct 资金约束生效）；读 config/backtest_kunpeng.yaml（stock_pool.codes + strategy.params + backtest/sim_broker 段）；支持 --mode/--cpu/--batch-size/--refine-top/--no-refine/--symbols/--start/--end/--output 覆盖
 ├── run_鲲鹏参数优化.py             # ✨【回写#34补录】鲲鹏壹号策略参数优化工作脚本（真实行情三轮网格：信号宽网格→出场网格→边界精扫，输出 outputs/kunpeng_param_opt/ CSV+JSON+控制台Top榜；既有工作脚本补录，非薄入口，建议后续薄化）；对应产物见回写#28
-├── run_鲲鹏一键应用推荐参数.py     # ✨【回写#37补录】固定参数一键应用薄入口（FIXED_PARAMS文本段替换写回config/backtest_kunpeng.yaml strategy.params→可选跑全池批量回测验证；--dry-run/--no-backtest/--refine-top；退出码0/1/2），第3批补录蓝图登记
-├── 看板快速生成.py                # ✨【2026-09-13】看板快速生成薄入口（根目录，与run_回测入口.py等根入口同级）：读取config/dashboard_targets.yaml → 交互式菜单选标的 → subprocess调run_回测入口.py跑回测+生成看板HTML；支持--start/--end覆盖、--symbol直选跳过菜单、全部生成、自定义标的；引擎模式走配置文件engine.mode（不传CLI）
-│                                 # 已废弃，见回写记录·2026-09-13（功能并入回测配置GUI「看板生成」页，文件已删除）
+├── run_鲲鹏一键应用推荐参数.py     # ✨【回写#37补录】固定参数一键应用薄入口（FIXED_PARAMS文本段替换写回config/backtest_kunpeng.yaml strategy.params→可选跑全池批量回测验证；--dry-run/--no-backtest/--refine-top；退出码0/1/2），第3批补录蓝图登记├── 鲲鹏仿真运测.py                # ✨【回写#62】仿真运测入口
+├── 看板快速生成.py                # ✨【2026-09-13】看板快速生成薄入口（根目录，与run_回测入口.py等根入口同级）：读取config/dashboard_targets.yaml → 交互式菜单选标的 → subprocess调run_回测入口.py跑回测+生成看板HTML；支持--start/--end覆盖、--symbol直选跳过菜单、全部生成、自定义标的；引擎模式走配置文件engine.mode（不传CLI）；已废弃（未落盘），见回写记录·2026-09-13（功能并入回测配置GUI「看板生成」页，文件已删除）
+
 │
 ├── 一键部署.bat                     # ✨【V5·P3】一键部署脚本（v3.0，2026-09-04）：自动查找Anaconda→创建/更新conda环境quant(Py3.12)→复用scripts/初始化项目目录.py创建必要目录（已消除data/旧路径，新增V5缓存目录cache/benchmark）→pip install -e ".[dev,benchmark,web,live]"（失败自动切清华镜像重试）→初始化数据库quant.db→验证核心模块导入（含防未来函数lookahead_guard+4项V5新模块：一致性校验/性能基准/内存监控/数据指纹）→通达信路径检测提示+快速开始；双击或命令行运行
 │                                 # P3-4 修正：自定义配置速查卡.html 实际位于 docs/，已移至 docs/ 段登记（2026-09-22）
@@ -117,14 +117,14 @@ Pythonwdhmm/
 ├── database/                         # ✨【#5】运行时SQLite数据库目录：主要产物quant.db（约5GB，行情/交易/清洗元信息等持久化存储），由myquant/database层+Alembic迁移(alembic.ini配置)管理，运行时产生不入库（*.db已gitignore覆盖）；注意与myquant/database/源码层同名不同层
 ├── outputs/                          # 回测结果、图表、绩效报告、交易明细、数据清洗统计报告等输出（运行时产物，gitignore已忽略不入库）
 │   ├── daily_reports/                # 日报输出目录（预留，盘后自动生成日报）
-│   ├── _verify_full/                 # 性能基准完整验证输出（equity/trades/report html+pdf/summary，由性能基准测试.py生成）
-│   └── _入口测试/                    # 入口脚本测试输出（按时间戳子目录，开发期测试遗留）
+│   ├── _verify_full/                 # 性能基准完整验证输出（equity/trades/report html+pdf/summary，由性能基准测试.py生成）；未落盘（运行时按需生成）
+│   └── _入口测试/                    # 入口脚本测试输出（按时间戳子目录，开发期测试遗留）；未落盘（已清理，运行时按需生成）│                                 # 说明（P3-D4-002 整改）：results/、实盘状态/、实盘信号/ 为运行时产物目录（gitignore 忽略），不入蓝图——与 outputs/ 不同策略（outputs/ 树内登记，三类运行时目录不登记）
 ├── backups/                          # ✨【#4】结果备份归档目录：scripts/结果备份.py 输出，按时间戳生成backup_YYYYMMDD_HHMMSS快照目录归档outputs/回测结果+logs/运行日志；可选--include-db备份database/quant.db、--include-config备份config/*.yaml（含敏感信息谨慎）、--zip压缩为zip、--keep N自动清理旧备份、--list查看；备份内容gitignore已忽略不入库；实盘运行状态不在此备份，走live/state_store.py状态持久化
 ├── notebooks/                        # Jupyter探索性分析、策略原型验证、数据质量探查Notebook
 ├── logs/                             # 运行时日志目录；专门分出data_quality子目录存放清洗告警日志，已加入.gitignore
-├── cache/                            # ✨【V5·P0】运行时缓存目录（gitignore已忽略，保留骨架）：factor因子L2磁盘缓存 / fingerprint数据指纹仓库 / backtest回测结果缓存 / tmp临时文件；由scripts/缓存管理.py查看清理、scripts/初始化项目目录.py自动创建；L1内存缓存在myquant/indicators/factor_cache.py
+├── cache/                            # ✨【V5·P0】运行时缓存目录（gitignore已忽略，保留骨架）：factor因子L2磁盘缓存 / fingerprint数据指纹仓库 / backtest回测结果缓存 / benchmark性能基准输出 / tmp临时文件（P3-D13-004 整改：5 子目录）；由scripts/缓存管理.py查看清理、scripts/初始化项目目录.py自动创建；L1内存缓存在myquant/indicators/factor_cache.py
     │
-├── docs/                             # 项目文档目录（共48个文件：6核心文档+9其他+4 mockups设计稿+29归档存档(archive_20260905/)，P3-4 速查卡归位计入）
+├── docs/                             # 项目文档目录（共66个文件：顶层28 + mockups 5 + archive_20260905 29 + design 4（P2-D1-002 补录 13 顶层 + design/ 4，P3-4 速查卡归位计入））
 │   ├── architecture.md               # 架构设计图、模块依赖关系、数据流与同步/异步边界说明
 │   ├── data_dictionary.md            # 数据库表结构、字段说明、数据源规范、数据版本、清洗规则文档
 │   ├── strategy_specs.md             # 策略逻辑规格、参数说明与回测/实盘注意事项
@@ -139,7 +139,7 @@ Pythonwdhmm/
 │   ├── 回测性能优化实施报告_v5.md      # ✨【V5·P3】完整方案文档（约32KB，8章）：三模式引擎架构/分阶段实施明细/性能验证/风险矩阵12项/局限L1-L10与中长期演进路线
 │   ├── 回测性能优化 V5｜任务完成度摘要.md # ✨【V5】阶段归档/评审附件：P0-P3共35/35项完成、验收A/B/C、全量回归1187 passed/2 skipped、落地红线5条
 │   ├── 回测性能优化V5_收官总结.html    # ✨【V5】收官可视化总结（HTML参考文档）
-│   ├── 自定义配置速查卡.html          # ✨【回写】GUI与配置项速查卡（HTML参考文档）：三个GUI对话框的操作步骤与配置字段速查，配合config/*.yaml模板使用；# P3-4 从根目录段更正归位（磁盘实际位于 docs/）
+│   ├── 自定义配置速查卡.html          # ✨【回写】GUI与配置项速查卡（HTML参考文档）：三个GUI对话框的操作步骤与配置字段速查，配合config/*.yaml模板使用；# P3-4 从根目录段更正归位（磁盘实际位于 docs/）│   ├── 代码变更治理规则.md            # ✨【回写#17】代码治理宪章│   ├── 修复补丁计划交接.md│   ├── 审计疑点处置记录.md│   ├── 掘金量化仿真模拟盘_任务实施细则摘要.md│   ├── 量化项目结构系统全面核查_规范提示词_v1.1.md  # 项目结构系统全面核查规程（D1-D13 审计依据）│   ├── 鲲鹏壹号策略_回测实施报告.md│   ├── 鲲鹏量化交易系统修复补丁计划.md│   ├── 鲲鹏量化交易系统全面审查摘要.md│   ├── 鲲鹏量化交易系统全面审计报告.md│   ├── 鲲鹏量化交易系统全面审计报告_补充篇.md│   ├── 交接摘要_财务数据导入与因子计算.md│   ├── 交接摘要_20260924_仿真运行弹窗模式.md│   ├── 交接摘要_20260924_增量更新与仿真落地.md│   ├── design/                        # ✨看板模板与设计稿（回写#20）│   │   ├── 回测看板.html│   │   ├── 回测看板_数据对接_最终定稿.md│   │   ├── 回测看板设计方案.md│   │   └── 量化模型结构图.html
 │   ├── mockups/                      # ✨【回写】GUI设计稿目录（5文件）：数据下载对话框设计稿与渲染图、用户面板参考图、预览页、看板生成板面预览（2026-09-13并入）；对应gui/data_download_dialog.py/backtest_config_dialog.py等已实现对话框，设计存档
 │   └── archive_20260905/             # ✨【回写·2026-09-05】历史存档目录（29文件）：26个交接摘要+交接文档_20260830+根目录早期文档2个（项目交接文档/优化后期迭代项目结构图）；仅追溯历史，不参与当前蓝图主结构
 │
@@ -162,7 +162,7 @@ Pythonwdhmm/
 │
 ├── .github/                          # CI/CD配置
 │   └── workflows/
-│       └── ci.yml                    # ✨【V5·P3】CI流水线（重写为6-job）：lint（ruff+py_compile）→ test（全量tests/unit，1187 passed/2 skipped）→ benchmark（V5引擎性能基准）→ data-clean（数据清洗单元测试）→ docker（构建镜像）→ deploy（占位）；任一job失败即阻断合并
+│       └── ci.yml                    # ✨【V5·P3】CI流水线（重写为7-job）：lint → test（全量tests/unit，gui extras 已装、offscreen 跑 GUI 测试）→ consistency-check（三模式一致性）→ backtest-smoke（回测冒烟）→ docker-build（构建镜像）→ live-config-check（实盘配置检查）→ data-clean（数据清洗单元测试）；任一job失败即阻断合并
 │
 ├── scripts/                          # 一次性运维脚本，只做入口，业务逻辑全部调用myquant内部模块，禁止业务写在脚本内
 │   ├── 数据下载.py                    # 数据下载入口：调用fetcher拉取原始数据写入raw；可触发完整清洗流水线输出processed；V5新增--no-cache-sync跳过缓存同步
@@ -184,7 +184,7 @@ Pythonwdhmm/
 │   ├── 缓存管理.py                    # ✨【V5·P0】缓存管理入口：查看/清理L1内存缓存与L2磁盘缓存（factor/fingerprint/backtest），支持--status/--clear/--cache-dir/--keep-latest，默认dry-run
 │   ├── 增量回测.py                    # ✨【V5·P2】增量回测入口：IncrementalBacktest只回测新增交易日增量段（基期分段/新增段增量/拼接，历史结果复用）
 │   ├── 参数优化.py                    # ✨【V5·P2】参数优化入口：ParamOptimizer网格/随机/坐标下降三策略搜索，输出最优参数与热度图
-  │   ├── 清理历史回测输出.py              # ✨【回写#25】清理outputs历史回测输出入口：按YYYYMMDD_HHMMSS时间戳归组仅保留最近N期（--keep），默认dry-run、--execute才删除；保护清单（子目录/非匹配模式/无法解析时间戳一律不删）
+│   ├── 清理历史回测输出.py              # ✨【回写#25】清理outputs历史回测输出入口：按YYYYMMDD_HHMMSS时间戳归组仅保留最近N期（--keep），默认dry-run、--execute才删除；保护清单（子目录/非匹配模式/无法解析时间戳一律不删）
 │   ├── 一致性校验.py                  # ✨【V5·P3】三模式一致性校验入口：engine.py/vectorized_engine.py/mixed_engine.py同参数同数据比对收益曲线与成交，差异超阈值即失败
 │   ├── 财务数据入库.py              # ✨【回写#36】财务数据入库薄入口：参数解析(--mode import/factors/all/--csv/--lookback-days/--output-dir)+路径探测+调用FinancialImportService；自动定位datasets/raw/financial/最新financial_history_*.csv；输出outputs/财务数据入库报告/全中文HTML+CSV报告；GUI财务数据栏「财务数据入库」选项共用同一服务
 │   └── 验收_回测引擎V5.py             # ✨【V5·P1】引擎验收入口：执行统一验收清单（事件/向量化/混合引擎正确性+三模式一致性+回归+性能基准），输出验收报告
@@ -194,67 +194,67 @@ Pythonwdhmm/
 │   └── 仿真准入评估.py             # ✨【回写#52】仿真绩效准入评估薄入口(任务T10)：argparse(--metrics/--thresholds/--backtest/--run-mode/--output)→加载JSON→SimulationAcceptanceEvaluator.evaluate→打印报告+可落盘.txt/.csv；退出码0=通过/2=不通过或输入错误
 
 │
-├── tests/                            # 测试体系（标准pytest单元测试 + 性能基准，49文件，2026-09-22 第4批磁盘对拍实测 49 个非__init__ py）
-  │   ├── __init__.py
-  │   ├── conftest.py                   # pytest全局配置，通过pytest_plugins加载fixtures目录
-  │   ├── unit/                         # ✨【目录重构】标准pytest单元测试（被pytest收集运行，39文件，2026-09-22 第4批磁盘对拍实测 39 个 test_*.py）
-  │   │   ├── __init__.py
-  │   │   ├── test_indicators.py        # 指标计算正确性（11指标，145项）✅已完成
-  │   │   ├── test_strategies.py        # 策略信号生成逻辑与参数边界（6策略，115项）✅已完成
-  │   │   ├── test_kunpeng_strategy.py  # ✨【回写#24】鲲鹏壹号策略单元测试（表9六组用例+出场规则+参数校验，9类56项）✅已完成
-  │   │   ├── test_api_middleware.py   # ✨【回写#25】API认证/限流中间件接线回归（审计C1：create_app挂载/关闭/CORS互斥/401/429逻辑）✅已完成
-  │   │   ├── test_broker_platform_check.py # ✨【回写#25】券商适配器平台校验（审计疑点3：qmt/ptrade非Windows拦截、paper/sim放行、大小写不敏感）✅已完成
-  │   │   ├── test_dashboard_serializer.py  # ✨【回写#25】回测看板数据序列化器测试（build_dashboard_json全链路/成本反向拆分/买卖配对/exit_reason_class/pool派生）✅已完成
-  │   │   ├── test_live_concurrency.py # ✨【回写#25】实盘多线程并发回归（审计C2：并发下单/撮合/apply_trade账目守恒、锁外回调无死锁）✅已完成
-  │   │   ├── test_lookahead_wiring.py # ✨【回写#25】防未来函数校验接线回归（审计H2：mixed/vectorized引擎默认启用guard及关闭路径）✅已完成
-  │   │   ├── test_rabbitmq_reliability.py # ✨【回写#25】RabbitMQ消息可靠性回归（审计C3：ACK/有限重试/死信/NACK/Publisher Confirm）✅已完成
-  │   │   ├── test_trade_boundary.py   # ✨【回写#25】交易模型边界回归（审计H3+H4：Order.fill超额成交拒绝、Position.apply_fill反转成本价重置）✅已完成
-  │   │   ├── test_backtest.py          # 回测引擎事件循环、撮合、绩效计算（V5三模式改造后124项）✅已完成
-  │   │   ├── test_database.py          # 数据库连接、查询、迁移脚本（68项）✅已完成
-  │   │   ├── test_data_clean.py        # 数据清洗单元测试（高频核心case + 极端边界，93项）✅已完成
-  │   │   ├── test_data_manager.py      # 数据加载、版本管理（68项）✅已完成
-  │   │   ├── test_live_risk.py         # 风控规则拦截、仓位限制、流控（83项）✅已完成
-  │   │   ├── test_models.py            # 数据模型校验、序列化（88项）✅已完成
-  │   │   ├── test_execution.py         # 执行层接口与订单状态机（66项）✅已完成
-  │   │   ├── test_monitoring.py        # 健康检查、告警通道、指标采集（105项）✅已完成
-  │   │   ├── test_allocation.py        # 组合资金分配逻辑（63项）✅已完成
-  │   │   ├── test_logger.py            # ✨【回写】统一日志配置与data_quality专用通道测试（路由/级别阈值/双写/结构化字段/统一告警API，18项）✅已完成
-  │   │   ├── test_backtest_consistency_v5.py  # ✨【V5·P3】三模式一致性校验测试（event/vectorized/mixed同参数同数据比对收益曲线与成交，差异超阈值即失败，28项）
-  │   │   ├── test_data_clean_incremental.py # ✨【回写#57】增量更新日线走清洗管线测试（清洗合并保留全历史/重叠日去重/脏行剔除/前收盘上下文触发跳变剔除/清洗关闭返回None/无数据返回None/存量损坏仍写入，7项）✅已完成
-  │   │   ├── test_data_download_pool_scope.py # ✨【回写#58】GUI日线下载标的范围=配置股票池测试（读池代码/文件缺失/解析失败/空池返回空不回退全市场/自定义池路径/run_daily用池列表而非全市场，6项）✅已完成
-  │   │   ├── test_data_fingerprint.py  # ✨【V5·P0】数据指纹测试（哈希级差异检测：指纹生成/查询/缓存失效/旧数据替换，20项）
-  │   │   ├── test_factor_cache_v5.py   # ✨【V5·P0】三级因子缓存测试（L1/L2/L3命中/穿透/失效/内存降级切换，20项）
-  │   │   ├── test_memory_watcher.py    # ✨【V5·P0】内存监控测试（水位跟踪/OOM防护/降级开关/策略上下文切换，23项）
-  │   │   ├── test_pickle_checker.py    # ✨【V5·P2】pickle预检测试（拒绝恶意对象/格式校验/安全过滤，31项）
-  │   │   ├── test_backtest_fee_v5.py   # ✨【V5·P1】V5费用模型测试（fee_common唯一入口/fee_table查表/order_matcher撮合全覆盖，27项）
-  │   │   ├── test_backtest_engines_v5.py # ✨【V5·P1】三引擎基准正确性测试（向量化vs事件vs混合结果一致，31项）
-  │   │   ├── test_engine_benchmark.py  # ✨【V5·P3】三模式性能基准测试（吞吐/耗时阈值断言，15项）
-  │   │   ├── test_live_guard_failover.py # ✨【回写#31】实盘保障组件故障注入（审计H2降级：事件总线断连/订阅失败/挂载失败/风控异常拒单/调度失败/巡检异常/快照失败/全组件关闭，10项）✅已完成
-  │   │   ├── test_qmt_broker_live.py  # ✨【回写#41】QMT实盘通道测试（fake SDK不连真实QMT：模式隔离/连接流程/委托撤单/成交回调/资金持仓/状态映射，23项）✅已完成
-  │   │   ├── test_live_lookahead.py   # ✨【回写#42】实盘LookaheadGuard防未来校验测试（接线/信号记录/HOLD与风控拒绝不记录/T+1成交/同日跳过/早于信号日真违规/停止校验/工厂配置消费，19项）✅已完成
-  │   │   ├── test_live_warmup.py       # ✨【回写#55】实盘本地parquet历史预热+context.data中文列测试（_load_local_history读取/升序限count/缺失缺列降级/_sync_context_data中文列/_warmup_history优先本地/降级akshare，7项）✅已完成
-  │   │   ├── test_signal_idempotency.py # ✨【回写#43】幂等去重测试（Signal确定性ID/to_order映射/引擎去重/分钟线粒度/start重置/QMT端按订单ID去重/统计双计修复验证，19项）✅已完成
-  │   │   ├── test_broker_manager_failover.py # ✨【回写#44】failover盲目重试约束化测试（业务拒单不failover/通道故障副本重试/冷却熔断/健康恢复/手动切换清除恢复记忆/统计摘要，27项）✅已完成
-  │   │   ├── test_broker_resend_pending.py # ✨【回写#45】断线补单对账测试（重连后仅补发未成交/多笔全补/已成交已撤废单不补/部成零重发不伪造/券商在途不补/查询失败异常不补/重复对账不重复报单/多券商独立统计/get_summary暴露last_resend/空订单簿零动作/引擎委托转发/无broker_manager错误码，16项）✅已完成
-  │   │   ├── test_daily_loss_limit.py # ✨【回写#46】每日亏损限制测试（比例计算4项/规则判定4项/注册装配4项/引擎接线5项：跨日重置日初快照/硬编码1%兜底/配置工厂消费/缺省1%/端到端拒买放行卖，17项）✅已完成
-  │   │   ├── test_emergency_liquidation.py # ✨【回写#47】紧急平仓服务测试（预览不下单/预览列撤单计划/确认全仓市价卖出/先撤挂单再卖/优先可卖数量/可卖0跳过/无可卖字段回退全仓/连接失败安全返回/断线重连恢复/单标异常不阻断/拒单记录/指定标只平该标的/无匹配持仓/空仓成功/报告结构完整，15项）✅已完成
-  │   │   ├── test_config_live_check.py # ✨【回写#50】配置模板完整性+第4批配置死项修复验证（4 example可解析/risk_params已删除断言/结构完整/BUG-07开关四象限消费/预留·未消费标注存在，15项）✅已完成
-  │   │   ├── test_run_mode.py       # ✨【回写#52】运行模式切割接口测试(枚举/resolve优先级/apply写回/validate_live安全门/check一致性，19项)✅已完成
-  │   │   └── test_acceptance.py     # ✨【回写#52】仿真绩效准入评估测试(全达标/回测比较/未达标/数据缺失NA/阈值覆盖/非法输入/序列化，11项)✅已完成
-  │   ├── fixtures/                     # 按领域拆分fixture，避免conftest膨胀
-  │   │   ├── __init__.py
-  │   │   ├── market_data.py            # 行情fixture：正常+脏数据样本
-  │   │   ├── strategies.py              # 策略fixture：已注册策略实例、信号样例
-  │   │   ├── live_env.py               # 实盘环境fixture：mock_broker、mock_feed
-  │   │   └── database.py               # 数据库fixture：临时数据库、初始化schema
-  │   └── benchmarks/                   # 性能基准测试目录（marker控制开关，默认不跑）
-  │       ├── __init__.py
-  │       ├── _benchmark_utils.py       # 轻量级性能基准工具（纯Python无外部依赖）：BenchmarkResult/BenchmarkRunner（预热+测量+均值/中位数/P95/P99/ops/sec+阈值断言）+ make_synthetic_bars()合成K线（历史日期随机游走防未来函数）；不依赖pytest-benchmark，可独立运行也可被pytest收集；✨【回写#54】合成K线列名对齐系统中文OHLCV（开盘价/最高价/最低价/收盘价/成交量）
-  │       ├── conftest.py               # 基准测试专用fixture与阈值配置
-  │       ├── test_indicator_perf.py    # 技术指标计算耗时基准
-  │       ├── test_engine_throughput.py  # 引擎每秒处理bar数基准
-  │       └── test_execution_latency.py # 下单接口延迟基准
-  │
+├── tests/                            # 测试体系（标准pytest单元测试 + 性能基准，54文件，2026-09-26 第5批磁盘对拍实测 54 个非__init__ py）
+│   ├── __init__.py
+│   ├── conftest.py                   # pytest全局配置，通过pytest_plugins加载fixtures目录
+│   ├── unit/                         # ✨【目录重构】标准pytest单元测试（被pytest收集运行，44文件，2026-09-26 第5批磁盘对拍实测 44 个 test_*.py）
+│   │   ├── __init__.py
+│   │   ├── test_indicators.py        # 指标计算正确性（11指标，145项）✅已完成
+│   │   ├── test_strategies.py        # 策略信号生成逻辑与参数边界（6策略，115项）✅已完成
+│   │   ├── test_kunpeng_strategy.py  # ✨【回写#24】鲲鹏壹号策略单元测试（表9六组用例+出场规则+参数校验，9类56项）✅已完成
+│   │   ├── test_api_middleware.py   # ✨【回写#25】API认证/限流中间件接线回归（审计C1：create_app挂载/关闭/CORS互斥/401/429逻辑）✅已完成
+│   │   ├── test_broker_platform_check.py # ✨【回写#25】券商适配器平台校验（审计疑点3：qmt/ptrade非Windows拦截、paper/sim放行、大小写不敏感）✅已完成
+│   │   ├── test_dashboard_serializer.py  # ✨【回写#25】回测看板数据序列化器测试（build_dashboard_json全链路/成本反向拆分/买卖配对/exit_reason_class/pool派生）✅已完成
+│   │   ├── test_live_concurrency.py # ✨【回写#25】实盘多线程并发回归（审计C2：并发下单/撮合/apply_trade账目守恒、锁外回调无死锁）✅已完成
+│   │   ├── test_lookahead_wiring.py # ✨【回写#25】防未来函数校验接线回归（审计H2：mixed/vectorized引擎默认启用guard及关闭路径）✅已完成
+│   │   ├── test_rabbitmq_reliability.py # ✨【回写#25】RabbitMQ消息可靠性回归（审计C3：ACK/有限重试/死信/NACK/Publisher Confirm）✅已完成
+│   │   ├── test_trade_boundary.py   # ✨【回写#25】交易模型边界回归（审计H3+H4：Order.fill超额成交拒绝、Position.apply_fill反转成本价重置）✅已完成
+│   │   ├── test_backtest.py          # 回测引擎事件循环、撮合、绩效计算（V5三模式改造后124项）✅已完成
+│   │   ├── test_database.py          # 数据库连接、查询、迁移脚本（68项）✅已完成
+│   │   ├── test_data_clean.py        # 数据清洗单元测试（高频核心case + 极端边界，93项）✅已完成
+│   │   ├── test_data_manager.py      # 数据加载、版本管理（68项）✅已完成
+│   │   ├── test_live_risk.py         # 风控规则拦截、仓位限制、流控（83项）✅已完成
+│   │   ├── test_models.py            # 数据模型校验、序列化（88项）✅已完成
+│   │   ├── test_execution.py         # 执行层接口与订单状态机（66项）✅已完成
+│   │   ├── test_monitoring.py        # 健康检查、告警通道、指标采集（105项）✅已完成
+│   │   ├── test_allocation.py        # 组合资金分配逻辑（63项）✅已完成
+│   │   ├── test_logger.py            # ✨【回写】统一日志配置与data_quality专用通道测试（路由/级别阈值/双写/结构化字段/统一告警API，18项）✅已完成
+│   │   ├── test_backtest_consistency_v5.py  # ✨【V5·P3】三模式一致性校验测试（event/vectorized/mixed同参数同数据比对收益曲线与成交，差异超阈值即失败，28项）
+│   │   ├── test_data_clean_incremental.py # ✨【回写#57】增量更新日线走清洗管线测试（清洗合并保留全历史/重叠日去重/脏行剔除/前收盘上下文触发跳变剔除/清洗关闭返回None/无数据返回None/存量损坏仍写入，7项）✅已完成
+│   │   ├── test_data_download_pool_scope.py # ✨【回写#58】GUI日线下载标的范围=配置股票池测试（读池代码/文件缺失/解析失败/空池返回空不回退全市场/自定义池路径/run_daily用池列表而非全市场，6项）✅已完成
+│   │   ├── test_data_fingerprint.py  # ✨【V5·P0】数据指纹测试（哈希级差异检测：指纹生成/查询/缓存失效/旧数据替换，20项）
+│   │   ├── test_factor_cache_v5.py   # ✨【V5·P0】三级因子缓存测试（L1/L2/L3命中/穿透/失效/内存降级切换，20项）
+│   │   ├── test_memory_watcher.py    # ✨【V5·P0】内存监控测试（水位跟踪/OOM防护/降级开关/策略上下文切换，23项）
+│   │   ├── test_pickle_checker.py    # ✨【V5·P2】pickle预检测试（拒绝恶意对象/格式校验/安全过滤，31项）
+│   │   ├── test_backtest_fee_v5.py   # ✨【V5·P1】V5费用模型测试（fee_common唯一入口/fee_table查表/order_matcher撮合全覆盖，27项）
+│   │   ├── test_backtest_engines_v5.py # ✨【V5·P1】三引擎基准正确性测试（向量化vs事件vs混合结果一致，31项）
+│   │   ├── test_engine_benchmark.py  # ✨【V5·P3】三模式性能基准测试（吞吐/耗时阈值断言，15项）
+│   │   ├── test_live_guard_failover.py # ✨【回写#31】实盘保障组件故障注入（审计H2降级：事件总线断连/订阅失败/挂载失败/风控异常拒单/调度失败/巡检异常/快照失败/全组件关闭，10项）✅已完成
+│   │   ├── test_qmt_broker_live.py  # ✨【回写#41】QMT实盘通道测试（fake SDK不连真实QMT：模式隔离/连接流程/委托撤单/成交回调/资金持仓/状态映射，23项）✅已完成
+│   │   ├── test_live_lookahead.py   # ✨【回写#42】实盘LookaheadGuard防未来校验测试（接线/信号记录/HOLD与风控拒绝不记录/T+1成交/同日跳过/早于信号日真违规/停止校验/工厂配置消费，19项）✅已完成
+│   │   ├── test_live_warmup.py       # ✨【回写#55】实盘本地parquet历史预热+context.data中文列测试（_load_local_history读取/升序限count/缺失缺列降级/_sync_context_data中文列/_warmup_history优先本地/降级akshare，7项）✅已完成
+│   │   ├── test_signal_idempotency.py # ✨【回写#43】幂等去重测试（Signal确定性ID/to_order映射/引擎去重/分钟线粒度/start重置/QMT端按订单ID去重/统计双计修复验证，19项）✅已完成
+│   │   ├── test_broker_manager_failover.py # ✨【回写#44】failover盲目重试约束化测试（业务拒单不failover/通道故障副本重试/冷却熔断/健康恢复/手动切换清除恢复记忆/统计摘要，27项）✅已完成
+│   │   ├── test_broker_resend_pending.py # ✨【回写#45】断线补单对账测试（重连后仅补发未成交/多笔全补/已成交已撤废单不补/部成零重发不伪造/券商在途不补/查询失败异常不补/重复对账不重复报单/多券商独立统计/get_summary暴露last_resend/空订单簿零动作/引擎委托转发/无broker_manager错误码，16项）✅已完成
+│   │   ├── test_daily_loss_limit.py # ✨【回写#46】每日亏损限制测试（比例计算4项/规则判定4项/注册装配4项/引擎接线5项：跨日重置日初快照/硬编码1%兜底/配置工厂消费/缺省1%/端到端拒买放行卖，17项）✅已完成
+│   │   ├── test_emergency_liquidation.py # ✨【回写#47】紧急平仓服务测试（预览不下单/预览列撤单计划/确认全仓市价卖出/先撤挂单再卖/优先可卖数量/可卖0跳过/无可卖字段回退全仓/连接失败安全返回/断线重连恢复/单标异常不阻断/拒单记录/指定标只平该标的/无匹配持仓/空仓成功/报告结构完整，15项）✅已完成
+│   │   ├── test_config_live_check.py # ✨【回写#50】配置模板完整性+第4批配置死项修复验证（4 example可解析/risk_params已删除断言/结构完整/BUG-07开关四象限消费/预留·未消费标注存在，15项）✅已完成
+│   │   ├── test_run_mode.py       # ✨【回写#52】运行模式切割接口测试(枚举/resolve优先级/apply写回/validate_live安全门/check一致性，19项)✅已完成
+│   │   ├── test_acceptance.py     # ✨【回写#52】仿真绩效准入评估测试(全达标/回测比较/未达标/数据缺失NA/阈值覆盖/非法输入/序列化，11项)✅已完成│   │   ├── test_paper_run_dialog.py  # ✨【回写#65】仿真运行弹窗 GUI 测试（offscreen）│   │   └── test_data_incremental_clean_dual.py  # ✨【回写#59】增量清洗双通道测试
+│   ├── fixtures/                     # 按领域拆分fixture，避免conftest膨胀
+│   │   ├── __init__.py
+│   │   ├── market_data.py            # 行情fixture：正常+脏数据样本
+│   │   ├── strategies.py              # 策略fixture：已注册策略实例、信号样例
+│   │   ├── live_env.py               # 实盘环境fixture：mock_broker、mock_feed
+│   │   └── database.py               # 数据库fixture：临时数据库、初始化schema
+│   └── benchmarks/                   # 性能基准测试目录（marker控制开关，默认不跑）
+│       ├── __init__.py
+│       ├── _benchmark_utils.py       # 轻量级性能基准工具（纯Python无外部依赖）：BenchmarkResult/BenchmarkRunner（预热+测量+均值/中位数/P95/P99/ops/sec+阈值断言）+ make_synthetic_bars()合成K线（历史日期随机游走防未来函数）；不依赖pytest-benchmark，可独立运行也可被pytest收集；✨【回写#54】合成K线列名对齐系统中文OHLCV（开盘价/最高价/最低价/收盘价/成交量）
+│       ├── conftest.py               # 基准测试专用fixture与阈值配置
+│       ├── test_indicator_perf.py    # 技术指标计算耗时基准
+│       ├── test_engine_throughput.py  # 引擎每秒处理bar数基准
+│       └── test_execution_latency.py # 下单接口延迟基准
+│
 └── myquant/                          # 核心源码包
     ├── __init__.py
     │
@@ -275,8 +275,8 @@ Pythonwdhmm/
     │   ├── event_bus.py              # 事件总线：进程内发布订阅，同步/异步事件
     │   │                             # ✅已实现：DataQualityEvent/PipelineCompleteEvent/QualityAlertEvent/StrategyPauseEvent 强类型事件 + EventFilter过滤器 + DataQualityEventPublisher便捷发布器
     │   │                             # ✨【V5·P1】批处理改造：backtest批处理模式下同步事件改为批量订阅者批量消费（减少锁竞争），事件驱动批处理循环对上层API兼容
-    │   ├── lookahead_guard.py        # ✨【#1】防未来函数校验器（规则4核心）：记录指标/信号/成交/止损/数据访问5类操作，四条铁律自动校验（指标不含当日/T+1成交/先检查后更新/因子仅用历史），回测结束assert_pass()强制校验；环境变量LOOKAHEAD_GUARD_ENABLED/STRICT控制开关与严格模式；回测实盘共用同一校验逻辑（实盘无缝对接）；依赖exceptions.LookaheadError
-    │   ├── light_lookahead_guard.py  # ✨【V5·P2】轻量防未来函数校验器（回测专用）：向量化/混合模式下的轻量代理——对预计算信号序列做向量偏移校验+当日bar数据索引合法性检查，不依赖全量操作记录，性能开销可忽略；与lookahead_guard互补（重校验用于event模式/验收，轻校验内嵌vectorized/mixed引擎）
+    │   ├── lookahead_guard.py        # ✨【#1】防未来函数校验器（规则4核心）：记录指标/信号/成交/止损/数据访问5类操作，四条铁律自动校验（指标不含当日/T+1成交/先检查后更新/因子仅用历史），回测结束assert_pass()强制校验；环境变量LOOKAHEAD_GUARD_ENABLED/STRICT控制开关与严格模式；回测实盘共用同一校验逻辑（实盘无缝对接）；依赖exceptions.LookaheadError；P2-D7-003 整改声明：铁律1（指标不含当日）由结构（RSRS闭式OLS+shift(1)/derived_metrics严格因果）+测试锚点保障、铁律2（先检查后更新）由止损逻辑顺序保障，guard 运行期记录覆盖铁律3/4（record_indicator/record_stop_loss 无生产调用，蓝图如实声明）
+    │   ├── light_lookahead_guard.py  # ✨【V5·P2】轻量防未来函数校验器（回测专用）：向量化/混合模式下的轻量代理——对预计算信号序列做向量偏移校验+当日bar数据索引合法性检查，不依赖全量操作记录，性能开销可忽略；与lookahead_guard互补（重校验用于event模式/验收）；P2-D7-002 整改声明：当前为独立可选模块，尚未接入引擎（性能配置 light_lookahead_guard 开关仅同步环境变量，无引擎消费方；接入需在事件/混合引擎逐 bar 检查点挂载 on_bar_close/check_*）
     │   └── transports/               # 外部消息中间件适配
     │       ├── __init__.py
     │       ├── base.py               # 传输抽象基类 publish/subscribe
@@ -303,8 +303,8 @@ Pythonwdhmm/
     │       ├── __init__.py           # 兼容层：自研MigrationManager保留（v1/v2），Alembic为主迁移框架
     │       ├── env.py                # Alembic环境配置：项目根自动探测、SQLite路径解析、offline/online双模式、事务迁移
     │       ├── script.py.mako        # 迁移脚本模板
-    │       └── versions/             # 版本迁移脚本
-    │           ├── 0001_initial_schema.py  # 初始建表：8表(6业务+2清洗元信息)+30索引，从schema.py完整转换
+    │       └── versions/             # 版本迁移脚本    │           ├── __init__.py       # 版本目录包
+    │           ├── 0001_initial_schema.py  # 初始建表：8表(6业务+2清洗元信息)+21索引，从schema.py完整转换（链上经0002后22；schema.py 已同步 22，P2-D10-001 整改）
     │           └── 0002_add_market_data_composite_index.py  # 增量迁移：market_data(symbol,period,trade_date)复合索引
     │
     ├── data_access/                  # ✨【数据获取+清洗核心模块】
@@ -324,7 +324,7 @@ Pythonwdhmm/
     │   │   ├── pipeline.py           # ✅已实现：PipelineStep/PipelineResult/CleanPipeline 完整流水线编排对象
     │   │   ├── rules_loader.py       # ✅已实现：CleanRuleLibrary 规则对象映射与yaml配置加载
     │   │   ├── quality_reporter.py   # ✅已实现：质量报告生成器（json统计+分级告警+脏数据归档）
-│   │   └── derived_metrics.py    # ✨【回写#41补录】派生指标计算（compute_derived_metrics：涨跌幅/振幅/量比，严格防未来-第t行只用历史行；compute_b_class_metrics：流通股本/总股本/换手率/市盈动，财务取report_date<=trade_date最新一期）；被full_clean_service.py调用
+    │   │   └── derived_metrics.py    # ✨【回写#41补录】派生指标计算（compute_derived_metrics：涨跌幅/振幅/量比，严格防未来-第t行只用历史行；compute_b_class_metrics：流通股本/总股本/换手率/市盈动，财务取report_date<=trade_date最新一期）；被full_clean_service.py调用
     │   └── sources/                  # 多数据源适配器，只负责拿到外部原始数据，不做业务清洗
     │       ├── __init__.py
     │       ├── base.py               # 数据源抽象基类
@@ -413,7 +413,7 @@ Pythonwdhmm/
     │   ├── cleanup_dialog.py         # ✨【回写·2026-09-07】项目清理对话框（方案一·上下分区）：被run_清理GUI.py调用；清理项目勾选（A-E）/回测输出保留N期/执行模式单选/保护清单只读/预览结果滚动区；后台线程扫描删除+信号桥；业务逻辑在utils/cleanup_service.py
     │   ├── data_clean_dialog.py      # ✨【回写】全量清洗配置对话框：被run_全量清洗GUI.py调用；可视化配置清洗范围/参数 → 生成config/data_clean_run.json（运行时状态文件，不入库）→ subprocess调起scripts/数据全量清洗.py；与CLI共用同一FullCleanService（data_access/full_clean_service.py）；✨【回写#59】新增「增量清洗」按钮（与「开始清洗」并列，对暂存增量做清洗+DB/processed双写）
     │   ├── data_download_dialog.py   # ✨【回写·第12条】数据下载管理器对话框：被run_数据下载GUI.py调用；8项数据下载管理功能；✨【第12条】财务数据卡片=同行布局（勾选框+「最新一期」/「自定义范围」单选+开始/结束QDateEdit），历史模式调用get_financial_history保存为financial_history_*.csv；标题栏加最小化按钮（WindowMinimizeButtonHint）；DownloadWorker后台线程+进度回调；设计稿见docs/mockups/；✨【回写#59】run_daily M0落增量审计文件incremental_YYYYMMDD.parquet + M1复用records消除双拉取 + M2分批限速 + M4单标原子隔离
-    │   └── widgets/
+    │   ├── widgets/    │   ├── paper_run_dialog.py         # ✨【回写#62/#65】仿真运行弹窗    │   ├── kunpeng_logo.png            # ✨【回写#66】品牌Logo资源
     │       ├── __init__.py
     │       ├── kline_item.py         # K线绘制控件
     │       ├── side_panel.py         # 侧边面板参数配置、账户概览

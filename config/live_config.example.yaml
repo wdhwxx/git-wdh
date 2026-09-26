@@ -142,10 +142,11 @@ lookahead_guard:
   # 2. 信号在T日收盘后生成，T+1日开盘成交
   # 3. 指标计算窗口严格截止到当前Bar，不包含未来Bar
 
-# ========== 状态持久化配置（崩溃恢复必备，v1预留TODO）==========
-# TODO: 后续迭代实现 state_store.py，v1仅配置预留，不实际持久化
+# ========== 状态持久化配置（P3-D9-001 整改：state_store.py 已实现并被消费）==========
+# 注：myquant/live/state_store.py 已实现（StateStore），由 run_实盘入口.py 与 live/engine.py 消费；
+#     模板默认 enabled: false（保守关闭），docker live 服务显式覆盖为 AUTO_RECOVER_ON_START=true
 state_store:
-  enabled: false                           # v1暂不启用，后续迭代实现
+  enabled: false                           # 默认关闭；docker live 服务开启
   state_dir: "./live_state"               # 状态保存目录（相对路径）
   # 持久化内容（后续迭代）
   save_positions: true                     # 保存当前持仓
@@ -157,10 +158,11 @@ state_store:
   auto_recover_on_start: false             # 启动时自动恢复上次状态
   backup_interval: 300                     # 状态备份间隔（秒）
 
-# ========== 定时任务配置（Scheduler，v1预留TODO）==========
-# TODO: 后续迭代实现 scheduler.py，v1仅配置预留
+# ========== 定时任务配置（P3-D9-001 整改：scheduler.py 已实现并被消费）==========
+# 注：myquant/live/scheduler.py 已实现（LiveScheduler），由 live/engine.py import 消费；
+#     模板默认 enabled: false（保守关闭），启用后按下方 tasks 定时执行
 scheduler:
-  enabled: false                           # v1暂不启用，后续迭代实现
+  enabled: false                           # 默认关闭；启用后按下方 tasks 定时执行
   tasks:
     - name: "盘前数据更新"
       time: "08:30"

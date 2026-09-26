@@ -122,6 +122,9 @@ CATEGORY_NAMES: Dict[str, str] = {
     "F": "回测产物输出",
     "G": "脏数据归档",
     "H": "批量回测结果",
+    "I": "outputs定期清理",
+    "J": "缓存目录清理",
+    "K": "旧日志归档",
 }
 
 # ─────────────────────────────────────────────
@@ -214,6 +217,9 @@ class CleanupOptions:
     clean_bad: bool = False
     clean_outputs: bool = True
     clean_batch_results: bool = False
+    clean_outputs_subdirs: bool = False
+    clean_cache: bool = False
+    clean_old_logs: bool = False
     keep: int = DEFAULT_KEEP
     execute: bool = False
 
@@ -260,8 +266,17 @@ class CleanupPlan:
         return candidates
 
     def delete_total_size(self) -> int:
-        """待删总字节数（垃圾项大小 + outputs 过期文件大小，按去重后候选统计）。"""
-        return sum(p.stat().st_size for p in self.delete_candidates())
+        """待删总字节数（垃圾项大小 + outputs 过期文件大小，按去重后候选统计）。
+
+        目录递归求和（Windows 上 stat().st_size 对目录返回条目大小，非内容总和）。
+        """
+        total = 0
+        for p in self.delete_candidates():
+            if p.is_file():
+                total += p.stat().st_size
+            elif p.is_dir():
+                total += sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+        return total
 
 
 # ─────────────────────────────────────────────
@@ -584,6 +599,135 @@ def scan_batch_backtest_results(
 
 
 # ─────────────────────────────────────────────
+# I 类：outputs 定期清理（子目录整目录删除）
+# ─────────────────────────────────────────────
+
+# outputs 下可定期清理的子目录名（整目录删除）
+OUTPUTS_SUBDIR_CLEANABLE: Tuple[str, ...] = (
+    "kunpeng_batch",
+    "kunpeng_param_opt",
+    "kunpeng_param_opt_loose",
+    "kunpeng_605577",
+    "smoke_backtest_1",
+    "财务数据入库报告",
+)
+
+# outputs 根目录散文件模式（临时配置 / 测试日志 / 补跑日志）
+OUTPUTS_LOOSE_FILE_PATTERNS: Tuple[str, ...] = (
+    "_tmp_config*.yaml",
+    "仿真_全量_pytest_*.log",
+    "增量更新日线_*.log",
+    "手动补跑_*.log",
+)
+
+
+def scan_outputs_subdirs(project_root: Path, result: ScanResult) -> None:
+    """扫描 I 类：outputs 下的中间产物子目录（整目录删除）。
+
+    清理批量回测产物、参数寻优中间文件、冒烟测试残留。
+    保护：paper_stats/、daily_reports/、live/ 不触碰。
+
+    Args:
+        project_root: 项目根目录。
+        result: 扫描结果容器（原地追加）。
+    """
+    out_dir = project_root / "outputs"
+    if not out_dir.is_dir():
+        return
+    for entry in out_dir.iterdir():
+        if entry.name == GITKEEP_FILENAME:
+            continue
+        if entry.is_dir():
+            if entry.name in OUTPUTS_SUBDIR_CLEANABLE:
+                result.add(entry, "I", f"outputs 中间产物（{entry.name}/）")
+        elif entry.is_file():
+            for pattern in OUTPUTS_LOOSE_FILE_PATTERNS:
+                if fnmatch.fnmatch(entry.name, pattern):
+                    result.add(entry, "I", f"outputs 散文件（匹配 {pattern}）")
+                    break
+
+
+# ─────────────────────────────────────────────
+# J 类：缓存目录清理
+# ─────────────────────────────────────────────
+
+# cache 下可清理的子目录名
+CACHE_SUBDIR_CLEANABLE: Tuple[str, ...] = (
+    "param_scan",
+    "tmp",
+    "factor",
+)
+
+
+def scan_cache_dirs(project_root: Path, result: ScanResult) -> None:
+    """扫描 J 类：cache 下的中间缓存目录。
+
+    清理参数寻优缓存、临时文件、因子计算缓存。
+    保护：cache/fingerprint/（增量缓存，删了会重跑）。
+
+    Args:
+        project_root: 项目根目录。
+        result: 扫描结果容器（原地追加）。
+    """
+    cache_dir = project_root / "cache"
+    if not cache_dir.is_dir():
+        return
+    for entry in cache_dir.iterdir():
+        if not entry.is_dir() or entry.name == GITKEEP_FILENAME:
+            continue
+        if entry.name in CACHE_SUBDIR_CLEANABLE:
+            result.add(entry, "J", f"缓存目录（cache/{entry.name}/）")
+
+
+# ─────────────────────────────────────────────
+# K 类：旧日志归档（按日期保留最近 N 天）
+# ─────────────────────────────────────────────
+
+# 旧日志文件名前缀
+OLD_LOG_PREFIXES: Tuple[str, ...] = (
+    "myquant_",
+    "myquant_error_",
+    "myquant_trade_",
+    "kunpeng_",
+)
+# 日志保留天数
+LOG_KEEP_DAYS: int = 7
+
+
+def scan_old_logs(project_root: Path, result: ScanResult) -> None:
+    """扫描 K 类：按日期命名的旧日志，保留最近 N 天。
+
+    与 D 类互补：D 类清 .log.N 轮转文件，K 类清按日期命名的旧日志。
+    保留最近 LOG_KEEP_DAYS 天，更早的加入待删列表。
+
+    Args:
+        project_root: 项目根目录。
+        result: 扫描结果容器（原地追加）。
+    """
+    log_dir = project_root / "logs"
+    if not log_dir.is_dir():
+        return
+    from datetime import timedelta
+    cutoff = datetime.now() - timedelta(days=LOG_KEEP_DAYS)
+    for entry in log_dir.iterdir():
+        if not entry.is_file():
+            continue
+        # 跳过 D 类已管的 .log.N
+        if fnmatch.fnmatch(entry.name, "*.log.*"):
+            continue
+        # 只处理已知前缀
+        if not any(entry.name.startswith(prefix) for prefix in OLD_LOG_PREFIXES):
+            continue
+        if entry.name == GITKEEP_FILENAME:
+            continue
+        # 按修改时间判断是否过期
+        mtime = datetime.fromtimestamp(entry.stat().st_mtime)
+        if mtime >= cutoff:
+            continue
+        result.add(entry, "K", f"旧日志（{LOG_KEEP_DAYS}天前）")
+
+
+# ─────────────────────────────────────────────
 # outputs 归期
 # ─────────────────────────────────────────────
 
@@ -721,6 +865,15 @@ def run_cleanup_scan(project_root: Path, options: CleanupOptions) -> CleanupPlan
     # 可选 H 类（批量回测结果归期，复用 options.keep）
     if options.clean_batch_results:
         scan_batch_backtest_results(project_root, result, options.keep)
+    # 可选 I 类（outputs 中间产物子目录）
+    if options.clean_outputs_subdirs:
+        scan_outputs_subdirs(project_root, result)
+    # 可选 J 类（缓存目录）
+    if options.clean_cache:
+        scan_cache_dirs(project_root, result)
+    # 可选 K 类（旧日志归档）
+    if options.clean_old_logs:
+        scan_old_logs(project_root, result)
 
     keep_files: List[Path] = []
     delete_files: List[Path] = []

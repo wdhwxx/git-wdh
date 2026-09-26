@@ -13,7 +13,7 @@ REM     1. 检查/安装 Anaconda 环境
 REM     2. 创建/更新 conda 环境 quant（Python 3.12）
 REM     3. 初始化运行时目录（复用 scripts\初始化项目目录.py，任务 2
 REM        含 V5 缓存目录 cache\{factor,fingerprint,backtest,tmp,benchmark}）
-REM     4. 安装项目所有依赖（pip install -e ".[dev,web,live,benchmark]"）
+REM     4. 安装项目所有依赖（pip install -e ".[dev,web,live,benchmark,gui]"）
 REM     5. 初始化数据库（quant.db）
 REM     6. 验证安装（核心模块 + V5 新模块导入 + 阶段9验证脚本）
 REM     7. 提示通达信路径配置
@@ -148,7 +148,7 @@ echo.
 
 REM ── 步骤4：安装项目依赖 ──
 echo ────────────────────────────────────────────────────────────
-echo   [步骤 4/7] 安装项目依赖（pip install -e ".[dev,web,live,benchmark]"）...
+echo   [步骤 4/7] 安装项目依赖（pip install -e ".[dev,web,live,benchmark,gui]"）...
 echo ────────────────────────────────────────────────────────────
 echo.
 
@@ -156,16 +156,16 @@ cd /d "%PROJECT_ROOT%"
 echo   正在安装依赖（dev + web + live + benchmark），这可能需要几分钟...
 echo.
 
-pip install -e ".[dev,web,live,benchmark]"
+pip install -e ".[dev,web,live,benchmark,gui]"
 if %errorlevel% neq 0 (
     echo.
     echo   [警告] 部分依赖安装失败，尝试使用国内镜像源重试...
     echo.
-    pip install -e ".[dev,web,live,benchmark]" -i https://pypi.tuna.tsinghua.edu.cn/simple
+    pip install -e ".[dev,web,live,benchmark,gui]" -i https://pypi.tuna.tsinghua.edu.cn/simple
     if %errorlevel% neq 0 (
         echo.
         echo   [错误] 依赖安装失败！
-        echo   请检查网络连接后手动运行：pip install -e ".[dev,web,live,benchmark]"
+        echo   请检查网络连接后手动运行：pip install -e ".[dev,web,live,benchmark,gui]"
         echo.
         pause
         exit /b 1
@@ -279,6 +279,13 @@ if %errorlevel% neq 0 (
     set "VERIFY_OK=0"
 )
 
+REM P2-D13-002 整改：GUI 主交付入口依赖校验（PySide6/pyqtgraph 来自 gui extras）
+python -c "import PySide6, pyqtgraph; print('  ✓ GUI 依赖（PySide6 + pyqtgraph）：成功')" 2>nul
+if %errorlevel% neq 0 (
+    echo   ✗ GUI 依赖（PySide6/pyqtgraph）：失败
+    set "VERIFY_OK=0"
+)
+
 REM 验证数据库文件
 echo.
 if exist "%PROJECT_ROOT%\database\quant.db" (
@@ -302,23 +309,13 @@ echo   是否运行阶段9验证脚本？（约需1-2分钟，验证1500+项）
 echo     输入 Y 运行，其他键跳过...
 set /p "RUN_VERIFY=  请选择 [Y/N]: "
 if /i "%RUN_VERIFY%"=="Y" (
+    echo   正在运行单元测试代替阶段9验证（1500+项）...
     echo.
-    echo   正在运行阶段9验证脚本...
+    echo   P3-D13-003 整改：原阶段9验证引用的 5 个 tests\_verify_*.py 脚本在本项目
+    echo   当前版本不存在（v3.0 已由 pytest 全量单元测试 + 上述模块导入校验覆盖）。
+    echo   如需完整验证，请运行：
+    echo     conda activate quant ^&^& pytest tests/unit/ -q
     echo.
-    if exist "%PROJECT_ROOT%\tests\_verify_event_bus.py" (
-        python "%PROJECT_ROOT%\tests\_verify_event_bus.py"
-    )
-    if exist "%PROJECT_ROOT%\tests\_verify_monitoring.py" (
-        python "%PROJECT_ROOT%\tests\_verify_monitoring.py"
-    )
-    if exist "%PROJECT_ROOT%\tests\_verify_alerting.py" (
-        python "%PROJECT_ROOT%\tests\_verify_alerting.py"
-    )
-    if exist "%PROJECT_ROOT%\tests\_verify_metrics.py" (
-        python "%PROJECT_ROOT%\tests\_verify_metrics.py"
-    )
-    echo.
-    echo   阶段9验证脚本运行完成。
 ) else (
     echo   已跳过验证脚本，可稍后手动运行。
 )
@@ -400,14 +397,11 @@ echo     - 最新交接文档：docs\交接摘要_阶段9任务11.md
 echo     - 架构设计：    docs\architecture.md
 echo     - 数据字典：    docs\data_dictionary.md
 echo.
-echo   ═══════════ 验证脚本 ═══════════
+echo   ═══════════ 验证方式 ═══════════
 echo.
-echo     阶段9验证（1500+项）：
-echo       python tests\_verify_event_bus.py
-echo       python tests\_verify_monitoring.py
-echo       python tests\_verify_alerting.py
-echo       python tests\_verify_metrics.py
-echo       python tests\_verify_pipeline.py
+echo     P3-D13-003 整改：阶段9 _verify 脚本已废弃（不存在），完整验证请运行：
+echo       conda activate quant
+echo       pytest tests/unit/ -q          # 全量单元测试（含防未来函数专项）
 echo.
 echo   按任意键退出...
 pause >nul

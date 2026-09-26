@@ -22,6 +22,10 @@ run_批量回测.py 主入口的支撑核心：
   - 结果缓存按 fingerprint_hash 匹配，仓库与缓存不同步时防御性重算（同增量回测）
   - 任务函数模块级定义，满足 Windows spawn 下子进程 pickle 反序列化约束
   - 引擎模式降级不影响正确性（三模式净值在 P1 已验收一致），仅牺牲性能换内存
+
+数据版本（P3-D8-003 整改声明）:
+  - DatasetVersion（数据版本标记）由 data_access/ 数据层（fetcher/manager/full_clean_service）管理，
+    回测侧不消费；回测防呆由 fingerprint_hash 指纹承担——版本标记仅服务于数据层，不回测路径，文档声明覆盖。
 """
 
 from __future__ import annotations
@@ -67,7 +71,7 @@ logger = logging.getLogger("myquant.backtest.batch_backtest")
 DEFAULT_INITIAL_CAPITAL: float = 1_000_000.0
 DEFAULT_FREQUENCY: str = "1d"
 DEFAULT_DATA_SOURCE: str = "batch"
-RESULTS_FORMAT_VERSION: str = "1.1"  # 1.1：缓存新增 config_signature 元数据（回测参数变更触发全量重算）
+from myquant.core.constants import RESULTS_FORMAT_VERSION  # P3-D10-001 整改：双源收敛为单一权威（myquant/core/constants.py）
 DEFAULT_MODE: str = "auto"
 DEFAULT_BENCHMARK: str = "000300.SH"
 DEFAULT_RISK_FREE_RATE: float = 0.02

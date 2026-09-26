@@ -74,11 +74,13 @@ CREATE TABLE IF NOT EXISTS market_data (
 """
 
 # 行情表索引（加速查询）
+# P2-D10-001 整改：补 idx_market_symbol_period_date（与 Alembic 0002 迁移对齐，双主一致为 22 索引）
 CREATE_MARKET_DATA_INDEX_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_market_symbol ON market_data(symbol);",
     "CREATE INDEX IF NOT EXISTS idx_market_date ON market_data(trade_date);",
     "CREATE INDEX IF NOT EXISTS idx_market_symbol_date ON market_data(symbol, trade_date);",
     "CREATE INDEX IF NOT EXISTS idx_market_market_period ON market_data(market, period);",
+    "CREATE INDEX IF NOT EXISTS idx_market_symbol_period_date ON market_data(symbol, period, trade_date);",
 ]
 
 # 财务数据表

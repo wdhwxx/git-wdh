@@ -115,6 +115,9 @@ backups/
 *.db-journal
 *.sqlite-journal
 *-journal
+# P2-D4-001 整改：SQLite WAL/SHM 伴生文件（quant.db-wal/-shm 为运行时数据，防 git add -A 误提交）
+*.db-wal
+*.db-shm
 
 # ===== 系统文件 =====
 .DS_Store

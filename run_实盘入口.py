@@ -486,6 +486,213 @@ def write_stats_json(
         return None
 
 
+def _write_live_status(engine, project_root):
+    """运行期间持续写 outputs/paper_stats/live_status.json（供 GUI 轮询展示盈亏）。
+
+    与 write_stats_json（停止时一次性导出）不同，本函数在主循环里每 5 秒调用一次，
+    把引擎 stats + 资产快照写到固定路径，GUI 弹窗每 2 秒轮询此文件刷新面板。
+    """
+    try:
+        stats = engine.stats
+        total_assets = 0.0
+        day_start_assets = 0.0
+        initial_capital = 0.0
+        portfolio = getattr(engine, "_portfolio", None)
+        if portfolio is not None:
+            try:
+                total_assets = float(portfolio.get_total_assets())
+                initial_capital = float(getattr(portfolio, "initial_capital", 0) or 0)
+            except Exception:
+                pass
+        day_start_assets = float(getattr(engine, "_day_start_assets", 0) or 0)
+
+        payload = {
+            "timestamp": datetime.now().isoformat(),
+            "stats": stats,
+            "total_assets": total_assets,
+            "day_start_assets": day_start_assets,
+            "initial_capital": initial_capital,
+        }
+        out = project_root / "outputs" / "paper_stats" / "live_status.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.debug("写 live_status.json 失败: %s", e)
+
+
+def write_report_html(
+    engine: Any,
+    run_mode: Any,
+    project_root: Path,
+) -> Optional[str]:
+    """运行结束生成自包含 HTML 报告（人可读，深色主题）。
+
+    Args:
+        engine: LiveEngine 实例。
+        run_mode: 运行模式。
+        project_root: 项目根目录。
+
+    Returns:
+        写入的 HTML 路径；失败返回 None。
+    """
+    try:
+        from myquant.live.run_mode import describe
+        stats = engine.stats
+        status = engine.get_status()
+        portfolio = getattr(engine, "_portfolio", None)
+        account = portfolio.get_account() if portfolio is not None else {}
+        positions = portfolio.get_all_positions() if portfolio is not None else []
+
+        total_pnl = account.get("total_pnl", 0.0)
+        pnl_color = "#F87171" if total_pnl > 0 else ("#34D399" if total_pnl < 0 else "#C7D2FE")
+        pnl_sign = "+" if total_pnl > 0 else ""
+
+        rows = ""
+        for pos in positions:
+            upnl = pos.unrealized_pnl
+            upnl_color = "#F87171" if upnl > 0 else ("#34D399" if upnl < 0 else "#C7D2FE")
+            rows += f"""<tr>
+                <td>{pos.symbol}</td>
+                <td style="text-align:right">{pos.quantity:,.0f}</td>
+                <td style="text-align:right">{pos.avg_cost:,.2f}</td>
+                <td style="text-align:right">{pos.market_price:,.2f}</td>
+                <td style="text-align:right">{pos.market_value:,.0f}</td>
+                <td style="text-align:right;color:{upnl_color}">{upnl:+,.0f}</td>
+            </tr>"""
+
+        html = f"""<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><title>Paper 仿真报告 {datetime.now().strftime("%Y%m%d")}</title>
+<style>
+body{{font-family:"Microsoft YaHei",sans-serif;background:#0B1120;color:#E0E7FF;padding:32px;max-width:900px;margin:0 auto;}}
+h1{{color:#22D3EE;font-size:22px;border-bottom:2px solid #4F46E5;padding-bottom:10px;}}
+h2{{color:#818CF8;font-size:15px;margin-top:28px;}}
+.grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:16px 0;}}
+.card{{background:#1E1B4B;border-radius:8px;padding:14px;}}
+.card .label{{font-size:11px;color:#94A3B8;}}
+.card .value{{font-size:20px;font-weight:700;margin-top:4px;font-family:Consolas,monospace;}}
+table{{width:100%;border-collapse:collapse;margin-top:8px;}}
+th{{background:#1E1B4B;color:#818CF8;padding:8px;text-align:left;font-size:12px;}}
+td{{padding:8px;border-bottom:1px solid #334155;font-size:12px;font-family:Consolas,monospace;}}
+.meta{{color:#94A3B8;font-size:12px;margin-top:8px;}}
+</style></head><body>
+<h1>Paper 仿真运行报告</h1>
+<div class="meta">模式：{run_mode.value}（{describe(run_mode)}） · 引擎：{status.get("engine_id","")} · 时间：{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</div>
+
+<h2>运行摘要</h2>
+<div class="grid">
+  <div class="card"><div class="label">总 Bar</div><div class="value">{stats.get("total_bars",0)}</div></div>
+  <div class="card"><div class="label">信号（买/卖）</div><div class="value"><span style="color:#F87171">{stats.get("buy_signals",0)}</span> / <span style="color:#34D399">{stats.get("sell_signals",0)}</span></div></div>
+  <div class="card"><div class="label">订单（成交）</div><div class="value">{stats.get("total_orders",0)}（{stats.get("filled_orders",0)}）</div></div>
+</div>
+
+<h2>账户概览</h2>
+<div class="grid">
+  <div class="card"><div class="label">初始资金</div><div class="value">{account.get("initial_capital",0):,.0f}</div></div>
+  <div class="card"><div class="label">总资产</div><div class="value">{account.get("total_assets",0):,.0f}</div></div>
+  <div class="card"><div class="label">总盈亏</div><div class="value" style="color:{pnl_color}">{pnl_sign}{total_pnl:,.0f}</div></div>
+  <div class="card"><div class="label">可用现金</div><div class="value">{account.get("available_cash",0):,.0f}</div></div>
+  <div class="card"><div class="label">持仓市值</div><div class="value">{account.get("market_value",0):,.0f}</div></div>
+  <div class="card"><div class="label">持仓数</div><div class="value">{account.get("position_count",0)}</div></div>
+</div>
+
+<h2>持仓明细（{len(positions)} 只）</h2>
+<table>
+<tr><th>标的</th><th style="text-align:right">数量</th><th style="text-align:right">成本价</th><th style="text-align:right">现价</th><th style="text-align:right">市值</th><th style="text-align:right">浮动盈亏</th></tr>
+{rows if rows else '<tr><td colspan="6" style="text-align:center;color:#64748B">无持仓</td></tr>'}
+</table>
+
+<div class="meta" style="margin-top:24px">风控状态：{status.get("risk",{}).get("status","NORMAL")} · 数据来源：本地 processed(tdx) · 本报告由鲲鹏仿真自动生成</div>
+</body></html>"""
+
+        out = project_root / "outputs" / "paper_stats" / f"paper_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(html, encoding="utf-8")
+        return str(out)
+    except Exception as e:
+        logger.warning("生成 HTML 报告失败: %s", e)
+        return None
+
+
+def html_to_pdf(html_path: str, project_root: Path) -> Optional[str]:
+    """用系统已有的 Edge headless 把 HTML 转 PDF（零 pip 依赖）。
+
+    Args:
+        html_path: HTML 文件路径。
+        project_root: 项目根目录（用于定位 Edge 可执行文件）。
+
+    Returns:
+        PDF 路径；失败返回 None。
+    """
+    try:
+        import subprocess as _sp
+        html_p = Path(html_path)
+        pdf_path = str(html_p.with_suffix(".pdf"))
+        # 定位 Edge / Chrome
+        candidates = [
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        ]
+        browser = next((c for c in candidates if Path(c).exists()), None)
+        if browser is None:
+            logger.debug("未找到 Edge/Chrome，跳过 PDF 导出")
+            return None
+        cmd = [
+            browser,
+            "--headless",
+            "--disable-gpu",
+            "--no-pdf-header-footer",
+            f"--print-to-pdf={pdf_path}",
+            str(html_p),
+        ]
+        _sp.run(cmd, capture_output=True, timeout=30, check=False)
+        if Path(pdf_path).exists() and Path(pdf_path).stat().st_size > 0:
+            return pdf_path
+        return None
+    except Exception as e:
+        logger.debug("HTML 转 PDF 失败: %s", e)
+        return None
+
+
+def write_positions_csv(
+    engine: Any,
+    project_root: Path,
+) -> Optional[str]:
+    """运行结束导出持仓明细 CSV（Excel 可直接打开）。
+
+    Args:
+        engine: LiveEngine 实例。
+        project_root: 项目根目录。
+
+    Returns:
+        CSV 路径；失败返回 None。
+    """
+    try:
+        import csv
+        portfolio = getattr(engine, "_portfolio", None)
+        if portfolio is None:
+            return None
+        positions = portfolio.get_all_positions()
+        out = project_root / "outputs" / "paper_stats" / f"positions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with open(out, "w", newline="", encoding="utf-8-sig") as f:
+            w = csv.writer(f)
+            w.writerow(["标的", "数量", "成本价", "现价", "市值", "成本", "浮动盈亏", "已实现盈亏"])
+            for pos in positions:
+                w.writerow([
+                    pos.symbol, pos.quantity, f"{pos.avg_cost:.4f}",
+                    f"{pos.market_price:.4f}", f"{pos.market_value:.2f}",
+                    f"{pos.cost_value:.2f}", f"{pos.unrealized_pnl:.2f}",
+                    f"{pos.realized_pnl:.2f}",
+                ])
+        return str(out)
+    except Exception as e:
+        logger.warning("导出持仓 CSV 失败: %s", e)
+        return None
+
+
 # ═══════════════════════════════════════════════
 #  信号/成交可视化回调
 # ═══════════════════════════════════════════════
@@ -692,6 +899,7 @@ def run_live_trading(args: argparse.Namespace) -> int:
     stop_event = threading.Event()
     start_time = time.time()
     last_report = 0.0
+    last_live_write = 0.0
 
     def _request_stop(signum: Any = None, frame: Any = None) -> None:
         print("\n[停止] 收到停止信号，正在优雅停止...")
@@ -709,8 +917,12 @@ def run_live_trading(args: argparse.Namespace) -> int:
                 print(f"\n[停止] 达到运行时长 {args.duration}s")
                 break
             stop_event.wait(timeout=1.0)
-            # 每60秒打印一次运行摘要
+            # 每5秒写 live_status.json（供 GUI 轮询盈亏面板）
             now = time.time()
+            if now - last_live_write >= 5.0:
+                last_live_write = now
+                _write_live_status(engine, project_root)
+            # 每60秒打印一次运行摘要
             if now - last_report >= 60.0:
                 last_report = now
                 st = engine.stats
@@ -739,6 +951,16 @@ def run_live_trading(args: argparse.Namespace) -> int:
             print(f"[绩效] 引擎统计已导出: {stats_path}")
         else:
             print("[警告] 引擎统计导出失败（详见日志）")
+        # 同时导出 HTML 报告 + CSV 持仓明细（人可读）
+        html_path = write_report_html(engine, run_mode, project_root)
+        if html_path:
+            print(f"[报告] HTML 报告已生成: {html_path}")
+            pdf_path = html_to_pdf(html_path, project_root)
+            if pdf_path:
+                print(f"[报告] PDF 报告已导出: {pdf_path}")
+        csv_path = write_positions_csv(engine, project_root)
+        if csv_path:
+            print(f"[报告] 持仓 CSV 已导出: {csv_path}")
 
     # ── 11. 运行总结 ──
     st = engine.stats

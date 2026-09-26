@@ -475,13 +475,21 @@ class FinancialImportService:
         if not rows:
             return None
         df = pd.DataFrame(rows)
+        # #38中文列改造：数据库 market_data 为英文表头，此处统一转中文，
+        # 与 FactorEngine 及其内部指标（要求中文列）及全链路中文口径一致
+        _rename = {
+            "open": "开盘价", "high": "最高价", "low": "最低价",
+            "close": "收盘价", "volume": "成交量",
+            "amount": "成交额", "pct_chg": "涨跌幅", "pre_close": "前收盘价",
+        }
+        df = df.rename(columns={en: cn for en, cn in _rename.items() if en in df.columns})
         # 确保数值列
-        for col in ("open", "high", "low", "close", "volume"):
+        for col in ("开盘价", "最高价", "最低价", "收盘价", "成交量"):
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
         df = df.sort_values("trade_date").set_index("trade_date")
         # 去掉全空行
-        df = df.dropna(subset=["open", "high", "low", "close"], how="all")
+        df = df.dropna(subset=["开盘价", "最高价", "最低价", "收盘价"], how="all")
         return df
 
     def _build_fundamental_rows(
