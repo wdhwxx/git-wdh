@@ -1,4 +1,4 @@
-# 鲲鹏量化交易系统 
+﻿# 鲲鹏量化交易系统 
 ## 项目架构蓝图
 ### ｜折中档位2（v1落地蓝图，预留后续迭代扩展点）
 > 说明：
@@ -246,7 +246,7 @@ Pythonwdhmm/
 │   │   ├── test_emergency_liquidation.py # ✨【回写#47】紧急平仓服务测试（预览不下单/预览列撤单计划/确认全仓市价卖出/先撤挂单再卖/优先可卖数量/可卖0跳过/无可卖字段回退全仓/连接失败安全返回/断线重连恢复/单标异常不阻断/拒单记录/指定标只平该标的/无匹配持仓/空仓成功/报告结构完整，15项）✅已完成
 │   │   ├── test_config_live_check.py # ✨【回写#50】配置模板完整性+第4批配置死项修复验证（4 example可解析/risk_params已删除断言/结构完整/BUG-07开关四象限消费/预留·未消费标注存在，15项）✅已完成
 │   │   ├── test_run_mode.py       # ✨【回写#52】运行模式切割接口测试(枚举/resolve优先级/apply写回/validate_live安全门/check一致性，19项)✅已完成
-│   │   ├── test_acceptance.py     # ✨【回写#52】仿真绩效准入评估测试(全达标/回测比较/未达标/数据缺失NA/阈值覆盖/非法输入/序列化，11项)✅已完成│   │   ├── test_paper_run_dialog.py  # ✨【回写#65】仿真运行弹窗 GUI 测试（offscreen）│   │   └── test_data_incremental_clean_dual.py  # ✨【回写#59】增量清洗双通道测试
+│   │   ├── test_acceptance.py     # ✨【回写#52】仿真绩效准入评估测试(全达标/回测比较/未达标/数据缺失NA/阈值覆盖/非法输入/序列化，11项)✅已完成│   │   ├── test_paper_run_dialog.py  # ✨【回写#65】仿真运行弹窗 GUI 测试（offscreen）│   │   ├── test_data_incremental_clean_dual.py  # ✨【回写#59】增量清洗双通道测试│   │   └── test_update_symbol_incremental_start.py  # ✨【回写#67】增量起点以 processed 为准（M5）+ save 失败统计（11项）✅已完成
 │   ├── fixtures/                     # 按领域拆分fixture，避免conftest膨胀
 │   │   ├── __init__.py
 │   │   ├── market_data.py            # 行情fixture：正常+脏数据样本
@@ -317,7 +317,7 @@ Pythonwdhmm/
     │   ├── __init__.py
     │   ├── fetcher.py                # ✨【第12条】数据获取器（带内存缓存）：行情拉取/财务数据/历史财务多期；get_market_data/get_financial_data/get_financial_history/get_stock_list；cache_key按数据类型区分（financial/financial_history），只缓存非空结果；所有查询严格传递end_date防未来函数
     │   ├── factory.py                # ✨【#2】数据获取器工厂（统一入口+自动优先级注册）：create_default_fetcher()/create_fetcher(mode)（auto/tdx/akshare）/detect_tdx_available()/get_available_sources()；优先级=通达信本地源最高（纯本地毫秒级，回测主力）→akshare备用（内部多源降级东财→腾讯→网易→新浪（V2稳定链）），通达信不可用自动跳过不报错；所有查询严格传递end_date防未来；实时行情/实盘场景可通过mode指定专用源
-    │   ├── manager.py                # 数据管理器：增量更新/质量校验/同步状态/调用清洗函数输出processed；✅已实现 DatasetVersion 完整版本管理（任务14）：create_dataset_version/create_from_clean_run/list/get/get_latest/load/rollback/delete/verify 版本方法 + checksum(SHA256)校验 + parent_version派生链 + 版本索引持久化 + DatasetVersionError异常体系；✨【回写#59】save_cleaned_incremental_parquet 支持 records 复用消除双拉取（M1）+ 新增 _read_db_prior_close DB前收盘上下文优先（M3）+ update_symbols_batch 分批限速/失败重试（M2，配置外置）
+    │   ├── manager.py                # 数据管理器：增量更新/质量校验/同步状态/调用清洗函数输出processed；✅已实现 DatasetVersion 完整版本管理（任务14）：create_dataset_version/create_from_clean_run/list/get/get_latest/load/rollback/delete/verify 版本方法 + checksum(SHA256)校验 + parent_version派生链 + 版本索引持久化 + DatasetVersionError异常体系；✨【回写#59】save_cleaned_incremental_parquet 支持 records 复用消除双拉取（M1）+ 新增 _read_db_prior_close DB前收盘上下文优先（M3）+ update_symbols_batch 分批限速/失败重试（M2，配置外置）；✨【回写#67】增量起点改以 processed 实际最新交易日为准（新增 _get_processed_last_date，防 sync 领先跳缺死锁）+ save 清洗空结果/无新增告警留痕
     │   ├── loader.py                 # ✨【V5·P0】数据加载器（回测专用）：预取next_chunk+分块加载（chunk_size）+流水线模式（多bar并行预取）+内存水位降级（联动utils/memory_watcher，超阈值自动降为单块流式）；三模式引擎共用同一加载路径；与backtest/data_loader.py（历史数据提供器）分工互补
     │   ├── full_clean_service.py     # ✨【回写】全量清洗业务逻辑层：FullCleanService——DB读取→清洗管线→事务写回→清洗元信息落库→bad归档→可选重建processed（subprocess调scripts/数据导出_DB到processed.py）；唯一调用方=scripts/数据全量清洗.py（CLI与GUI全量清洗对话框共用）；业务逻辑归myquant，脚本只做薄入口（架构纪律）；✨【回写#59】新增增量清洗通道 run_incremental_clean/_load_incremental_records/_normalize_incremental_date（读暂存增量→清洗→DB+processed双写，仅清洗模式）
     │   ├── financial_service.py      # ✨【回写#36】财务数据入库服务：FinancialImportService——财务CSV读取→字段映射(net_profit_parent→net_profit/report_date YYYYMMDD→YYYY-MM-DD)→分批批量入库financial_data；FactorEngine向量化计算14个技术因子(SMA5/10/20/60,EMA12/26,MACD_DIF/DEA/HIST,RSI14,BOLL_UP/MID/LOW,ATR14)+5个基本面因子(PE/PB/ROE/毛利率/资产负债率)映射最新报告期→长表写入factor_data；生成全中文表头HTML+CSV入库报告；防未来函数(财务仅取report_date<=trade_date最新一期)；调用方=scripts/财务数据入库.py + GUI财务数据入库选项
@@ -418,7 +418,7 @@ Pythonwdhmm/
     │   ├── batch_backtest_tab.py     # ✨【回写·2026-09-09】批量回测标签页（Tab6）：被backtest_config_dialog.py挂载；标的来源三选（全市场/预筛选池/手输）/数据源二选（processed真实/演示）/策略QListWidget多选（MultiSelection，6策略只读注册表，默认ma_cross）+参数覆盖JSON框/QThread直调HistoricalDataProvider+BatchBacktester（on_batch_done批次回调）/结果summary+每策略CSV导出；run_批量回测.py零改动；✨【2026-09-11】交易成本/绩效口径/复权/输出设置控件+参数区QScrollArea；✨【2026-09-12】CSV文件名中文化（批量回测汇总/批量成交明细/批量净值明细/批量持仓明细_<时间戳>.csv）+新增_save_batch_report生成HTML/PDF三件套
     │   ├── cleanup_dialog.py         # ✨【回写·2026-09-07】项目清理对话框（方案一·上下分区）：被run_清理GUI.py调用；清理项目勾选（A-E）/回测输出保留N期/执行模式单选/保护清单只读/预览结果滚动区；后台线程扫描删除+信号桥；业务逻辑在utils/cleanup_service.py
     │   ├── data_clean_dialog.py      # ✨【回写】全量清洗配置对话框：被run_全量清洗GUI.py调用；可视化配置清洗范围/参数 → 生成config/data_clean_run.json（运行时状态文件，不入库）→ subprocess调起scripts/数据全量清洗.py；与CLI共用同一FullCleanService（data_access/full_clean_service.py）；✨【回写#59】新增「增量清洗」按钮（与「开始清洗」并列，对暂存增量做清洗+DB/processed双写）
-    │   ├── data_download_dialog.py   # ✨【回写·第12条】数据下载管理器对话框：被run_数据下载GUI.py调用；8项数据下载管理功能；✨【第12条】财务数据卡片=同行布局（勾选框+「最新一期」/「自定义范围」单选+开始/结束QDateEdit），历史模式调用get_financial_history保存为financial_history_*.csv；标题栏加最小化按钮（WindowMinimizeButtonHint）；DownloadWorker后台线程+进度回调；设计稿见docs/mockups/；✨【回写#59】run_daily M0落增量审计文件incremental_YYYYMMDD.parquet + M1复用records消除双拉取 + M2分批限速 + M4单标原子隔离
+    │   ├── data_download_dialog.py   # ✨【回写·第12条】数据下载管理器对话框：被run_数据下载GUI.py调用；8项数据下载管理功能；✨【第12条】财务数据卡片=同行布局（勾选框+「最新一期」/「自定义范围」单选+开始/结束QDateEdit），历史模式调用get_financial_history保存为financial_history_*.csv；标题栏加最小化按钮（WindowMinimizeButtonHint）；DownloadWorker后台线程+进度回调；设计稿见docs/mockups/；✨【回写#59】run_daily M0落增量审计文件incremental_YYYYMMDD.parquet + M1复用records消除双拉取 + M2分批限速 + M4单标原子隔离；✨【回写#67】run_daily save 返回 None 计入 save_failed 并告警 + GUI 完成信息改显 processed 实际写入数（不再以拉取成功数冒充）
     │   ├── widgets/    │   ├── paper_run_dialog.py         # ✨【回写#62/#65】仿真运行弹窗    │   ├── kunpeng_logo.png            # ✨【回写#66】品牌Logo资源
     │       ├── __init__.py
     │       ├── kline_item.py         # K线绘制控件
@@ -860,3 +860,11 @@ Pythonwdhmm/
    b. **当日信号改由 warmup 回放产出（本地化后 0 信号根因）**：engine.py _replay_warmup_strategies 原全部丢弃信号 + feed 推当天 bar 触发；但本地 processed 已含最新交易日（warmup 回放至此），feed 从 processed 读相同 bar 被 _validate_bar_time 非递增去重丢弃，当日信号永不产生。改为对最新一根 bar 的 signal 交 _process_signal 推进当日（订单入队，T+1 下一交易日撮合）；历史信号仍丢弃避免全池下单熔断
    c. **验证结果**：真实 paper 信号=187(买89/卖98)/订单=5/成交=0(T+1)/风控拒绝=182/终态 NORMAL 无熔断无暂停；48 live 单测 passed；warmup 本地回放全池约 91s 零网络零限流（对比 akshare 逐只网络拉全池 20+ 分钟且限流）；每日推进现为纯本地（增量清洗 tdx 补当日到 processed → 引擎 warmup 回放 → warmup 最新 bar 产出当日信号 → 订单入队 → 下一交易日撮合）
    d. **纪律遵守**：业务逻辑归 myquant/live/data_feed.py + engine.py（蓝图已登记）；live_config.yaml 为真实配置不入蓝图树；docs/交接摘要_20260924_仿真运行弹窗模式.md 更新 2.5 节记录本地化；临时脚本在系统Temp已清理
+## 回写 #67：增量更新日线"缺失区间死锁"修复（M5：processed 权威增量起点 + 写入失败可观测）
+   用户报告 1162 只股票数据卡在 09-21。诊断（2026-09-29）：1117 只 sync_status=2026-09-28(completed) 但 processed 停在 09-21——00:08 一轮 auto_sync（只写 DB+sync，不写 processed）后，增量起点仅信 sync_status（09-28→09-29），tdx 无 09-29 数据→no_data 跳过，09-22~09-28 缺失区间被永久跳过（死锁）；另有 46 只 sync=09-21 且未停牌（数据源覆盖疑缺）。本次落地（事实来源：本次落地；代码级核验：py_compile 通过 + 相关单测 29 passed + 新增 M5 单测 11 passed + 全量 pytest tests/unit 结果见 d 项）：
+   a. **myquant/data_access/manager.py 增量起点以 processed 为权威**：新增 _get_processed_last_date(symbol)（读 processed/<symbol>.parquet 日期列 max→YYYY-MM-DD；文件缺失/损坏/无日期列/全空→None 回退，不阻断增量链路；防未来函数只读存量历史）；update_symbol 增量判断改 last_date = _get_processed_last_date(...) or _get_last_sync_date(...)——sync_status 仅代表"曾拉取成功"，processed 写回失败时 DB 领先，以 DB 为准会跳过缺失区间；processed 缺失区间（最新日+1..今天）将被重新拉取，幂等收敛
+   b. **写入失败可观测**：save_cleaned_incremental_parquet 清洗结果为空/剔除上下文后无新增时分别打 warning/info 日志（此前静默 return None，"拉取成功但 processed 未更新"无从观测）；myquant/gui/data_download_dialog.py run_daily save 返回 None 同计 save_failed 并留痕（此前仅异常才计）
+   c. **GUI 完成信息口径修正**：_on_task_finished 日线任务（含"全部更新"复合任务 daily 分支）的"成功"改为 processed 实际写入数（parquet_saved），拉取失败/写入失败分开显示，不再以"拉取 completed"冒充成功
+   d. **验证结果**：py_compile manager.py + data_download_dialog.py 通过；新增 tests/unit/test_update_symbol_incremental_start.py 11 passed（processed 解析/NaN/缺列/缺失/非日线；脱节重拉/回退DB/全量/已最新跳过/正常增量；save None→save_failed）；回归 test_data_clean_incremental.py + test_data_incremental_clean_dual.py + test_data_download_pool_scope.py + 新增 = 29 passed；全量 pytest tests/unit 结果以当日回归日志为准（环境缺 fastapi 的 8 failed 为已知环境依赖缺失，与本次改动无关）
+   e. **补救建议（未拍板不执行）**：存量 1117 只滞后标的可在重启 GUI 后跑一次"增量更新日线"自动重拉缺失区间（M5 生效后无需 force_full）；46 只 sync=09-21 未停牌标的属数据源覆盖疑缺，建议样本核对 tdx 本地 .day 文件后另行处置
+   f. **纪律遵守**：业务逻辑归 myquant/data_access/manager.py + myquant/gui/data_download_dialog.py（均在蓝图登记）；新增测试文件 test_update_symbol_incremental_start.py 已登记目录树；临时脚本在系统Temp已清理；用户既有未提交改动（routes.py/financial_service.py/rsrs.py/验收_回测引擎V5.py）未触碰

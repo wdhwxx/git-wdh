@@ -260,6 +260,16 @@ def run_daily(fetcher, manager, project_root: Path, progress_callback=None, forc
                 logger.warning("增量清洗写 processed 失败 [%s]: %s", r["symbol"], e)
             if processed_file:
                 success_count += 1
+            else:
+                # M5修复：清洗写 processed 未产出文件（None）同样视为写入失败并告警，
+                # 避免"拉取成功但 processed 未更新"被静默吞掉（此前仅异常才记 save_failed）
+                save_failed += 1
+                save_failed_symbols.append(r["symbol"])
+                logger.warning(
+                    "增量清洗写 processed 未产出文件 [%s] start=%s end=%s records=%d",
+                    r["symbol"], r.get("start_date"), r.get("end_date"),
+                    len(r.get("data") or []),
+                )
 
     # M0：落当日增量审计文件（可重跑；不影响 processed 主链路）
     if incremental_records:
@@ -1200,18 +1210,36 @@ class DataDownloadDialog(QDialog):
         ps = summary.get("parquet_saved", 0)
         if "daily" in summary:  # 全部更新任务
             d = summary["daily"]; fi = summary["finance"]
-            self._append_log(
-                f"✔ {label} 完成:日线 成功{d.get('success',0)}/失败{d.get('failed',0)}/跳过{d.get('skipped',0)}"
-                f";财务 成功{fi.get('success',0)}/失败{fi.get('failed',0)}/共{fi.get('records',0)}条"
-            )
+            if "parquet_saved" in d:
+                # M5修复：复合任务中日线部分同样以 processed 实际写入数为主口径
+                self._append_log(
+                    f"✔ {label} 完成:日线 processed写入{d.get('parquet_saved',0)}"
+                    f"/写入失败{d.get('save_failed',0)}/拉取失败{d.get('failed',0)}/跳过{d.get('skipped',0)}"
+                    f";财务 成功{fi.get('success',0)}/失败{fi.get('failed',0)}/共{fi.get('records',0)}条"
+                )
+            else:
+                self._append_log(
+                    f"✔ {label} 完成:日线 成功{d.get('success',0)}/失败{d.get('failed',0)}/跳过{d.get('skipped',0)}"
+                    f";财务 成功{fi.get('success',0)}/失败{fi.get('failed',0)}/共{fi.get('records',0)}条"
+                )
         else:
             pq_now = self._count_parquet()
             added = pq_now - self._pq_before
             total = summary.get("total", s + f + sk)
-            self._append_log(
-                f"✔ {label} 完成:已完成{s + f + sk}/{total}·成功{s}·失败{f}·跳过{sk}"
-                f"·本次共写入parquet {self._pq_before}→新增{added}个"
-            )
+            # M5修复：日线任务的"成功"改为 processed 实际写入数（parquet_saved），
+            # 不再用"拉取 completed"冒充（拉取成功≠processed 已更新）
+            if "parquet_saved" in summary and "save_failed" in summary:
+                self._append_log(
+                    f"✔ {label} 完成:processed写入{ps}"
+                    f"/写入失败{summary.get('save_failed', 0)}"
+                    f"/拉取失败{f}·跳过{sk}"
+                    f"·本次共写入parquet {self._pq_before}→新增{added}个"
+                )
+            else:
+                self._append_log(
+                    f"✔ {label} 完成:已完成{s + f + sk}/{total}·成功{s}·失败{f}·跳过{sk}"
+                    f"·本次共写入parquet {self._pq_before}→新增{added}个"
+                )
         # 网页任务：显示最终使用的数据源与降级次数
         web_info = summary.get("_web")
         if web_info:

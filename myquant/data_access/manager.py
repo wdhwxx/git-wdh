@@ -311,7 +311,10 @@ class DataManager:
             # 确定起始日期
             start_date = None
             if not force_full:
-                last_date = self._get_last_sync_date(symbol, period)
+                # M5修复：增量起点以 processed 实际最新交易日为准（回测/实盘消费的权威数据）；
+                # sync_status 仅代表"曾拉取成功"，processed 写回失败时 DB 领先，
+                # 若以 DB 为准会跳过缺失区间造成死锁。processed 缺失时回退 DB。
+                last_date = self._get_processed_last_date(symbol, period) or self._get_last_sync_date(symbol, period)
                 if last_date:
                     # 从最后同步日期的下一天开始
                     last_dt = datetime.strptime(last_date, "%Y-%m-%d")
@@ -600,6 +603,48 @@ class DataManager:
     # ═══════════════════════════════════════════
     # 同步状态管理
     # ═══════════════════════════════════════════
+
+    def _get_processed_last_date(
+        self,
+        symbol: str,
+        period: str = "daily",
+    ) -> Optional[str]:
+        """读取 processed 扁平 parquet 的实际最新交易日（YYYY-MM-DD）。
+
+        M5修复：processed 是回测/实盘消费的权威数据，增量起点必须以其实际
+        最新交易日为准；sync_status 只代表"曾拉取成功"，processed 写回失败时
+        DB 领先会导致缺失区间被永久跳过（死锁）。只读存量历史文件，
+        不获取任何未来数据（防未来函数）。
+
+        Args:
+            symbol: 标的代码，如 000001.SZ。
+            period: 周期（当前仅 daily 扁平 parquet）。
+
+        Returns:
+            Optional[str]: 最新交易日 YYYY-MM-DD；文件缺失/损坏/无日期列/
+            日期列全空时返回 None（调用方回退 sync_status 或全量拉取）。
+        """
+        if period != "daily":
+            return None
+        processed_dir = get_project_path("datasets", "processed")
+        path = processed_dir / f"{symbol}.parquet"
+        if not path.exists():
+            return None
+        try:
+            import pandas as pd
+
+            df = pd.read_parquet(path, columns=["日期"])
+            if df is None or df.empty or "日期" not in df.columns:
+                return None
+            vals = pd.to_numeric(df["日期"], errors="coerce").dropna()
+            if vals.empty:
+                return None
+            d = int(vals.max())
+            return f"{d // 10000:04d}-{d % 10000 // 100:02d}-{d % 100:02d}"
+        except Exception as e:
+            # 读取失败不阻断增量链路，回退 sync_status 判断
+            logger.debug("processed 最新日期读取失败，回退 sync_status: %s (%s)", symbol, e)
+            return None
 
     def _get_last_sync_date(
         self,
@@ -1083,6 +1128,12 @@ class DataManager:
         )
         cleaned = clean_result["cleaned"]
         if not cleaned:
+            # M5修复：清洗结果为空时必须告警（此前静默 return None，
+            # 增量"拉取成功但 processed 未更新"无从观测）
+            logger.warning(
+                "增量清洗结果为空，跳过写 processed: %s (输入 %d 条)",
+                symbol, len(records_to_clean),
+            )
             return None
 
         # 剔除上下文行（已存在存量中，不重复写入）
@@ -1090,6 +1141,9 @@ class DataManager:
             prior_date = prior_row.get("date")
             cleaned = [r for r in cleaned if r.get("date") != prior_date]
             if not cleaned:
+                # M5修复：剔除上下文行后无新增数据（本次增量区间无新 bar），
+                # 不写 processed 属正常跳过，留痕便于审计
+                logger.info("增量区间无新增数据，跳过写 processed: %s", symbol)
                 return None
 
         # 清洗后英文字段 → 中文字段
