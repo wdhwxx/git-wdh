@@ -1,4 +1,4 @@
-# 文件名：myquant/gui/data_download_dialog.py
+﻿# 文件名：myquant/gui/data_download_dialog.py
 """
 数据下载管理器弹窗（PySide6）v2
 ==============================
@@ -12,7 +12,9 @@
 - 操作区：开始执行 / 取消 + 总进度条 + 百分比 + 防未来函数提示
 
 新增 2 项：
-  7. 通达信单独下载 —— 强制仅用通达信本地源（D:\\TDX）全量下载，零联网
+  7. 通达信全量数据 —— 强制仅用通达信本地源（D:\\TDX）全市场 A 股全量入库：
+                        只写 quant.db 原始层 + sync_status，不写 processed
+                        （processed 由全量清洗重建、增量更新补最新），零联网
   8. 网页抓取全量   —— akshare 网页源全量抓取，降级链 东财→新浪→腾讯；
                         代码框留空=全量，填入代码=单只抓取
 
@@ -76,7 +78,7 @@ OPTIONS: Dict[str, tuple] = {
     "all":         ("全部更新",                   "日线增量+财务",                "常规"),
     "validate":    ("数据质量校验",               "完整性/异常检测",              "常规"),
     "status":      ("查看同步状态报告",           "仅展示,不下载",                "常规"),
-    "tdx":         ("通达信单独下载",             "强制仅用D:\\TDX本地源,全量,零联网", ""),
+    "tdx":         ("通达信全量数据",             "D:\\TDX本地源,全市场A股,零联网入库", ""),
     "web":         ("网页抓取全量",               "akshare网页源 东财→新浪→腾讯降级", ""),
 }
 
@@ -205,13 +207,65 @@ def _save_incremental_audit_file(project_root: Path, records: List[Dict]) -> Opt
     return out
 
 
-def run_daily(fetcher, manager, project_root: Path, progress_callback=None, force_full: bool = False, pool_config: Optional[str] = None) -> dict:
+def run_daily(
+    fetcher,
+    manager,
+    project_root: Path,
+    progress_callback=None,
+    force_full: bool = False,
+    pool_config: Optional[str] = None,
+    scope: str = "pool",
+) -> dict:
     """
     下载日线数据
-    force_full=True=全量重下（忽略数据库同步状态，从头拉取全部历史）；
-    force_full=False=增量（只补缺失，默认，DataManager 依据 sync_status 自动判断）。
-    【防未来函数】DataManager 内部严格截止到当前日期
+
+    Args:
+        fetcher: 数据获取器；scope="full_market" 时必填（需提供 get_stock_list()）。
+        manager: 数据管理器（写 quant.db + sync_status；scope="pool" 时另写 processed）。
+        project_root: 项目根目录。
+        progress_callback: 进度回调 callback(current, total, result)。
+        force_full: True=全量重下（忽略数据库同步状态，从头拉取全部历史）；
+            False=增量（只补缺失，默认，DataManager 依据 sync_status 自动判断）。
+        pool_config: 股票池配置文件路径（相对 project_root）；None 用默认。
+        scope: 标的范围：
+            "pool"（默认）= 配置股票池（三因子 3226 只，与回测/实盘一致），
+                拉取后走清洗管线合并写回 processed（增量/修复场景）；
+            "full_market" = 通达信本地全市场 A 股（get_stock_list，约 5000+ 只），
+                只写 quant.db 原始层 + sync_status，不写 processed
+                （processed 由全量清洗重建、增量更新补池内最新，增量旁路独立）。
+
+    Returns:
+        dict 汇总；scope="full_market" 时含 mode="full_market"，无 parquet_saved 字段。
+
+    【防未来函数】DataManager 内部严格截止到当前日期。
     """
+    # ── 全市场全量入库（原始层）：只写 quant.db + sync_status，不写 processed ──
+    if scope == "full_market":
+        if fetcher is None:
+            raise ValueError("scope='full_market' 需要 fetcher 提供 get_stock_list()")
+        stocks = fetcher.get_stock_list()
+        symbols = [s["symbol"] for s in stocks if s.get("symbol")]
+        if not symbols:
+            return {"total": 0, "success": 0, "failed": 0, "skipped": 0, "mode": "full_market"}
+        results = manager.update_symbols_batch(
+            symbols,
+            period="daily",
+            adjust="hfq",
+            progress_callback=progress_callback,
+            force_full=force_full,
+        )
+        # 增量旁路说明：全量入库只落原始层；「增量更新日线」（scope="pool"）独立按池内
+        # processed 最新日期补缺失并写回 processed，本任务未完成/中断均不影响增量旁路
+        # （写库幂等：bulk_insert 默认 INSERT OR IGNORE，可安全续跑）。
+        return {
+            "total": len(results),
+            "success": sum(1 for r in results if r["status"] == "completed"),
+            "failed": sum(1 for r in results if r["status"] == "failed"),
+            "skipped": sum(1 for r in results if r["status"] == "skipped"),
+            "mode": "full_market",
+        }
+
+    # ── 池内下载（默认）：写 DB + 清洗合并写回 processed ──
     from myquant.utils.file_utils import ensure_dir
     ensure_dir(project_root / "datasets" / "raw" / "daily")
     ensure_dir(project_root / "datasets" / "processed")
@@ -455,11 +509,15 @@ def _entry_all(project_root: Path, progress_callback=None) -> dict:
 
 
 def _entry_tdx(project_root: Path, progress_callback=None) -> dict:
-    """通达信数据：强制仅用通达信本地源全量（force_full=True）"""
+    """通达信全量数据：强制仅用通达信本地源（D:\\TDX）全市场 A 股全量入库（force_full=True）。
+
+    只写 quant.db 原始层 + sync_status，不写 processed；processed 由全量清洗重建、
+    「增量更新日线」（池内 3226）补最新数据——增量旁路独立于本任务，全量未完成/中断不影响增量。
+    """
     fetcher = create_fetcher("tdx", enable_cache=False)
     manager, conn = _make_manager(fetcher, project_root)
     try:
-        return run_daily(fetcher, manager, project_root, progress_callback, force_full=True)
+        return run_daily(fetcher, manager, project_root, progress_callback, force_full=True, scope="full_market")
     finally:
         conn.close()
 
@@ -1203,6 +1261,13 @@ class DataDownloadDialog(QDialog):
         if "error" in summary:
             self._append_log(f"× {label} 异常:{summary['error']}")
             self.lbl_pct.setText("异常")
+            return
+        if summary.get("mode") == "full_market":
+            self._append_log(
+                f"✔ {label} 完成:全市场入库 成功{summary.get('success', 0)}"
+                f"/失败{summary.get('failed', 0)}/跳过{summary.get('skipped', 0)}"
+                f"·processed 不动（由全量清洗重建/增量更新补）"
+            )
             return
         s = summary.get("success", 0)
         f = summary.get("failed", 0)

@@ -1,4 +1,4 @@
-# 文件名：myquant/data_access/manager.py
+﻿# 文件名：myquant/data_access/manager.py
 """
 manager.py - 数据管理器（更新/校验/同步/自动维护）
 ===================================================
@@ -943,18 +943,21 @@ class DataManager:
 
         return result
 
-    def _read_db_prior_close(
+    def _read_db_prior_bars(
         self,
         symbol: str,
         start_date: str,
         period: str = "daily",
         adjust: Optional[str] = "hfq",
-    ) -> Optional[Dict[str, Any]]:
+        limit: int = 5,
+    ) -> List[Dict[str, Any]]:
         """
-        从 quant.db 读取 < start_date 的最新一根收盘，作增量清洗前收盘上下文。
+        从 quant.db 读取 < start_date 的最近 limit 根 bar，作增量清洗上下文。
 
         M3修复：DB 是增量写入权威（quant.db 往往领先 processed），
         优先用 DB 保证跳变检测基准正确；processed 落后时不再作为唯一上下文来源。
+        M6扩展：量比需前 5 日均量基准（VOLUME_RATIO_WINDOW），上下文从单根前收盘
+        扩展为前 N 根（含前收盘 + 成交量均量窗口），与全量清洗 compute_derived_metrics 口径一致。
 
         【防未来函数】只读 start_date 之前的已发生数据，绝不读取未来。
 
@@ -962,12 +965,14 @@ class DataManager:
             symbol: 标的代码，如 000001.SZ。
             start_date: 增量区间开始日期（YYYY-MM-DD）。
             period / adjust: 查询口径，与增量拉取一致。
+            limit: 取最近多少根（默认 5 = 量比窗口）。
 
         Returns:
-            Optional[Dict]: 最新一根行（英文字段 date/close/...），无数据或读取失败返回 None。
+            List[Dict]: 按日期升序的最近 limit 根行（英文字段 date/close/...），
+                无数据或读取失败返回空列表。
         """
         if not self._db:
-            return None
+            return []
         try:
             from ..database.queries import DataQueries
             queries = DataQueries(self._db)
@@ -976,24 +981,28 @@ class DataManager:
                 symbol, end_date=prior_end, period=period, adjust=adjust,
             )
             if not rows:
-                return None
-            last = rows[-1]
+                return []
+            rows = sorted(rows, key=lambda r: str(r.get("trade_date", "")))
+            rows = rows[-limit:]
             # DB 行字段为 trade_date/open/close/...，转成清洗管线英文字段 date/close/...
-            en: Dict[str, Any] = {
-                "date": last.get("trade_date"),
-                "open": last.get("open"),
-                "high": last.get("high"),
-                "low": last.get("low"),
-                "close": last.get("close"),
-                "volume": last.get("volume"),
-                "amount": last.get("amount"),
-                "pct_chg": last.get("pct_chg"),
-                "turnover": last.get("turnover"),
-            }
-            return {k: v for k, v in en.items() if v is not None}
+            bars: List[Dict[str, Any]] = []
+            for r in rows:
+                en: Dict[str, Any] = {
+                    "date": r.get("trade_date"),
+                    "open": r.get("open"),
+                    "high": r.get("high"),
+                    "low": r.get("low"),
+                    "close": r.get("close"),
+                    "volume": r.get("volume"),
+                    "amount": r.get("amount"),
+                    "pct_chg": r.get("pct_chg"),
+                    "turnover": r.get("turnover"),
+                }
+                bars.append({k: v for k, v in en.items() if v is not None})
+            return bars
         except Exception as e:
             logger.warning("DB 前收盘上下文读取失败，回退 processed: %s: %s", symbol, e)
-            return None
+            return []
 
     def save_cleaned_incremental_parquet(
         self,
@@ -1008,8 +1017,10 @@ class DataManager:
         增量区间清洗后按中文列合并写回 processed 扁平 parquet。
 
         与全量清洗共用同一套规则（run_clean_pipeline + config/data_clean.yaml），
-        仅处理有新增数据的标的与区间（带前一收盘上下文），规避全池全量慢扫，
-        根治增量更新日线"直写原始数据弄脏 processed"的问题。
+        仅处理有新增数据的标的与区间（带前 N 根上下文：前收盘 + 量比 5 日均量基准），
+        规避全池全量慢扫，根治增量更新日线"直写原始数据弄脏 processed"的问题。
+        清洗后与全量清洗同口径补派生量（A类：涨跌幅/振幅/量比；B类：换手率/流通股本/
+        市盈动，B类与每股收益依赖 financial_data，DB 缺失或异常时跳过不阻断写入）。
 
         【防未来函数】end_date 之后的数据不获取、不清洗；只读存量历史作上下文。
 
@@ -1028,6 +1039,11 @@ class DataManager:
         """
         import pandas as pd
 
+        from myquant.data_access.cleaner.derived_metrics import (
+            VOLUME_RATIO_WINDOW,
+            compute_b_class_metrics,
+            compute_derived_metrics,
+        )
         from myquant.utils.file_utils import write_parquet
 
         # 与全量清洗同一份规则配置
@@ -1056,7 +1072,8 @@ class DataManager:
             "low": "最低价", "close": "收盘价", "volume": "成交量",
             "amount": "成交额", "pct_chg": "涨跌幅", "amplitude": "振幅",
             "volume_ratio": "量比", "float_share": "流通股本",
-            "pe_dynamic": "市盈动",
+            "pe_dynamic": "市盈动", "turnover": "换手率",
+            "eps": "每股收益",
         }
         _cn_to_en: Dict[str, str] = {v: k for k, v in _en_to_cn.items()}
 
@@ -1095,21 +1112,26 @@ class DataManager:
 
         # M3修复：前收盘上下文优先读 quant.db（增量写入权威），processed 兜底，
         # 避免 processed 落后导致跳变检测基准错；仅用于清洗，不写入。
-        prior_row: Optional[Dict[str, Any]] = None
+        # M6扩展：上下文取前 N 根（VOLUME_RATIO_WINDOW=5），供量比 5 日均量基准，
+        # 与全量清洗 compute_derived_metrics 口径一致（涨跌幅/振幅仅需前收盘，量比需前 5 日均量）。
+        context_rows: List[Dict[str, Any]] = []
         if start_date:
-            db_prior = self._read_db_prior_close(symbol, start_date, period, adjust)
-            if db_prior:
-                prior_row = db_prior
+            db_bars = self._read_db_prior_bars(
+                symbol, start_date, period, adjust, limit=VOLUME_RATIO_WINDOW,
+            )
+            if db_bars:
+                context_rows = db_bars
             elif existing_df is not None and not existing_df.empty:
                 start_int = int(start_date.replace("-", ""))
                 before = existing_df[existing_df["日期"].astype(int) < start_int]
                 if not before.empty:
-                    prior_row = _row_cn_to_en(before.iloc[-1])
+                    context_rows = [
+                        _row_cn_to_en(r)
+                        for _, r in before.tail(VOLUME_RATIO_WINDOW).iterrows()
+                    ]
 
-        # 组装清洗输入：前收盘上下文 + 增量区间
-        records_to_clean: List[Dict[str, Any]] = []
-        if prior_row:
-            records_to_clean.append(prior_row)
+        # 组装清洗输入：前 N 根上下文 + 增量区间
+        records_to_clean: List[Dict[str, Any]] = list(context_rows)
         records_to_clean.extend(interval_records)
 
         # 原始 bar 记录可能不含 symbol 字段，而清洗管线 check_symbol=true 默认校验；
@@ -1136,10 +1158,55 @@ class DataManager:
             )
             return None
 
+        # M6：与全量清洗同口径补派生量（A类：涨跌幅/振幅/量比；B类：换手率/流通股本/市盈动）。
+        # 即使当下无消费者也计算写入，保证增量新行与全量重建的 processed 列口径长期一致。
+        compute_derived_metrics(cleaned)
+        if self._db:
+            try:
+                from ..database.queries import DataQueries
+                dq = DataQueries(self._db)
+                fin_rows = dq.conn.execute(
+                    "SELECT report_date, circ_mv, total_mv, net_profit, eps "
+                    "FROM financial_data WHERE symbol=? ORDER BY report_date",
+                    (symbol,),
+                )
+                fin_all = [dict(r) for r in fin_rows]
+                if fin_all:
+                    fin_b = [
+                        {
+                            "report_date": f.get("report_date"),
+                            "circ_mv": f.get("circ_mv"),
+                            "total_mv": f.get("total_mv"),
+                            "net_profit": f.get("net_profit"),
+                        }
+                        for f in fin_all
+                    ]
+                    # 归一字段：增量记录用 date（fetcher 原始格式），
+                    # compute_b_class_metrics 内部按 trade_date 匹配财务（全量口径），
+                    # 仅补齐 trade_date 供其使用，不影响 date 主字段。
+                    for rec in cleaned:
+                        if "date" in rec and "trade_date" not in rec:
+                            rec["trade_date"] = rec["date"]
+                    compute_b_class_metrics(cleaned, fin_b)
+                    # 每股收益：按交易日匹配最近一期（同全量导出口径，防未来函数）
+                    fin_dates = [str(f.get("report_date", "")) for f in fin_all]
+                    fin_eps = [f.get("eps") for f in fin_all]
+                    for rec in cleaned:
+                        trade_date = str(rec.get("date") or "")
+                        eps_val = None
+                        for i, fd in enumerate(fin_dates):
+                            if fd <= trade_date:
+                                eps_val = fin_eps[i]
+                            else:
+                                break
+                        rec["eps"] = eps_val
+            except Exception as e:
+                logger.warning("增量 B 类派生量计算失败，跳过（不影响写入）: %s: %s", symbol, e)
+
         # 剔除上下文行（已存在存量中，不重复写入）
-        if prior_row:
-            prior_date = prior_row.get("date")
-            cleaned = [r for r in cleaned if r.get("date") != prior_date]
+        if context_rows:
+            context_dates = {str(r.get("date")) for r in context_rows}
+            cleaned = [r for r in cleaned if str(r.get("date")) not in context_dates]
             if not cleaned:
                 # M5修复：剔除上下文行后无新增数据（本次增量区间无新 bar），
                 # 不写 processed 属正常跳过，留痕便于审计

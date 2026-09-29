@@ -1,4 +1,4 @@
-# 文件名：tests/unit/test_data_download_pool_scope.py
+﻿# 文件名：tests/unit/test_data_download_pool_scope.py
 """GUI 数据下载"股票池范围"单测。
 
 验证方案 A：日线全量/增量下载的标的来源由"全市场 get_stock_list()"改为
@@ -90,3 +90,40 @@ def test_run_daily_用池列表而非全市场(monkeypatch, tmp_path: Path) -> N
     res = run_daily(fetcher=None, manager=manager, project_root=tmp_path)
     assert manager.symbols == ["000001.SZ", "600519.SH"]
     assert res["total"] == 0  # update_symbols_batch 返回空
+# ── run_daily 全市场范围（scope="full_market"，通达信全量数据）──
+
+
+class _FakeFetcher:
+    """伪 fetcher：get_stock_list 返回全市场列表。"""
+
+    def get_stock_list(self, market: str = "A股") -> List[Dict[str, Any]]:
+        """返回全市场 A 股列表（全量入库标的范围）。"""
+        return [
+            {"symbol": "000001.SZ"},
+            {"symbol": "600519.SH"},
+            {"symbol": "601398.SH"},
+        ]
+
+
+def test_run_daily_全市场范围_用get_stock_list(tmp_path: Path) -> None:
+    """scope='full_market'：标的取全市场 get_stock_list()，不写 processed。"""
+    import myquant.gui.data_download_dialog as d
+
+    manager = _FakeManager()
+    fetcher = _FakeFetcher()
+    res = run_daily(
+        fetcher=fetcher, manager=manager, project_root=tmp_path,
+        force_full=True, scope="full_market",
+    )
+    assert manager.symbols == ["000001.SZ", "600519.SH", "601398.SH"]
+    assert res["mode"] == "full_market"
+    assert "parquet_saved" not in res  # 全市场入库不写 processed
+
+
+def test_run_daily_全市场_缺fetcher抛错(tmp_path: Path) -> None:
+    """scope='full_market' 但 fetcher=None → 明确报错（防静默空转）。"""
+    import myquant.gui.data_download_dialog as d
+
+    manager = _FakeManager()
+    with pytest.raises(ValueError, match="full_market"):
+        run_daily(fetcher=None, manager=manager, project_root=tmp_path, scope="full_market")

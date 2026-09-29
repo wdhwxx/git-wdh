@@ -1,10 +1,12 @@
-# 文件名：tests/unit/test_data_clean_incremental.py
+﻿# 文件名：tests/unit/test_data_clean_incremental.py
 """DataManager.save_cleaned_incremental_parquet 单测。
 
 验证增量更新日线"走清洗管线"：与全量清洗共用 run_clean_pipeline + config/data_clean.yaml，
 按标的按区间清洗（带前一收盘上下文）后合并写回 processed 扁平 parquet。
 核心保证：清洗规则生效（脏行剔除）、前收盘上下文用于涨跌跳变判定、
 合并保留全历史不丢、重叠日去重 keep=last、日期升序、列对齐存量 schema。
+M6 增量派生量：清洗后新行补 涨跌幅/振幅/量比（量比以存量前 5 日均量为基准），
+DB 有 financial_data 时补 换手率/流通股本/市盈动/每股收益。
 """
 
 from __future__ import annotations
@@ -221,3 +223,79 @@ def test_传入records后不再重新拉取(monkeypatch, tmp_path: Path) -> None
     df = pd.read_parquet(Path(out))
     assert int((df["日期"] == 20260919).sum()) == 1  # 复用 records 清洗后写入
     assert int(df["日期"].min()) == 19910403  # 存量保留
+def test_增量新行补派生量_量比用前5日均量(monkeypatch, tmp_path: Path) -> None:
+    """M6：增量清洗后新行含 涨跌幅/振幅/量比；量比以存量前 5 日均量为基准（与全量口径一致）。"""
+    symbol = "TST.SZ"
+    # 区间：前收盘 10 → 新日 11.2，成交量 120000
+    records = [_bar("20260926", 11, 11.5, 10.8, 11.2, volume=120000)]
+    manager, processed = _make_manager(monkeypatch, tmp_path, records)
+    # 存量前 6 根（< 20260926 取最近 5 根 = 20260921..20260925，成交量均 100000），收盘 10
+    rows = []
+    for d in ["20260918", "20260921", "20260922", "20260923", "20260924", "20260925"]:
+        rows.append({
+            "日期": int(d.replace("-", "")), "开盘价": 10, "最高价": 10.2,
+            "最低价": 9.9, "收盘价": 10.0, "成交量": 100000, "成交额": 1000000,
+            "涨跌幅": None, "振幅": None, "量比": None,
+            "流通股本": None, "市盈动": None,
+        })
+    _write_existing(processed, symbol, rows)
+
+    out = manager.save_cleaned_incremental_parquet(symbol, start_date="2026-09-26", end_date="2026-09-26")
+    df = pd.read_parquet(Path(out))
+    new = df[df["日期"] == 20260926].iloc[0]
+    assert float(new["涨跌幅"]) == round((11.2 - 10.0) / 10.0 * 100, 4)
+    assert float(new["振幅"]) == round((11.5 - 10.8) / 10.0 * 100, 4)
+    assert float(new["量比"]) == round(120000 / 100000, 4)  # 5 日均量 = 100000
+    # 存量行不被重算（增量语义：历史不动），派生量列保持空
+    old = df[df["日期"] == 20260918].iloc[0]
+    assert pd.isna(old.get("涨跌幅"))
+
+
+def test_增量B类派生量_有财务数据时计算换手率流通股本市盈动与每股收益(monkeypatch, tmp_path: Path) -> None:
+    """M6：DB 有 financial_data 时，增量新行补 换手率/流通股本/市盈动/每股收益；无财务则留空不报错。"""
+    symbol = "TST.SZ"
+    records = [_bar("20260926", 11, 11.5, 10.8, 11.2, volume=100000)]
+    manager, processed = _make_manager(monkeypatch, tmp_path, records)
+
+    class _FakeDataQueries:
+        """fake DataQueries：DB 无上下文行情（processed 兜底），financial_data 返回单期财报。"""
+
+        def __init__(self, conn: Any) -> None:
+            self.conn = conn
+
+        def get_market_data(self, *args: Any, **kwargs: Any) -> List[Dict[str, Any]]:
+            return []
+
+    class _FakeConn:
+        def execute(self, sql: str, params: Any = ()) -> List[Dict[str, Any]]:
+            if "financial_data" in sql:
+                return [{
+                    "report_date": "2026-06-30", "circ_mv": 10_000_000_000.0,
+                    "total_mv": 20_000_000_000.0, "net_profit": 1_000_000_000.0,
+                    "eps": 0.5,
+                }]
+            return []
+
+    monkeypatch.setattr("myquant.database.queries.DataQueries", _FakeDataQueries)
+    manager._db = _FakeConn()  # 注入非空 db 连接启用 DB 路径
+
+    rows = [{
+        "日期": 20260925, "开盘价": 10, "最高价": 10.2,
+        "最低价": 9.9, "收盘价": 10.0, "成交量": 100000, "成交额": 1000000,
+        "涨跌幅": None, "振幅": None, "量比": None,
+        "流通股本": None, "市盈动": None, "换手率": None, "每股收益": None,
+    }]
+    _write_existing(processed, symbol, rows)
+
+    out = manager.save_cleaned_incremental_parquet(symbol, start_date="2026-09-26", end_date="2026-09-26")
+    df = pd.read_parquet(Path(out))
+    new = df[df["日期"] == 20260926].iloc[0]
+    float_share = 10_000_000_000.0 / 11.2  # circ_mv / 最新收盘
+    assert float(new["流通股本"]) == round(float_share, 2)
+    assert float(new["换手率"]) == round(100000 / float_share * 100, 4)
+    # pe_dynamic = close * total_share / 年化净利润（半年报 ×2）
+    assert float(new["市盈动"]) == round(11.2 * (20_000_000_000.0 / 11.2) / (1_000_000_000.0 * 2), 4)
+    assert float(new["每股收益"]) == 0.5
+    # 存量行不补派生量（增量语义）
+    old = df[df["日期"] == 20260925].iloc[0]
+    assert pd.isna(old.get("市盈动"))
