@@ -51,6 +51,7 @@ EN_TO_CN_COLUMN_MAP: Dict[str, str] = {
     "volume_ratio": "量比",
     "float_share": "流通股本",
     "pe_dynamic": "市盈动",
+    "turnover": "换手率",
     "pre_close": "前收盘价",
 }
 

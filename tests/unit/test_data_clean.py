@@ -55,6 +55,7 @@ from myquant.data_access.cleaner.tick_cleaner import (
     TickCleaner,
     clean_tick_records,
 )
+from myquant.data_access.full_clean_service import FullCleanService
 
 
 # ═══════════════════════════════════════════
@@ -1237,3 +1238,103 @@ class TestConfigDrivenCleaning:
         # 关闭去重后，5条全部保留（包括重复）
         assert stats["bad"] == 0
         assert len(cleaned) == 5
+
+
+# ═══════════════════════════════════════════
+#  全量清洗 B类财务缺失留痕 (#71)
+# ═══════════════════════════════════════════
+
+class _FakeConn:
+    """伪连接：execute 返回预置财务行。"""
+
+    def __init__(self, fin_rows: List[Dict[str, Any]]) -> None:
+        self._fin_rows = fin_rows
+
+    def execute(self, sql: str, params: Any = None) -> List[Dict[str, Any]]:
+        return self._fin_rows
+
+
+class _FakeDataQueries:
+    """伪 DataQueries：get_market_data 返回固定行情行。"""
+
+    def __init__(self, conn: _FakeConn, rows: List[Dict[str, Any]]) -> None:
+        self.conn = conn
+        self._rows = rows
+
+    def get_market_data(self, symbol: str, period: str = "daily", adjust: str = "hfq") -> List[Dict[str, Any]]:
+        return list(self._rows)
+
+
+def _make_worker_result(monkeypatch: Any, fin_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """调用 worker_clean，返回 result（monkeypatch 注入伪连接/查询/管道）。"""
+    import myquant.data_access.full_clean_service as fcs
+
+    rows: List[Dict[str, Any]] = [{
+        "trade_date": "2026-09-28", "open": 10.0, "high": 10.5,
+        "low": 9.8, "close": 10.2, "volume": 100000.0, "amount": 1000000.0,
+    }]
+    cleaned_out: List[Dict[str, Any]] = [dict(r) for r in rows]
+    fake_conn = _FakeConn(fin_rows)
+    fake_dq = _FakeDataQueries(fake_conn, rows)
+    monkeypatch.setattr(fcs, "get_connection", lambda *a, **k: fake_conn)
+    monkeypatch.setattr(fcs, "DataQueries", lambda conn: fake_dq)
+
+    def _fake_pipeline(**kwargs: Any) -> Dict[str, Any]:
+        return {"cleaned": cleaned_out, "bad": [], "stats": {}, "bad_file": None}
+
+    monkeypatch.setattr(fcs, "run_clean_pipeline", _fake_pipeline)
+    task = ("000001.SZ", "fake.db", {})
+    return fcs.worker_clean(task)
+
+
+class TestFullCleanBClassTrace:
+    """全量清洗 B类财务缺失留痕（#71）。"""
+
+    def test_worker_财务缺失标记留痕(self, monkeypatch: Any) -> None:
+        """financial_data 无记录 → result 含 no_financial=True，B类列留空。"""
+        result = _make_worker_result(monkeypatch, [])
+        assert result["status"] == "ok"
+        assert result.get("no_financial") is True
+        rec = result["cleaned_data"][0]
+        assert rec.get("turnover") is None
+        assert rec.get("float_share") is None
+        assert rec.get("pe_dynamic") is None
+
+    def test_worker_财务存在不标记(self, monkeypatch: Any) -> None:
+        """financial_data 有记录 → 无 no_financial 标记，B类正常计算。"""
+        fin_rows: List[Dict[str, Any]] = [{
+            "report_date": "2026-06-30", "circ_mv": 2.0e11,
+            "total_mv": 2.2e11, "net_profit": 2.5e10,
+        }]
+        result = _make_worker_result(monkeypatch, fin_rows)
+        assert result["status"] == "ok"
+        assert result.get("no_financial") is None
+        rec = result["cleaned_data"][0]
+        assert rec.get("float_share") is not None
+
+    def test_report_含财务缺失字段(self) -> None:
+        """报告含 no_financial_count / no_financial_symbols。"""
+        service = FullCleanService(config={}, dry_run=True)
+        service.no_financial_symbols = ["601091.SH", "301686.SZ"]
+        report = service.build_report(
+            counts={"ok": 2, "written": 2, "unchanged": 0, "error": 0, "empty": 0},
+            stats_agg={"bad_rows": 0, "removed_duplicates": 0, "price_jumps": 0,
+                       "volume_anomalies": 0, "time_violations": 0, "total_rows": 2},
+            t0=0.0,
+            backup_path=None,
+        )
+        assert report["no_financial_count"] == 2
+        assert report["no_financial_symbols"] == ["601091.SH", "301686.SZ"]
+
+    def test_report_财务缺失字段默认(self) -> None:
+        """无缺失标的 → 字段为 0 / []。"""
+        service = FullCleanService(config={}, dry_run=True)
+        report = service.build_report(
+            counts={"ok": 0, "written": 0, "unchanged": 0, "error": 0, "empty": 0},
+            stats_agg={"bad_rows": 0, "removed_duplicates": 0, "price_jumps": 0,
+                       "volume_anomalies": 0, "time_violations": 0, "total_rows": 0},
+            t0=0.0,
+            backup_path=None,
+        )
+        assert report["no_financial_count"] == 0
+        assert report["no_financial_symbols"] == []

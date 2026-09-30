@@ -335,6 +335,8 @@ Pythonwdhmm/
 
 │   ├── data_clean_run.json       # ✨【回写】全量清洗运行时状态文件（不入库）：由gui/data_clean_dialog.py生成、供scripts/数据全量清洗.py --config读取；✅已修复【回写#32】：.gitignore 已追加 config/*.json 覆盖该文件（原⚠️误提交风险已消除）；同类核验：config/ 其余运行时文件（真实 yaml/stock_pool.yaml）均已被 config/*.yaml 覆盖，无同类遗漏
 
+│   ├── st_blacklist.example.yaml # ✨【回写#70】ST/*ST/S*ST/SST 风险警示股名单模板（真实名单 config/st_blacklist.yaml 不入库，由 GUI「刷新名单」联网生成或人工编辑；full_clean_service.load_st_blacklist 离线读取，resolve_symbols 按 symbol 命中剔除，与代码前缀规则正交串联）
+
 │   ├── dashboard_targets.yaml    # ✨【2026-09-13】看板快速生成标的配置文件：defaults段（start/end/output_dir/strategy）+ targets列表（name/symbol/start/end/enabled开关，symbol支持逗号分隔多只）；供根目录看板快速生成.py交互式菜单读取；编辑此文件即可增删常用标的，无需记忆命令行参数；已废弃，见回写记录·2026-09-13（随 看板快速生成.py 一并删除，标的改由 GUI 直接输入）
 
 │   └── features/                     # 特征工程配置目录（预留）：因子参数、特征列表、特征工程流水线配置；当前为空目录占位(.gitkeep)，后续迭代实现特征配置时直接补yaml
@@ -387,7 +389,7 @@ Pythonwdhmm/
 
 │   ├── 标的预筛选.py                  # ✨【回写】标的预筛选入口：从quant.db按代码前缀/上市年限/日均成交额/换手率筛出可交易标的池，输出config/stock_pool.yaml供回测配置引用；流动性指标按回测起始日前历史窗口计算（防未来）；回测/实盘共用同一套筛选条件（实盘无缝对接）
 
-│   ├── 数据导出_DB到processed.py      # ✨【回写】DB导出入口（当前主格式）：quant.db的hfq日线→datasets/processed/扁平parquet，逐只导出+完整性校验+断点续传；格式与实盘数据提供器一致（实盘无缝对接）；取代旧CSV子目录版脚本（导出DB到回测数据.py，仅存档不再使用）
+│   ├── 数据导出_DB到processed.py      # ✨【回写】DB导出入口（当前主格式）：quant.db的hfq日线→datasets/processed/扁平parquet，逐只导出+完整性校验+断点续传；格式与实盘数据提供器一致（实盘无缝对接）；取代旧CSV子目录版脚本（导出DB到回测数据.py，仅存档不再使用）；✨【回写#72】CN_COLUMN_MAP/SELECT/数值列加 turnover→换手率，导出列集合=增量 _en_to_cn 13列统一
 
 │   ├── 数据全量清洗.py                # ✨【回写】全量清洗薄入口：参数解析→组装配置→调用FullCleanService.run()；链路=DB读取→清洗管线→事务写回→清洗元信息→bad归档→可选重建processed；支持--config/--symbols/--dry-run/--workers；与GUI全量清洗对话框共用同一服务
 
@@ -406,6 +408,7 @@ Pythonwdhmm/
 │   ├── 一致性校验.py                  # ✨【V5·P3】三模式一致性校验入口：engine.py/vectorized_engine.py/mixed_engine.py同参数同数据比对收益曲线与成交，差异超阈值即失败
 
 │   ├── 财务数据入库.py              # ✨【回写#36】财务数据入库薄入口：参数解析(--mode import/factors/all/--csv/--lookback-days/--output-dir)+路径探测+调用FinancialImportService；自动定位datasets/raw/financial/最新financial_history_*.csv；输出outputs/财务数据入库报告/全中文HTML+CSV报告；GUI财务数据栏「财务数据入库」选项共用同一服务
+│   ├── 财务CSV更新.py              # ✨【回写#74】财务CSV增量同步薄入口：参数(--all/--symbols/--start-date/--end-date/--no-import)+路径探测+调用FinancialSyncService；默认只拉financial_data缺失的清洗保留标的（增量优先，当前=601091.SH类新股）→与本地最新CSV合并去重→落盘→自动入库；全市场重拉与GUI行为一致；输出下一步建议（重跑全量清洗）
 
 │   └── 验收_回测引擎V5.py             # ✨【V5·P1】引擎验收入口：执行统一验收清单（事件/向量化/混合引擎正确性+三模式一致性+回归+性能基准），输出验收报告
 
@@ -455,7 +458,7 @@ Pythonwdhmm/
 
 │   │   ├── test_database.py          # 数据库连接、查询、迁移脚本（68项）✅已完成
 
-│   │   ├── test_data_clean.py        # 数据清洗单元测试（高频核心case + 极端边界，93项）✅已完成
+│   │   ├── test_data_clean.py        # 数据清洗单元测试（高频核心case + 极端边界，93项 + ✨【回写#71】B类财务缺失留痕 4 项，现 97 项）✅已完成
 
 │   │   ├── test_data_manager.py      # 数据加载、版本管理（68项）✅已完成
 
@@ -476,6 +479,11 @@ Pythonwdhmm/
 │   │   ├── test_data_clean_incremental.py # ✨【回写#57】增量更新日线走清洗管线测试（清洗合并保留全历史/重叠日去重/脏行剔除/前收盘上下文触发跳变剔除/清洗关闭返回None/无数据返回None/存量损坏仍写入，7项）✅已完成；✨【回写#69】增量清洗补派生量测试（+2项：A类量比5日均量基准/B类财务派生量与每股收益，现共10项）
 
 │   │   ├── test_data_download_pool_scope.py # ✨【回写#58】GUI日线下载标的范围=配置股票池测试（读池代码/文件缺失/解析失败/空池返回空不回退全市场/自定义池路径/run_daily用池列表而非全市场，6项）✅已完成；✨【回写#68】新增 scope="full_market" 全市场范围测试 2 项（用 get_stock_list 全市场列表且不写 processed / 缺 fetcher 抛 ValueError）
+
+│   │   ├── test_st_blacklist_clean.py # ✨【回写#70】ST/*ST/S*ST/SST 风险警示剔除测试（名单读取/前缀命中/名单过滤/联网刷新/前缀与ST串联/未启用ST兼容/报告字段，29项）✅已完成
+│   │   ├── test_data_export_columns.py # ✨【回写#72】全量导出列集合统一测试（CN_COLUMN_MAP/SELECT含turnover/临时DB 13列集合/无财务eps列存在，4项）✅已完成
+│   │   ├── test_financial_sync_service.py # ✨【回写#74】财务CSV增量同步测试（定位缺失标的14条排除/新旧合并去重17列头/无新记录None/增量流程/自动入库monkeypatch/无可拉取跳过，6项）✅已完成
+│   │   ├── test_data_download_finance_sync.py # ✨【回写#75】GUI财务CSV增量更新选项测试（选项注册完整/执行顺序在入库前/_entry_finance_sync调用服务返回同构汇总，3项）✅已完成
 
 │   │   ├── test_data_fingerprint.py  # ✨【V5·P0】数据指纹测试（哈希级差异检测：指纹生成/查询/缓存失效/旧数据替换，20项）
 
@@ -665,9 +673,10 @@ Pythonwdhmm/
     │   ├── loader.py                 # ✨【V5·P0】数据加载器（回测专用）：预取next_chunk+分块加载（chunk_size）+流水线模式（多bar并行预取）+内存水位降级（联动utils/memory_watcher，超阈值自动降为单块流式）；三模式引擎共用同一加载路径；与backtest/data_loader.py（历史数据提供器）分工互补
 
     │   ├── full_clean_service.py     # ✨【回写】全量清洗业务逻辑层：FullCleanService——DB读取→清洗管线→事务写回→清洗元信息落库→bad归档→可选重建processed（subprocess调scripts/数据导出_DB到processed.py）；唯一调用方=scripts/数据全量清洗.py（CLI与GUI全量清洗对话框共用）；业务逻辑归myquant，脚本只做薄入口（架构纪律）
-；✨【回写#59】新增增量清洗通道 run_incremental_clean/_load_incremental_records/_normalize_incremental_date（读暂存增量→清洗→DB+processed双写，仅清洗模式）
+；✨【回写#59】新增增量清洗通道 run_incremental_clean/_load_incremental_records/_normalize_incremental_date（读暂存增量→清洗→DB+processed双写，仅清洗模式）；✨【回写#70】新增 ST 风险警示剔除（load_st_blacklist/match_st_name/filter_st_blacklist_symbols/refresh_st_blacklist；resolve_symbols 串联代码前缀规则后；报告含 exclude_st/st_excluded_count/st_excluded_symbols）；✨【回写#71】B类财务缺失留痕（worker_clean 对 financial_data 无记录标的打 warning 并置 result["no_financial"]；run() 聚合 no_financial_symbols 并打印"待补财务标的"；build_report 新增 no_financial_count/no_financial_symbols）
 
     │   ├── financial_service.py      # ✨【回写#36】财务数据入库服务：FinancialImportService——财务CSV读取→字段映射(net_profit_parent→net_profit/report_date YYYYMMDD→YYYY-MM-DD)→分批批量入库financial_data；FactorEngine向量化计算14个技术因子(SMA5/10/20/60,EMA12/26,MACD_DIF/DEA/HIST,RSI14,BOLL_UP/MID/LOW,ATR14)+5个基本面因子(PE/PB/ROE/毛利率/资产负债率)映射最新报告期→长表写入factor_data；生成全中文表头HTML+CSV入库报告；防未来函数(财务仅取report_date<=trade_date最新一期)；调用方=scripts/财务数据入库.py + GUI财务数据入库选项
+    │   ├── financial_sync_service.py # ✨【回写#74】财务CSV增量同步服务：FinancialSyncService——定位financial_data缺失标的（与#71 no_financial同口径，排除规则对齐清洗14条）→逐标get_financial_history拉多期财务（防未来函数end_date过滤）→按symbol+report_date合并去重keep=新落盘financial_history_YYYYMMDD.csv→可选自动入库FinancialImportService→复查缺失；调用方=scripts/财务CSV更新.py + 豆包定时任务
 
     │   ├── cleaner/                  # ✨【数据清洗核心模块】已重构为面向对象架构
 
@@ -757,7 +766,7 @@ Pythonwdhmm/
 
     │   ├── engine.py                 # ✨【V5·P1】回测引擎升级为三模式调度器：BacktestScheduler（按config engine.mode切换event/vectorized/mixed，统一数据加载+防未来函数校验+结果封装）+ run_backtest()便捷函数；原Engine保留为event真值基准（时间序列事件循环+内置LookaheadGuard：on_market_event记录成交铁律3、_execute_signal记录信号铁律4、on_stop assert_pass()；_bar_date_str/_order_signal_dates映射）
 
-    │   ├── data_loader.py            # 数据加载：DataProviderBase + HistoricalDataProvider，从processed加载，严格end_date过滤防未来
+    │   ├── data_loader.py            # 数据加载：DataProviderBase + HistoricalDataProvider，从processed加载，严格end_date过滤防未来；✨【回写#72】EN_TO_CN_COLUMN_MAP 加 turnover→换手率（与导出脚本列集合同步）
 
     │   ├── metrics.py                # 绩效指标：夏普、最大回撤、胜率、Calmar、Sortino
 
@@ -862,9 +871,9 @@ Pythonwdhmm/
     │   ├── cleanup_dialog.py         # ✨【回写·2026-09-07】项目清理对话框（方案一·上下分区）：被run_清理GUI.py调用；清理项目勾选（A-E）/回测输出保留N期/执行模式单选/保护清单只读/预览结果滚动区；后台线程扫描删除+信号桥；业务逻辑在utils/cleanup_service.py
 
     │   ├── data_clean_dialog.py      # ✨【回写】全量清洗配置对话框：被run_全量清洗GUI.py调用；可视化配置清洗范围/参数 → 生成config/data_clean_run.json（运行时状态文件，不入库）→ subprocess调起scripts/数据全量清洗.py；与CLI共用同一FullCleanService（data_access/full_clean_service.py）
-；✨【回写#59】新增「增量清洗」按钮（与「开始清洗」并列，对暂存增量做清洗+DB/processed双写）
+；✨【回写#59】新增「增量清洗」按钮（与「开始清洗」并列，对暂存增量做清洗+DB/processed双写）；✨【回写#70】新增「剔除 ST/*ST/S*ST/SST 风险警示股」选项组（勾选+名单数量预览+刷新名单/编辑按钮；_collect_config 输出 exclude_st/st_blacklist_path）
 
-    │   ├── data_download_dialog.py   # ✨【回写·第12条】数据下载管理器对话框：被run_数据下载GUI.py调用；8项数据下载管理功能；✨【第12条】财务数据卡片=同行布局（勾选框+「最新一期」/「自定义范围」单选+开始/结束QDateEdit），历史模式调用get_financial_history保存为financial_history_*.csv；标题栏加最小化按钮（WindowMinimizeButtonHint）；DownloadWorker后台线程+进度回调；设计稿见docs/mockups/
+    │   ├── data_download_dialog.py   # ✨【回写·第12条】数据下载管理器对话框：被run_数据下载GUI.py调用；8项数据下载管理功能；✨【第12条】财务数据卡片=同行布局（勾选框+「最新一期」/「自定义范围」单选+开始/结束QDateEdit），历史模式调用get_financial_history保存为financial_history_*.csv；标题栏加最小化按钮（WindowMinimizeButtonHint）；DownloadWorker后台线程+进度回调；设计稿见docs/mockups/；✨【回写#75】财务数据标签页新增「财务CSV增量更新」选项（finance_sync）：OPTIONS/DISPLAY_ORDER/EXEC_ORDER/TASKS/tab_defs 5处+新增_entry_finance_sync（调用FinancialSyncService.run_sync增量+自动入库，复用#74业务不重复）；✨【回写#76】删除「全部更新」选项（方案A）：OPTIONS/DISPLAY/EXEC/TASKS 删 all + MUTEX_GROUPS 收缩为[full,incremental] + 删_entry_all + tab_defs 财务分组4→3项；选项10→9项，财务侧统一走 finance_sync；全项目grep核验其它文件"all"均无关零改动
 ；✨【回写#59】run_daily M0落增量审计文件incremental_YYYYMMDD.parquet + M1复用records消除双拉取 + M2分批限速 + M4单标原子隔离；✨【回写#67】run_daily save 返回 None 计入 save_failed 并告警 + GUI 完成信息改显 processed 实际写入数（不再以拉取成功数冒充）；✨【回写#68】「通达信单独下载」更名「通达信全量数据」并恢复全市场全量入库（run_daily 新增 scope 参数："full_market"=get_stock_list 全市场 A 股只写 quant.db 原始层不写 processed；"pool"=默认池内清洗写 processed；增量旁路独立）
 
     │   ├── widgets/
@@ -1768,3 +1777,48 @@ Pythonwdhmm/
    c. **tests/unit/test_data_clean_incremental.py**：新增 2 项（现共 10 项）——A类：新行含 涨跌幅/振幅/量比 且量比=成交量/存量前5日均量（processed 兜底上下文 5 根）；B类：fake DataQueries 注入 financial_data 后新行含 换手率/流通股本/市盈动/每股收益（按报告期年化×2），存量行不被重算
    d. **验证结果**：py_compile manager.py + test_data_clean_incremental.py 通过；test_data_clean_incremental.py 10 passed；回归 test_update_symbol_incremental_start.py + test_data_incremental_clean_dual.py + test_data_download_pool_scope.py 通过（以当次运行输出为准）
    e. **纪律遵守**：业务逻辑归 myquant/data_access/manager.py（蓝图已登记）；派生量算法复用既有 derived_metrics.py 不新增文件；测试为既有文件追加用例（不新增蓝图外文件）；目录树已同步；工作区 git 未提交改动由用户拍板
+70. ✨【回写记录·2026-09-29·全量清洗GUI新增ST风险警示股剔除（*ST/ST/S*ST/SST名单）】用户需求：在 run_全量清洗GUI.py 入口加入剔除 ST/*ST/S/SST 选项。前置核查：项目代码层无 ST 剔除模块（exclude_st 配置无消费点、全库无名称过滤逻辑），18 只缺失标的根因=下载源未提供（ST/退市类通达信停更）。本次落地（事实来源：本次落地，代码级核验：py_compile 通过 + 新增 29 项单测 + 回归 126 passed + 全量 pytest tests/unit = 1616 passed/2 skipped + GUI 离屏冒烟通过）：
+   a. **myquant/data_access/full_clean_service.py**：新增 ST 名单族——ST_BLACKLIST_CONFIG="config/st_blacklist.yaml"、ST_NAME_PREFIXES=("*ST","S*ST","SST","ST")、load_st_blacklist（离线读名单，缺失/损坏→空 dict 不阻断）、match_st_name（名称前缀命中）、filter_st_blacklist_symbols（按 symbol 剔除，与 exclude_rules 代码前缀正交）、refresh_st_blacklist（联网拉全市场名称→筛选→写 yaml，fetcher 可注入）；FullCleanService.__init__ 读 config.exclude_st（缺省 False）；resolve_symbols 改为"前缀过滤→ST 名单过滤"两段串联，st_excluded 记录被剔除清单；run() 打印口径含 ST风险警示数；build_report 新增 exclude_st/st_excluded_count/st_excluded_symbols 字段
+   b. **myquant/gui/data_clean_dialog.py**：排除规则框内新增 ST 选项组（「剔除 ST / *ST / S*ST / SST 风险警示股」复选框默认勾选 + 名单数量实时预览 + 「刷新名单」「编辑名单」按钮）；_update_preview 将名单∩DB 存量并入排除统计（勾选时预览"…+ ST 风险警示 N 只"）；_collect_config 新增 exclude_st/st_blacklist_path 写入 data_clean_run.json；不勾选则行为与之前完全一致（向后兼容）
+   c. **config/st_blacklist.example.yaml**：新增名单模板（真实名单 config/st_blacklist.yaml 不入库，由「刷新名单」联网生成或人工编辑）；示例为占位说明不编造真实名称
+   d. **tests/unit/test_st_blacklist_clean.py（29 项）**：名单读取（正常/缺失/解析失败/空/非字典）/ 前缀命中（*ST/ST/S*ST/SST 四类+边界）/ 名单过滤（剔除/空名单/名单外）/ 联网刷新（生成落盘/无 ST 空名单，fetcher 注入不联网）/ resolve_symbols 串联（前缀+ST/未启用兼容/空名单/自定义 symbols）/ 报告字段（启用与未启用）
+   e. **验证结果**：py_compile full_clean_service.py + data_clean_dialog.py + test_st_blacklist_clean.py 通过；新单测 29 passed；清洗链路回归 126 passed；全量 pytest tests/unit = 1616 passed / 2 skipped / 0 failed；GUI 离屏冒烟：DataCleanDialog 可实例化、勾选/取消配置字段正确、名单为空预览回退原文案
+   f. **纪律遵守**：业务逻辑归 myquant/data_access/full_clean_service.py + myquant/gui/data_clean_dialog.py（均在蓝图登记）；新增 config/st_blacklist.example.yaml（模板入库）与 tests/unit/test_st_blacklist_clean.py 已登记目录树；真实名单 config/st_blacklist.yaml 遵循 config/*.yaml 不入库约定；临时补丁脚本在 Agent workspace（.sessions 目录，不入库）
+71. ✨【回写记录·2026-09-30·全量B类派生量补数（财务数据入库 + B类财务缺失留痕）】交接摘要《交接摘要_全量补B类派生量_20260929.md》步骤1落地 + 缺口B留痕（事实来源：本次落地，代码级核验：py_compile 通过 + 新增 4 项单测 + 全量 pytest tests/unit = 1620 passed/2 skipped）：
+   a. **财务数据入库（步骤1）**：datasets/raw/financial/financial_history_20260912.csv（53.7MB / 329,722行 / 5,314标的，2026-09-12生成）经 scripts/财务数据入库.py --mode import 导入 financial_data = 329,722 行 / 5,314 标的 / 区间 1990-12-31~2026-06-30；net_profit（映射自 net_profit_parent）非空 329,625；eps 非空 304,469；circ_mv/total_mv 非空 5,235（集中最新一期 2026-06-30）；601091.SH 无财务记录（9-17 上市新股早于 CSV 生成，B类留空待下期财务CSV覆盖，用户拍板空置）
+   b. **myquant/data_access/full_clean_service.py（缺口B留痕）**：worker_clean 对"有行情但 financial_data 无记录"标的打 warning 并置 result["no_financial"]=True（B类列留空，与增量侧 no_data 可见留痕治理对齐）；run() 聚合 self.no_financial_symbols 并在 [5/6] 打印"待补财务标的(financial_data 无记录，B类留空) N 只"；build_report 新增 no_financial_count/no_financial_symbols 字段（与 #70 st_excluded 同模式）
+   c. **tests/unit/test_data_clean.py**：新增 TestFullCleanBClassTrace 4 项（worker 财务缺失标记留痕/财务存在不标记/报告含财务缺失字段/字段默认），文件由 93 项 → 97 项
+   d. **验证结果**：py_compile full_clean_service.py + test_data_clean.py 通过；test_data_clean.py 97 passed；ST+增量相关回归 43 passed；全量 pytest tests/unit = 1620 passed / 2 skipped / 0 failed
+   e. **纪律遵守**：业务逻辑归 myquant/data_access/full_clean_service.py（蓝图已登记）；测试为既有文件追加用例（不新增蓝图外文件）；B类派生量计算逻辑（derived_metrics.compute_b_class_metrics）未改动，仅补数据源与留痕；财务入库报告已生成 outputs/财务数据入库报告/；目录树已同步；工作区 git 未提交改动由用户拍板
+72. ✨【回写记录·2026-09-30·全量导出补换手率列（列集合统一）】交接摘要步骤2落地：全量导出列集合与增量 _en_to_cn 列集合统一（13列）（事实来源：本次落地，代码级核验：py_compile 通过 + 新增 4 项单测 + 全量 pytest tests/unit = 1624 passed/2 skipped + 真实 DB 000001.SZ 列集合验证）：
+   a. **scripts/数据导出_DB到processed.py**：CN_COLUMN_MAP 加 turnover→换手率；load_symbol_data 的 SELECT 加 turnover 列；数值转换列表加 turnover；docstring 列列表更新——导出列集合=日期+开盘价/最高价/最低价/收盘价/成交量/成交额/涨跌幅/振幅/量比/换手率/流通股本/市盈动/每股收益（13列）
+   b. **myquant/backtest/data_loader.py**：EN_TO_CN_COLUMN_MAP 加 turnover→换手率（与导出脚本同步，先例同 #68/#69 振幅量比/流通股本市盈动补列）
+   c. **tests/unit/test_data_export_columns.py（4 项）**：CN_COLUMN_MAP 含换手率 / SELECT 含 turnover（防失同步）/ load_symbol_data 临时DB输出13列集合且换手率与每股收益值透传 / 无财务记录每股收益列存在全None
+   d. **验证结果**：py_compile 数据导出_DB到processed.py + data_loader.py + test_data_export_columns.py 通过；真实 DB 000001.SZ load_symbol_data 输出13列一致（换手率当前NULL=DB未重跑清洗，步骤3后自动有值；eps=1.24 已随财务入库生效）；全量 pytest tests/unit = 1624 passed / 2 skipped / 0 failed
+   e. **纪律遵守**：业务逻辑归 scripts/数据导出_DB到processed.py（蓝图已登记薄入口）+ myquant/backtest/data_loader.py（蓝图已登记）；新增测试文件 test_data_export_columns.py 已登记目录树；未改动增量链路与 processed 存量（仅代码列集合，processed 待步骤3全量清洗重建时生效）；工作区 git 未提交改动由用户拍板
+73. ✨【回写记录·2026-09-30·全量重跑清洗+重建processed（B类派生量全量落地）】交接摘要步骤3+步骤4落地：纯执行操作（无代码改动，代码/数据改动均已在 #71/#72 就绪）（事实来源：本次执行 + 验证，代码级核验：清洗统计 + processed 全量扫描 + 全量 pytest tests/unit = 1624 passed/2 skipped）：
+   a. **执行命令**：scripts/数据全量清洗.py --config config/data_clean_run.json（exclude_rules 14条含688.SH科创板剔除；rebuild_processed=True；backup=True；workers=8；batch_id=full_clean_20260930_222426；配置沿用 #70 前 GUI 生成文件，st_blacklist.yaml 不存在故 ST 剔除 0 只，行为与上次清洗一致）
+   b. **清洗结果**：标的解析 全量5317 / 排除指数基金2109 / 实际清洗3208；[4/6] 并行清洗 3208/3208 ok、written=3208、err=0、耗时1558s；清洗前自动备份 quant.db → backups/backup_20260930_222436_quant_before_clean.db（5388.8MB）
+   c. **缺口B留痕生效**：[5/6] 待补财务标的(financial_data 无记录，B类留空) 1 只 = 601091.SH（#71 新增报告字段 no_financial_count=1 / no_financial_symbols=['601091.SH']，清洗报告 outputs/clean_all_full_clean_20260930_222426.json）
+   d. **processed 重建**：[重建] 白名单 3208 只全量导出 parquet（新导出3208/跳过0/失败0，耗时109s）；缓存同步扫描 3208 标的、变更 3208（data_source=full_clean）
+   e. **步骤4 验证结果**：全量扫描 3208 个 parquet——列集合 100% 与 13 列目标一致（含换手率）、无空文件、无读取错误；B类四列非空率：换手率 100.0%（13018140/13018146）、流通股本 100.0%、市盈动 85.8%、每股收益 90.9%（历史期财务未覆盖属正常）；000001.SZ 最新行（2026-09-28）四列全部有值（换手率0.3548/流通股本201.6亿/市盈动4.43/每股收益1.24）；601091.SH 保持空置（1行、B类四列全空，待下期财务CSV更新后自动覆盖）；最新日期范围 2026-04-03~2026-09-28；全量 pytest tests/unit = 1624 passed / 2 skipped / 0 failed
+   f. **纪律遵守**：本次为纯执行，零代码改动；processed 重建属全量侧既定范围（增量侧未触碰）；备份已保留可回滚；outputs/ 为运行时产物不入蓝图树；工作区 git 未提交改动由用户拍板
+74. ✨【回写记录·2026-09-30·缺口A：财务CSV更新自动机制（增量拉取+合并+自动入库+定时）】交接摘要缺口A落地（用户确认：增量优先+自动入库+豆包定时任务；事实来源：本次落地，代码级核验：py_compile通过 + 新增6项单测 + 全量 pytest tests/unit = 1630 passed/2 skipped）：
+   a. **myquant/data_access/financial_sync_service.py（新增）**：FinancialSyncService——find_missing_financial_symbols（查 quant.db：market_data 有行情但 financial_data 无记录的 A 股标的；排除规则对齐清洗实际口径 config/data_clean_run.json 14条：000.SH/399/880/5.SH/1.SZ/30.SZ/688.SH/4/8/92/68/90/20/99，与 #71 no_financial 留痕同口径，注意 full_clean_service.DEFAULT_EXCLUDE_RULES 仅10条为脚本无config兜底，本服务以14条为准）；fetch_financial_history（逐标调用数据源 get_financial_history 拉多期财务，防未来函数 end_date 过滤，sleep 0.3s 限速与GUI一致）；merge_and_save_csv（新记录与本地最新 financial_history_*.csv 按 symbol+report_date 去重 keep=新，落盘 financial_history_YYYYMMDD.csv，17列头保持）；run_sync（定位→拉取→合并→可选自动入库 FinancialImportService→复查缺失）
+   b. **scripts/财务CSV更新.py（新增，薄入口）**：参数 --all 全市场/--symbols 指定/--start-date/--end-date/--no-import；默认增量（只拉缺失标的）+自动入库；打印下一步建议（重跑全量清洗）
+   c. **tests/unit/test_financial_sync_service.py（新增，6项）**：定位缺失标的并过滤排除规则（14条含B股200011.SZ被排除）/新旧合并去重17列头保持/无新记录返回None/增量流程（fake fetcher）/自动入库（monkeypatch FinancialImportService）/无可拉取跳过
+   d. **自动机制**：豆包定时任务（月度，doubao-cron-scheduler）定时执行 scripts/财务CSV更新.py，触发后由用户拍板重跑全量清洗（清洗侧 B 类派生量自动补齐链路已在 #71/#72/#73 闭环）
+   e. **验证结果**：py_compile 3文件通过；test_financial_sync_service.py 6 passed；全量 pytest tests/unit = 1630 passed / 2 skipped / 0 failed；真实增量拉取验证见 #74 后续执行记录
+   f. **纪律遵守**：业务逻辑归 myquant/data_access/financial_sync_service.py（蓝图登记）；scripts/财务CSV更新.py 薄入口（蓝图登记）；测试文件蓝图登记；未改动既有文件（financial_service.py/full_clean_service.py 零触碰）；工作区 git 未提交改动由用户拍板
+75. ✨【回写记录·2026-09-30·缺口A GUI化：数据下载管理器「财务数据」新增财务CSV增量更新选项】用户要求将 scripts/财务CSV更新.py（#74）能力接入 run_数据下载GUI.py 的财务数据标签页（事实来源：本次落地，代码级核验：py_compile通过 + 新增3项单测 + 全量 pytest tests/unit = 1633 passed/2 skipped）：
+   a. **myquant/gui/data_download_dialog.py（6处）**：OPTIONS 加 finance_sync（显示名"财务CSV增量更新"，提示"自动补齐新股财务:拉取+合并+入库"）；DISPLAY_ORDER/EXEC_ORDER 均在 finance 后、finance_import 前插入；新增 _entry_finance_sync（调用 FinancialSyncService.run_sync(auto_import=True)，汇总与其它任务同构）；TASKS 注册 finance_sync（无需代码参数）；tab_defs 财务数据分组=4项2x2网格（finance/finance_sync/finance_import/all）
+   b. **tests/unit/test_data_download_finance_sync.py（新增，3项）**：选项注册完整（OPTIONS/DISPLAY/EXEC/TASKS）/ 执行顺序 finance_sync 先于 finance_import / _entry_finance_sync monkeypatch 调用服务并返回同构汇总
+   c. **与#74关系**：GUI 选项与 scripts/财务CSV更新.py 共用同一 FinancialSyncService（业务逻辑不重复，GUI 仅新增薄入口函数）；与既有"财务数据入库"（finance_import）为上下游关系——finance_sync 先拉取合并生成新CSV并入库，finance_import 再对最新CSV入库+因子+报告，二者先后勾选可串联（入库幂等：同 symbol+report_date REPLACE）
+   d. **验证结果**：py_compile data_download_dialog.py + test_data_download_finance_sync.py 通过；新单测 3 passed；全量 pytest tests/unit = 1633 passed / 2 skipped / 0 failed
+   e. **纪律遵守**：业务逻辑归 #74 已登记的 financial_sync_service.py（复用不重复）；data_download_dialog.py 已在蓝图登记（修改合法）；新测试文件已登记目录树；工作区 git 未提交改动由用户拍板
+76. ✨【回写记录·2026-09-30·方案A：删除「全部更新」选项（数据下载管理器财务数据标签页）】用户拍板方案A：移除「全部更新（日线增量+财务）」选项，财务侧改用「财务CSV增量更新」（#75/#74）。事实来源：本次落地，代码级核验：py_compile通过 + 静态断言9项选项完整 + offscreen GUI实例化冒烟通过 + 全量 pytest tests/unit = 1633 passed/2 skipped（与#75基线持平，证明删除不破坏既有功能）：
+   a. **myquant/gui/data_download_dialog.py（删除7处）**：OPTIONS 删 all 条目；DISPLAY_ORDER/EXEC_ORDER 删 "all"（选项 10→9 项）；**MUTEX_GROUPS 由 ["full","incremental","all"] 收缩为 ["full","incremental"]**（关键联动，否则互斥校验引用已删 key）；删除 _entry_all 函数；TASKS 删 all 注册；tab_defs 财务数据分组 4→3 项（finance/finance_sync/finance_import）
+   b. **移除理由（与#75讨论一致）**：all 内部无独立逻辑，仅是 _entry_incremental+_entry_finance 的组合壳；与「增量更新日线」100%同通道重复、与挂起增量任务同写 processed 重复、财务段 run_finance 覆盖写 CSV 可能冲掉finance_sync 合并增量——移除后入口唯一、重复消除、覆盖坑消失
+   c. **未动其它应用代码**：routes/config_builder/live/risk/monitoring/scripts财务数据入库.py 等处的 "all" 均为无关字符串（mode="all"/scope="all" 等），已通过全项目 grep 核验并保持零改动；docstring "8项功能" 为历史残留文案（早于 tdx/web 新增），不在点名范围不扩大改动；:1311 汇总展示逻辑只检查 "daily" in summary（不引用 all key），保留安全
+   d. **删除后日常流程**：「增量更新日线」+「财务CSV增量更新」（需因子时加「财务数据入库」）；「下载财务数据」（全市场）保留作季度全量刷新显式入口
+   e. **纪律遵守**：补丁脚本精确字符串替换+断言幂等；工作区 git 未提交改动由用户拍板

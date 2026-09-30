@@ -74,8 +74,8 @@ OPTIONS: Dict[str, tuple] = {
     "full":        ("全量下载日线数据",           "约5000只,30-60分钟",           "常规"),
     "incremental": ("增量更新日线",               "盘后每日:1-5分钟",             "常规"),
     "finance":     ("下载财务数据",               "PE/PB/业绩报表",               "常规"),
+    "finance_sync": ("财务CSV增量更新",           "自动补齐新股财务:拉取+合并+入库", "常规"),
     "finance_import": ("财务数据入库",             "CSV导入DB+因子计算+中文报告",   "常规"),
-    "all":         ("全部更新",                   "日线增量+财务",                "常规"),
     "validate":    ("数据质量校验",               "完整性/异常检测",              "常规"),
     "status":      ("查看同步状态报告",           "仅展示,不下载",                "常规"),
     "tdx":         ("通达信全量数据",             "D:\\TDX本地源,全市场A股,零联网入库", ""),
@@ -84,18 +84,18 @@ OPTIONS: Dict[str, tuple] = {
 
 # 勾选区显示顺序（与参考图 v2 一致：常规项在前，新增项沉底）
 DISPLAY_ORDER: List[str] = [
-    "full", "incremental", "finance", "finance_import", "all",
+    "full", "incremental", "finance", "finance_sync", "finance_import",
     "validate", "status", "tdx", "web",
 ]
 
 # 固定执行顺序（勾选后按此顺序串行执行）
 EXEC_ORDER: List[str] = [
-    "full", "incremental", "finance", "finance_import", "all",
+    "full", "incremental", "finance", "finance_sync", "finance_import",
     "tdx", "web", "validate", "status",
 ]
 
 # 互斥组：同组同时勾选时弹提示二选一
-MUTEX_GROUPS: List[List[str]] = [["full", "incremental", "all"]]
+MUTEX_GROUPS: List[List[str]] = [["full", "incremental"]]
 
 
 # ════════════════════════════════════════════════════════════════
@@ -467,6 +467,39 @@ def _entry_finance_import(project_root: Path, progress_callback=None) -> dict:
         return {"total": 0, "success": 0, "failed": 1, "skipped": 0,
                 "error": "datasets/raw/financial/ 下未找到 financial_history_*.csv"}
 
+
+def _entry_finance_sync(project_root: Path, progress_callback=None) -> dict:
+    """
+    财务CSV增量同步（缺口A GUI化）：定位缺失标的 → 拉取 → 合并 → 自动入库。
+
+    调用 myquant.data_access.financial_sync_service.FinancialSyncService，
+    默认增量模式（只拉 financial_data 缺失的清洗保留标的，如新上市未进历史
+    CSV 的 601091.SH 类）并自动入库 financial_data。
+
+    Args:
+        project_root: 项目根目录。
+        progress_callback: 可选进度回调 (current, total, message_dict)。
+
+    Returns:
+        汇总字典（与其它任务函数同构：total/success/failed/skipped/records）。
+    """
+    from myquant.data_access.financial_sync_service import FinancialSyncService
+
+    svc = FinancialSyncService(project_root)
+    stats = svc.run_sync(auto_import=True, progress_callback=progress_callback)
+    return {
+        "total": len(stats.symbols),
+        "success": stats.fetched_symbols,
+        "failed": stats.skipped_symbols,
+        "skipped": 0,
+        "records": stats.new_records,
+        "csv_path": stats.csv_path,
+        "import": stats.import_stats,
+        "missing_after": stats.missing_after,
+    }
+
+
+
     def _adapt_cb(current: int, total: int, message: str) -> None:
         if progress_callback:
             progress_callback(current, total, {
@@ -490,22 +523,6 @@ def _entry_finance_import(project_root: Path, progress_callback=None) -> dict:
         }
     finally:
         svc.close()
-
-
-def _entry_all(project_root: Path, progress_callback=None) -> dict:
-    """全部更新：日线增量 + 财务数据（合并汇总到顶层，兼容 summary_total 统计）"""
-    daily = _entry_incremental(project_root, progress_callback)
-    finance = _entry_finance(project_root, progress_callback)
-    return {
-        "total": daily.get("total", 0) + finance.get("total", 0),
-        "success": daily.get("success", 0) + finance.get("success", 0),
-        "failed": daily.get("failed", 0) + finance.get("failed", 0),
-        "skipped": daily.get("skipped", 0) + finance.get("skipped", 0),
-        "parquet_saved": daily.get("parquet_saved", 0),
-        "records": finance.get("records", 0),
-        "daily": daily,
-        "finance": finance,
-    }
 
 
 def _entry_tdx(project_root: Path, progress_callback=None) -> dict:
@@ -593,8 +610,8 @@ TASKS: Dict[str, tuple] = {
     "full":        (OPTIONS["full"][0], _entry_full, False),
     "incremental": (OPTIONS["incremental"][0], _entry_incremental, False),
     "finance":     (OPTIONS["finance"][0], _entry_finance, False),
+    "finance_sync": (OPTIONS["finance_sync"][0], _entry_finance_sync, False),
     "finance_import": (OPTIONS["finance_import"][0], _entry_finance_import, False),
-    "all":         (OPTIONS["all"][0], _entry_all, False),
     "validate":    (OPTIONS["validate"][0], _entry_validate, False),
     "status":      (OPTIONS["status"][0], _entry_status, False),
     "tdx":         (OPTIONS["tdx"][0], _entry_tdx, False),
@@ -918,7 +935,7 @@ class DataDownloadDialog(QDialog):
         # 标签页分组定义
         tab_defs = [
             ("行情数据", ["full", "incremental", "tdx", "web"]),
-            ("财务数据", ["finance", "finance_import", "all"]),
+            ("财务数据", ["finance", "finance_sync", "finance_import"]),
             ("数据管理", ["validate", "status"]),
         ]
 

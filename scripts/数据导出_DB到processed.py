@@ -7,7 +7,8 @@ quant.db → processed 完整导出脚本
 
 功能:
   1. 从 quant.db 读取所有有 hfq 日线数据的标的
-  2. 逐只读取完整日线数据（trade_date, open, high, low, close, volume, amount, pct_chg）
+  2. 逐只读取完整日线数据（trade_date, open, high, low, close, volume, amount, pct_chg,
+     amplitude, volume_ratio, turnover, float_share, pe_dynamic）
   3. 按日期升序排序，设置日期为索引
   4. 保存为 parquet 文件到 processed 目录
   5. 导出后做完整性校验：每只股票的行数/日期范围对比 DB
@@ -49,6 +50,7 @@ CN_COLUMN_MAP: Dict[str, str] = {
     "volume_ratio": "量比",
     "float_share": "流通股本",
     "pe_dynamic": "市盈动",
+    "turnover": "换手率",
 }
 
 #: DataFrame 索引（日期列）的中文显示名
@@ -94,7 +96,7 @@ def get_symbol_stats(conn: sqlite3.Connection, symbol: str) -> Tuple[int, str, s
 def load_symbol_data(conn: sqlite3.Connection, symbol: str) -> pd.DataFrame:
     """从 quant.db 读取单只标的的完整 hfq 日线数据"""
     query = """
-        SELECT trade_date, open, high, low, close, volume, amount, pct_chg, amplitude, volume_ratio, float_share, pe_dynamic
+        SELECT trade_date, open, high, low, close, volume, amount, pct_chg, amplitude, volume_ratio, turnover, float_share, pe_dynamic
         FROM market_data
         WHERE symbol=? AND period='daily' AND adjust='hfq'
         ORDER BY trade_date ASC
@@ -105,7 +107,7 @@ def load_symbol_data(conn: sqlite3.Connection, symbol: str) -> pd.DataFrame:
     df = df.set_index('trade_date')
     df.index.name = CN_INDEX_NAME
     # 确保数值列为 float
-    for col in ['open', 'high', 'low', 'close', 'volume', 'amount', 'pct_chg', 'amplitude', 'volume_ratio', 'float_share', 'pe_dynamic']:
+    for col in ['open', 'high', 'low', 'close', 'volume', 'amount', 'pct_chg', 'amplitude', 'volume_ratio', 'turnover', 'float_share', 'pe_dynamic']:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
     # 表头全中文显示（下游加载器自动映射回英文列名，不影响回测）

@@ -32,6 +32,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import yaml
+
 from myquant.core.logger import get_logger
 from myquant.database.connection import get_connection
 from myquant.database.queries import CleanDataQueries, DataQueries
@@ -93,6 +95,109 @@ def filter_excluded_symbols(
         else:
             keep.append(sym)
     return keep, excluded
+
+
+# ═══════════════════════════════════════════════
+#  ST 风险警示股剔除（*ST/ST/S*ST/SST，按名称名单）
+# ═══════════════════════════════════════════════
+
+ST_BLACKLIST_CONFIG: str = "config/st_blacklist.yaml"
+# 名称前缀命中顺序无关（均为前缀判断）：*ST(退市风险) / S*ST / SST / ST
+ST_NAME_PREFIXES: Tuple[str, ...] = ("*ST", "S*ST", "SST", "ST")
+
+
+def load_st_blacklist(project_root: Optional[Path] = None) -> Dict[str, str]:
+    """读取 ST 风险警示股名单（config/st_blacklist.yaml → {symbol: name}）。
+
+    离线数据源：由 GUI「刷新名单」联网生成或人工维护。文件缺失/解析失败
+    返回空 dict（不阻断清洗），与 exclude_st=False 行为一致。
+
+    Args:
+        project_root: 项目根目录；None 用模块默认。
+
+    Returns:
+        Dict[str, str]: {symbol: 股票名称}；缺失/损坏返回空 dict。
+    """
+    root = Path(project_root) if project_root else PROJECT_ROOT
+    path = root / ST_BLACKLIST_CONFIG
+    if not path.exists():
+        return {}
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        if not isinstance(data, dict):
+            return {}
+        return {str(k): str(v) for k, v in data.items() if k and v}
+    except Exception as e:
+        logger.warning(f"[st] ST 名单读取失败（按空名单处理）: {path}: {e}")
+        return {}
+
+
+def match_st_name(name: str) -> bool:
+    """名称是否命中 ST 风险警示前缀（*ST / S*ST / SST / ST）。
+
+    Args:
+        name: 股票名称。
+
+    Returns:
+        bool: True=命中风险警示前缀。
+    """
+    n = str(name or "").strip()
+    return n.startswith(ST_NAME_PREFIXES)
+
+
+def filter_st_blacklist_symbols(
+    symbols: List[str], blacklist: Dict[str, str]
+) -> Tuple[List[str], List[str]]:
+    """按 ST 名单剔除。Returns: (保留标的, 被剔除的 ST 标的)。
+
+    与 exclude_rules（代码前缀）正交：本函数只按 symbol 命中名单判断。
+    """
+    if not blacklist:
+        return symbols, []
+    keep, excluded = [], []
+    for sym in symbols:
+        if sym in blacklist:
+            excluded.append(sym)
+        else:
+            keep.append(sym)
+    return keep, excluded
+
+
+def refresh_st_blacklist(
+    project_root: Optional[Path] = None,
+    fetcher: Optional[Any] = None,
+) -> Dict[str, str]:
+    """联网刷新 ST 名单：拉全市场 A 股名称 → 按 *ST/S*ST/SST/ST 前缀筛选 → 写 yaml。
+
+    Args:
+        project_root: 项目根目录；None 用模块默认。
+        fetcher: 数据源（测试可注入）；None 用默认 composite fetcher（tdx+akshare）。
+
+    Returns:
+        Dict[str, str]: 新生成的 {symbol: name} 名单（已落盘）。
+
+    Raises:
+        Exception: 网络/数据源失败时向上抛，由 GUI 捕获提示（不静默）。
+    """
+    root = Path(project_root) if project_root else PROJECT_ROOT
+    if fetcher is None:
+        from myquant.data_access.factory import create_default_fetcher
+        fetcher = create_default_fetcher()
+    stocks = fetcher.get_stock_list()
+    blacklist: Dict[str, str] = {}
+    for s in stocks or []:
+        symbol = s.get("symbol")
+        name = s.get("name")
+        if symbol and match_st_name(name):
+            blacklist[str(symbol)] = str(name)
+    out = root / ST_BLACKLIST_CONFIG
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(
+        yaml.safe_dump(blacklist, allow_unicode=True, sort_keys=True),
+        encoding="utf-8",
+    )
+    logger.info(f"[st] ST 名单已刷新: {len(blacklist)} 只 → {out}")
+    return blacklist
 
 
 # ═══════════════════════════════════════════════
@@ -277,6 +382,12 @@ def worker_clean(task: Tuple[str, str, Dict[str, Any]]) -> Dict[str, Any]:
                 fin_rows = dq.conn.execute("SELECT report_date, circ_mv, total_mv, net_profit FROM financial_data WHERE symbol=? ORDER BY report_date", (symbol,))
                 if fin_rows:
                     compute_b_class_metrics(cleaned, [dict(r) for r in fin_rows])
+                else:
+                    # 有行情但 financial_data 无记录：B类留空并留痕（与增量侧 no_data 可见留痕对齐）
+                    logger.warning(
+                        "B类财务数据缺失（financial_data 无记录），换手率/流通股本/市盈动留空: %s", symbol
+                    )
+                    result["no_financial"] = True
             except Exception as _e:
                 logger.warning(f"B类派生量计算失败 {symbol}: {_e}")
         bad = pipe_result["bad"]
@@ -343,6 +454,10 @@ class FullCleanService:
         self.batch_source = f"full_clean:{self.batch_id}"
         self.workers = int(config.get("workers", 8))
         self.exclude_rules = config.get("exclude_rules") or []
+        self.exclude_st = bool(config.get("exclude_st", False))
+        self.st_blacklist = load_st_blacklist(PROJECT_ROOT) if self.exclude_st else {}
+        self.st_excluded: List[str] = []
+        self.no_financial_symbols: List[str] = []  # B类财务缺失留痕：有行情但 financial_data 无记录
         self.rebuild_processed = bool(config.get("rebuild_processed", True))
         self.keep_symbols: Optional[List[str]] = None  # 清洗保留标的，重建 processed 白名单
         self.do_backup = bool(config.get("backup", True))
@@ -368,7 +483,15 @@ class FullCleanService:
         if self.config.get("symbols"):
             filter_set = {s.strip() for s in str(self.config["symbols"]).split(",") if s.strip()}
             all_symbols = [s for s in all_symbols if s in filter_set]
-        return filter_excluded_symbols(all_symbols, self.exclude_rules)
+        keep, excluded_prefix = filter_excluded_symbols(all_symbols, self.exclude_rules)
+        if self.exclude_st and self.st_blacklist:
+            keep, excluded_st = filter_st_blacklist_symbols(keep, self.st_blacklist)
+            self.st_excluded = excluded_st
+            excluded = excluded_prefix + excluded_st
+        else:
+            self.st_excluded = []
+            excluded = excluded_prefix
+        return keep, excluded
 
     # ── 断点续传：本次 batch 已 completed 的标的 ──
     def load_completed_symbols(self, cdq: CleanDataQueries) -> set:
@@ -456,8 +579,12 @@ class FullCleanService:
         try:
             keep_symbols, excluded = self.resolve_symbols(dq)
             self.keep_symbols = keep_symbols
+            base_excluded = len(excluded) - len(self.st_excluded)
             print(f"\n[1/6] 标的解析完成: 全量={len(keep_symbols)+len(excluded)}, "
-                  f"排除指数/基金={len(excluded)}, 实际清洗={len(keep_symbols)}")
+                  f"排除指数/基金={base_excluded}, ST风险警示={len(self.st_excluded)}, "
+                  f"实际清洗={len(keep_symbols)}")
+            if self.st_excluded:
+                print(f"       ST 剔除示例: {self.st_excluded[:5]} ...")
             if excluded:
                 print(f"       排除示例: {excluded[:5]} ...")
 
@@ -491,6 +618,8 @@ class FullCleanService:
                             dq, symbol, result.get("cleaned_data"),
                         )
                         counts[write_status if write_status in counts else "error"] += 1
+                        if result.get("no_financial"):
+                            self.no_financial_symbols.append(symbol)
                         if not self.dry_run:
                             self.record_meta(cdq, symbol, result, write_status)
                         s = result.get("stats") or {}
@@ -513,6 +642,9 @@ class FullCleanService:
             print(f"[5/6] 清洗完成: 统计 {counts}")
             if self.failed_symbols:
                 print(f"       失败标的({len(self.failed_symbols)}): {self.failed_symbols[:10]}")
+            if self.no_financial_symbols:
+                print(f"       待补财务标的(financial_data 无记录，B类留空): "
+                      f"{len(self.no_financial_symbols)} 只，样例: {self.no_financial_symbols[:10]}")
 
             # 重建 processed（集成 parquet 导出）
             if self.rebuild_processed and not self.dry_run:
@@ -583,6 +715,11 @@ class FullCleanService:
             "finished_at": datetime.now().isoformat(timespec="seconds"),
             "duration_sec": round(time.time() - t0, 2),
             "exclude_rules": self.exclude_rules,
+            "exclude_st": self.exclude_st,
+            "st_excluded_count": len(self.st_excluded),
+            "st_excluded_symbols": self.st_excluded[:50],
+            "no_financial_count": len(self.no_financial_symbols),
+            "no_financial_symbols": self.no_financial_symbols[:50],
             "dry_run": self.dry_run,
             "counts": counts,
             "summary": stats_agg,
