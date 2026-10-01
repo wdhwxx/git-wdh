@@ -1261,7 +1261,7 @@ class _FakeDataQueries:
         self.conn = conn
         self._rows = rows
 
-    def get_market_data(self, symbol: str, period: str = "daily", adjust: str = "hfq") -> List[Dict[str, Any]]:
+    def get_market_data(self, symbol: str, period: str = "daily", adjust: str = "raw") -> List[Dict[str, Any]]:
         return list(self._rows)
 
 

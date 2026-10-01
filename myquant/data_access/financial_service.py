@@ -468,7 +468,7 @@ class FinancialImportService:
     def _load_market_df(self, symbol: str) -> Optional[pd.DataFrame]:
         """加载单只标的行情为 DataFrame（按 trade_date 排序，日期索引）。"""
         try:
-            rows = self._queries.get_market_data(symbol=symbol, period="daily", adjust="hfq")
+            rows = self._queries.get_market_data(symbol=symbol, period="daily", adjust="raw")
         except sqlite3.Error as e:
             logger.debug("行情查询失败 [%s]: %s", symbol, e)
             return None

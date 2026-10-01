@@ -54,7 +54,7 @@ class MockDataSource(DataSourceBase):
         return "mock_data_source"
 
     def get_market_data(self, symbol, start_date=None, end_date=None,
-                        period="daily", adjust="hfq"):
+                        period="daily", adjust="raw"):
         from myquant.data_access import MarketDataResult
         dates = pd.date_range("2024-01-01", periods=10, freq="B")
         records = [
@@ -66,7 +66,7 @@ class MockDataSource(DataSourceBase):
                                 period=period, adjust=adjust)
 
     def get_market_data_batch(self, symbols, start_date=None, end_date=None,
-                              period="daily", adjust="hfq"):
+                              period="daily", adjust="raw"):
         return {s: self.get_market_data(s, start_date, end_date, period, adjust)
                 for s in symbols}
 
@@ -304,7 +304,7 @@ class TestDatasetVersion:
         v = DatasetVersion(version=1, symbol="000001.SZ")
         assert v.data_type == "bar"
         assert v.period == "daily"
-        assert v.adjust == "hfq"
+        assert v.adjust == "raw"
         assert v.source == "offline"
         assert v.record_count == 0
 
@@ -348,7 +348,7 @@ class TestDatasetVersion:
     def test_data_file_name(self):
         """数据文件名生成"""
         v = DatasetVersion(version=1, symbol="000001.SZ", data_type="bar",
-                           period="daily", adjust="hfq")
+                           period="daily", adjust="raw")
         fname = v.data_file_name
         assert isinstance(fname, str)
         assert fname.endswith(".csv")

@@ -206,7 +206,7 @@ class DataFetcher:
         start_date: Optional[str],
         end_date: Optional[str],
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
         **kwargs,
     ) -> str:
         """
@@ -233,7 +233,7 @@ class DataFetcher:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
         use_cache: bool = True,
     ) -> MarketDataResult:
         """
@@ -286,7 +286,7 @@ class DataFetcher:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
     ) -> Dict[str, MarketDataResult]:
         """
         批量获取行情数据（逐只带缓存）

@@ -67,7 +67,7 @@ class _FakeManager:
     def __init__(self) -> None:
         self.symbols: List[str] = []
 
-    def update_symbols_batch(self, symbols, period="daily", adjust="hfq", progress_callback=None, force_full=False) -> List[Dict[str, Any]]:
+    def update_symbols_batch(self, symbols, period="daily", adjust="raw", progress_callback=None, force_full=False) -> List[Dict[str, Any]]:
         """记录标的并返回空结果。"""
         self.symbols = list(symbols)
         return []
@@ -170,7 +170,7 @@ class _FakeManagerWithResults(_FakeManager):
         super().__init__()
         self._results = results
 
-    def update_symbols_batch(self, symbols, period="daily", adjust="hfq", progress_callback=None, force_full=False) -> List[Dict[str, Any]]:
+    def update_symbols_batch(self, symbols, period="daily", adjust="raw", progress_callback=None, force_full=False) -> List[Dict[str, Any]]:
         self.symbols = list(symbols)
         return self._results
 

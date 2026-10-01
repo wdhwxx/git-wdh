@@ -3,10 +3,10 @@
 """
 quant.db → processed 完整导出脚本
 ====================================
-从 quant.db 导出所有标的的 hfq 后复权日线数据到 datasets/processed/ 目录。
+从 quant.db 导出所有标的的 raw 不复权日线数据到 datasets/processed/ 目录。
 
 功能:
-  1. 从 quant.db 读取所有有 hfq 日线数据的标的
+  1. 从 quant.db 读取所有有 raw 日线数据的标的
   2. 逐只读取完整日线数据（trade_date, open, high, low, close, volume, amount, pct_chg,
      amplitude, volume_ratio, turnover, float_share, pe_dynamic）
   3. 按日期升序排序，日期保留为「日期」列（扁平式，整数 YYYYMMDD）
@@ -81,11 +81,11 @@ def find_project_root() -> Path:
 
 
 def get_all_symbols(conn: sqlite3.Connection) -> List[str]:
-    """从 quant.db 读取所有有 hfq 日线数据的标的代码"""
+    """从 quant.db 读取所有有 raw 日线数据的标的代码"""
     cur = conn.cursor()
     cur.execute("""
         SELECT DISTINCT symbol FROM market_data
-        WHERE period='daily' AND adjust='hfq'
+        WHERE period='daily' AND adjust='raw'
         ORDER BY symbol
     """)
     return [r[0] for r in cur.fetchall()]
@@ -97,18 +97,18 @@ def get_symbol_stats(conn: sqlite3.Connection, symbol: str) -> Tuple[int, str, s
     cur.execute("""
         SELECT COUNT(*), MIN(trade_date), MAX(trade_date)
         FROM market_data
-        WHERE symbol=? AND period='daily' AND adjust='hfq'
+        WHERE symbol=? AND period='daily' AND adjust='raw'
     """, (symbol,))
     row = cur.fetchone()
     return row[0], row[1], row[2]
 
 
 def load_symbol_data(conn: sqlite3.Connection, symbol: str) -> pd.DataFrame:
-    """从 quant.db 读取单只标的的完整 hfq 日线数据"""
+    """从 quant.db 读取单只标的的完整 raw 日线数据"""
     query = """
         SELECT trade_date, open, high, low, close, volume, amount, pct_chg, amplitude, volume_ratio, turnover, float_share, pe_dynamic
         FROM market_data
-        WHERE symbol=? AND period='daily' AND adjust='hfq'
+        WHERE symbol=? AND period='daily' AND adjust='raw'
         ORDER BY trade_date ASC
     """
     df = pd.read_sql_query(query, conn, params=(symbol,))

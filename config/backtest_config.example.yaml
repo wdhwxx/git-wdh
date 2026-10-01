@@ -109,7 +109,7 @@ data:
   data_dir: "./datasets/processed"    # 数据目录（相对路径，跨机器可迁移）
   data_format: "parquet"               # 数据格式：parquet / csv
   date_column: "date"                  # 时间字段名
-  adjust: "hfq"                        # 复权方式：hfq=后复权（回测推荐）/ qfq=前复权 / none=不复权
+  adjust: "raw"                        # 复权方式：raw=不复权原始层（当前库内）/ hfq=后复权 / qfq=前复权（预留）
   price_columns:                       # 价格字段映射（根据实际数据调整）
     open: "open"
     high: "high"

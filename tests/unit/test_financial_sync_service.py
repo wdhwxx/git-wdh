@@ -39,7 +39,7 @@ def _make_db(tmp_path: Path) -> Path:
     for sym in ("600000.SH", "601091.SH", "688001.SH", "200011.SZ"):
         conn.execute(
             _MARKET_INSERT,
-            (sym, "A股", "daily", "hfq", "2026-09-28", 1.0, 1.0, 1.0, 1.0,
+            (sym, "A股", "daily", "raw", "2026-09-28", 1.0, 1.0, 1.0, 1.0,
              1.0, 1.0, 0.0, None, None, None, None, None, "test"),
         )
     conn.execute(
@@ -194,7 +194,7 @@ class TestRunSync:
         conn.executescript(CREATE_FINANCIAL_DATA_SQL)
         conn.execute(
             _MARKET_INSERT,
-            ("600000.SH", "A股", "daily", "hfq", "2026-09-28", 1.0, 1.0, 1.0, 1.0,
+            ("600000.SH", "A股", "daily", "raw", "2026-09-28", 1.0, 1.0, 1.0, 1.0,
              1.0, 1.0, 0.0, None, None, None, None, None, "test"),
         )
         conn.execute(

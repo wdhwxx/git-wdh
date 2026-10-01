@@ -103,19 +103,19 @@ class KunpengParamScanner:
     # ── 阶段2：数据加载 ──
 
     def load_data(self, symbols: List[str]) -> Dict[str, Any]:
-        """加载真实行情（HistoricalDataProvider，hfq）。"""
+        """加载真实行情（HistoricalDataProvider，raw 不复权原始层）。"""
         from myquant.backtest.data_loader import HistoricalDataProvider
 
         provider = HistoricalDataProvider(
             processed_dir=self._processed_dir,
-            default_adjust="hfq",
+            default_adjust="raw",
             data_format="parquet",
         )
         return provider.load_multiple(
             symbols,
             start_date=self.START_DATE,
             end_date=None,
-            adjust="hfq",
+            adjust="raw",
         )
 
     # ── 阶段3：单组合评估 ──

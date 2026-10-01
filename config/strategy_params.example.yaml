@@ -166,6 +166,6 @@ bollinger:
 common:
   data_frequency: "daily"                    # 数据频率：daily / 60m / 30m / 15m / 5m / 1m
   use_adjusted: true                         # 是否使用复权数据
-  adjust_type: "hfq"                         # 复权方式：hfq=后复权 / qfq=前复权
+  adjust_type: "raw"                         # 复权方式：raw=不复权原始层（当前）/ hfq=后复权 / qfq=前复权（预留）
   min_price: 2.0                             # 过滤2元以下仙股
   max_price: 500.0                           # 过滤500元以上高价股（可根据需要调整）

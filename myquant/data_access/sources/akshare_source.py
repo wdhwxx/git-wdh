@@ -320,7 +320,7 @@ class AkshareDataSource(DataSourceBase):
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
     ) -> MarketDataResult:
         """
         通过多源获取行情数据（V2 自动降级链）
@@ -355,7 +355,7 @@ class AkshareDataSource(DataSourceBase):
         ak_end = end_date.replace("-", "") if end_date else datetime.now().strftime("%Y%m%d")
 
         # 复权方式映射
-        adjust_map = {"hfq": "hfq", "qfq": "qfq", None: "", "": ""}
+        adjust_map = {"raw": "", "hfq": "hfq", "qfq": "qfq", None: "", "": ""}
         adjust_param = adjust_map.get(adjust, "")
 
         records: List[Dict] = []

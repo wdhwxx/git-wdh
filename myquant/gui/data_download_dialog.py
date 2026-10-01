@@ -250,7 +250,7 @@ def run_daily(
         results = manager.update_symbols_batch(
             symbols,
             period="daily",
-            adjust="hfq",
+            adjust="raw",
             progress_callback=progress_callback,
             force_full=force_full,
         )
@@ -291,7 +291,7 @@ def run_daily(
     results = manager.update_symbols_batch(
         symbols,
         period="daily",
-        adjust="hfq",
+        adjust="raw",
         progress_callback=progress_callback,
         force_full=force_full,
     )

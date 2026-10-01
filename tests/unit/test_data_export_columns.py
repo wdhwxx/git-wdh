@@ -74,7 +74,7 @@ class TestExportColumnSet:
     def test_load_symbol_data_输出完整列集合(self, tmp_path: Path) -> None:
         """load_symbol_data 输出 13 列中文集合（含换手率），与增量 _en_to_cn 一致。"""
         row: List[Any] = [
-            "000001.SZ", "A股", "daily", "hfq", "2026-09-28", 11.28, 11.41, 11.27, 11.3,
+            "000001.SZ", "A股", "daily", "raw", "2026-09-28", 11.28, 11.41, 11.27, 11.3,
             71534144.0, 810575808.0, 0.0, 1.23, 1.2389, 0.8165, 1.94e10, 5.0, "test",
         ]
         db = _make_db(tmp_path, "000001.SZ", row)
@@ -101,7 +101,7 @@ class TestExportColumnSet:
     def test_load_symbol_data_无财务记录每股收益为None(self, tmp_path: Path) -> None:
         """financial_data 无记录 → 每股收益列仍存在（全 None），列集合不受影响。"""
         row: List[Any] = [
-            "601091.SH", "A股", "daily", "hfq", "2026-09-17", 13.0, 20.8, 11.73, 20.8,
+            "601091.SH", "A股", "daily", "raw", "2026-09-17", 13.0, 20.8, 11.73, 20.8,
             168125152.0, 2.18e9, None, None, None, None, None, None, "test",
         ]
         db = _make_db(tmp_path, "601091.SH", row)

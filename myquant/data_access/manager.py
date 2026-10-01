@@ -170,7 +170,7 @@ class DatasetVersion:
     period : str
         K线周期：daily/minute/tick
     adjust : str | None
-        复权方式：hfq/qfq/None
+        复权方式：raw（当前库内不复权原始层）/hfq/qfq（预留）
     created_at : str
         版本创建时间（UTC，YYYY-MM-DD HH:MM:SS）
     source : str
@@ -200,7 +200,7 @@ class DatasetVersion:
     symbol: str
     data_type: str = "bar"
     period: str = "daily"
-    adjust: Optional[str] = "hfq"
+    adjust: Optional[str] = "raw"
     created_at: Optional[str] = None
     source: str = "offline"
     record_count: int = 0
@@ -248,7 +248,7 @@ class DatasetVersion:
             symbol=data.get("symbol", ""),
             data_type=data.get("data_type", "bar"),
             period=data.get("period", "daily"),
-            adjust=data.get("adjust", "hfq"),
+            adjust=data.get("adjust", "raw"),
             created_at=data.get("created_at"),
             source=data.get("source", "offline"),
             record_count=data.get("record_count", 0),
@@ -341,7 +341,7 @@ class DataManager:
         self,
         symbol: str,
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
         force_full: bool = False,
     ) -> Dict:
         """
@@ -451,7 +451,7 @@ class DataManager:
         self,
         symbols: List[str],
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
         batch_size: int = DEFAULT_BATCH_SIZE,
         progress_callback: Optional[Callable] = None,
         force_full: bool = False,
@@ -526,7 +526,7 @@ class DataManager:
         self,
         market: str = "A股",
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
         progress_callback: Optional[Callable] = None,
         force_full: bool = False,
     ) -> List[Dict]:
@@ -854,7 +854,7 @@ class DataManager:
         self,
         market: str = "A股",
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
         progress_callback: Optional[Callable] = None,
     ) -> Dict:
         """
@@ -901,7 +901,7 @@ class DataManager:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
         data_type: str = "bar",
         clean_config: Optional[Dict] = None,
         save_bad: bool = True,
@@ -1025,7 +1025,7 @@ class DataManager:
         symbol: str,
         start_date: str,
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
         limit: int = 5,
     ) -> List[Dict[str, Any]]:
         """
@@ -1087,7 +1087,7 @@ class DataManager:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
         records: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[str]:
         """
@@ -1106,7 +1106,7 @@ class DataManager:
             start_date: 增量区间开始日期（YYYY-MM-DD），None 表示全量。
             end_date: 增量区间截止日期（YYYY-MM-DD）。
             period: K线周期，默认 daily。
-            adjust: 复权方式，默认 hfq。
+            adjust: 复权方式，默认 raw（不复权原始层）。
             records: 可选，调用方已拉取的增量区间原始记录（update_symbol 的 result["data"]）；
                 传入则不重新拉取（消除增量双拉取），None 时按 start_date/end_date 自行拉取（向后兼容）。
 
@@ -1460,7 +1460,7 @@ class DataManager:
         symbol: str,
         data_type: str = "bar",
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
     ) -> Optional[Path]:
         """
         查找同条件下最新的已保存 processed 文件。
@@ -1512,7 +1512,7 @@ class DataManager:
         symbol: str,
         data_type: str = "bar",
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
         deduplicate_with_latest: bool = False,
     ) -> Optional[str]:
         """
@@ -1670,7 +1670,7 @@ class DataManager:
         records: List[Dict],
         data_type: str = "bar",
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
         source: str = "offline",
         clean_run_id: Optional[str] = None,
         parent_version: Optional[int] = None,
@@ -1752,7 +1752,7 @@ class DataManager:
         records: Optional[List[Dict]] = None,
         data_type: str = "bar",
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
         description: str = "",
         db_connection: Any = None,
     ) -> DatasetVersion:
@@ -1990,7 +1990,7 @@ class DataManager:
         version: int,
         data_type: str = "bar",
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
         description: str = "",
     ) -> str:
         """

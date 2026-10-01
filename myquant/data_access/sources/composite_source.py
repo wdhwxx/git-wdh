@@ -262,7 +262,7 @@ class CompositeDataSource(DataSourceBase):
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
     ) -> MarketDataResult:
         """
         获取行情数据（自动降级）

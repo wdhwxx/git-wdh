@@ -98,8 +98,8 @@ DEFAULT_TRANSFER_FEE_PCT: float = 0.001  # 过户费（%，买卖双向）
 DEFAULT_SLIPPAGE_PCT: float = 0.02  # 滑点（%，固定 bps 模型）
 DEFAULT_BENCHMARK: str = "000300.SH"  # 基准指数代码
 DEFAULT_RISK_FREE_PCT: float = 2.0  # 无风险利率（%）
-ADJUST_MODES: Tuple[str, ...] = ("hfq", "qfq", "none")  # 复权方式（值）
-ADJUST_LABELS: Tuple[str, ...] = ("前复权 (hfq)", "后复权 (qfq)", "不复权 (none)")
+ADJUST_MODES: Tuple[str, ...] = ("raw",)  # 复权方式（值；库内为不复权原始层）
+ADJUST_LABELS: Tuple[str, ...] = ("不复权原始层 (raw)",)
 LOG_LEVELS: Tuple[str, ...] = ("INFO", "DEBUG", "WARNING", "ERROR")
 BENCHMARK_PRESETS: Tuple[str, ...] = ("000300.SH", "000905.SH", "000001.SH", "399006.SZ")
 OUTPUT_DIR_PLACEHOLDER: str = "留空=默认 results/batch_backtest"
@@ -138,7 +138,7 @@ class BatchRunOptions:
         slippage_pct: 滑点（界面百分比数值，Worker 内转 bps）。
         benchmark: 基准指数代码（绩效口径）。
         risk_free_rate: 无风险利率（小数）。
-        adjust: 复权方式（hfq/qfq/none）。
+        adjust: 复权方式（raw：库内不复权原始层）。
         log_level: 日志级别（INFO/DEBUG/WARNING/ERROR）。
         incremental: True 增量回测（数据/参数未变化时复用缓存）。
         output_dir: 明细输出目录；空字符串表示默认 results/batch_backtest。
@@ -169,7 +169,7 @@ class BatchRunOptions:
     slippage_pct: float = 0.02
     benchmark: str = DEFAULT_BENCHMARK
     risk_free_rate: float = 0.02
-    adjust: str = "hfq"
+    adjust: str = "raw"
     log_level: str = "INFO"
     incremental: bool = True
     output_dir: str = ""
@@ -1139,7 +1139,7 @@ def _main() -> int:
     if opts.commission_rate != 0.0002 or opts.risk_free_rate != 0.02:
         print("[FAIL] 成本/绩效默认值转换异常")
         return 1
-    if opts.adjust != "hfq" or opts.log_level != "INFO" or not opts.incremental:
+    if opts.adjust != "raw" or opts.log_level != "INFO" or not opts.incremental:
         print("[FAIL] 复权/日志/增量默认值异常")
         return 1
     if tab._spin_min_commission.value() != 5.0 or tab._spin_stamp_tax.value() != 0.1:

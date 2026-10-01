@@ -58,7 +58,7 @@ class _MockFetcher:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
         use_cache: bool = True,
     ) -> MarketDataResult:
         """返回预设区间记录（忽略日期过滤，测试聚焦清洗/合并逻辑）。"""

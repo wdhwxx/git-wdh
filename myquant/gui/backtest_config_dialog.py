@@ -307,7 +307,7 @@ def build_config_dict(
             "data_dir": "./datasets/processed",
             "data_format": "parquet",
             "date_column": "date",
-            "adjust": "hfq",
+            "adjust": "raw",
             "price_columns": {
                 "open": "open",
                 "high": "high",

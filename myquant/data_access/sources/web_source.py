@@ -373,7 +373,7 @@ class WebSourceDataSource(DataSourceBase):
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
     ) -> MarketDataResult:
         """
         获取日线行情（东财→新浪→腾讯 三级降级，每源3秒超时）
@@ -389,7 +389,7 @@ class WebSourceDataSource(DataSourceBase):
 
         ak_start = start_date.replace("-", "") if start_date else "19900101"
         ak_end = end_date.replace("-", "") if end_date else datetime.now().strftime("%Y%m%d")
-        adjust_map = {"hfq": "hfq", "qfq": "qfq", None: "", "": ""}
+        adjust_map = {"raw": "", "hfq": "hfq", "qfq": "qfq", None: "", "": ""}
         adjust_param = adjust_map.get(adjust, "")
 
         # 降级链：东财 → 新浪 → 腾讯

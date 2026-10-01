@@ -256,7 +256,7 @@ class TdxDataSource(DataSourceBase):
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
     ) -> MarketDataResult:
         """
         获取通达信本地行情数据
@@ -274,9 +274,9 @@ class TdxDataSource(DataSourceBase):
         period : str
             周期（仅支持daily）
         adjust : str | None
-            复权方式（通达信本地数据通常是不复权，
-            后复权需通过复权因子计算，当前版本返回原始数据，
-            复权计算由上层indicators层处理）
+            复权方式（通达信本地数据仅提供不复权原始价，
+            复权计算由上层数据加工层（复权因子，见回写#80）处理，
+            当前版本直接返回原始数据，入库标签为 raw）
 
         Returns
         -------

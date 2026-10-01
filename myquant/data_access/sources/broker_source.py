@@ -139,7 +139,7 @@ class BrokerDataSource(DataSourceBase):
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
     ) -> MarketDataResult:
         """
         获取历史行情数据（券商SDK通常提供有限的历史数据）

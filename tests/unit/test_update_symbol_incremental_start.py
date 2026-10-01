@@ -52,7 +52,7 @@ class _FakeFetcher:
         self.calls: List[Dict[str, Any]] = []
 
     def get_market_data(self, symbol, start_date=None, end_date=None, period="daily",
-                        adjust="hfq", use_cache=False) -> MarketDataResult:
+                        adjust="raw", use_cache=False) -> MarketDataResult:
         self.last_start_date = start_date
         self.calls.append({"start_date": start_date, "end_date": end_date})
         today = datetime.now().strftime("%Y-%m-%d")
@@ -189,7 +189,7 @@ def test_update_symbol_正常增量起点为今天(tmp_path: Path, monkeypatch: 
 class _FakeSaveNoneManager:
     """伪 manager：拉取"成功"，但清洗写 processed 未产出文件（返回 None）。"""
 
-    def update_symbols_batch(self, symbols, period="daily", adjust="hfq",
+    def update_symbols_batch(self, symbols, period="daily", adjust="raw",
                              progress_callback=None, force_full=False) -> List[Dict[str, Any]]:
         return [{
             "symbol": "000001.SZ",

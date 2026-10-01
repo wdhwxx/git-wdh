@@ -70,7 +70,7 @@ class DataQueries:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
         market: str = "A股",
     ) -> List[Dict]:
         """
@@ -127,7 +127,7 @@ class DataQueries:
         symbols: List[str],
         trade_date: str,
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
     ) -> Dict[str, Dict]:
         """
         批量查询多只股票某一天的行情数据
@@ -160,7 +160,7 @@ class DataQueries:
         self,
         symbol: str,
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
     ) -> Optional[str]:
         """查询某只股票最新的行情日期（用于增量更新判断）"""
         adjust_clause = "adjust = ?" if adjust else "adjust IS NULL"

@@ -70,7 +70,7 @@ class AdjustType(Enum):
     """复权类型"""
     NONE = None                # 不复权
     QFQ = "qfq"                # 前复权
-    HFQ = "hfq"                # 后复权（交接文档5.2节约定，回测默认用此）
+    HFQ = "hfq"                # 后复权（预留；当前库内为 raw 不复权原始层，见回写#80）
 
 
 # ─────────────────────────────────────────────
@@ -102,7 +102,7 @@ class MarketDataResult:
         source: str = "",
         market: str = "A股",
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
     ):
         self.symbol = symbol
         self.market = market
@@ -251,7 +251,7 @@ class DataSourceBase(ABC):
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
     ) -> MarketDataResult:
         """
         获取单只股票行情数据
@@ -283,7 +283,7 @@ class DataSourceBase(ABC):
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         period: str = "daily",
-        adjust: Optional[str] = "hfq",
+        adjust: Optional[str] = "raw",
     ) -> Dict[str, MarketDataResult]:
         """
         批量获取多只股票行情数据（默认逐只调用，子类可优化为批量接口）
