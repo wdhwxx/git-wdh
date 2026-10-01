@@ -1,0 +1,17 @@
+# ST/*ST/S*ST/SST 风险警示股名单模板
+# =============================================
+# 真实名单见 config/st_blacklist.yaml（不入库，由 GUI「刷新名单」联网生成或人工编辑）。
+# 本文件为模板示例，登记蓝图目录树；真实名单格式与之一致：
+#   symbol: 股票名称
+#
+# 生成口径（full_clean_service.refresh_st_blacklist）：
+#   拉全市场 A 股名称（akshare stock_zh_a_spot_em）→ 名称以 *ST / ST / S*ST / SST 前缀命中 → 写入名单。
+#
+# 使用方式：
+#   python run_全量清洗GUI.py  → 勾选「剔除 ST / *ST / S*ST / SST 风险警示股」→ 可点「刷新名单」生成真实名单。
+# 清洗时（FullCleanService.resolve_symbols）：先按 exclude_rules 代码前缀过滤，
+#   再按本名单 symbol 命中剔除，两套规则正交串联。
+#
+# 示例格式（占位说明，真实名单由「刷新名单」按钮生成，勿手动编造）：
+# 000001.SZ: "ST示例"        # 名称以 ST 开头（其他风险警示）
+# 000002.SZ: "*ST示例"       # 名称以 *ST 开头（退市风险警示）
