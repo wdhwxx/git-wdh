@@ -186,8 +186,9 @@ class HistoricalDataProvider(DataProviderBase):
         self,
         processed_dir: Optional[Union[str, Path]] = None,
         default_period: str = "daily",
-        default_adjust: str = "hfq",
+        default_adjust: str = "raw",
         data_format: str = "parquet",
+        factor_svc: Optional[Any] = None,
     ):
         """
         Parameters
@@ -201,6 +202,8 @@ class HistoricalDataProvider(DataProviderBase):
         data_format : str
             数据格式："parquet"（默认，直接 {symbol}.parquet 文件）
                      或 "csv"（子目录 {symbol_safe}/bar_*.csv 文件，旧格式兼容）
+        factor_svc : FactorSyncService | None
+            复权因子服务（方案B #82，hfq/qfq 现算用）；None 则懒加载默认 DB 服务
         """
         if processed_dir is None:
             self._processed_dir = get_project_path("datasets", "processed")
@@ -209,6 +212,7 @@ class HistoricalDataProvider(DataProviderBase):
         self._default_period = default_period
         self._default_adjust = default_adjust
         self._data_format = data_format.lower()
+        self._factor_svc = factor_svc
 
         # 标的数据文件缓存: {symbol: {period: {adjust: filepath}}}
         self._file_cache: Dict[str, Dict[str, Dict[str, Path]]] = {}
@@ -446,6 +450,11 @@ class HistoricalDataProvider(DataProviderBase):
         if internal_cols:
             df = df.drop(columns=internal_cols)
 
+        # ★ 复权现算（方案B #82）：processed 只存 raw，hfq/qfq 按因子表内存变换
+        requested_adjust = adjust or self._default_adjust
+        if requested_adjust in ("hfq", "qfq") and not df.empty:
+            df = self._apply_factor_adjust(df, symbol, requested_adjust, end_date)
+
         if not df.empty:
             logger.info(
                 f"加载 {symbol}: {len(df)} 根K线, "
@@ -455,6 +464,80 @@ class HistoricalDataProvider(DataProviderBase):
             logger.warning(f"{symbol} 过滤后无数据")
 
         return df
+    # ── 复权现算（方案B #82） ──
+
+    def _ensure_factor_svc(self) -> None:
+        """懒加载复权因子服务（DB 不存在时静默降级，保持 None）。
+
+        项目根用 __file__ 推导（parents[2] = 项目根），不依赖 PROJECT_ROOT 探测
+        （marker 缺失时可能解析到错误目录，2026-10-01 实测）。
+        """
+        if self._factor_svc is not None:
+            return
+        from myquant.data_access.factor_sync_service import FactorSyncService
+
+        project_root = Path(__file__).resolve().parents[2]
+        db_path = project_root / "database" / "quant.db"
+        if db_path.exists():
+            try:
+                self._factor_svc = FactorSyncService(project_root, db_path=db_path)
+            except Exception as e:
+                logger.error(f"初始化复权因子服务失败: {type(e).__name__}: {e}")
+                self._factor_svc = None
+
+    def _get_factor_lookup(
+        self,
+        symbol: str,
+        as_of: Optional[str] = None,
+    ) -> Dict[str, float]:
+        """读取标的后复权因子 {event_date: factor}（<= as_of；防未来函数）。"""
+        self._ensure_factor_svc()
+        if self._factor_svc is None:
+            return {}
+        try:
+            return self._factor_svc.get_factor_lookup(symbol, as_of=as_of)
+        except Exception as e:
+            logger.error(f"读取复权因子失败[{symbol}]: {type(e).__name__}: {e}")
+            return {}
+
+    def _apply_factor_adjust(
+        self,
+        df: pd.DataFrame,
+        symbol: str,
+        adjust: str,
+        end_date: Optional[str],
+    ) -> pd.DataFrame:
+        """按复权因子表现算 hfq/qfq 价（processed 只存 raw，消费端内存变换）。
+
+        - hfq价 = raw价 × factor（事件日及之后生效）
+        - qfq价 = hfq价 / 最新因子（最新因子按 end_date 截断，防未来函数）
+        - 标的无因子事件时降级返回 raw 并告警（不阻断回测）
+        """
+        factors = self._get_factor_lookup(symbol, as_of=end_date)
+        if not factors:
+            logger.warning(f"{symbol} 无复权因子事件，adjust={adjust} 降级为不复权 raw")
+            return df
+
+        factor_series = pd.Series(factors)  # index 为 str 日期
+        factor_series.index = pd.to_datetime(factor_series.index)  # 转 Timestamp（避免 dict+index 错配致 NaN）
+        factor_series = factor_series.sort_index()
+        left = df.reset_index().sort_values(CN_INDEX_NAME)
+        right = pd.DataFrame({"因子日": factor_series.index, "_factor": factor_series.values})
+        right = right.sort_values("因子日")
+        merged = pd.merge_asof(
+            left, right, left_on=CN_INDEX_NAME, right_on="因子日", direction="backward"
+        )
+        merged["_factor"] = merged["_factor"].fillna(1.0)
+        if adjust == "qfq":
+            latest = float(factor_series.iloc[-1])
+            merged["_factor"] = merged["_factor"] / latest
+        for col in ("开盘价", "最高价", "最低价", "收盘价"):
+            if col in merged.columns:
+                merged[col] = pd.to_numeric(merged[col], errors="coerce") * merged["_factor"]
+        out = merged.drop(columns=["_factor"]).set_index(CN_INDEX_NAME)
+        out.index.name = CN_INDEX_NAME
+        return out.sort_index()
+
 
     def get_available_symbols(self) -> List[str]:
         """获取所有可用标的列表"""

@@ -10,12 +10,13 @@ schema.py - 数据库表结构定义
   5. 数据源表（数据源注册/优先级/健康状态）
   6. 数据同步状态表（每只股票最后更新时间）
   7. 建表/删表/表存在检查
+  8. 复权因子表（adjust_factor：除权除息事件后复权因子，方案B #82）
 
 设计原则:
   - 所有表带 market 字段（A股/港股/美股），为多市场扩展预留
   - 所有表带 period 字段（daily/minute/tick），为多周期预留
   - 行情表字段与交接文档5.2节约定一致
-  - 支持后复权(hfq)/前复权(qfq)/不复权(None)
+  - 行情表 adjust 字段：当前库内为不复权原始层(raw)，预留复权(hfq/qfq)扩展
   - 所有时间戳用UTC存储，展示时转上海时区
 """
 
@@ -32,6 +33,7 @@ TABLE_NAMES = {
     "market_data": "market_data",           # 行情数据表
     "financial_data": "financial_data",     # 财务数据表
     "factor_data": "factor_data",           # 因子数据表
+    "adjust_factor": "adjust_factor",       # 复权因子表（除权除息事件，方案B #82）
     "strategy_state": "strategy_state",     # 策略状态表
     "data_source": "data_source",           # 数据源注册表
     "sync_status": "sync_status",           # 数据同步状态表
@@ -51,7 +53,7 @@ CREATE TABLE IF NOT EXISTS market_data (
     symbol      TEXT    NOT NULL,           -- 股票代码，带后缀如 000001.SZ
     market      TEXT    NOT NULL DEFAULT 'A股',  -- 市场：A股/港股/美股
     period      TEXT    NOT NULL DEFAULT 'daily', -- 周期：daily/minute/tick
-    adjust      TEXT,                        -- 复权方式：hfq/qfq/None(不复权)
+    adjust      TEXT,                        -- 复权方式：raw(不复权原始层，当前)/hfq/qfq(预留)
     trade_date  TEXT    NOT NULL,           -- 交易日期 YYYY-MM-DD
     trade_time  TEXT,                        -- 交易时间（分钟线/tick用）HH:MM:SS
     open        REAL,                        -- 开盘价
@@ -136,6 +138,24 @@ CREATE TABLE IF NOT EXISTS factor_data (
 CREATE_FACTOR_INDEX_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_factor_symbol_date ON factor_data(symbol, trade_date);",
     "CREATE INDEX IF NOT EXISTS idx_factor_name_date ON factor_data(factor_name, trade_date);",
+]
+
+# 复权因子表（除权除息事件后复权因子，方案B #82：hfq价 = raw价 × factor，事件日及之后生效）
+CREATE_ADJUST_FACTOR_SQL = """
+CREATE TABLE IF NOT EXISTS adjust_factor (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol      TEXT    NOT NULL,           -- 股票代码
+    event_date  TEXT    NOT NULL,           -- 除权除息事件日 YYYY-MM-DD（该日及之后因子生效）
+    factor      REAL    NOT NULL,           -- 后复权因子（hfq价 = raw价 × factor）
+    data_source TEXT,                        -- 数据来源（akshare_em）
+    created_at  TEXT    DEFAULT (datetime('now')),
+    UNIQUE(symbol, event_date)
+);
+"""
+
+CREATE_ADJUST_FACTOR_INDEX_SQL = [
+    "CREATE INDEX IF NOT EXISTS idx_adj_factor_symbol ON adjust_factor(symbol);",
+    "CREATE INDEX IF NOT EXISTS idx_adj_factor_symbol_date ON adjust_factor(symbol, event_date);",
 ]
 
 # 策略状态表（回测/实盘状态持久化，崩溃恢复用）
@@ -268,6 +288,7 @@ ALL_CREATE_TABLE_SQL = [
     CREATE_MARKET_DATA_SQL,
     CREATE_FINANCIAL_DATA_SQL,
     CREATE_FACTOR_DATA_SQL,
+    CREATE_ADJUST_FACTOR_SQL,
     CREATE_STRATEGY_STATE_SQL,
     CREATE_DATA_SOURCE_SQL,
     CREATE_SYNC_STATUS_SQL,
@@ -279,6 +300,7 @@ ALL_CREATE_INDEX_SQL = (
     CREATE_MARKET_DATA_INDEX_SQL
     + CREATE_FINANCIAL_INDEX_SQL
     + CREATE_FACTOR_INDEX_SQL
+    + CREATE_ADJUST_FACTOR_INDEX_SQL
     + CREATE_STRATEGY_INDEX_SQL
     + CREATE_SYNC_INDEX_SQL
     + CREATE_CLEAN_RUN_INDEX_SQL
@@ -452,6 +474,7 @@ def drop_all_tables(connection) -> None:
         TABLE_NAMES["data_source"],
         TABLE_NAMES["strategy_state"],
         TABLE_NAMES["factor_data"],
+        TABLE_NAMES["adjust_factor"],
         TABLE_NAMES["financial_data"],
         TABLE_NAMES["market_data"],
     ]

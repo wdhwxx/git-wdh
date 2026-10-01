@@ -92,6 +92,50 @@ def _merge_config(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return merged
 
 
+def _rec_date_str(record: Dict[str, Any]) -> Optional[str]:
+    """提取记录日期字符串 YYYY-MM-DD（兼容 trade_date/date/datetime/timestamp 字段）。"""
+    for k in ("trade_date", "date", "datetime", "timestamp"):
+        v = record.get(k)
+        if v is not None:
+            s = str(v)
+            return s[:10] if len(s) >= 10 else s
+    return None
+
+
+def _factor_adjusted_jump_pct(
+    prev: Dict[str, Any],
+    rec: Dict[str, Any],
+    factor_lookup: Optional[Dict[str, float]],
+) -> Optional[float]:
+    """除权除息日跳变豁免（方案B #82）：有因子事件时按 hfq 价复算跳变。
+
+    因子语义：hfq价 = raw价 × factor，事件日及之后生效。
+    若前/后日任一存在因子事件，用复权价复算跳变（除权缺口被因子吸收）；
+    两日均无因子事件返回 None（调用方回退常规 raw 口径检测）。
+    """
+    if not factor_lookup:
+        return None
+    prev_date = _rec_date_str(prev)
+    curr_date = _rec_date_str(rec)
+    if not prev_date or not curr_date:
+        return None
+    f_prev = factor_lookup.get(prev_date)
+    f_curr = factor_lookup.get(curr_date)
+    if f_prev is None and f_curr is None:
+        return None
+    prev_close = prev.get("close")
+    curr_open = rec.get("open")
+    if not prev_close or float(prev_close) <= 0 or not curr_open:
+        return None
+    factor_prev = float(f_prev) if f_prev else 1.0
+    factor_curr = float(f_curr) if f_curr else factor_prev
+    hfq_prev = float(prev_close) * factor_prev
+    hfq_curr = float(curr_open) * factor_curr
+    if hfq_prev <= 0:
+        return None
+    return abs(hfq_curr - hfq_prev) / hfq_prev
+
+
 def _get_timestamp(record: Dict[str, Any]) -> float:
     """
     从记录中提取时间戳
@@ -272,7 +316,10 @@ def _detect_sequence_anomalies(
                     curr_open = rec.get("open")
                     if prev_close and curr_open and float(prev_close) > 0:
                         try:
-                            change_pct = abs(float(curr_open) - float(prev_close)) / float(prev_close)
+                            exempt_pct = _factor_adjusted_jump_pct(prev, rec, config.get("factor_lookup"))
+                            change_pct = exempt_pct if exempt_pct is not None else (
+                                abs(float(curr_open) - float(prev_close)) / float(prev_close)
+                            )
                             if change_pct > config.get("max_price_jump_pct", 0.22):
                                 msg = f"价格跳变 {change_pct:.2%} (open={curr_open}, prev_close={prev_close})"
                                 counts["price_jump"] += 1
@@ -704,7 +751,12 @@ class BarCleaner(CleanerBase):
                     curr_open = record.get("open")
                     if prev_close and curr_open and float(prev_close) > 0:
                         try:
-                            change_pct = abs(float(curr_open) - float(prev_close)) / float(prev_close)
+                            exempt_pct = _factor_adjusted_jump_pct(
+                                prev_record, record, self._config.get("factor_lookup")
+                            )
+                            change_pct = exempt_pct if exempt_pct is not None else (
+                                abs(float(curr_open) - float(prev_close)) / float(prev_close)
+                            )
                             if change_pct > self._config.get("max_price_jump_pct", 0.22):
                                 msg = f"价格跳变 {change_pct:.2%} (open={curr_open}, prev_close={prev_close})"
                                 warnings.append(msg)

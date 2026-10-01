@@ -151,3 +151,102 @@
 - **ST 剔除能力已实施**（蓝图 #70，2026-09-29 晚完成）：`full_clean_service.py`（ST 名单族 load/match/filter/refresh + resolve_symbols 串联）、`data_clean_dialog.py`（排除规则框内「剔除 ST / *ST / S*ST / SST」选项组 + 刷新/编辑名单按钮）、新增 `config/st_blacklist.example.yaml`（模板）与 `tests/unit/test_st_blacklist_clean.py`（29 项）；验证：py_compile 通过、新单测 29 passed、清洗链路回归 126 passed、全量 tests/unit = **1616 passed / 2 skipped / 0 failed**、GUI 离屏冒烟 + 真实 DB 端到端剔除生效。
 - 第 5.2 四条修复方案未动代码（除上述 #70 独立任务）；**18 只缺失的修复（下载层补数据）用户明确"暂时不动手"**。
 - 工作区 git 含本任务 3 改 + 2 新文件，提交与否由用户拍板。
+
+---
+
+## 9. 增量端到端亲测 + 列模板修复 + 规则化根治待办（2026-10-01 晚追加）
+
+> 本节为增量 F 清单落地（#77，执行A）后的端到端真实验证结论，与 8.x 衔接（用户 10-01 在 GUI「增量更新日线」亲测，从 3208→3226）。
+
+### 9.1 核实结论（已入库）
+
+- **缺口属实**：10-01 前 processed 全部 ≤09-28（3208 只，3185 只=09-28）；DB 09-29/09-30 均 0 行；交易所公告证实 09-29/09-30 为交易日（中秋 9-25~27 休市、国庆 10-01~07 休市）。本地 TDX .day 已含 29/30 → 无需等开市即可补。
+- **增量后实测**：processed 3208→**3226**（3186 只到 09-30、3 只到 09-29、37 只停牌 <09-29）；DB 全量 5317→5335（+18 只池内标的首次入库）。
+- **范围规则确实引入增量（F4，防焊死）**：processed 3226 = `resolve_incremental_symbols` 对 DB 全量 5335 实时推导的规则内集合（排除规则剔 2109、ST 剔 0）——**精确相等、零剔除零多余**；池=3226 与规则内=3226 恰好同数。
+- **18 只新增票溯源（trace_18.py）**：000584.SZ/000622.SZ/000627.SZ/000851.SZ/002231.SZ/002336.SZ/002750.SZ/600190.SH/600200.SH/600387.SH/600462.SH/600705.SH/600804.SH/601028.SH/601989.SH/603003.SH/603056.SH/603388.SH——18/18 在池配置内、18/18 经范围规则保留（正常 A 股代码非 ST）、DB 行情各行=640（2022 年~2025/2026-01 停牌）、financial_data=0、TDX 本地名单无名称。**即：池内规则内老停牌标的首次入库（此前下载层未入库），非规则漏网**。
+- **整库无变化（问题2）**：存量 3208 只结构全检通过；DB 逐值抽样对比 20 只 81282 行 **0 不一致**（存量与新增 09-29/09-30 均与 quant.db 权威源一致）。
+
+### 9.2 列模板缺陷与修复（蓝图 #78，已提交 0ec99a4）
+
+- **缺陷**：18 只新建 parquet 仅 10 列（缺 换手率/流通股本/市盈动/每股收益）。根因：增量"无存量新建"分支直接写清洗后现存列，B 类派生量依赖 financial_data（#69 缺失跳过）→ 列不建；存量追加靠 reindex 对齐故不暴露。全量导出为固定 14 列模板。
+- **修复**：`manager.py` 模块级 `PROCESSED_COLUMN_TEMPLATE`（14 列，与全量导出 load_symbol_data 一致）+ 无存量新建分支 reindex 对齐；18 只已有文件重写对齐（只补列不改行，逐值校验）；单测 +1 项（现 14 项）。
+- **验证**：py_compile PASS；增量链路相关 53 passed；全量 tests/unit **1653 passed / 2 skipped / 0 failed**；端到端复验 3226 文件结构异常=0、DB 逐值 81282 行 0 不一致。
+
+### 9.3 全池盘点（只读）与待决策项
+
+- 池 3226 只按 DB 最后交易日分类：A 类·无行情 0；**B 类·长期停牌/退市（最后<2026-06-01）=20**（18 只本次新建 + 000638.SZ 最后04-13、600355.SH 最后04-03 全量已导出 14 列正常）；C 类·2026 有数据但未到 09-29 =17（2026-06~09 停牌，如 000004.SZ 07-13、600293.SH 09-28）；活跃 3189。
+- **用户拍板方向（10-01 晚）**：清除 18 只停牌/退市老标的（processed 18 个 parquet 已确认）；**"长期停牌/退市不应进干净库"规则化根治 = 方案 A（待办，用户下班回家继续）**。
+
+### 9.4 ⏳ 待办：规则化根治（方案 A，用户已选，回家后继续）
+
+1. `config/data_clean_run.json` 排除规则新增「长期停牌/退市」项（默认阈值：DB 最后交易日距今 > 90 天 → 排除；阈值可配，动态推导、防焊死）。
+2. `full_clean_service.resolve_incremental_symbols` 串联该规则（需接入 DB 最后交易日查询；与全量 resolve_symbols 同源，注意全量导出也受影响——B 类 20 只将全部被规则排除）。
+3. 三处同步清理：processed 18 只移备份（不硬删，可追溯）；quant.db market_data 18 只行情；`backtest_kunpeng.yaml` stock_pool.codes 剔除（**必须同步，否则增量从 TDX 复发**）。
+4. 单测（新规则项：阈值内保留/超阈值排除/边界日/无 DB 数据回退）+ 蓝图回写 #79 + 全量回归。
+5. 完成后补记交接摘要（本项闭环）。
+
+### 9.5 Git 与环境（10-01 提交后状态）
+
+- 已提交：`84d68a3`（#71-76，含 #70 ST 主代码）→ `4b2af10`（#70 补齐：test_st_blacklist_clean.py 29 项 + st_blacklist.example.yaml）→ `0ec99a4`（#77 增量 F 清单 + #78 列模板，13 文件 938+/86-）。**工作区 CLEAN**。
+- 环境（本次会话=dgd 机器）：Python `C:\Users\dgd\anaconda3\envs\conda_wdh\python.exe`（3.11.16）；Bash 不可用，一律 PowerShell；项目根 `D:\Projects\Pythonwdhmm`（与交接 8.x 的 wdh52 机器为同一项目迁移，机器不同解释器路径不同）。
+- 一次性验证/修复脚本存于会话工作区（verify_gap_2930 / verify_inc_after / verify_inc_rules_and_integrity / verify_18_bad_cols / trace_18 / pool_audit / fix_18_cols），可复用；fix_18_cols.py 为 18 只 14 列重写脚本（已执行，18/18 PASS）。
+
+### 9.6 ✅ 规则化根治完成（蓝图 #79，2026-10-01 wdh52 机器，用户拍板"规则外全部"）
+
+- **阈值确定**：60 天（自然日，≈42 交易日；正常停牌 ≤10 交易日≈15 天，余量充足，覆盖暂停上市/长期重组停滞/退市整理）。⚠️ 与 9.4 草拟的"90 天"不同，以 60 天为准。
+- **规则实现**：`full_clean_service.py` 新增 `filter_long_suspended_symbols`（market_data(daily,hfq) MAX(trade_date) gap > 阈值剔除、等于保留；DB 无记录/解析失败/查询异常/阈值≤0 均保留不阻断）；`resolve_incremental_symbols` 串联（ref_date 可注入、stats 增 excluded_suspended、config 缺省 0 不启用）；`resolve_symbols` 全量侧用 dq.conn 同口径串联；`data_clean_dialog.py` 新增「剔除长期停牌/退市」QSpinBox（默认 60/0=不启用）+ 实时预览 + `_collect_config` 写 `exclude_suspended_days`（防 GUI 重写 config 丢字段）；`config/data_clean_run.json` 加 `exclude_st:true` + `exclude_suspended_days:60`。
+- **实测影响面**：DB 全量 5335 → 规则内 **3196**（长期停牌排除 **30 只** = B 类 20 + C 类停牌>60 天 10 只；用户点名 18 只 100% 命中）。
+- **三处同步清理（DB 不删——修正 9.4 第 3 步）**：① processed 移备份 30 只 → `backups/processed_excluded_20261001/`，processed=3196=规则内（差集空）✅；② 池 `backtest_kunpeng.yaml` 剔除 31 只（30 长期停牌 + 689009.SH"68"前缀规则外历史遗留）→ 池 3195（⚠️ 缺 601091.SH：沪市新股历史遗漏，非本次范围，披露）；③ **quant.db 行情不删**——规则判定依赖最后交易日，删库后"无记录=保留"会使拦截失效（复发机制）；DB 原始层保留历史无副作用（全量/增量均已被规则挡住）。
+- **验证**：py_compile PASS；test_resolve_incremental_symbols.py 12 passed（+5 项：60 天启用剔除/边界==阈值保留/DB无记录保留/未配置不启用/DB缺失不报错）；清理 dry_run 清单与实测一致（30/31）；全量 pytest tests/unit 以当日回归日志为准。
+- **Git**：未提交改动 = full_clean_service.py / data_clean_dialog.py / config/data_clean_run.json / test_resolve_incremental_symbols.py / project_layout_gear2.md（#79 回写）/ 本摘要 9.6 节。提交方式（单 commit 或分拆）由用户拍板。
+
+
+### 9.7 ⏳ 数据层深度审查（#80，2026-10-01 wdh52 机器，只读审查，结论待新对话拍板修复）
+
+**背景**：用户要求"严格审查数据层：数据拉取、财务数据拉取、本地及网络数据抓取，看是否还有无重大 BUG"。本审查全程只读，**未改任何代码**。
+
+**审查范围**（11 文件精读 + 5 个决定性实测脚本）：
+- 精读：`tdx_source.py` / `base.py` / `web_source.py` / `composite_source.py` / `fetcher.py` / `factory.py` / `manager.py`（update_symbols 385-448 + _save_to_database 800-848）/ `derived_metrics.py` 全文 / `financial_sync_service.py` 全文 / `akshare_source.py`（财务段）/ `data_download_dialog.py`（入口段）
+- 实测脚本（agent workspace m_0cwpjmv7D5g/，可复用）：audit_adjust.py（复权口径）/ audit_units.py（TDX 原始字段）/ audit_src.py+audit_src2.py（数据源分布）/ audit_tencent.py+audit_tencent2.py（腾讯混入核验），输出 $env:TEMP 下 a80/u80/s80/t80 日志
+
+**🔴 P0 级发现（正确性，必须处理）**：
+1. **P0-1 全库复权标签失真**：market_data **16,753,492 行 adjust='hfq'，实际全为 TDX 不复权价**。证据：600519.SH 除息日 2024-06-19（10派308.76）DB close=1501.00 == TDX 原始 1501.00（真实跳空 -20.5 元未复权）；000001.SZ 2023-07-21 全等；3 只抽样近 10 日与 TDX **0 不一致**。根因：`tdx_source` 返回原始价（注释自认"复权由上层处理"），`manager._save_to_database` **无转换直通入库**，adjust='hfq' 原样写。影响：① 除权日涨跌幅/振幅假跳变（600519 2024-06-19 被算成 -3.5% 虚假跌幅）；② 高送转除权（-50%）会触发清洗 `max_price_jump_pct` 跳变检测**误判剔除**；③ 回测按 hfq 语义消费实为不复权序列；④ derived_metrics 注释"库内为 hfq"与事实不符。
+2. **P0-2 腾讯 hfq 孤岛混入 DB（#77"清除18只"未真正落库）**：全库数据源分布 = tdx **16,741,972** + tencent_http **11,520**（18 只 × 640 行，即 #77 用户点名 18 只）。实证：000584.SZ 2022-09-06 DB close=**34.89**（真后复权价，不复权应 ~4-5 元）→ **跨源量纲混合**。现状：processed 已清、池已剔、TDX 无数据、financial_data=0 → **孤岛**，最新日期停在 2025-2026 初不再更新。用户以为已清，实际 DB 原始层仍在。
+
+**🟠 P1 级发现（数据质量，建议处理）**：
+3. **P1-3 B 类派生量防未来违规**：`derived_metrics.py` L203 `fin.report_date <= trade_date` 用**报告期**而非**发布日**——一季报（报告期 03-31）4 月底才披露，4 月初交易提前使用；中报/三季报同理提前 1-2 个月。financial_sync_service 仅拉取端按 end_date 过滤报告期，未解决使用端时点。
+4. **P1-4 股本反推近似**：`float_share = 最新财报 circ_mv / 最新行情 close`（财报 circ_mv 对应财报日市值，高送转/增发后与最新价不匹配 → 换手率系统性偏差；注释已承认近似，误差可达数倍）。
+5. **P1-5 is_suspended 判定失效**：manager L842 `is_suspended = volume==0`，TDX .day 停牌日**不写记录**（无行）→ 几乎永不触发。
+6. **P1-6 网源 volume 单位风险（种子）**：TDX .day volume 字段**实测单位=股**（5951416=594.5 万股，与 91.8 亿成交额/均价 1543 吻合），tdx_source 注释"手"是**错误注释**（数值链路自洽）；但网源（东财/新浪/腾讯）volume 单位=**手**，若标的走网源入库 → 换手率/量比差 **100 倍**（当前 18 只孤岛未消费未爆雷，网源入口存在即风险）。
+7. **P1-7 成交额 float32 精度**：amount 用 float32（91.8 亿精度误差 ~64 元，实测 DB 值 9177636864.0 已非整数），建议 double/INTEGER(分)。
+
+**🟡 P2 级发现（健壮性，择机）**：8. 交易日历=工作日近似（base.get_trading_dates 无节假日调休）；9. akshare 财务兜底 report_date=今天（L745/798/878，入库后与历史交易日不匹配）；10. FINANCIAL_EXCLUDE_RULES 14 条硬编码（与 config 同口径未外置）；11. tdx get_stock_list 缺北交所（与排除规则一致无害）；12. 上证 B 股 900xxx 归 A 股清单（依赖规则兜底）；13. 量比 5 日均量含停牌 0 量日（TDX 无 0 行，网源可能有）→ 停牌后首日量比失真。
+
+**建议修复方向（待新对话拍板）**：
+- **P0-1 复权口径二选一**：A) 明确 DB="不复权原始层"，adjust 标签改 raw/none + 网源拉取强制 adjust="" 对齐（**推荐**，改动最小）；B) 建复权因子表做真 hfq。
+- **P0-2 18 只孤岛**：按 #77 原意补执行 DB 移备份清理（不硬删）或 is_deleted 标记。
+- **P1-3** financial_data 增公告日列改按公告日判定；或保守滞后窗口（Q1+1月/中报+2月/Q3+1月）。
+- **P1-4** 优先用财务源股本字段，否则除权事件修正；**P1-5** is_suspended 改交易日历缺失判定；**P1-6** 网源 volume ×100 统一为股；**P1-7** amount 改 double。
+- **优先级建议**：P0-1 口径决策 → P0-2 孤岛清理 → P1-3 PE 未来函数 → 其余。
+
+**遗留衔接**：本审查未动代码；**#79 git 提交（5 文件，full_clean_service.py / data_clean_dialog.py / test_resolve_incremental_symbols.py / project_layout_gear2.md / 本摘要 9.6 节）仍未执行**，提交方式（单 commit 或分拆）由用户拍板；601091.SH 池缺失已披露未处理。新对话续做时默认遵守代码治理规则（查蓝图/业务逻辑归 myquant/补单测/py_compile+pytest/回写蓝图 #80/交接摘要，先出改动清单等拍板）。
+## 9.8 【2026-10-01 晚】P0-1 复权口径修复已完成（蓝图回写 #81）
+
+用户拍板方案 A（明确 DB=不复权原始层，adjust 标签 'raw'）+ 网源强制不复权对齐，7 组全部执行完毕：
+
+1. **DB 迁移（一次）**：market_data 16,753,492 行 adjust 'hfq'→'raw'（UPDATE 全命中）；迁移前备份 backups/quant_db_bak_before_p0_1_20261001_222410.db（5.55GB 可回滚）；迁移后 hfq=0、raw=16,753,492、全市场 raw 标的 5335
+2. **默认值改造（9 文件）**：sources 六源 + queries + fetcher + manager 默认 adjust→"raw"；akshare/web adjust_map 加 "raw": ""（东财 adjust="" / 腾讯 day，跨源量纲混入源头切断）
+3. **读库口径（4 文件）**：full_clean_service / scripts/数据导出_DB到processed.py / data_download_dialog / financial_service 全部 'hfq'→'raw'；端到端冒烟通过（默认查询命中 600519、raw 5335、hfq 残留 0）
+4. **注释/config/UI（12 文件）**：schema/derived_metrics（"库内为后复权"错误注释修正）/tdx_source docstring/config example/data_loader/kunpeng_param_scanner/batch_backtest_tab（复权下拉 3 项→1 项"不复权原始层 (raw)"）/backtest_config_dialog/data_clean_dialog（补漏）等
+5. **测试**：8 测试文件 15 处 hfq→raw 同步 + 新增 tests/unit/test_adjust_raw_semantics.py（4 项：默认值/入库标签透传/查询隔离/网源 raw→不复权映射，零网络）
+6. **验证**：py_compile 全项目（myquant/scripts/tests）PASS；新增单测 4 passed；全量 pytest tests/unit = **1662 passed / 2 skipped / 0 failed**
+7. **蓝图**：回写 #81 + 目录树登记 test_adjust_raw_semantics.py
+
+**遗留（披露，勿删）**：
+- 除权日假跳变（600519 除息 -3.5% 虚假跌幅 / 高送转触发 max_price_jump_pct 误剔）**仍在**——方案 A 只诚实化标签，真复权需方案 B（复权因子表，另立任务拍板）
+- P0-2 腾讯 hfq 孤岛 18 只 / 11,520 行仍在 DB（网源改不复权后不再新增，存量清理待 P0-2 任务）
+- live 实时链路 qfq 独立于 DB 未动（本地历史 raw 预热 + 实时 qfq 量纲错位为既有遗留）
+- #79 的 git 提交（5 文件）仍未执行，待用户拍板；本次 #81 改动（含 DB 迁移）一并待提交
+
+## 9.9 方案B复权因子表落地（2026-10-01，P0-1 配套）
+用户 4 项拍板：全市场 5317 / B1 消费落点（processed 保持 raw，回测现算）/ 清洗跳变豁免 / hfq+qfq。已落地：adjust_factor 表（9 张表）+ factor_sync_service.py + scripts/复权因子同步.py；全市场拉取 5316/5317 成功、63,374 事件（689009.SH CDR 无因子，降级 raw）；data_loader hfq/qfq 内存现算（防未来按 end_date 截断）+ bar_cleaner 除权跳变豁免；新增 3 测试文件 23 项单测；全量 pytest tests/unit = 1685 passed / 2 skipped / 0 failed；蓝图 #82 已回写。遗留：派生量复权口径重建为二期；git 提交延后待用户拍板。

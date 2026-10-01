@@ -333,7 +333,7 @@ Pythonwdhmm/
 
 │   │                                  # ✅已实现：CleanRuleLibrary规则对象映射（data_access/cleaner/rules_loader.py），支持yaml配置加载
 
-│   ├── data_clean_run.json       # ✨【回写】全量清洗运行时状态文件（不入库）：由gui/data_clean_dialog.py生成、供scripts/数据全量清洗.py --config读取；✅已修复【回写#32】：.gitignore 已追加 config/*.json 覆盖该文件（原⚠️误提交风险已消除）；同类核验：config/ 其余运行时文件（真实 yaml/stock_pool.yaml）均已被 config/*.yaml 覆盖，无同类遗漏
+│   ├── data_clean_run.json       # ✨【回写】全量清洗运行时状态文件（不入库）：由gui/data_clean_dialog.py生成、供scripts/数据全量清洗.py --config读取；✅已修复【回写#32】：.gitignore 已追加 config/*.json 覆盖该文件（原⚠️误提交风险已消除）；同类核验：config/ 其余运行时文件（真实 yaml/stock_pool.yaml）均已被 config/*.yaml 覆盖，无同类遗漏；✨【回写#79】含 exclude_st:true + exclude_suspended_days:60（长期停牌/退市规则阈值，GUI 每次清洗重写并保留）
 
 │   ├── st_blacklist.example.yaml # ✨【回写#70】ST/*ST/S*ST/SST 风险警示股名单模板（真实名单 config/st_blacklist.yaml 不入库，由 GUI「刷新名单」联网生成或人工编辑；full_clean_service.load_st_blacklist 离线读取，resolve_symbols 按 symbol 命中剔除，与代码前缀规则正交串联）
 
@@ -390,6 +390,7 @@ Pythonwdhmm/
 │   ├── 标的预筛选.py                  # ✨【回写】标的预筛选入口：从quant.db按代码前缀/上市年限/日均成交额/换手率筛出可交易标的池，输出config/stock_pool.yaml供回测配置引用；流动性指标按回测起始日前历史窗口计算（防未来）；回测/实盘共用同一套筛选条件（实盘无缝对接）
 
 │   ├── 数据导出_DB到processed.py      # ✨【回写】DB导出入口（当前主格式）：quant.db的hfq日线→datasets/processed/扁平parquet，逐只导出+完整性校验+断点续传；格式与实盘数据提供器一致（实盘无缝对接）；取代旧CSV子目录版脚本（导出DB到回测数据.py，仅存档不再使用）；✨【回写#72】CN_COLUMN_MAP/SELECT/数值列加 turnover→换手率，导出列集合=增量 _en_to_cn 13列统一；✨【回写#77】F1 改扁平式（去set_index/"日期"列整数YYYYMMDD/eps按df["日期"].dt.strftime/verify_parquet读"日期"列+旧索引式判失败触发重建/to_parquet(index=False)/新增_int_date_to_iso）+ export_all 接 resolve_incremental_symbols 规则过滤（防 DB 全量污染 processed）
+│   ├── 复权因子同步.py          # ✨【回写#82】方案B复权因子同步薄入口：--all/--symbols/--limit/--dry-run；业务逻辑在 data_access/factor_sync_service.py（架构纪律）✅已完成
 
 │   ├── 数据全量清洗.py                # ✨【回写】全量清洗薄入口：参数解析→组装配置→调用FullCleanService.run()；链路=DB读取→清洗管线→事务写回→清洗元信息→bad归档→可选重建processed；支持--config/--symbols/--dry-run/--workers；与GUI全量清洗对话框共用同一服务
 
@@ -482,10 +483,14 @@ Pythonwdhmm/
 
 │   │   ├── test_st_blacklist_clean.py # ✨【回写#70】ST/*ST/S*ST/SST 风险警示剔除测试（名单读取/前缀命中/名单过滤/联网刷新/前缀与ST串联/未启用ST兼容/报告字段，29项）✅已完成
 │   │   ├── test_data_export_columns.py # ✨【回写#72】全量导出列集合统一测试（CN_COLUMN_MAP/SELECT含turnover/临时DB 13列集合/无财务eps列存在，4项）✅已完成；✨【回写#77】+4项扁平式（日期列整数+RangeIndex/verify_parquet扁平式通过/旧索引式判失败触发重建，现共8项）
-│   │   ├── test_resolve_incremental_symbols.py # ✨【回写#77】增量范围实时推导测试（前缀过滤/ST串联/json缺失回退/防焊死反例——规则增删范围跟随/空池/统计字段/exclude_st无名单，7项）✅已完成
+│   │   ├── test_resolve_incremental_symbols.py # ✨【回写#77】增量范围实时推导测试
+│   │   ├── test_factor_sync_service.py # ✨【回写#82】因子同步单测（符号转换/事件清洗/UPSERT幂等/as_of防未来/失败重试/sync统计，stub akshare 零网络，9项）✅已完成
+│   │   ├── test_data_loader_factor_adjust.py # ✨【回写#82】data_loader复权现算单测（raw原样/hfq=raw×factor/qfq÷最新因子/end_date透传防未来/无因子降级，合成parquet+stub因子，6项）✅已完成
+│   │   ├── test_bar_cleaner_factor_exempt.py # ✨【回写#82】除权跳变豁免单测（函数版/类版豁免/非除权日仍检测/无因子回退，合成数据零网络，8项）✅已完成（前缀过滤/ST串联/json缺失回退/防焊死反例——规则增删范围跟随/空池/统计字段/exclude_st无名单，7项）；✨【回写#79】+长期停牌/退市规则5项（60天启用剔除/边界==阈值保留/DB无记录保留/未配置不启用/DB缺失不报错，sqlite临时库替身）✅已完成，现共12项
 │   │   ├── test_cleanup_service.py # ✨【回写#77】清理pattern保护语义测试（生产报告/真实备份不匹配、测试前缀匹配，4项）✅已完成
 │   │   ├── test_financial_sync_service.py # ✨【回写#74】财务CSV增量同步测试（定位缺失标的14条排除/新旧合并去重17列头/无新记录None/增量流程/自动入库monkeypatch/无可拉取跳过，6项）✅已完成
 │   │   ├── test_data_download_finance_sync.py # ✨【回写#75】GUI财务CSV增量更新选项测试（选项注册完整/执行顺序在入库前/_entry_finance_sync调用服务返回同构汇总，3项）✅已完成
+│   │   ├── test_adjust_raw_semantics.py # ✨【回写#81】P0-1 复权口径语义测试（默认值raw/入库标签透传/查询隔离raw与hfq不混读/网源raw→不复权映射，4项）✅已完成
 
 │   │   ├── test_data_fingerprint.py  # ✨【V5·P0】数据指纹测试（哈希级差异检测：指纹生成/查询/缓存失效/旧数据替换，20项）
 
@@ -674,7 +679,8 @@ Pythonwdhmm/
 
     │   ├── loader.py                 # ✨【V5·P0】数据加载器（回测专用）：预取next_chunk+分块加载（chunk_size）+流水线模式（多bar并行预取）+内存水位降级（联动utils/memory_watcher，超阈值自动降为单块流式）；三模式引擎共用同一加载路径；与backtest/data_loader.py（历史数据提供器）分工互补
 
-    │   ├── full_clean_service.py     # ✨【回写】全量清洗业务逻辑层：FullCleanService——DB读取→清洗管线→事务写回→清洗元信息落库→bad归档→可选重建processed（subprocess调scripts/数据导出_DB到processed.py）；唯一调用方=scripts/数据全量清洗.py（CLI与GUI全量清洗对话框共用）；业务逻辑归myquant，脚本只做薄入口（架构纪律）；✨【回写#77】F4 新增公共函数 resolve_incremental_symbols（filter_excluded_symbols+filter_st_blacklist_symbols串联，读config/data_clean_run.json 14条实口径，json缺失回退DEFAULT_EXCLUDE_RULES(10条)+warning；返回keep+stats；防焊死：每次调用实时推导）——供增量下载与全量导出共用范围口径
+    │   ├── full_clean_service.py     # ✨【回写】全量清洗业务逻辑层：FullCleanService——DB读取→清洗管线→事务写回→清洗元信息落库→bad归档→可选重建processed（subprocess调scripts/数据导出_DB到processed.py）；唯一调用方=scripts/数据全量清洗.py（CLI与GUI全量清洗对话框共用）；业务逻辑归myquant，脚本只做薄入口（架构纪律）；✨【回写#77】F4 新增公共函数 resolve_incremental_symbols（filter_excluded_symbols+filter_st_blacklist_symbols串联，读config/data_clean_run.json 14条实口径，json缺失回退DEFAULT_EXCLUDE_RULES(10条)+warning；返回keep+stats；防焊死：每次调用实时推导）——供增量下载与全量导出共用范围口径；✨【回写#79】新增 SUSPEND_DB_REL_PATH + filter_long_suspended_symbols（按 market_data(daily,hfq) MAX(trade_date) 与参考日 gap > exclude_suspended_days 剔除，等于阈值保留；DB无记录/解析失败/查询异常/阈值≤0 均保留不阻断；ref_date 可注入防未来）；resolve_incremental_symbols 串联该规则（stats 增 excluded_suspended，config 缺省 0 不启用）；FullCleanService.__init__ 读 exclude_suspended_days、resolve_symbols 用 dq.conn 同口径串联（全量/增量一致）
+    │   ├── factor_sync_service.py   # ✨【回写#82】方案B复权因子同步业务：akshare stock_zh_a_daily(adjust="hfq-factor") 东财事件表→清洗(1900脏行/NaN/排序去重)→UPSERT adjust_factor(symbol,event_date,factor)；hfq价=raw×factor事件日生效；qfq=hfq/最新因子；限速/失败留痕/as_of防未来；供清洗豁免与data_loader复权现算 ✅已完成
 ；✨【回写#59】新增增量清洗通道 run_incremental_clean/_load_incremental_records/_normalize_incremental_date（读暂存增量→清洗→DB+processed双写，仅清洗模式）；✨【回写#70】新增 ST 风险警示剔除（load_st_blacklist/match_st_name/filter_st_blacklist_symbols/refresh_st_blacklist；resolve_symbols 串联代码前缀规则后；报告含 exclude_st/st_excluded_count/st_excluded_symbols）；✨【回写#71】B类财务缺失留痕（worker_clean 对 financial_data 无记录标的打 warning 并置 result["no_financial"]；run() 聚合 no_financial_symbols 并打印"待补财务标的"；build_report 新增 no_financial_count/no_financial_symbols）
 
     │   ├── financial_service.py      # ✨【回写#36】财务数据入库服务：FinancialImportService——财务CSV读取→字段映射(net_profit_parent→net_profit/report_date YYYYMMDD→YYYY-MM-DD)→分批批量入库financial_data；FactorEngine向量化计算14个技术因子(SMA5/10/20/60,EMA12/26,MACD_DIF/DEA/HIST,RSI14,BOLL_UP/MID/LOW,ATR14)+5个基本面因子(PE/PB/ROE/毛利率/资产负债率)映射最新报告期→长表写入factor_data；生成全中文表头HTML+CSV入库报告；防未来函数(财务仅取report_date<=trade_date最新一期)；调用方=scripts/财务数据入库.py + GUI财务数据入库选项
@@ -872,7 +878,7 @@ Pythonwdhmm/
 
     │   ├── cleanup_dialog.py         # ✨【回写·2026-09-07】项目清理对话框（方案一·上下分区）：被run_清理GUI.py调用；清理项目勾选（A-E）/回测输出保留N期/执行模式单选/保护清单只读/预览结果滚动区；后台线程扫描删除+信号桥；业务逻辑在utils/cleanup_service.py
 
-    │   ├── data_clean_dialog.py      # ✨【回写】全量清洗配置对话框：被run_全量清洗GUI.py调用；可视化配置清洗范围/参数 → 生成config/data_clean_run.json（运行时状态文件，不入库）→ subprocess调起scripts/数据全量清洗.py；与CLI共用同一FullCleanService（data_access/full_clean_service.py）
+    │   ├── data_clean_dialog.py      # ✨【回写】全量清洗配置对话框：被run_全量清洗GUI.py调用；可视化配置清洗范围/参数 → 生成config/data_clean_run.json（运行时状态文件，不入库）→ subprocess调起scripts/数据全量清洗.py；与CLI共用同一FullCleanService（data_access/full_clean_service.py）；✨【回写#79】新增「剔除长期停牌/退市」QSpinBox（默认60天/0-3650/0=不启用）+ lbl_suspend_count 实时预览（按 DB 最后交易日统计命中数，复用 filter_long_suspended_symbols）；_collect_config 写入 exclude_suspended_days（防 GUI 重写 config 丢字段）
 ；✨【回写#59】曾新增「增量清洗」按钮（与「开始清洗」并列，对暂存增量做清洗+DB/processed双写）；✨【回写#70】新增「剔除 ST/*ST/S*ST/SST 风险警示股」选项组（勾选+名单数量预览+刷新名单/编辑按钮；_collect_config 输出 exclude_st/st_blacklist_path）；✨【回写#77】F5.4 滚掉「增量清洗」按钮与 _on_incremental_clean（入口唯一化：增量统一由 run_数据下载GUI.py「增量更新日线」=下载+清洗一体化完成；run_incremental_clean 业务函数保留供单测调用）
 
     │   ├── data_download_dialog.py   # ✨【回写·第12条】数据下载管理器对话框：被run_数据下载GUI.py调用；8项数据下载管理功能；✨【第12条】财务数据卡片=同行布局（勾选框+「最新一期」/「自定义范围」单选+开始/结束QDateEdit），历史模式调用get_financial_history保存为financial_history_*.csv；标题栏加最小化按钮（WindowMinimizeButtonHint）；DownloadWorker后台线程+进度回调；设计稿见docs/mockups/；✨【回写#75】财务数据标签页新增「财务CSV增量更新」选项（finance_sync）：OPTIONS/DISPLAY_ORDER/EXEC_ORDER/TASKS/tab_defs 5处+新增_entry_finance_sync（调用FinancialSyncService.run_sync增量+自动入库，复用#74业务不重复）；✨【回写#76】删除「全部更新」选项（方案A）：OPTIONS/DISPLAY/EXEC/TASKS 删 all + MUTEX_GROUPS 收缩为[full,incremental] + 删_entry_all + tab_defs 财务分组4→3项；选项10→9项，财务侧统一走 finance_sync；全项目grep核验其它文件"all"均无关零改动
@@ -1842,3 +1848,50 @@ Pythonwdhmm/
    c. **tests/unit/test_data_clean_incremental.py**：+1 项"无财务标的新建文件仍14列"（无存量+_db 为 None → 列=全量 14 列模板、B 类 3 列 None、行情列透传不被改动），现共 14 项
    d. **验证结果**：py_compile manager.py PASS；test_data_clean_incremental.py 14 passed；增量链路相关 7 文件 53 passed；全量 pytest tests/unit 以当日回归日志为准
    e. **纪律遵守**：只改 manager.py 无存量新建分支（增量侧）；未碰全量 B 类派生量；未动存量 processed 文件（18 只属本次增量新建的异常产物，重写仅补列不改行数据）；工作区 git 未提交改动由用户拍板
+
+79. ✨【回写记录·2026-10-01·长期停牌/退市规则化根治（60天，方案A）】全池盘点（DB 最后交易日分类）：B 类长期停牌/退市 20 只 + C 类 2026 年中停牌 17 只 + 活跃 3189 只；用户拍板方案 A（规则化根治）+ 阈值 60 天（自然日，≈42 交易日，超合规停牌上限 10 交易日 4 倍余量，覆盖暂停上市/长期重组停滞/退市整理）。本次落地：
+   a. **myquant/data_access/full_clean_service.py**：新增 SUSPEND_DB_REL_PATH + filter_long_suspended_symbols（批量查 market_data(daily,hfq) MAX(trade_date)，gap = ref_date - last_trade_date，**gap > 阈值剔除、等于保留**；DB 无记录/日期解析失败/查询异常/阈值≤0 均保留不阻断——防"删库后无记录=保留"复发机制失效）；resolve_incremental_symbols 新增 ref_date 参数（默认今天，测试可注入），读 config.exclude_suspended_days（缺省 0 不启用，向后兼容），连 root/database/quant.db 串联，stats 增 excluded_suspended；FullCleanService.__init__ 读 exclude_suspended_days、resolve_symbols 用 dq.conn 同口径串联（全量/增量一致）
+   b. **myquant/gui/data_clean_dialog.py**：ST 行下新增「剔除长期停牌/退市」QSpinBox（默认 60/0-3650/step5/suffix" 天"/tooltip 说明，0=不启用）+ lbl_suspend_count 实时统计（_count_long_suspended 复用 filter_long_suspended_symbols，DB 最后交易日命中数）；_update_preview 纳入停牌剔除统计（"… + 长期停牌/退市 N 只"）；_collect_config 写入 exclude_suspended_days（GUI 每次清洗重写 data_clean_run.json，必须同步保留该字段否则规则失效）
+   c. **config/data_clean_run.json**：新增 exclude_st:true + exclude_suspended_days:60（运行口径 14 条排除规则不变）
+   d. **三处同步清理（用户确认"规则外全部"）**：实测 60 天规则影响面——DB 全量 5335 → 规则内 3196（长期停牌排除 30 只 = B 类 20 + C 类停牌>60 天 10 只，用户点名 18 只 100% 命中）；processed 移备份 30 只 → backups/processed_excluded_20261001/（processed=3196=规则内，差集空）；池 backtest_kunpeng.yaml 剔除 31 只（30 长期停牌 + 689009.SH "68"前缀规则外历史遗留）→ 池 3195（缺 601091.SH 沪市新股历史遗漏，非本次范围，披露）；**DB 行情不删**——规则判定依赖最后交易日，删除后"无记录=保留"破坏拦截能力，DB 原始层保留历史无副作用
+   e. **tests/unit/test_resolve_incremental_symbols.py**：+5 项（60天启用剔除/边界==阈值保留/DB无记录保留/未配置不启用/DB缺失不报错），现 12 项；_write_run_json 增 suspend_days 参数、_write_db 增 sqlite 临时库替身（tmp_path/database/quant.db 建 market_data 插不同 trade_date 行）
+   f. **验证结果**：py_compile full_clean_service.py + data_clean_dialog.py + test_resolve_incremental_symbols.py PASS；本文件单测 12 passed；清理 dry_run 清单与实测一致（30/31）；清理后一致性验证 processed==规则内 3196（差集空）、池 3195；全量 pytest tests/unit 以当日回归日志为准
+   g. **纪律遵守**：只动长期停牌规则（full_clean_service.py/data_clean_dialog.py/config json/测试）；未碰全量 B 类派生量（邻居）；processed 移备份不硬删；DB 原始层零改动；工作区 git 未提交改动由用户拍板
+
+
+80. ✨【回写记录·2026-10-01·数据层深度审查（只读，#80）】用户要求严格审查数据层（数据拉取/财务数据拉取/本地及网络数据抓取）有无重大 BUG；全程只读未改码，结论登记供后续修复（新对话已约定续做）：
+   a. **P0-1 全库复权标签失真**：market_data 16,753,492 行 adjust='hfq' 实为 TDX 不复权价（实测 600519.SH 除息日 2024-06-19 DB==TDX==1501.00、跳空-20.5 未复权；3 只抽样近 10 日 0 不一致）。根因：tdx_source 返回原始价 + manager._save_to_database 无转换直通 + adjust 原样写 hfq。影响：除权日涨跌幅/振幅假跳变、高送转触发 max_price_jump_pct 误剔、回测量纲错。
+   b. **P0-2 腾讯 hfq 孤岛混入**：data_source 分布 tdx 16,741,972 + tencent_http 11,520（18 只 × 640 行 = #77 点名 18 只）；000584.SZ 2022-09-06 DB=34.89 为真 hfq（不复权应 ~4-5 元）；processed/池已清但 DB 原始层残留，属 #77"清除 18 只"未真正落库。
+   c. **P1**：B 类派生量用 report_date≤trade_date 选财务=防未来违规（应用发布日判定）；股本反推近似致换手率偏差；is_suspended=volume==0 失效（TDX 停牌无行）；网源 volume 单位=手未转股（差 100 倍种子，tdx 注释"手"实为股）；amount float32 精度。
+   d. **P2**：交易日历=工作日近似；财务兜底 report_date=今天；FINANCIAL_EXCLUDE_RULES 14 条硬编码；tdx 清单缺北交所/B股混 A 股清单；量比含停牌 0 量日。
+   e. **修复建议**：复权口径选 A（DB 定位不复权原始层，adjust 改 raw/none + 网源强制 adjust="" 对齐，改动最小）；18 只孤岛补清（移备份不硬删）；PE 改公告日判定；网源 volume×100 统一股；amount 改 double。优先级 P0→P1-3→其余。
+   f. **纪律**：全程只读零改动；修复待新对话按治理规则执行（先出逐文件改动清单等用户拍板；业务逻辑归 myquant；补单测；py_compile+pytest；回写 #80 已占位）。
+81. ✨【回写记录·2026-10-01·P0-1 复权口径修复落地（DB=不复权原始层 raw，方案A）】#80 审查 P0-1 的修复执行（用户拍板方案 A：明确 DB=不复权原始层 + adjust 标签改 raw + 网源强制不复权对齐；B 复权因子表另立后续任务）。事实来源：本次落地；代码级核验：py_compile 全项目（myquant/scripts/tests）通过 + 新增 4 项语义单测 + 全量 pytest tests/unit = 1662 passed / 2 skipped / 0 failed：
+
+   a. **DB 数据迁移（一次）**：quant.db market_data 16,753,492 行 adjust='hfq'→'raw'（UPDATE 全部命中）；迁移前备份 backups/quant_db_bak_before_p0_1_20261001_222410.db（5.55GB 可回滚）；迁移后 adjust 分布 raw=16,753,492 / hfq=0；抽样 600519.SH 2024-06-19 close=1501.0 保持 TDX 原始价；全市场 raw 标签标的 5335
+
+   b. **默认值改造（9 文件）**：sources/base、tdx_source、akshare_source、web_source、composite_source、broker_source、database/queries（3 查询）、data_access/fetcher、manager（13 处+docstring）默认 adjust 'hfq'→'raw'；akshare/web adjust_map 加 "raw": ""（raw→不复权参数，东财 adjust="" / 腾讯 day，跨源量纲混入从源头切断；残留 hfq 均为合法映射/常量/腾讯参数判断）
+
+   c. **读库口径改造（4 文件）**：full_clean_service（长期停牌 SQL/读库/写回/注释）、scripts/数据导出_DB到processed.py（4 docstring+3 SQL）、gui/data_download_dialog（下载 2 处）、data_access/financial_service（1 处）'hfq'→'raw'；端到端冒烟：默认查询命中 600519 3 行 adjust=raw、全市场 raw 5335、hfq 残留 0
+
+   d. **注释/config/UI 语义同步（12 文件）**：schema.py、derived_metrics.py（"库内为后复权"错误注释修正）、sources/base HFQ 常量注释、tdx_source docstring（"复权由上层 indicators 处理"不实描述修正）、config/backtest_config.example.yaml（adjust: raw）、strategy_params.example.yaml（adjust_type: raw，0 消费点）、backtest/data_loader（默认 raw）、kunpeng_param_scanner（3 处）、batch_backtest_tab（复权下拉 3 项→1 项"不复权原始层 (raw)"+默认+自测断言）、backtest_config_dialog（配置默认）、manager docstring、data_clean_dialog（补漏：读库 SQL+按钮文案）
+
+   e. **测试同步+新增（9 文件）**：8 测试文件 15 处 'hfq'→'raw'（mock 默认/插入数据/断言；test_data_fingerprint 的 metadata={"adj":"hfq"} 为无关元数据不改）；新增 tests/unit/test_adjust_raw_semantics.py（4 项：默认值 raw / 入库标签透传 / 查询隔离 raw 与 hfq 不混读 / 网源 raw→不复权映射，离线确定性零网络）
+
+   f. **验证结果**：py_compile 全项目 PASS；新增单测 4 passed；全量 pytest tests/unit = 1662 passed / 2 skipped / 0 failed（基线 1653 + 新增 4 + 净变化）
+
+   g. **边界与遗留（披露）**：方案 A 只诚实化标签，除权日假跳变（600519 除息 -3.5% 虚假跌幅 / 高送转误剔）仍在，真复权需方案 B 复权因子表（另立任务）；live 实时链路 qfq 独立于 DB 不动（本地历史 raw 预热 + 实时 qfq 量纲错位为既有遗留）；P0-2 腾讯 hfq 孤岛 18 只/11520 行存留（网源改不复权后不再新增，存量清理待 P0-2 任务）
+
+   h. **纪律遵守**：DB 迁移一次性脚本存会话工作区（不入库）；改动文件均已在蓝图登记；新增测试文件已登记目录树；未动全量 B 类派生量（邻居）；工作区 git 未提交改动由用户拍板
+
+82. ✨【回写记录·2026-10-01·方案B复权因子表落地（除权跳变豁免 + 回测复权现算）】#81 预留的方案B执行（用户 4 项拍板：全市场 5317 / B1 消费落点 processed 保持 raw 回测现算 / 清洗跳变豁免 / hfq+qfq）。事实来源：本次落地；代码级核验：py_compile 10 文件 PASS + 新增 23 项单测 + 全量 pytest tests/unit = 1685 passed / 2 skipped / 0 failed（基线 1662 + 23）：
+
+   a. **立项决定性验证**：数据源探查——akshare 1.18.91 无 stock_zh_a_xdxr、stock_zh_a_hist 被 RemoteDisconnected 拒绝；唯一可用路径 stock_zh_a_daily(symbol, adjust="hfq-factor") 返回全历史除权事件因子表（date+hfq_factor，含 1900-01-01 脏行需清洗）；600519.SH 2024-06-19 除息日实证 raw=1501.0（假跳 -20.5）→ factor 8.071836→8.239032 → hfq 价 12281.30→12366.79 日间 +0.70% 假跳变消除
+   b. **schema 建表**：adjust_factor(symbol,event_date,factor,data_source,created_at,UNIQUE(symbol,event_date))；TABLE_NAMES 8→9 张 + ALL_CREATE_TABLE/INDEX + drop_all_tables 补删；test_database.py 表数断言 8→9
+   c. **因子同步业务（2 文件）**：myquant/data_access/factor_sync_service.py（FactorSyncService：to_ak_symbol/fetch_factor_events 清洗/UPSERT 幂等/sync_market 限速批量/失败留痕/get_factor_lookup+get_latest_factor as_of 截断防未来）+ scripts/复权因子同步.py 薄入口（--all/--symbols/--limit/--dry-run）
+   d. **全市场拉取（执行）**：5317 只 → 5316 成功 / 1 失败（689009.SH CDR 标的 akshare "sina hfq factor not available" 结构性失败，重试确认；data_loader 对无因子标的自动降级 raw，清洗豁免自动跳过）；63,374 事件 / 每标 avg 11.9 min 1 max 52 / 最新事件 2026-09-30 / 42.3 分钟（sleep 0.3s）；000001.SZ 2024-07 除息抽样 hfq 日间 -0.10% 连续
+   e. **data_loader 复权现算（B1）**：processed 保持 raw 13 列不动；get_bars adjust=hfq/qfq 内存现算——hfq=raw×factor（merge_asof backward，事件日及之后生效）、qfq=hfq/最新因子（最新因子按 end_date 截断防未来）；无因子标的降级 raw+warning 不阻断；项目根用 __file__.parents[2] 推导（PROJECT_ROOT marker 缺失时探测错位实测修正）；端到端：600519 除息窗口 raw/hfq/qfq 三口径验证通过
+   f. **清洗跳变豁免**：bar_cleaner 两处跳变检测（函数版 L276 区/类版 L708 区）新增 _factor_adjusted_jump_pct（有因子事件按 hfq 价复算，除权缺口被因子吸收）；full_clean_service worker_clean + 增量入口 _load_factor_lookup 注入 factor_lookup（config 副本不污染共享配置）；高送转 -50% 跳变不再误剔，非除权日仍按 raw 检测
+   g. **测试（3 新文件 23 项）**：test_factor_sync_service.py 9 项（符号转换/清洗/UPSERT 幂等/as_of 防未来/失败重试/sync 统计，stub akshare 零网络）；test_data_loader_factor_adjust.py 6 项（raw 原样/hfq 事件生效/qfq÷最新/end_date 透传防未来/无因子降级，合成 parquet+stub 因子）；test_bar_cleaner_factor_exempt.py 8 项（函数版/类版豁免/非除权日仍检测/辅助函数，合成数据零网络）
+   h. **验证结果**：py_compile 10 文件（schema/data_loader/bar_cleaner/full_clean_service/factor_sync_service/复权因子同步/test_database/3 新测试）PASS；新增 23 passed；test_database 66 passed；全量 pytest tests/unit = 1685 passed / 2 skipped / 0 failed
+   i. **边界与遗留（披露）**：689009.SH 无因子（CDR 无传统除权，raw 口径正确）；live 实时 qfq 链路独立于 DB 未动（本地历史 raw+因子现算，实时 qfq 量纲错位为既有遗留）；派生量（processed 内 pct_chg 等）仍 raw 口径，复权口径重建列为二期；P1/P2 未在本次范围；git 提交延后至全部完成待用户拍板

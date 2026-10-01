@@ -93,11 +93,11 @@ def cdq(conn: DatabaseConnection) -> CleanDataQueries:
 
 def _insert_market_row(conn: DatabaseConnection, symbol: str = "000001.SZ",
                        trade_date: str = "2024-01-02", close: float = 10.5) -> None:
-    """插入一条行情数据（含 adjust='hfq' 以匹配默认查询）"""
+    """插入一条行情数据（含 adjust='raw' 以匹配默认查询）"""
     conn.execute_update(
         "INSERT INTO market_data (symbol, trade_date, period, market, adjust, "
         "open, high, low, close, volume, amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [symbol, trade_date, "daily", "A股", "hfq", close * 0.99, close * 1.01,
+        [symbol, trade_date, "daily", "A股", "raw", close * 0.99, close * 1.01,
          close * 0.98, close, 100000.0, close * 100000.0],
     )
 
@@ -154,7 +154,7 @@ class TestDatabaseConnection:
     def test_executemany(self, conn):
         """executemany 批量写入"""
         rows_data = [
-            ["000001.SZ", f"2024-01-{i:02d}", "daily", "A股", "hfq",
+            ["000001.SZ", f"2024-01-{i:02d}", "daily", "A股", "raw",
              10.0, 10.5, 9.8, 10.2, 100000.0, 1020000.0]
             for i in range(2, 12)
         ]
@@ -253,15 +253,15 @@ class TestSchema:
     """Schema 表结构测试"""
 
     def test_table_names_complete(self):
-        """TABLE_NAMES 包含全部8张表"""
+        """TABLE_NAMES 包含全部9张表"""
         expected = {"market_data", "financial_data", "factor_data",
                     "strategy_state", "data_source", "sync_status",
-                    "clean_run_meta", "dirty_data_stats"}
+                    "clean_run_meta", "dirty_data_stats", "adjust_factor"}
         assert set(TABLE_NAMES.keys()) == expected
         assert set(TABLE_NAMES.values()) == expected
 
     def test_create_all_tables(self, empty_conn):
-        """create_all_tables 创建全部8张表"""
+        """create_all_tables 创建全部9张表"""
         create_all_tables(empty_conn)
         for table_name in TABLE_NAMES.values():
             assert table_exists(empty_conn, table_name) is True
@@ -661,7 +661,7 @@ class TestRealTimePreparation:
     def test_transaction_atomicity(self, conn):
         """事务原子性：批量插入中途失败全部回滚"""
         rows_data = [
-            ["000001.SZ", "2024-01-02", "daily", "A股", "hfq",
+            ["000001.SZ", "2024-01-02", "daily", "A股", "raw",
              10.0, 10.5, 9.8, 10.2, 100000.0, 1020000.0],
         ]
         with pytest.raises(Exception):
