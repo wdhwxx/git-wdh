@@ -27,6 +27,7 @@ import importlib.util
 import json
 import multiprocessing as mp
 import shutil
+import sqlite3
 import time
 from datetime import datetime
 from pathlib import Path
@@ -163,29 +164,100 @@ def filter_st_blacklist_symbols(
     return keep, excluded
 
 
+# ═══════════════════════════════════════════════
+#  长期停牌/退市剔除（按 DB 最后交易日动态判定，防焊死）
+# ═══════════════════════════════════════════════
+
+SUSPEND_DB_REL_PATH: str = "database/quant.db"
+
+
+def filter_long_suspended_symbols(
+    symbols: List[str],
+    db_conn: Any,
+    max_suspend_days: int,
+    ref_date: Optional[str] = None,
+) -> Tuple[List[str], List[str]]:
+    """按「最后交易日距今 > max_suspend_days」剔除长期停牌/退市标的。
+
+    判定口径：market_data(daily,raw) 每只 MAX(trade_date) 与参考日期（默认今天）
+    的间隔天数；严格大于阈值才剔除（等于阈值保留）。DB 无行情记录或日期
+    解析失败的标的**保留**（无从判定停牌时长，不阻断，交由下载/缺口机制处理）。
+    每次调用实时查询 DB、动态推导——规则变化则范围跟随，绝不焊死任何标的数字。
+
+    Args:
+        symbols: 候选标的列表。
+        db_conn: sqlite3 连接（只读查询，不提交事务）。
+        max_suspend_days: 阈值天数；<=0 视为不启用（直接全部保留）。
+        ref_date: 参考日期 YYYY-MM-DD；None 用当天（测试可注入固定日期）。
+
+    Returns:
+        (保留标的, 被剔除的长期停牌/退市标的)。
+    """
+    if max_suspend_days <= 0 or not symbols:
+        return symbols, []
+    ref = ref_date or datetime.now().strftime("%Y-%m-%d")
+    try:
+        ref_dt = datetime.strptime(ref, "%Y-%m-%d").date()
+    except ValueError:
+        ref_dt = datetime.now().date()
+    placeholders = ",".join("?" * len(symbols))
+    try:
+        rows = db_conn.execute(
+            f"SELECT symbol, MAX(trade_date) AS mx FROM market_data "
+            f"WHERE period='daily' AND adjust='raw' AND symbol IN ({placeholders}) "
+            f"GROUP BY symbol",
+            list(symbols),
+        ).fetchall()
+    except Exception:
+        # DB 查询失败不阻断范围推导（防御式：跳过本规则，按规则内保留）
+        return symbols, []
+    last_map: Dict[str, Any] = {r[0]: r[1] for r in rows}
+    keep, excluded = [], []
+    for sym in symbols:
+        mx = last_map.get(sym)
+        if mx is None:
+            keep.append(sym)
+            continue
+        try:
+            gap = (ref_dt - datetime.strptime(str(mx), "%Y-%m-%d").date()).days
+        except ValueError:
+            keep.append(sym)
+            continue
+        if gap > max_suspend_days:
+            excluded.append(sym)
+        else:
+            keep.append(sym)
+    return keep, excluded
+
+
 def resolve_incremental_symbols(
     pool_symbols: List[str],
     project_root: Optional[Path] = None,
+    ref_date: Optional[str] = None,
 ) -> Tuple[List[str], Dict[str, Any]]:
-    """增量/导出范围实时推导（防焊死）：候选池 → 排除规则 → ST 名单。
+    """增量/导出范围实时推导（防焊死）：候选池 → 排除规则 → ST 名单 → 长期停牌。
 
     与全量清洗同一规则源：优先读 config/data_clean_run.json 的 exclude_rules
-    （14 条实际口径）与 exclude_st；文件缺失/解析失败回退 DEFAULT_EXCLUDE_RULES
-    （10 条静态兜底）并告警。每次调用实时推导，绝不读取任何历史标的数字
-    （如 3208/3226 等快照只作展示、不参与判定）——规则变化则范围跟随变化。
+    （14 条实际口径）、exclude_st 与 exclude_suspended_days；文件缺失/解析失败
+    回退 DEFAULT_EXCLUDE_RULES（10 条静态兜底）并告警。每次调用实时推导，
+    绝不读取任何历史标的数字（如 3208/3226 等快照只作展示、不参与判定）——
+    规则变化则范围跟随变化。
 
     Args:
         pool_symbols: 候选标的池（如配置池 / DB 全量）。
         project_root: 项目根目录；None 用模块默认。
+        ref_date: 参考日期 YYYY-MM-DD（长期停牌判定用）；None 用当天。
 
     Returns:
         Tuple[keep, stats]：
         keep = 规则内标的列表；
-        stats = {"original", "after", "excluded_prefix", "excluded_st"}。
+        stats = {"original", "after", "excluded_prefix", "excluded_st",
+                 "excluded_suspended"}。
     """
     root = Path(project_root) if project_root else PROJECT_ROOT
     exclude_rules = list(DEFAULT_EXCLUDE_RULES)
     exclude_st = False
+    suspend_days = 0
     cfg_path = root / "config" / "data_clean_run.json"
     if cfg_path.exists():
         try:
@@ -194,6 +266,7 @@ def resolve_incremental_symbols(
             if rules:
                 exclude_rules = [str(r).strip() for r in rules if str(r).strip()]
             exclude_st = bool(cfg.get("exclude_st", False))
+            suspend_days = int(cfg.get("exclude_suspended_days", 0) or 0)
         except (json.JSONDecodeError, OSError) as e:
             logger.warning("config/data_clean_run.json 读取失败，回退默认排除规则: %s", e)
     else:
@@ -208,12 +281,31 @@ def resolve_incremental_symbols(
         blacklist = load_st_blacklist(root)
         if blacklist:
             keep, excluded_st = filter_st_blacklist_symbols(keep, blacklist)
+    excluded_suspended: List[str] = []
+    if suspend_days > 0:
+        db_path = root / SUSPEND_DB_REL_PATH
+        if db_path.exists():
+            try:
+                conn = sqlite3.connect(str(db_path))
+                try:
+                    keep, excluded_suspended = filter_long_suspended_symbols(
+                        keep, conn, suspend_days, ref_date=ref_date,
+                    )
+                finally:
+                    conn.close()
+            except Exception as e:
+                logger.warning("长期停牌规则 DB 查询失败，跳过该规则: %s", e)
+        else:
+            logger.warning(
+                "长期停牌规则启用但 quant.db 不存在，跳过该规则: %s", db_path,
+            )
 
     stats = {
         "original": len(pool_symbols),
         "after": len(keep),
         "excluded_prefix": excluded_prefix,
         "excluded_st": excluded_st,
+        "excluded_suspended": excluded_suspended,
     }
     return keep, stats
 
@@ -394,6 +486,31 @@ def record_clean_meta(
 #  Worker：单只标的清洗（多进程入口，模块顶层可 pickle）
 # ═══════════════════════════════════════════════
 
+def _load_factor_lookup(conn, symbol: str) -> Dict[str, float]:
+    """加载标的后复权因子 {event_date: factor}（方案B #82 除权跳变豁免用）。
+
+    因子表缺失/异常时返回空（清洗回退常规 raw 口径，不阻断流程）。
+    """
+    try:
+        rows = conn.execute(
+            "SELECT event_date, factor FROM adjust_factor WHERE symbol=? ORDER BY event_date",
+            (symbol,),
+        )
+        return {r["event_date"]: r["factor"] for r in rows}
+    except Exception as e:
+        logger.warning(f"加载复权因子失败[{symbol}]: {type(e).__name__}: {e}")
+        return {}
+
+
+def _with_factor_lookup(config: Dict[str, Any], factor_lookup: Dict[str, float]) -> Dict[str, Any]:
+    """清洗 config 副本注入 factor_lookup（不污染共享 config，子进程池安全）。"""
+    bar_cfg = dict(config.get("bar") or {})
+    bar_cfg["factor_lookup"] = factor_lookup
+    new_cfg = dict(config)
+    new_cfg["bar"] = bar_cfg
+    return new_cfg
+
+
 def worker_clean(task: Tuple[str, str, Dict[str, Any]]) -> Dict[str, Any]:
     """
     单只标的清洗。由子进程调用。
@@ -410,7 +527,7 @@ def worker_clean(task: Tuple[str, str, Dict[str, Any]]) -> Dict[str, Any]:
         dq = DataQueries(conn)
         # DataQueries.get_market_data 返回 List[Dict]，字段含 trade_date/open/...，
         # 清洗器 _get_timestamp 原生支持 trade_date
-        rows = dq.get_market_data(symbol, period="daily", adjust="hfq")
+        rows = dq.get_market_data(symbol, period="daily", adjust="raw")
         if not rows:
             result.update(
                 status="empty", db_original_count=0,
@@ -419,11 +536,14 @@ def worker_clean(task: Tuple[str, str, Dict[str, Any]]) -> Dict[str, Any]:
             return result
 
         # save_bad=True：pipeline 自动把脏数据落盘到 datasets/bad/bad_bar_{symbol}_{ts}.json
+        # 方案B #82：注入复权因子 → 除权除息日跳变豁免（config 副本，不污染共享配置）
+        factor_lookup = _load_factor_lookup(conn, symbol)
+        task_config = _with_factor_lookup(clean_config, factor_lookup) if factor_lookup else clean_config
         pipe_result = run_clean_pipeline(
             records=rows,
             data_type="bar",
             symbol=symbol,
-            config=clean_config,
+            config=task_config,
             save_bad=True,
             save_report=False,
             publish_events=False,  # 批量场景避免污染监控告警
@@ -510,8 +630,10 @@ class FullCleanService:
         self.workers = int(config.get("workers", 8))
         self.exclude_rules = config.get("exclude_rules") or []
         self.exclude_st = bool(config.get("exclude_st", False))
+        self.suspend_days = int(config.get("exclude_suspended_days", 0) or 0)
         self.st_blacklist = load_st_blacklist(PROJECT_ROOT) if self.exclude_st else {}
         self.st_excluded: List[str] = []
+        self.suspended_excluded: List[str] = []  # 长期停牌/退市剔除（#79）
         self.no_financial_symbols: List[str] = []  # B类财务缺失留痕：有行情但 financial_data 无记录
         self.rebuild_processed = bool(config.get("rebuild_processed", True))
         self.keep_symbols: Optional[List[str]] = None  # 清洗保留标的，重建 processed 白名单
@@ -539,13 +661,22 @@ class FullCleanService:
             filter_set = {s.strip() for s in str(self.config["symbols"]).split(",") if s.strip()}
             all_symbols = [s for s in all_symbols if s in filter_set]
         keep, excluded_prefix = filter_excluded_symbols(all_symbols, self.exclude_rules)
+        excluded = list(excluded_prefix)
         if self.exclude_st and self.st_blacklist:
             keep, excluded_st = filter_st_blacklist_symbols(keep, self.st_blacklist)
             self.st_excluded = excluded_st
-            excluded = excluded_prefix + excluded_st
+            excluded = excluded + excluded_st
         else:
             self.st_excluded = []
-            excluded = excluded_prefix
+        # 长期停牌/退市剔除（#79）：与增量 resolve_incremental_symbols 同口径，
+        # 按 DB 最后交易日动态判定（> exclude_suspended_days 天 → 排除）
+        self.suspended_excluded = []
+        if self.suspend_days > 0:
+            keep, suspended_excluded = filter_long_suspended_symbols(
+                keep, dq.conn, self.suspend_days,
+            )
+            self.suspended_excluded = suspended_excluded
+            excluded = excluded + suspended_excluded
         return keep, excluded
 
     # ── 断点续传：本次 batch 已 completed 的标的 ──
@@ -574,7 +705,7 @@ class FullCleanService:
     ) -> str:
         """
         事务内写回：删该标的原数据 + 批量插入清洗后数据。
-        注意：delete_market_data 按 symbol 删除（当前 DB 仅 daily/hfq，安全）。
+        注意：delete_market_data 按 symbol 删除（当前 DB 仅 daily/raw，安全）。
         Returns: 'written' / 'unchanged' / 'error'
         """
         if cleaned_data is None:
@@ -905,7 +1036,11 @@ def run_incremental_clean(
         for symbol, recs in by_symbol.items():
             try:
                 # 0) 先清洗过滤脏数据（DB 与 processed 同源一致；脏数据剔除不算失败）
+                # 方案B #82：注入复权因子 → 除权除息日跳变豁免
                 clean_config = load_clean_config()
+                factor_lookup = _load_factor_lookup(conn, symbol)
+                if factor_lookup:
+                    clean_config = _with_factor_lookup(clean_config, factor_lookup)
                 pipe = run_clean_pipeline(
                     records=recs, data_type="bar", symbol=symbol,
                     config=clean_config, save_bad=False, save_report=False,
@@ -918,7 +1053,7 @@ def run_incremental_clean(
                 for cc in cleaned:
                     db_rows.append({
                         "symbol": symbol, "market": "A股", "period": "daily",
-                        "adjust": "hfq", "trade_date": cc.get("date", ""),
+                        "adjust": "raw", "trade_date": cc.get("date", ""),
                         "open": cc.get("open"), "high": cc.get("high"),
                         "low": cc.get("low"), "close": cc.get("close"),
                         "volume": cc.get("volume"), "amount": cc.get("amount"),

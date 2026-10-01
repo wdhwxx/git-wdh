@@ -13,6 +13,8 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -39,13 +41,18 @@ _RULES_14: List[str] = [
 ]
 
 
-def _write_run_json(tmp_path: Path, rules: List[str], exclude_st: bool = False) -> Path:
+def _write_run_json(
+    tmp_path: Path, rules: List[str], exclude_st: bool = False,
+    suspend_days: int = 0,
+) -> Path:
     """写入 config/data_clean_run.json（14 条规则口径的测试替身）。"""
     path = tmp_path / "config" / "data_clean_run.json"
     path.parent.mkdir(parents=True, exist_ok=True)
+    cfg: Dict[str, Any] = {"exclude_rules": rules, "exclude_st": exclude_st}
+    if suspend_days > 0:
+        cfg["exclude_suspended_days"] = suspend_days
     path.write_text(
-        json.dumps({"exclude_rules": rules, "exclude_st": exclude_st}, ensure_ascii=False),
-        encoding="utf-8",
+        json.dumps(cfg, ensure_ascii=False), encoding="utf-8",
     )
     return path
 
@@ -57,6 +64,27 @@ def _write_st_yaml(tmp_path: Path, items: Dict[str, str]) -> Path:
     body = "\n".join(f'{k}: "{v}"' for k, v in items.items())
     path.write_text(body + "\n", encoding="utf-8")
     return path
+
+
+def _write_db(tmp_path: Path, last_dates: Dict[str, str]) -> None:
+    """写入 database/quant.db（market_data daily/hfq 最后交易日替身，供长期停牌规则）。"""
+    db_path = tmp_path / "database" / "quant.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(
+            "CREATE TABLE market_data (symbol TEXT, trade_date TEXT, "
+            "period TEXT, adjust TEXT)"
+        )
+        for sym, td in last_dates.items():
+            conn.execute(
+                "INSERT INTO market_data (symbol, trade_date, period, adjust) "
+                "VALUES (?, ?, 'daily', 'raw')",
+                (sym, td),
+            )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 class TestResolveIncrementalSymbols:
@@ -114,11 +142,11 @@ class TestResolveIncrementalSymbols:
         assert stats["after"] == 0
 
     def test_统计字段完整(self, tmp_path: Path) -> None:
-        """返回统计字典含 original/after/excluded_prefix/excluded_st。"""
+        """返回统计字典含 original/after/excluded_prefix/excluded_st/excluded_suspended。"""
         _write_run_json(tmp_path, _RULES_14)
         _, stats = resolve_incremental_symbols(_POOL, tmp_path)
-        assert set(stats.keys()) == {"original", "after", "excluded_prefix", "excluded_st"}
-        assert stats["after"] == stats["original"] - len(stats["excluded_prefix"]) - len(stats["excluded_st"])
+        assert set(stats.keys()) == {"original", "after", "excluded_prefix", "excluded_st", "excluded_suspended"}
+        assert stats["after"] == stats["original"] - len(stats["excluded_prefix"]) - len(stats["excluded_st"]) - len(stats["excluded_suspended"])
 
     def test_exclude_st无名单不报错(self, tmp_path: Path) -> None:
         """exclude_st=true 但 st_blacklist.yaml 缺失 → 按空名单处理，不剔除、不报错。"""
@@ -126,3 +154,55 @@ class TestResolveIncrementalSymbols:
         keep, stats = resolve_incremental_symbols(_POOL, tmp_path)
         assert keep == ["000001.SZ", "600519.SH", "600000.SH"]
         assert stats["excluded_st"] == []
+
+
+    # ── #79 长期停牌/退市剔除（60 天动态规则） ──
+
+    def test_长期停牌启用_超阈值剔除(self, tmp_path: Path) -> None:
+        """exclude_suspended_days=60：最后交易日距今 >60 天剔除，≤60 天保留。"""
+        ref = datetime.now().strftime("%Y-%m-%d")
+        old = (datetime.now() - timedelta(days=100)).strftime("%Y-%m-%d")
+        recent = (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d")
+        _write_run_json(tmp_path, _RULES_14, suspend_days=60)
+        _write_db(tmp_path, {"000001.SZ": old, "600519.SH": recent, "600000.SH": recent})
+        keep, stats = resolve_incremental_symbols(_POOL, tmp_path, ref_date=ref)
+        assert "000001.SZ" not in keep       # 100 天 → 剔除
+        assert "600519.SH" in keep           # 10 天 → 保留
+        assert "600000.SH" in keep
+        assert stats["excluded_suspended"] == ["000001.SZ"]
+        assert stats["after"] == 2
+
+    def test_长期停牌_边界等于阈值保留(self, tmp_path: Path) -> None:
+        """gap == 60 天 → 保留（严格大于才剔除）。"""
+        ref = "2026-10-01"
+        _write_run_json(tmp_path, _RULES_14, suspend_days=60)
+        _write_db(tmp_path, {"600519.SH": "2026-08-02"})  # 60 天整
+        keep, stats = resolve_incremental_symbols(["600519.SH"], tmp_path, ref_date=ref)
+        assert keep == ["600519.SH"]
+        assert stats["excluded_suspended"] == []
+
+    def test_长期停牌_DB无记录保留(self, tmp_path: Path) -> None:
+        """候选标的中 DB 无行情记录 → 无从判定，保留（不阻断）。"""
+        ref = "2026-10-01"
+        _write_run_json(tmp_path, _RULES_14, suspend_days=60)
+        _write_db(tmp_path, {"600519.SH": "2026-09-01"})
+        keep, stats = resolve_incremental_symbols(
+            ["600519.SH", "000001.SZ"], tmp_path, ref_date=ref,
+        )
+        assert "000001.SZ" in keep  # DB 无记录 → 保留
+        assert "600519.SH" in keep
+        assert stats["excluded_suspended"] == []
+
+    def test_长期停牌_未启用时不受影响(self, tmp_path: Path) -> None:
+        """未配置 exclude_suspended_days（旧 config 兼容）→ 不启用、全部保留。"""
+        _write_run_json(tmp_path, _RULES_14)
+        keep, stats = resolve_incremental_symbols(_POOL, tmp_path)
+        assert keep == ["000001.SZ", "600519.SH", "600000.SH"]
+        assert stats["excluded_suspended"] == []
+
+    def test_长期停牌_DB缺失不报错(self, tmp_path: Path) -> None:
+        """启用规则但 quant.db 不存在 → 跳过该规则，不抛错、全保留。"""
+        _write_run_json(tmp_path, _RULES_14, suspend_days=60)
+        keep, stats = resolve_incremental_symbols(_POOL, tmp_path)
+        assert keep == ["000001.SZ", "600519.SH", "600000.SH"]
+        assert stats["excluded_suspended"] == []

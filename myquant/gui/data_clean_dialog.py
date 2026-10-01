@@ -74,7 +74,7 @@ def find_project_root() -> Path:
 
 
 def load_all_symbols(db_path: Path):
-    """读取全量 hfq 日线标的（用于预览排除数量）"""
+    """读取全量 raw 日线标的（用于预览排除数量）"""
     if not db_path.exists():
         return None
     conn = sqlite3.connect(str(db_path))
@@ -82,7 +82,7 @@ def load_all_symbols(db_path: Path):
         cur = conn.cursor()
         cur.execute(
             "SELECT DISTINCT symbol FROM market_data "
-            "WHERE period='daily' AND adjust='hfq' ORDER BY symbol"
+            "WHERE period='daily' AND adjust='raw' ORDER BY symbol"
         )
         return [r[0] for r in cur.fetchall()]
     finally:
@@ -129,7 +129,7 @@ class DataCleanDialog(QDialog):
         # ① 清洗范围
         grp_scope = QGroupBox("清洗范围")
         scope_form = QFormLayout(grp_scope)
-        self.rb_all = QRadioButton("全量 hfq 日线标的（默认）")
+        self.rb_all = QRadioButton("全量 raw 日线标的（默认）")
         self.rb_all.setChecked(True)
         self.rb_custom = QRadioButton("仅指定标的（逗号分隔）")
         self.ed_symbols = QLineEdit()
@@ -197,6 +197,26 @@ class DataCleanDialog(QDialog):
         btn_st_edit.clicked.connect(self._on_st_edit)
         st_row.addWidget(btn_st_edit)
         fv.addLayout(st_row)
+
+        # 长期停牌/退市剔除（#79：最后交易日距今 > N 天 → 排除；0=不启用）
+        suspend_row = QHBoxLayout()
+        suspend_row.addWidget(QLabel("剔除长期停牌/退市："))
+        self.sp_suspend = QSpinBox()
+        self.sp_suspend.setRange(0, 3650)
+        self.sp_suspend.setSingleStep(5)
+        self.sp_suspend.setValue(60)
+        self.sp_suspend.setSuffix(" 天")
+        self.sp_suspend.setToolTip(
+            "最后交易日距今超过 N 天（自然日）的标的剔除（按 quant.db 实时判定、防焊死）；"
+            "0 = 不启用。默认 60 天（正常停牌 ≤10 交易日≈15 天，余量充足；"
+            "覆盖暂停上市/长期重组停滞/退市整理）。"
+        )
+        self.sp_suspend.valueChanged.connect(lambda _v: self._update_preview())
+        suspend_row.addWidget(self.sp_suspend)
+        self.lbl_suspend_count = QLabel("")
+        self.lbl_suspend_count.setStyleSheet("color: #666;")
+        suspend_row.addWidget(self.lbl_suspend_count)
+        fv.addLayout(suspend_row)
 
         # 预览
         self.lbl_preview = QLabel("")
@@ -304,20 +324,42 @@ class DataCleanDialog(QDialog):
         # ST 名单：勾选时并入排除统计（名单∩DB 存量，离线读文件）
         st_blacklist = self._load_st_blacklist()
         st_hit = [s for s in self.all_symbols if s in st_blacklist] if self.cb_exclude_st.isChecked() else []
-        keep = len(self.all_symbols) - len(excluded) - len(st_hit)
+        # 长期停牌/退市：阈值>0 时按 DB 最后交易日实时统计（#79）
+        suspend_hit: List[str] = []
+        if self.sp_suspend.value() > 0:
+            suspend_hit = self._count_long_suspended(self.sp_suspend.value())
+        keep = len(self.all_symbols) - len(excluded) - len(st_hit) - len(suspend_hit)
         self.lbl_st_count.setText(
             f"名单 {len(st_blacklist)} 只（DB 内 {len(st_hit)} 只）"
             if st_blacklist else "名单为空（点击「刷新名单」生成）"
         )
+        self.lbl_suspend_count.setText(
+            f"剔除 {len(suspend_hit)} 只"
+            if suspend_hit else ("停牌规则未启用" if self.sp_suspend.value() == 0 else "当前无超期停牌标的")
+        )
+        parts = [f"排除指数/基金/板块 {len(excluded)} 只"]
         if st_hit:
-            self.lbl_preview.setText(
-                f"将清洗 {keep} 只标的，排除指数/基金/板块 {len(excluded)} 只 + "
-                f"ST 风险警示 {len(st_hit)} 只（全量 {len(self.all_symbols)} 只）"
-            )
-        else:
-            self.lbl_preview.setText(
-                f"将清洗 {keep} 只标的，排除指数/基金/板块 {len(excluded)} 只（全量 {len(self.all_symbols)} 只）"
-            )
+            parts.append(f"ST 风险警示 {len(st_hit)} 只")
+        if suspend_hit:
+            parts.append(f"长期停牌/退市 {len(suspend_hit)} 只")
+        self.lbl_preview.setText(
+            f"将清洗 {keep} 只标的，{' + '.join(parts)}（全量 {len(self.all_symbols)} 只）"
+        )
+
+    def _count_long_suspended(self, max_days: int) -> list:
+        """按 DB 最后交易日统计超期停牌标的（最后交易日距今 > max_days 天）。"""
+        from myquant.data_access.full_clean_service import filter_long_suspended_symbols
+        try:
+            conn = sqlite3.connect(str(self.db_path))
+            try:
+                keep, excluded = filter_long_suspended_symbols(
+                    self.all_symbols, conn, max_days,
+                )
+                return excluded
+            finally:
+                conn.close()
+        except Exception:
+            return []
 
     def _collect_config(self) -> dict:
         scope = "all" if self.rb_all.isChecked() else "custom"
@@ -327,6 +369,7 @@ class DataCleanDialog(QDialog):
             "symbols": self.ed_symbols.text().strip() if scope == "custom" else None,
             "exclude_rules": self._current_rules(),
             "exclude_st": self.cb_exclude_st.isChecked(),
+            "exclude_suspended_days": self.sp_suspend.value(),
             "st_blacklist_path": ST_BLACKLIST_CONFIG,
             "clean_overrides": {
                 "max_price_jump_pct": self.sp_jump.value(),
