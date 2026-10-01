@@ -163,6 +163,61 @@ def filter_st_blacklist_symbols(
     return keep, excluded
 
 
+def resolve_incremental_symbols(
+    pool_symbols: List[str],
+    project_root: Optional[Path] = None,
+) -> Tuple[List[str], Dict[str, Any]]:
+    """增量/导出范围实时推导（防焊死）：候选池 → 排除规则 → ST 名单。
+
+    与全量清洗同一规则源：优先读 config/data_clean_run.json 的 exclude_rules
+    （14 条实际口径）与 exclude_st；文件缺失/解析失败回退 DEFAULT_EXCLUDE_RULES
+    （10 条静态兜底）并告警。每次调用实时推导，绝不读取任何历史标的数字
+    （如 3208/3226 等快照只作展示、不参与判定）——规则变化则范围跟随变化。
+
+    Args:
+        pool_symbols: 候选标的池（如配置池 / DB 全量）。
+        project_root: 项目根目录；None 用模块默认。
+
+    Returns:
+        Tuple[keep, stats]：
+        keep = 规则内标的列表；
+        stats = {"original", "after", "excluded_prefix", "excluded_st"}。
+    """
+    root = Path(project_root) if project_root else PROJECT_ROOT
+    exclude_rules = list(DEFAULT_EXCLUDE_RULES)
+    exclude_st = False
+    cfg_path = root / "config" / "data_clean_run.json"
+    if cfg_path.exists():
+        try:
+            cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+            rules = cfg.get("exclude_rules")
+            if rules:
+                exclude_rules = [str(r).strip() for r in rules if str(r).strip()]
+            exclude_st = bool(cfg.get("exclude_st", False))
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("config/data_clean_run.json 读取失败，回退默认排除规则: %s", e)
+    else:
+        logger.warning(
+            "config/data_clean_run.json 不存在，使用默认排除规则（%d 条）",
+            len(exclude_rules),
+        )
+
+    keep, excluded_prefix = filter_excluded_symbols(pool_symbols, exclude_rules)
+    excluded_st: List[str] = []
+    if exclude_st:
+        blacklist = load_st_blacklist(root)
+        if blacklist:
+            keep, excluded_st = filter_st_blacklist_symbols(keep, blacklist)
+
+    stats = {
+        "original": len(pool_symbols),
+        "after": len(keep),
+        "excluded_prefix": excluded_prefix,
+        "excluded_st": excluded_st,
+    }
+    return keep, stats
+
+
 def refresh_st_blacklist(
     project_root: Optional[Path] = None,
     fetcher: Optional[Any] = None,

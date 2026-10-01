@@ -15,6 +15,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, List
 
+import pandas as pd
 import pytest
 
 from myquant.database.schema import CREATE_FINANCIAL_DATA_SQL, CREATE_MARKET_DATA_SQL
@@ -88,7 +89,10 @@ class TestExportColumnSet:
 
         mod = _load_export_module()
         df = mod.load_symbol_data(sqlite3.connect(str(db)), "000001.SZ")
-        assert list(df.columns) == EXPECTED_CN_COLUMNS
+        # 扁平式：#72 13 列业务列 + "日期"列（整数 YYYYMMDD），index 为 RangeIndex
+        assert list(df.columns) == ["日期"] + EXPECTED_CN_COLUMNS
+        assert isinstance(df.index, pd.RangeIndex)
+        assert int(df["日期"].iloc[0]) == 20260928
         # 换手率列值透传（DB 有值则导出有值）
         assert df["换手率"].iloc[0] == 1.23
         # 每股收益按报告期向前匹配
@@ -103,6 +107,38 @@ class TestExportColumnSet:
         db = _make_db(tmp_path, "601091.SH", row)
         mod = _load_export_module()
         df = mod.load_symbol_data(sqlite3.connect(str(db)), "601091.SH")
-        assert list(df.columns) == EXPECTED_CN_COLUMNS
+        assert list(df.columns) == ["日期"] + EXPECTED_CN_COLUMNS
+        assert isinstance(df.index, pd.RangeIndex)
+        assert int(df["日期"].iloc[0]) == 20260917
         assert df["每股收益"].isna().all()
         assert df["换手率"].isna().all()
+
+    def test_verify_parquet_扁平式通过(self, tmp_path: Path) -> None:
+        """verify_parquet 从「日期」列读起止日期（扁平式），与 DB 统计一致 → 通过。"""
+        mod = _load_export_module()
+        # 构造扁平式 parquet（整数日期列 + 两行）
+        df = pd.DataFrame({
+            "日期": [20260917, 20260918],
+            "收盘价": [13.0, 13.5],
+            "开盘价": [12.9, 13.1],
+        })
+        path = tmp_path / "601091.SH.parquet"
+        df.to_parquet(path, index=False)
+        ok, msg = mod.verify_parquet(path, db_rows=2, db_start="2026-09-17", db_end="2026-09-18")
+        assert ok, msg
+        # 与 DB 统计不一致 → 失败
+        ok2, _ = mod.verify_parquet(path, db_rows=2, db_start="2026-09-16", db_end="2026-09-18")
+        assert not ok2
+
+    def test_verify_parquet_旧索引式判失败触发重建(self, tmp_path: Path) -> None:
+        """旧索引式文件（无「日期」列）→ verify 判失败（触发重建，不抛异常中断）。"""
+        mod = _load_export_module()
+        df = pd.DataFrame({
+            "收盘价": [13.0, 13.5],
+        }, index=pd.to_datetime(["2026-09-17", "2026-09-18"]))
+        df.index.name = "日期"
+        path = tmp_path / "old.parquet"
+        df.to_parquet(path, index=True)
+        ok, msg = mod.verify_parquet(path, db_rows=2, db_start="2026-09-17", db_end="2026-09-18")
+        assert not ok
+        assert "重建" in msg

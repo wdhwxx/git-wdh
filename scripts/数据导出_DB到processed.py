@@ -9,7 +9,7 @@ quant.db → processed 完整导出脚本
   1. 从 quant.db 读取所有有 hfq 日线数据的标的
   2. 逐只读取完整日线数据（trade_date, open, high, low, close, volume, amount, pct_chg,
      amplitude, volume_ratio, turnover, float_share, pe_dynamic）
-  3. 按日期升序排序，设置日期为索引
+  3. 按日期升序排序，日期保留为「日期」列（扁平式，整数 YYYYMMDD）
   4. 保存为 parquet 文件到 processed 目录
   5. 导出后做完整性校验：每只股票的行数/日期范围对比 DB
 
@@ -35,6 +35,8 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
+from myquant.data_access.full_clean_service import resolve_incremental_symbols
+
 
 #: 英文列名 → 中文显示名（导出到 processed 时表头全中文）
 #: 下游回测加载器 myquant/backtest/data_loader.py 读取时会自动映射回英文列名，不影响回测
@@ -53,8 +55,16 @@ CN_COLUMN_MAP: Dict[str, str] = {
     "turnover": "换手率",
 }
 
-#: DataFrame 索引（日期列）的中文显示名
-CN_INDEX_NAME: str = "日期"
+def _int_date_to_iso(value: int) -> str:
+    """整数日期 YYYYMMDD → ISO 字符串 YYYY-MM-DD（扁平式日期列口径）。
+
+    Args:
+        value: 整数日期，如 20260928。
+
+    Returns:
+        ISO 格式日期字符串，如 "2026-09-28"。
+    """
+    return f"{value // 10000:04d}-{value % 10000 // 100:02d}-{value % 100:02d}"
 
 
 def find_project_root() -> Path:
@@ -102,16 +112,15 @@ def load_symbol_data(conn: sqlite3.Connection, symbol: str) -> pd.DataFrame:
         ORDER BY trade_date ASC
     """
     df = pd.read_sql_query(query, conn, params=(symbol,))
-    # 转换日期为 datetime，设置为索引
+    # 转换日期为 datetime（扁平式：日期以普通列保存，不 set_index）
     df['trade_date'] = pd.to_datetime(df['trade_date'])
-    df = df.set_index('trade_date')
-    df.index.name = CN_INDEX_NAME
     # 确保数值列为 float
     for col in ['open', 'high', 'low', 'close', 'volume', 'amount', 'pct_chg', 'amplitude', 'volume_ratio', 'turnover', 'float_share', 'pe_dynamic']:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
-    # 表头全中文显示（下游加载器自动映射回英文列名，不影响回测）
-    df = df.rename(columns=CN_COLUMN_MAP)
+    # 表头全中文显示（下游加载器自动映射回英文列名，不影响回测）；
+    # trade_date 一并映射为「日期」列（扁平式）
+    df = df.rename(columns={**CN_COLUMN_MAP, "trade_date": "日期"})
     # 每股收益 = 按交易日匹配最近一期 financial_data.eps（防未来函数）
     fin_cur = conn.cursor()
     fin_cur.execute("SELECT report_date, eps FROM financial_data WHERE symbol=? ORDER BY report_date", (symbol,))
@@ -121,7 +130,7 @@ def load_symbol_data(conn: sqlite3.Connection, symbol: str) -> pd.DataFrame:
         fin_dates = [r[0] for r in fin_rows]
         fin_eps = [r[1] for r in fin_rows]
         eps_list = []
-        for trade_date_str in df.index.strftime('%Y-%m-%d'):
+        for trade_date_str in df['日期'].dt.strftime('%Y-%m-%d'):
             eps_val = None
             for i, fd in enumerate(fin_dates):
                 if fd <= trade_date_str:
@@ -132,6 +141,8 @@ def load_symbol_data(conn: sqlite3.Connection, symbol: str) -> pd.DataFrame:
         df["每股收益"] = eps_list
     else:
         df["每股收益"] = None
+    # 扁平式统一：日期列转整数 YYYYMMDD（与增量链路/manager._get_processed_last_date 读取口径一致）
+    df["日期"] = df["日期"].dt.strftime("%Y%m%d").astype(int)
     return df
 
 
@@ -150,8 +161,13 @@ def verify_parquet(parquet_path: Path, db_rows: int, db_start: str, db_end: str)
     if len(df) != db_rows:
         return False, f"行数不匹配: parquet={len(df)}, db={db_rows}"
 
-    pq_start = df.index[0].strftime("%Y-%m-%d") if hasattr(df.index[0], "strftime") else str(df.index[0])
-    pq_end = df.index[-1].strftime("%Y-%m-%d") if hasattr(df.index[-1], "strftime") else str(df.index[-1])
+    # 扁平式：日期从「日期」列读取（整数 YYYYMMDD → YYYY-MM-DD）；
+    # 旧索引式文件无「日期」列 → 视为校验失败（触发重建）
+    try:
+        pq_start = _int_date_to_iso(int(df["日期"].iloc[0]))
+        pq_end = _int_date_to_iso(int(df["日期"].iloc[-1]))
+    except (KeyError, TypeError, ValueError):
+        return False, "日期列缺失或格式异常（旧索引式文件，需重建）"
 
     if pq_start != db_start:
         return False, f"起始日期不匹配: parquet={pq_start}, db={db_start}"
@@ -177,10 +193,14 @@ def export_all(
     conn = sqlite3.connect(str(db_path))
     try:
         all_symbols = get_all_symbols(conn)
+        # 清洗规则把关（与全量清洗同一规则源）：processed 只进规则内标的，
+        # 范围每次运行时实时推导（防焊死），绝不添加规则外任何一只股票
+        all_symbols, scope_stats = resolve_incremental_symbols(all_symbols, find_project_root())
         if symbols_filter:
             all_symbols = [s for s in all_symbols if s in symbols_filter]
 
         total = len(all_symbols)
+        print(f"  DB 全量: {scope_stats['original']} → 规则内: {scope_stats['after']}")
         print(f"=" * 60)
         print(f"  quant.db → processed 完整导出")
         print(f"=" * 60)
@@ -214,7 +234,7 @@ def export_all(
             # 读取并导出
             try:
                 df = load_symbol_data(conn, symbol)
-                df.to_parquet(parquet_path, index=True)
+                df.to_parquet(parquet_path, index=False)
                 stats["exported"] += 1
             except Exception as e:
                 stats["failed"] += 1

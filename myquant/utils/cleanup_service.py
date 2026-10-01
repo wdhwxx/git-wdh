@@ -7,7 +7,8 @@
 
   1. 项目垃圾清理：A-E 五类
      A 测试残留（文件名含测试关键词 / 孤儿 bad / clean 测试报告）
-     B 测试备份（backups/backup_*_quant_before_clean.db 及 -shm/-wal）
+     B 测试备份（backups/backup_TEST_*_quant_before_clean.db 及 -shm/-wal；
+        真实清洗备份 backup_*_quant_before_clean.db 受保护不删）
      C Python 缓存（**/__pycache__，删除后自动重建）
      D 轮转日志（logs/*.log.1）
      E 旧格式冗余（datasets/processed/*/ CSV 子目录，默认关闭）
@@ -72,9 +73,9 @@ TEST_NAME_PATTERNS: Tuple[str, ...] = (
 # 孤儿 bad 文件回退规则（仅当 quant.db 的 clean_run_meta 不可读时使用）
 ORPHAN_BAD_PATTERN: str = "bad_bar_*_20260830_225*.json"
 
-# 全量清洗测试产生的备份与报告
-TEST_BACKUP_PATTERN: str = "backup_*_quant_before_clean.db"
-TEST_CLEAN_REPORT_PATTERN: str = "clean_all_full_clean_*.json"
+# 全量清洗测试产生的备份与报告（真实生产备份/报告受保护，不匹配以下模式）
+TEST_BACKUP_PATTERN: str = "backup_TEST_*_quant_before_clean.db"
+TEST_CLEAN_REPORT_PATTERN: str = "clean_all_TEST_*.json"
 
 # 回测看板验收样品（一次性验收产物；正式看板由 回测配置GUI「看板生成」页产出，
 # 命名规范为 回测看板_<代码>_<起止日期>.html，不匹配本模式）

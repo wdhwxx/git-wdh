@@ -108,8 +108,8 @@ def test_清洗后合并保留全历史并追加新日(monkeypatch, tmp_path: Pa
     assert int(df["日期"].max()) == 20260920  # 新日追加
 
 
-def test_重叠日去重保留最新值(monkeypatch, tmp_path: Path) -> None:
-    """增量区间与存量重叠日 → 去重为1，保留最新（清洗后的新值）。"""
+def test_重叠日保留存量不覆盖(monkeypatch, tmp_path: Path) -> None:
+    """增量区间与存量重叠日 → 保留存量值（硬约束：绝不覆盖存量数据），新值不写入。"""
     symbol = "TST.SZ"
     manager, processed = _make_manager(monkeypatch, tmp_path, [
         _bar("20260918", 9, 9.3, 8.9, 9.0),
@@ -123,8 +123,9 @@ def test_重叠日去重保留最新值(monkeypatch, tmp_path: Path) -> None:
     out = manager.save_cleaned_incremental_parquet(symbol, start_date="2026-09-18", end_date="2026-09-21")
     df = pd.read_parquet(Path(out))
     assert len(df) == 3
-    assert int((df["日期"] == 20260918).sum()) == 1  # 重叠去重
-    assert float(df.loc[df["日期"] == 20260918, "收盘价"].iloc[0]) == 9.0  # keep=last 取新值
+    assert int((df["日期"] == 20260918).sum()) == 1  # 重叠保留 1 条
+    assert float(df.loc[df["日期"] == 20260918, "收盘价"].iloc[0]) == 3.0  # 存量值保留，不被覆盖
+    assert float(df.loc[df["日期"] == 20260921, "收盘价"].iloc[0]) == 9.5  # 新日追加
 
 
 def test_脏行被清洗剔除(monkeypatch, tmp_path: Path) -> None:
@@ -299,3 +300,105 @@ def test_增量B类派生量_有财务数据时计算换手率流通股本市盈
     # 存量行不补派生量（增量语义）
     old = df[df["日期"] == 20260925].iloc[0]
     assert pd.isna(old.get("市盈动"))
+
+
+# ── F2 存量保护：旧索引式兼容 / 写回扁平式 / 存量逐值等价 ──
+
+
+def test_旧索引式存量兼容追加新日(monkeypatch, tmp_path: Path) -> None:
+    """旧索引式存量（DatetimeIndex、无「日期」列）→ 归一化后合并，不丢失存量、追加新日。"""
+    symbol = "TST.SZ"
+    manager, processed = _make_manager(
+        monkeypatch, tmp_path, [_bar("20260921", 11, 11.5, 10.8, 11.2)],
+    )
+    path = processed / f"{symbol}.parquet"
+    old = pd.DataFrame(
+        [{"收盘价": 1.0}, {"收盘价": 3.0}],
+        index=pd.to_datetime(["1991-04-03", "2026-09-18"]),
+    )
+    old.index.name = "日期"
+    old.to_parquet(path, index=True)
+
+    out = manager.save_cleaned_incremental_parquet(symbol, start_date="2026-09-21", end_date="2026-09-21")
+    assert out is not None
+    df = pd.read_parquet(Path(out))
+    assert isinstance(df.index, pd.RangeIndex)
+    assert list(df["日期"].astype(int)) == [19910403, 20260918, 20260921]
+    assert list(df["收盘价"].astype(float)) == [1.0, 3.0, 11.2]
+
+
+def test_写回扁平式indexFalse(monkeypatch, tmp_path: Path) -> None:
+    """写回 processed 为扁平式：RangeIndex + 「日期」列（不落旧索引式）。"""
+    symbol = "TST.SZ"
+    manager, processed = _make_manager(
+        monkeypatch, tmp_path, [_bar("20260921", 11, 11.5, 10.8, 11.2)],
+    )
+    _write_existing(processed, symbol, [{"日期": 19910403, "收盘价": 1.0}])
+
+    out = manager.save_cleaned_incremental_parquet(symbol, start_date="2026-09-21", end_date="2026-09-21")
+    df = pd.read_parquet(Path(out))
+    assert isinstance(df.index, pd.RangeIndex)
+    assert "日期" in df.columns
+    assert list(df["日期"].astype(int)) == [19910403, 20260921]
+
+
+def test_存量逐值等价_冲突保留存量(monkeypatch, tmp_path: Path) -> None:
+    """存量多列逐值等价（写回前不改变存量任何数据）；重叠日新值不覆盖存量。"""
+    symbol = "TST.SZ"
+    manager, processed = _make_manager(
+        monkeypatch, tmp_path,
+        [
+            # 新日 20260921 + 与存量重叠的 20260918（新值 9.0，必须被存量 3.0 挡住）
+            _bar("20260921", 11, 11.5, 10.8, 11.2),
+            _bar("20260918", 9, 9.2, 8.9, 9.0),
+        ],
+    )
+    existing_rows = [
+        {"日期": 19910403, "开盘价": 1.0, "最高价": 1.1, "最低价": 0.9, "收盘价": 1.0, "成交量": 100000},
+        {"日期": 20260918, "开盘价": 2.9, "最高价": 3.1, "最低价": 2.8, "收盘价": 3.0, "成交量": 200000},
+    ]
+    _write_existing(processed, symbol, existing_rows)
+
+    out = manager.save_cleaned_incremental_parquet(symbol, start_date="2026-09-18", end_date="2026-09-21")
+    df = pd.read_parquet(Path(out))
+    # 冲突日保留存量（3.0 不被 9.0 覆盖）
+    conflict = df[df["日期"] == 20260918].iloc[0]
+    assert float(conflict["收盘价"]) == 3.0
+    # 新日追加
+    assert int((df["日期"] == 20260921).sum()) == 1
+    # 存量两行各列逐值等价（数值列）
+    numeric_cols = ["开盘价", "最高价", "最低价", "收盘价", "成交量"]
+    for row in existing_rows:
+        got = df[df["日期"] == row["日期"]].iloc[0]
+        for col in numeric_cols:
+            assert float(got[col]) == float(row[col]), f"{row['日期']}.{col} 被改动"
+    # 全表日期升序
+    assert list(df["日期"].astype(int)) == sorted(df["日期"].astype(int))
+
+
+# ── 列模板对齐：无存量新建仍为全量 14 列（修复 18 只 10 列缺陷） ──
+
+
+def test_无财务标的新建文件仍14列(monkeypatch, tmp_path: Path) -> None:
+    """无存量 + DB 无 financial_data（_db 为 None）→ 新建文件列 = 全量 14 列模板，
+    B 类 4 列（换手率/流通股本/市盈动/每股收益）存在且为 None，行数据不被改动。"""
+    symbol = "TST.SZ"
+    manager, processed = _make_manager(
+        monkeypatch, tmp_path, [_bar("20260919", 11, 11.5, 10.8, 11.2)],
+    )
+
+    out = manager.save_cleaned_incremental_parquet(symbol, start_date="2026-09-19", end_date="2026-09-19")
+    assert out is not None
+    df = pd.read_parquet(Path(out))
+    assert list(df.columns) == [
+        "日期", "开盘价", "最高价", "最低价", "收盘价", "成交量", "成交额",
+        "涨跌幅", "振幅", "量比", "换手率", "流通股本", "市盈动", "每股收益",
+    ]
+    assert len(df) == 1
+    assert int(df["日期"].iloc[0]) == 20260919
+    # B 类 3 列（依赖 financial_data）存在且为 None；换手率若原始记录透传则保留（不强求 None）
+    assert df["流通股本"].isna().all()
+    assert df["市盈动"].isna().all()
+    assert df["每股收益"].isna().all()
+    # 行情列透传不被改动
+    assert float(df["收盘价"].iloc[0]) == 11.2

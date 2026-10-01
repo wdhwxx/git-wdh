@@ -27,7 +27,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFormLayout,
     QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton,
@@ -44,6 +45,8 @@ from PySide6.QtWidgets import (
 #   688.SH = 科创板(688开头.SH)
 #   4/8/92 = 北交所/老三板(4开头老三板、8开头北交所82/83/87/88、92北交所920新段)
 DEFAULT_EXCLUDE_RULES = "000.SH, 399, 880, 5.SH, 1.SZ, 30.SZ, 688.SH, 4, 8, 92, 68, 90, 20, 99"
+# ST 风险警示股名单（离线数据源；由「刷新名单」联网生成或人工编辑，不入库）
+ST_BLACKLIST_CONFIG = "config/st_blacklist.yaml"
 DEFAULT_PRESETS = [
     ("上证指数（000.SH）", "000.SH"),
     ("深证/中证指数（399）", "399"),
@@ -175,6 +178,26 @@ class DataCleanDialog(QDialog):
         rules_row.addWidget(btn_default)
         fv.addLayout(rules_row)
 
+        # ST 风险警示剔除（*ST/ST/S*ST/SST，按名称名单，与上方代码前缀规则正交串联）
+        st_row = QHBoxLayout()
+        self.cb_exclude_st = QCheckBox("剔除 ST / *ST / S*ST / SST 风险警示股")
+        self.cb_exclude_st.setChecked(True)
+        self.cb_exclude_st.toggled.connect(lambda _on: self._update_preview())
+        self.cb_exclude_st.setToolTip("按名称匹配风险警示股（名单 config/st_blacklist.yaml），与上方代码前缀规则串联执行；不勾选则行为与之前完全一致")
+        st_row.addWidget(self.cb_exclude_st)
+        self.lbl_st_count = QLabel("")
+        self.lbl_st_count.setStyleSheet("color: #666;")
+        st_row.addWidget(self.lbl_st_count)
+        btn_st_refresh = QPushButton("刷新名单")
+        btn_st_refresh.setToolTip("联网拉取全市场股票名称，按 *ST/ST/S*ST/SST 前缀生成 config/st_blacklist.yaml")
+        btn_st_refresh.clicked.connect(self._on_st_refresh)
+        st_row.addWidget(btn_st_refresh)
+        btn_st_edit = QPushButton("编辑名单")
+        btn_st_edit.setToolTip("打开 config/st_blacklist.yaml 人工维护名单")
+        btn_st_edit.clicked.connect(self._on_st_edit)
+        st_row.addWidget(btn_st_edit)
+        fv.addLayout(st_row)
+
         # 预览
         self.lbl_preview = QLabel("")
         self.lbl_preview.setStyleSheet("color: #1a7f37; font-weight: bold;")
@@ -239,12 +262,6 @@ class DataCleanDialog(QDialog):
         btns.addStretch(1)
         btn_cancel = QPushButton("取消")
         btn_cancel.clicked.connect(self.reject)
-        # 增量清洗通道（M0-M4 方案）：对 database/incremental_*.parquet 暂存增量做清洗 + DB/processed 双写，不重新拉取
-        btn_incremental = QPushButton("增量清洗")
-        btn_incremental.setToolTip(
-            "对 database/incremental_*.parquet 暂存增量做清洗 + DB/processed 双写（仅清洗，不重新拉取）"
-        )
-        btn_incremental.clicked.connect(self._on_incremental_clean)
         btn_start = QPushButton("开始清洗")
         btn_start.setDefault(True)
         btn_start.setStyleSheet(
@@ -253,7 +270,6 @@ class DataCleanDialog(QDialog):
         )
         btn_start.clicked.connect(self._on_start)
         btns.addWidget(btn_cancel)
-        btns.addWidget(btn_incremental)
         btns.addWidget(btn_start)
         root.addLayout(btns)
 
@@ -285,10 +301,23 @@ class DataCleanDialog(QDialog):
             return
         rules = self._current_rules()
         excluded = [s for s in self.all_symbols if any(match_rule(s, r) for r in rules)]
-        keep = len(self.all_symbols) - len(excluded)
-        self.lbl_preview.setText(
-            f"将清洗 {keep} 只标的，排除指数/基金/板块 {len(excluded)} 只（全量 {len(self.all_symbols)} 只）"
+        # ST 名单：勾选时并入排除统计（名单∩DB 存量，离线读文件）
+        st_blacklist = self._load_st_blacklist()
+        st_hit = [s for s in self.all_symbols if s in st_blacklist] if self.cb_exclude_st.isChecked() else []
+        keep = len(self.all_symbols) - len(excluded) - len(st_hit)
+        self.lbl_st_count.setText(
+            f"名单 {len(st_blacklist)} 只（DB 内 {len(st_hit)} 只）"
+            if st_blacklist else "名单为空（点击「刷新名单」生成）"
         )
+        if st_hit:
+            self.lbl_preview.setText(
+                f"将清洗 {keep} 只标的，排除指数/基金/板块 {len(excluded)} 只 + "
+                f"ST 风险警示 {len(st_hit)} 只（全量 {len(self.all_symbols)} 只）"
+            )
+        else:
+            self.lbl_preview.setText(
+                f"将清洗 {keep} 只标的，排除指数/基金/板块 {len(excluded)} 只（全量 {len(self.all_symbols)} 只）"
+            )
 
     def _collect_config(self) -> dict:
         scope = "all" if self.rb_all.isChecked() else "custom"
@@ -297,6 +326,8 @@ class DataCleanDialog(QDialog):
             "scope": scope,
             "symbols": self.ed_symbols.text().strip() if scope == "custom" else None,
             "exclude_rules": self._current_rules(),
+            "exclude_st": self.cb_exclude_st.isChecked(),
+            "st_blacklist_path": ST_BLACKLIST_CONFIG,
             "clean_overrides": {
                 "max_price_jump_pct": self.sp_jump.value(),
                 "price_jump_action": self.cb_jump_action.currentData(),
@@ -307,6 +338,42 @@ class DataCleanDialog(QDialog):
             "rebuild_processed": self.cb_rebuild.isChecked(),
             "started_at": datetime.now().isoformat(timespec="seconds"),
         }
+
+    def _load_st_blacklist(self) -> dict:
+        """读取 ST 名单（离线文件）；缺失/损坏返回空 dict（不阻断预览）。"""
+        from myquant.data_access.full_clean_service import load_st_blacklist
+        return load_st_blacklist(self.project_root)
+
+    def _on_st_refresh(self) -> None:
+        """联网刷新 ST 名单（业务在 full_clean_service.refresh_st_blacklist）。"""
+        from myquant.data_access.full_clean_service import refresh_st_blacklist
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            blacklist = refresh_st_blacklist(self.project_root)
+        except Exception as e:
+            QMessageBox.warning(
+                self, "刷新失败",
+                f"ST 名单刷新失败（网络/数据源错误）：\n{type(e).__name__}: {e}",
+            )
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+        self._update_preview()
+        QMessageBox.information(
+            self, "刷新完成",
+            f"ST 风险警示名单已刷新：{len(blacklist)} 只\n保存至 config/st_blacklist.yaml",
+        )
+
+    def _on_st_edit(self) -> None:
+        """打开 ST 名单文件人工维护。"""
+        path = self.project_root / ST_BLACKLIST_CONFIG
+        if not path.exists():
+            QMessageBox.warning(
+                self, "名单不存在",
+                "config/st_blacklist.yaml 不存在，请先点击「刷新名单」生成。",
+            )
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def _on_start(self) -> None:
         if not self.clean_script.exists():
@@ -351,40 +418,6 @@ class DataCleanDialog(QDialog):
             f"outputs/clean_all_{config['run_id']}.json",
         )
         self.accept()
-
-    def _on_incremental_clean(self) -> None:
-        """增量清洗通道：对最近暂存增量文件做清洗 + DB/processed 双写（仅清洗模式，不重新拉取）。"""
-        from myquant.data_access.full_clean_service import run_incremental_clean
-
-        incr_dir = self.project_root / "database"
-        files = sorted(incr_dir.glob("incremental_*.parquet"), reverse=True) if incr_dir.exists() else []
-        if not files:
-            QMessageBox.warning(
-                self, "提示",
-                "未找到增量暂存文件 database/incremental_*.parquet。\n请先运行「增量更新日线」生成后再执行增量清洗。",
-            )
-            return
-
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            res = run_incremental_clean(project_root=self.project_root)
-        except Exception as e:
-            QMessageBox.critical(self, "错误", f"增量清洗异常：\n{type(e).__name__}: {e}")
-            return
-        finally:
-            QApplication.restoreOverrideCursor()
-
-        if res.get("status") == "no_records":
-            QMessageBox.information(self, "增量清洗", "暂存文件中无有效增量记录。")
-            return
-        msg = (
-            f"增量清洗完成：\n"
-            f"  处理标的：{len(res.get('cleaned_symbols', []))}\n"
-            f"  写入 DB：{res.get('db_written', 0)}\n"
-            f"  写入 processed：{res.get('processed_written', 0)}\n"
-            f"  失败标的：{len(res.get('errors', []))}"
-        )
-        QMessageBox.information(self, "增量清洗", msg)
 
 
 def run_dialog(project_root: Path) -> int:

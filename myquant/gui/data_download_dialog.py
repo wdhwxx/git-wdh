@@ -270,11 +270,23 @@ def run_daily(
     ensure_dir(project_root / "datasets" / "raw" / "daily")
     ensure_dir(project_root / "datasets" / "processed")
 
-    # 标的范围取自配置股票池（三因子 3226 只，与回测/实盘一致）；
-    # 不用全市场 get_stock_list()，避免把 processed 扩成全市场（池空则空转）
-    symbols = _load_pool_codes(project_root, pool_config)
-    if not symbols:
+    # 标的范围取自配置股票池（与回测/实盘一致），再经清洗规则实时过滤
+    # （排除规则 14 条 + ST 名单，与全量清洗同一规则源；防焊死：每次运行时推导，
+    #   绝不读取任何历史标的数字）——processed 只进规则内标的
+    from myquant.data_access.full_clean_service import resolve_incremental_symbols
+    pool_symbols = _load_pool_codes(project_root, pool_config)
+    if not pool_symbols:
         return {"total": 0, "success": 0, "failed": 0, "skipped": 0, "parquet_saved": 0}
+    symbols, scope_stats = resolve_incremental_symbols(pool_symbols, project_root)
+    if not symbols:
+        logger.warning("池内标的全被清洗规则排除，空转: pool=%d", len(pool_symbols))
+        return {"total": 0, "success": 0, "failed": 0, "skipped": 0, "parquet_saved": 0,
+                "pool_original": len(pool_symbols), "pool_after": 0}
+    logger.info(
+        "增量范围(实时推导): pool=%d → 规则内=%d (排除规则%d/ST%d)",
+        len(pool_symbols), len(symbols),
+        len(scope_stats["excluded_prefix"]), len(scope_stats["excluded_st"]),
+    )
 
     results = manager.update_symbols_batch(
         symbols,
@@ -288,7 +300,20 @@ def run_daily(
     save_failed = 0
     save_failed_symbols: List[str] = []
     incremental_records: List[Dict] = []  # M0：审计暂存
+    no_data_symbols: List[Dict] = []  # 缺口可见：下载区间无数据（休市/停牌/数据源缺失）
+    failed_symbols: List[Dict] = []   # 缺口可见：拉取异常
     for r in results:
+        if r["status"] == "no_data":
+            no_data_symbols.append({
+                "symbol": r["symbol"],
+                "start_date": r.get("start_date"),
+                "end_date": r.get("end_date"),
+            })
+        elif r["status"] == "failed":
+            failed_symbols.append({
+                "symbol": r["symbol"],
+                "error": str(r.get("error_message", ""))[:120],
+            })
         if r["status"] == "completed" and r.get("record_count", 0) > 0:
             # M0：收集已拉取增量记录，供落审计文件（database/incremental_YYYYMMDD.parquet）
             if r.get("data"):
@@ -337,6 +362,10 @@ def run_daily(
         "parquet_saved": success_count,
         "save_failed": save_failed,
         "save_failed_symbols": save_failed_symbols,
+        "no_data_symbols": no_data_symbols,   # 缺口可见（含请求区间）
+        "failed_symbols": failed_symbols,     # 拉取异常明细
+        "pool_original": len(pool_symbols),
+        "pool_after": len(symbols),
     }
 
 
@@ -1322,6 +1351,28 @@ class DataDownloadDialog(QDialog):
                     f"✔ {label} 完成:已完成{s + f + sk}/{total}·成功{s}·失败{f}·跳过{sk}"
                     f"·本次共写入parquet {self._pq_before}→新增{added}个"
                 )
+        # 缺口可见：下载缺失（no_data）与拉取失败（failed）逐只留痕，
+        # 区间非空时弹窗告警（休市/停牌/数据源缺失由用户结合日期判断）
+        nd = summary.get("no_data_symbols") or []
+        fd = summary.get("failed_symbols") or []
+        if nd:
+            preview = "、".join(
+                f"{d['symbol']}({d.get('start_date') or '无起点'}~{d.get('end_date') or ''})"
+                for d in nd[:10]
+            )
+            more = f"…等 {len(nd)} 只" if len(nd) > 10 else ""
+            self._append_log(f"⚠ 下载区间无数据 {len(nd)} 只: {preview}{more}")
+            QMessageBox.warning(
+                self, "增量缺口提示",
+                f"有 {len(nd)} 只标的下载区间无数据（可能休市/停牌/数据源缺失）：\n{preview}{more}",
+            )
+        if fd:
+            preview = "、".join(
+                f"{d['symbol']}({d.get('error') or ''})" for d in fd[:10]
+            )
+            more = f"…等 {len(fd)} 只" if len(fd) > 10 else ""
+            self._append_log(f"× 下载失败 {len(fd)} 只: {preview}{more}")
+
         # 网页任务：显示最终使用的数据源与降级次数
         web_info = summary.get("_web")
         if web_info:

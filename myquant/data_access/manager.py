@@ -31,6 +31,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+import pandas as pd
+
 from myquant.core.logger import get_logger
 
 logger = get_logger("data_access.manager")
@@ -55,6 +57,14 @@ DEFAULT_BATCH_SIZE = 50
 PRICE_JUMP_THRESHOLD = 0.5  # 单日涨跌幅超过50%视为异常（除权除息除外）
 VOLUME_ZERO_THRESHOLD = 0   # 成交量为0视为停牌或异常
 
+# 全量 processed 扁平 parquet 固定列模板（与 scripts/数据导出_DB到processed.py
+# load_symbol_data 导出一致：日期 + 13 业务列；无财务数据时 B 类 4 列置 None）。
+# 增量"无存量新建"分支必须对齐本模板，保证增量新建文件与全量导出 schema 完全一致。
+PROCESSED_COLUMN_TEMPLATE: List[str] = [
+    "日期", "开盘价", "最高价", "最低价", "收盘价", "成交量", "成交额",
+    "涨跌幅", "振幅", "量比", "换手率", "流通股本", "市盈动", "每股收益",
+]
+
 
 # ─────────────────────────────────────────────
 # 数据集版本异常 (任务14新增)
@@ -73,6 +83,69 @@ class DatasetVersionNotFoundError(DatasetVersionError):
 class DataVersionIntegrityError(DatasetVersionError):
     """版本数据完整性校验失败（checksum不匹配）"""
     pass
+
+
+def _normalize_processed_df(df: "pd.DataFrame") -> "pd.DataFrame":
+    """归一化 processed 存量：确保含整数「日期」列（兼容旧索引式/扁平 datetime64）。
+
+    旧索引式（DatetimeIndex、无「日期」列）→ reset_index 为「日期」列；
+    「日期」列 datetime64 → 转整数 YYYYMMDD（与 _get_processed_last_date 读取口径一致）。
+    无法恢复日期（无日期列且非 DatetimeIndex）时原样返回，由调用方跳过合并。
+    """
+    if df is None or df.empty:
+        return df
+    if "日期" not in df.columns:
+        if isinstance(df.index, pd.DatetimeIndex):
+            df = df.reset_index()
+            if df.columns[0] != "日期":
+                df = df.rename(columns={df.columns[0]: "日期"})
+        else:
+            return df
+    if "日期" in df.columns:
+        if pd.api.types.is_datetime64_any_dtype(df["日期"]):
+            df["日期"] = df["日期"].dt.strftime("%Y%m%d").astype(int)
+        else:
+            df["日期"] = pd.to_numeric(
+                df["日期"].astype(str).str.replace("-", ""), errors="coerce"
+            )
+    return df
+
+
+def _verify_existing_unchanged(
+    existing: "pd.DataFrame",
+    merged: "pd.DataFrame",
+    symbol: str,
+) -> None:
+    """存量保护校验：合并结果中存量部分必须与读入时逐值等价（硬约束）。
+
+    比较口径：存量日期集合在 merged 中的行（按日期升序）vs 读入时存量，
+    逐列逐值比较（NaN 视为相等，数值误差 >1e-8 即判定不等）。
+    任何不等抛 RuntimeError——调用方捕获后记入失败清单、不写出 processed，
+    保证增量合并绝不修改存量表头下的任何数据。
+    """
+    existing_dates = set(int(d) for d in existing["日期"].dropna())
+    if not existing_dates:
+        return
+    merged_mask = merged["日期"].astype(float).isin([float(d) for d in existing_dates])
+    merged_existing = merged[merged_mask].sort_values("日期").reset_index(drop=True)
+    ref = existing.sort_values("日期").reset_index(drop=True)
+    if len(merged_existing) != len(ref):
+        raise RuntimeError(
+            f"存量保护校验失败: 存量行数变化 {len(ref)} → {len(merged_existing)} ({symbol})"
+        )
+    cols = [c for c in ref.columns if c in merged_existing.columns]
+    for c in cols:
+        a = pd.to_numeric(ref[c], errors="coerce")
+        b = pd.to_numeric(merged_existing[c], errors="coerce")
+        both_nan = a.isna() & b.isna()
+        diff = (a - b).abs()
+        bad = (diff > 1e-8) & ~both_nan
+        if bad.any():
+            idx = int(bad.idxmax())
+            raise RuntimeError(
+                f"存量保护校验失败: 列「{c}」第 {idx} 行数值不等 "
+                f"(存量 {a.iloc[idx]!r} vs 合并后 {b.iloc[idx]!r}) ({symbol})"
+            )
 
 
 # ─────────────────────────────────────────────
@@ -356,6 +429,10 @@ class DataManager:
             else:
                 result["status"] = "no_data"
                 result["error_message"] = "未获取到数据"
+                # 缺口可见：记录请求区间（processed/sync 最新+1 → today），
+                # 供 GUI 展示缺口（休市/停牌/数据源缺失由用户结合日期判断）
+                result["start_date"] = start_date
+                result["end_date"] = today
                 self._update_stats["total_failed"] += 1
 
         except Exception as e:
@@ -1107,6 +1184,8 @@ class DataManager:
         if output_path.exists():
             try:
                 existing_df = pd.read_parquet(output_path)
+                # 归一化存量（兼容旧索引式/扁平 datetime64 → 整数「日期」列）
+                existing_df = _normalize_processed_df(existing_df)
             except Exception:
                 logger.warning("存量 processed parquet 读取失败，跳过合并: %s", output_path)
 
@@ -1222,17 +1301,42 @@ class DataManager:
                 cleaned_df["日期"].astype(str).str.replace("-", ""), errors="coerce"
             )
 
-        # 与存量合并（按日期去重 keep=last、升序），列对齐存量 schema
+        # 与存量合并（硬约束：只追加缺失日期，冲突保留存量，绝不覆盖存量任何数据），
+        # 列对齐存量 schema；写回前对存量部分做逐值等价校验，不等则抛异常不写出。
         merged = cleaned_df
         if existing_df is not None and not existing_df.empty:
             if not cleaned_df.empty:
                 cleaned_df = cleaned_df.reindex(columns=existing_df.columns)
+            if "日期" not in existing_df.columns or "日期" not in cleaned_df.columns:
+                logger.warning("存量或增量缺少「日期」列，跳过写 processed: %s", symbol)
+                return None
+            existing_dates = set(int(d) for d in existing_df["日期"].dropna())
+            new_dates = set(int(d) for d in cleaned_df["日期"].dropna())
+            conflict = sorted(new_dates & existing_dates)
+            if conflict:
+                # 冲突行保留存量（keep=first 语义），剔除新行并告警，绝不覆盖
+                logger.warning(
+                    "增量区间与存量日期冲突 %d 条（保留存量，不覆盖）: %s 日期=%s",
+                    len(conflict), symbol, conflict[:10],
+                )
+                cleaned_df = cleaned_df[~cleaned_df["日期"].astype(float).isin(
+                    [float(d) for d in existing_dates]
+                )]
+                if cleaned_df.empty:
+                    logger.info("增量行全部与存量冲突，无新增，跳过写 processed: %s", symbol)
+                    return None
             merged = pd.concat([existing_df, cleaned_df], ignore_index=True)
-            if "日期" in merged.columns:
-                merged = merged.drop_duplicates(subset=["日期"], keep="last")
-                merged = merged.sort_values("日期").reset_index(drop=True)
+            merged = merged.sort_values("日期").reset_index(drop=True)
+            # 存量保护：合并结果中存量部分必须与读入时逐值等价（不等 → 抛异常，不写出）
+            _verify_existing_unchanged(existing_df, merged, symbol)
+        else:
+            # 无存量新建：对齐全量 14 列模板（B 类列缺失置 None，列顺序与全量导出一致），
+            # 修复增量新建文件列数=10（缺 换手率/流通股本/市盈动/每股收益）与全量 schema 不一致问题
+            if not cleaned_df.empty:
+                cleaned_df = cleaned_df.reindex(columns=PROCESSED_COLUMN_TEMPLATE)
+                merged = cleaned_df
 
-        write_parquet(output_path, merged)
+        write_parquet(output_path, merged, index=False)
         return str(output_path)
 
 

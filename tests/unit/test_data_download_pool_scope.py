@@ -127,3 +127,100 @@ def test_run_daily_全市场_缺fetcher抛错(tmp_path: Path) -> None:
     manager = _FakeManager()
     with pytest.raises(ValueError, match="full_market"):
         run_daily(fetcher=None, manager=manager, project_root=tmp_path, scope="full_market")
+
+
+# ── 增量范围实时过滤（resolve_incremental_symbols 接入）与缺口可见 ──
+
+
+def _write_run_json(tmp_path: Path) -> None:
+    """写入 config/data_clean_run.json（14 条规则口径测试替身，含 68/000.SH）。"""
+    path = tmp_path / "config" / "data_clean_run.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    import json
+    path.write_text(json.dumps({
+        "exclude_rules": [
+            "000.SH", "399", "880", "5.SH", "1.SZ", "30.SZ", "688.SH",
+            "4", "8", "92", "68", "90", "20", "99",
+        ],
+        "exclude_st": False,
+    }), encoding="utf-8")
+
+
+def test_run_daily_池内规则实时过滤(monkeypatch, tmp_path: Path) -> None:
+    """池内标的经清洗规则实时过滤后才是下载范围（规则外不进 processed）。"""
+    import myquant.gui.data_download_dialog as d
+
+    def fake_load(project_root: Path, pool_config: Optional[str] = None) -> List[str]:
+        return ["000001.SZ", "000300.SH", "689009.SH", "600519.SH"]
+
+    monkeypatch.setattr(d, "_load_pool_codes", fake_load)
+    _write_run_json(tmp_path)
+    manager = _FakeManager()
+    res = run_daily(fetcher=None, manager=manager, project_root=tmp_path)
+    # 000300.SH(000.SH) / 689009.SH(68) 被剔除 → 只下载规则内标的
+    assert manager.symbols == ["000001.SZ", "600519.SH"]
+    assert res["pool_original"] == 4
+    assert res["pool_after"] == 2
+
+
+class _FakeManagerWithResults(_FakeManager):
+    """伪 manager：update_symbols_batch 返回预设结果（no_data/failed 缺口可见）。"""
+
+    def __init__(self, results: List[Dict[str, Any]]) -> None:
+        super().__init__()
+        self._results = results
+
+    def update_symbols_batch(self, symbols, period="daily", adjust="hfq", progress_callback=None, force_full=False) -> List[Dict[str, Any]]:
+        self.symbols = list(symbols)
+        return self._results
+
+
+def test_run_daily_no_data缺口进汇总(monkeypatch, tmp_path: Path) -> None:
+    """下载区间无数据（no_data）→ 逐只携带请求区间进汇总（缺口可见）。"""
+    import myquant.gui.data_download_dialog as d
+
+    def fake_load(project_root: Path, pool_config: Optional[str] = None) -> List[str]:
+        return ["000001.SZ", "600519.SH"]
+
+    monkeypatch.setattr(d, "_load_pool_codes", fake_load)
+    _write_run_json(tmp_path)
+    manager = _FakeManagerWithResults([
+        {
+            "symbol": "000001.SZ", "status": "no_data", "record_count": 0,
+            "start_date": "2026-09-29", "end_date": "2026-10-01",
+            "data": None, "error_message": "未获取到数据",
+        },
+        {
+            "symbol": "600519.SH", "status": "completed", "record_count": 1,
+            "start_date": "2026-09-29", "end_date": "2026-09-29",
+            "data": [{"date": "2026-09-29"}],
+        },
+    ])
+    res = run_daily(fetcher=None, manager=manager, project_root=tmp_path)
+    assert len(res["no_data_symbols"]) == 1
+    nd = res["no_data_symbols"][0]
+    assert nd["symbol"] == "000001.SZ"
+    assert nd["start_date"] == "2026-09-29"
+    assert nd["end_date"] == "2026-10-01"
+
+
+def test_run_daily_失败明细进汇总(monkeypatch, tmp_path: Path) -> None:
+    """拉取异常（failed）→ 错误明细进汇总（缺口可见）。"""
+    import myquant.gui.data_download_dialog as d
+
+    def fake_load(project_root: Path, pool_config: Optional[str] = None) -> List[str]:
+        return ["000001.SZ"]
+
+    monkeypatch.setattr(d, "_load_pool_codes", fake_load)
+    _write_run_json(tmp_path)
+    manager = _FakeManagerWithResults([
+        {
+            "symbol": "000001.SZ", "status": "failed", "record_count": 0,
+            "start_date": None, "end_date": None,
+            "data": None, "error_message": "磁盘 IO 异常",
+        },
+    ])
+    res = run_daily(fetcher=None, manager=manager, project_root=tmp_path)
+    assert len(res["failed_symbols"]) == 1
+    assert res["failed_symbols"][0]["symbol"] == "000001.SZ"
+    assert "磁盘 IO 异常" in res["failed_symbols"][0]["error"]

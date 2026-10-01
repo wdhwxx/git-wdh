@@ -84,7 +84,7 @@ ail_count=3 → 达到阈值 → akshare 源状态变 DOWN → 后续 get_financ
 
 > 13. ✨【回写记录·2026-09-07·清理工具服务化+GUI弹窗】新增统一清理工具（事实来源：本次落地，代码级核验：AST语法通过+offscreen端到端验证+dry-run实测）：
 
->    a. **新增业务核心 myquant/utils/cleanup_service.py**：统一封装两类清理（①项目垃圾A-E五类：测试残留/测试备份/__pycache__/轮转日志/旧格式CSV；②outputs回测输出归期：report_/equity_/trades_/summary_<时间戳>保留最近N期+result_<unix>.json单独保留N个，不再提供删光语义）；CleanupOptions/CleanupPlan数据模型；run_cleanup_scan/execute_plan统一入口；保护清单内置（quant.db/processed/保留期报告族/.gitkeep/backups代码备份）；默认dry-run，execute=True才删；format_plan_summary供GUI/CLI共用报告格式；
+>    a. **新增业务核心 myquant/utils/cleanup_service.py**：统一封装两类清理（①项目垃圾A-E五类：测试残留/测试备份/__pycache__/轮转日志/旧格式CSV；②outputs回测输出归期：report_/equity_/trades_/summary_<时间戳>保留最近N期+result_<unix>.json单独保留N个，不再提供删光语义）；CleanupOptions/CleanupPlan数据模型；run_cleanup_scan/execute_plan统一入口；保护清单内置（quant.db/processed/保留期报告族/.gitkeep/backups代码备份）；默认dry-run，execute=True才删；format_plan_summary供GUI/CLI共用报告格式；✨【回写#77】F6 pattern 收紧保护生产产物（TEST_CLEAN_REPORT_PATTERN 只匹配 clean_all_TEST_*，生产 clean_all_full_clean_*.json 受保护；TEST_BACKUP_PATTERN 只匹配 backup_TEST_*，真实清洗备份 backup_*_quant_before_clean.db 受保护）；
 
 >    b. **新增GUI myquant/gui/cleanup_dialog.py**（方案一·上下分区，深紫科技渐变风与回测配置对话框一致）：清理项目勾选（A-E）→回测输出（启用+保留N期）→执行模式单选（仅预览/直接清理）→保护清单只读提示→预览结果滚动区（QPlainTextEdit只读5000行）→底部三按钮；后台线程扫描/删除+信号桥，不阻塞GUI；默认仅预览，「执行清理」仅直接清理模式可用且弹确认框；
 
@@ -389,7 +389,7 @@ Pythonwdhmm/
 
 │   ├── 标的预筛选.py                  # ✨【回写】标的预筛选入口：从quant.db按代码前缀/上市年限/日均成交额/换手率筛出可交易标的池，输出config/stock_pool.yaml供回测配置引用；流动性指标按回测起始日前历史窗口计算（防未来）；回测/实盘共用同一套筛选条件（实盘无缝对接）
 
-│   ├── 数据导出_DB到processed.py      # ✨【回写】DB导出入口（当前主格式）：quant.db的hfq日线→datasets/processed/扁平parquet，逐只导出+完整性校验+断点续传；格式与实盘数据提供器一致（实盘无缝对接）；取代旧CSV子目录版脚本（导出DB到回测数据.py，仅存档不再使用）；✨【回写#72】CN_COLUMN_MAP/SELECT/数值列加 turnover→换手率，导出列集合=增量 _en_to_cn 13列统一
+│   ├── 数据导出_DB到processed.py      # ✨【回写】DB导出入口（当前主格式）：quant.db的hfq日线→datasets/processed/扁平parquet，逐只导出+完整性校验+断点续传；格式与实盘数据提供器一致（实盘无缝对接）；取代旧CSV子目录版脚本（导出DB到回测数据.py，仅存档不再使用）；✨【回写#72】CN_COLUMN_MAP/SELECT/数值列加 turnover→换手率，导出列集合=增量 _en_to_cn 13列统一；✨【回写#77】F1 改扁平式（去set_index/"日期"列整数YYYYMMDD/eps按df["日期"].dt.strftime/verify_parquet读"日期"列+旧索引式判失败触发重建/to_parquet(index=False)/新增_int_date_to_iso）+ export_all 接 resolve_incremental_symbols 规则过滤（防 DB 全量污染 processed）
 
 │   ├── 数据全量清洗.py                # ✨【回写】全量清洗薄入口：参数解析→组装配置→调用FullCleanService.run()；链路=DB读取→清洗管线→事务写回→清洗元信息→bad归档→可选重建processed；支持--config/--symbols/--dry-run/--workers；与GUI全量清洗对话框共用同一服务
 
@@ -476,12 +476,14 @@ Pythonwdhmm/
 
 │   │   ├── test_backtest_consistency_v5.py  # ✨【V5·P3】三模式一致性校验测试（event/vectorized/mixed同参数同数据比对收益曲线与成交，差异超阈值即失败，28项）
 
-│   │   ├── test_data_clean_incremental.py # ✨【回写#57】增量更新日线走清洗管线测试（清洗合并保留全历史/重叠日去重/脏行剔除/前收盘上下文触发跳变剔除/清洗关闭返回None/无数据返回None/存量损坏仍写入，7项）✅已完成；✨【回写#69】增量清洗补派生量测试（+2项：A类量比5日均量基准/B类财务派生量与每股收益，现共10项）
+│   │   ├── test_data_clean_incremental.py # ✨【回写#57】增量更新日线走清洗管线测试（清洗合并保留全历史/重叠日去重/脏行剔除/前收盘上下文触发跳变剔除/清洗关闭返回None/无数据返回None/存量损坏仍写入，7项）✅已完成；✨【回写#69】增量清洗补派生量测试（+2项：A类量比5日均量基准/B类财务派生量与每股收益，现共10项）；✨【回写#77】存量保护测试（+3项：旧索引式存量兼容/写回扁平式indexFalse/存量逐值等价冲突保留存量；重叠日断言由 keep=last 改为保留存量不覆盖，现共13项）；✨【回写#78】+1项无财务标的新建文件仍14列（无存量+_db为None时列=全量14列模板，B类3列None，现共14项）
 
-│   │   ├── test_data_download_pool_scope.py # ✨【回写#58】GUI日线下载标的范围=配置股票池测试（读池代码/文件缺失/解析失败/空池返回空不回退全市场/自定义池路径/run_daily用池列表而非全市场，6项）✅已完成；✨【回写#68】新增 scope="full_market" 全市场范围测试 2 项（用 get_stock_list 全市场列表且不写 processed / 缺 fetcher 抛 ValueError）
+│   │   ├── test_data_download_pool_scope.py # ✨【回写#58】GUI日线下载标的范围=配置股票池测试（读池代码/文件缺失/解析失败/空池返回空不回退全市场/自定义池路径/run_daily用池列表而非全市场，6项）✅已完成；✨【回写#68】新增 scope="full_market" 全市场范围测试 2 项（用 get_stock_list 全市场列表且不写 processed / 缺 fetcher 抛 ValueError）；✨【回写#77】+3项：池内规则实时过滤（规则外不进 processed）/no_data 缺口进汇总（含请求区间）/failed 明细进汇总
 
 │   │   ├── test_st_blacklist_clean.py # ✨【回写#70】ST/*ST/S*ST/SST 风险警示剔除测试（名单读取/前缀命中/名单过滤/联网刷新/前缀与ST串联/未启用ST兼容/报告字段，29项）✅已完成
-│   │   ├── test_data_export_columns.py # ✨【回写#72】全量导出列集合统一测试（CN_COLUMN_MAP/SELECT含turnover/临时DB 13列集合/无财务eps列存在，4项）✅已完成
+│   │   ├── test_data_export_columns.py # ✨【回写#72】全量导出列集合统一测试（CN_COLUMN_MAP/SELECT含turnover/临时DB 13列集合/无财务eps列存在，4项）✅已完成；✨【回写#77】+4项扁平式（日期列整数+RangeIndex/verify_parquet扁平式通过/旧索引式判失败触发重建，现共8项）
+│   │   ├── test_resolve_incremental_symbols.py # ✨【回写#77】增量范围实时推导测试（前缀过滤/ST串联/json缺失回退/防焊死反例——规则增删范围跟随/空池/统计字段/exclude_st无名单，7项）✅已完成
+│   │   ├── test_cleanup_service.py # ✨【回写#77】清理pattern保护语义测试（生产报告/真实备份不匹配、测试前缀匹配，4项）✅已完成
 │   │   ├── test_financial_sync_service.py # ✨【回写#74】财务CSV增量同步测试（定位缺失标的14条排除/新旧合并去重17列头/无新记录None/增量流程/自动入库monkeypatch/无可拉取跳过，6项）✅已完成
 │   │   ├── test_data_download_finance_sync.py # ✨【回写#75】GUI财务CSV增量更新选项测试（选项注册完整/执行顺序在入库前/_entry_finance_sync调用服务返回同构汇总，3项）✅已完成
 
@@ -667,12 +669,12 @@ Pythonwdhmm/
 
     │   ├── factory.py                # ✨【#2】数据获取器工厂（统一入口+自动优先级注册）：create_default_fetcher()/create_fetcher(mode)（auto/tdx/akshare）/detect_tdx_available()/get_available_sources()；优先级=通达信本地源最高（纯本地毫秒级，回测主力）→akshare备用（内部多源降级东财→腾讯→网易→新浪（V2稳定链）），通达信不可用自动跳过不报错；所有查询严格传递end_date防未来；实时行情/实盘场景可通过mode指定专用源
 
-    │   ├── manager.py                # 数据管理器：增量更新/质量校验/同步状态/调用清洗函数输出processed；✨【回写#69】save_cleaned_incremental_parquet 清洗后补派生量（A类涨跌幅/振幅/量比+B类换手率/流通股本/市盈动+每股收益；上下文扩展前5根做量比均量基准；_read_db_prior_close 重构为 _read_db_prior_bars；_en_to_cn 补 turnover/eps）；✅已实现 DatasetVersion 完整版本管理（任务14）：create_dataset_version/create_from_clean_run/list/get/get_latest/load/rollback/delete/verify 版本方法 + checksum(SHA256)校验 + parent_version派生链 + 版本索引持久化 + DatasetVersionError异常体系
-；✨【回写#59】save_cleaned_incremental_parquet 支持 records 复用消除双拉取（M1）+ 新增 _read_db_prior_close DB前收盘上下文优先（M3）+ update_symbols_batch 分批限速/失败重试（M2，配置外置）；✨【回写#67】增量起点改以 processed 实际最新交易日为准（新增 _get_processed_last_date，防 sync 领先跳缺死锁）+ save 清洗空结果/无新增告警留痕
+    │   ├── manager.py                # 数据管理器：增量更新/质量校验/同步状态/调用清洗函数输出processed；✨【回写#69】save_cleaned_incremental_parquet 清洗后补派生量（A类涨跌幅/振幅/量比+B类换手率/流通股本/市盈动+每股收益；上下文扩展前5根做量比均量基准；_read_db_prior_close 重构为 _read_db_prior_bars；_en_to_cn 补 turnover/eps）；✅已实现 DatasetVersion 完整版本管理（任务14）：create_dataset_version/create_from_clean_run/list/get/get_latest/load/rollback/delete/verify 版本方法 + checksum(SHA256)校验 + parent_version派生链 + 版本索引持久化 + DatasetVersionError异常体系；✨【回写#78】模块级 PROCESSED_COLUMN_TEMPLATE 常量（14列模板，与全量导出 load_symbol_data 一致）+ save_cleaned_incremental_parquet 无存量新建分支 reindex 对齐该模板（修复增量新建文件10列缺 B类4列，与全量 schema 不一致）
+；✨【回写#59】save_cleaned_incremental_parquet 支持 records 复用消除双拉取（M1）+ 新增 _read_db_prior_close DB前收盘上下文优先（M3）+ update_symbols_batch 分批限速/失败重试（M2，配置外置）；✨【回写#67】增量起点改以 processed 实际最新交易日为准（新增 _get_processed_last_date，防 sync 领先跳缺死锁）+ save 清洗空结果/无新增告警留痕；✨【回写#77】F2 增量合并存量保护（模块级 _normalize_processed_df 旧索引式兼容/_verify_existing_unchanged 写回前存量逐值等价校验——不等抛异常不写出；冲突剔除新行保留存量；write_parquet(index=False)）+ update_symbol no_data 分支补请求区间（缺口可见）
 
     │   ├── loader.py                 # ✨【V5·P0】数据加载器（回测专用）：预取next_chunk+分块加载（chunk_size）+流水线模式（多bar并行预取）+内存水位降级（联动utils/memory_watcher，超阈值自动降为单块流式）；三模式引擎共用同一加载路径；与backtest/data_loader.py（历史数据提供器）分工互补
 
-    │   ├── full_clean_service.py     # ✨【回写】全量清洗业务逻辑层：FullCleanService——DB读取→清洗管线→事务写回→清洗元信息落库→bad归档→可选重建processed（subprocess调scripts/数据导出_DB到processed.py）；唯一调用方=scripts/数据全量清洗.py（CLI与GUI全量清洗对话框共用）；业务逻辑归myquant，脚本只做薄入口（架构纪律）
+    │   ├── full_clean_service.py     # ✨【回写】全量清洗业务逻辑层：FullCleanService——DB读取→清洗管线→事务写回→清洗元信息落库→bad归档→可选重建processed（subprocess调scripts/数据导出_DB到processed.py）；唯一调用方=scripts/数据全量清洗.py（CLI与GUI全量清洗对话框共用）；业务逻辑归myquant，脚本只做薄入口（架构纪律）；✨【回写#77】F4 新增公共函数 resolve_incremental_symbols（filter_excluded_symbols+filter_st_blacklist_symbols串联，读config/data_clean_run.json 14条实口径，json缺失回退DEFAULT_EXCLUDE_RULES(10条)+warning；返回keep+stats；防焊死：每次调用实时推导）——供增量下载与全量导出共用范围口径
 ；✨【回写#59】新增增量清洗通道 run_incremental_clean/_load_incremental_records/_normalize_incremental_date（读暂存增量→清洗→DB+processed双写，仅清洗模式）；✨【回写#70】新增 ST 风险警示剔除（load_st_blacklist/match_st_name/filter_st_blacklist_symbols/refresh_st_blacklist；resolve_symbols 串联代码前缀规则后；报告含 exclude_st/st_excluded_count/st_excluded_symbols）；✨【回写#71】B类财务缺失留痕（worker_clean 对 financial_data 无记录标的打 warning 并置 result["no_financial"]；run() 聚合 no_financial_symbols 并打印"待补财务标的"；build_report 新增 no_financial_count/no_financial_symbols）
 
     │   ├── financial_service.py      # ✨【回写#36】财务数据入库服务：FinancialImportService——财务CSV读取→字段映射(net_profit_parent→net_profit/report_date YYYYMMDD→YYYY-MM-DD)→分批批量入库financial_data；FactorEngine向量化计算14个技术因子(SMA5/10/20/60,EMA12/26,MACD_DIF/DEA/HIST,RSI14,BOLL_UP/MID/LOW,ATR14)+5个基本面因子(PE/PB/ROE/毛利率/资产负债率)映射最新报告期→长表写入factor_data；生成全中文表头HTML+CSV入库报告；防未来函数(财务仅取report_date<=trade_date最新一期)；调用方=scripts/财务数据入库.py + GUI财务数据入库选项
@@ -871,10 +873,10 @@ Pythonwdhmm/
     │   ├── cleanup_dialog.py         # ✨【回写·2026-09-07】项目清理对话框（方案一·上下分区）：被run_清理GUI.py调用；清理项目勾选（A-E）/回测输出保留N期/执行模式单选/保护清单只读/预览结果滚动区；后台线程扫描删除+信号桥；业务逻辑在utils/cleanup_service.py
 
     │   ├── data_clean_dialog.py      # ✨【回写】全量清洗配置对话框：被run_全量清洗GUI.py调用；可视化配置清洗范围/参数 → 生成config/data_clean_run.json（运行时状态文件，不入库）→ subprocess调起scripts/数据全量清洗.py；与CLI共用同一FullCleanService（data_access/full_clean_service.py）
-；✨【回写#59】新增「增量清洗」按钮（与「开始清洗」并列，对暂存增量做清洗+DB/processed双写）；✨【回写#70】新增「剔除 ST/*ST/S*ST/SST 风险警示股」选项组（勾选+名单数量预览+刷新名单/编辑按钮；_collect_config 输出 exclude_st/st_blacklist_path）
+；✨【回写#59】曾新增「增量清洗」按钮（与「开始清洗」并列，对暂存增量做清洗+DB/processed双写）；✨【回写#70】新增「剔除 ST/*ST/S*ST/SST 风险警示股」选项组（勾选+名单数量预览+刷新名单/编辑按钮；_collect_config 输出 exclude_st/st_blacklist_path）；✨【回写#77】F5.4 滚掉「增量清洗」按钮与 _on_incremental_clean（入口唯一化：增量统一由 run_数据下载GUI.py「增量更新日线」=下载+清洗一体化完成；run_incremental_clean 业务函数保留供单测调用）
 
     │   ├── data_download_dialog.py   # ✨【回写·第12条】数据下载管理器对话框：被run_数据下载GUI.py调用；8项数据下载管理功能；✨【第12条】财务数据卡片=同行布局（勾选框+「最新一期」/「自定义范围」单选+开始/结束QDateEdit），历史模式调用get_financial_history保存为financial_history_*.csv；标题栏加最小化按钮（WindowMinimizeButtonHint）；DownloadWorker后台线程+进度回调；设计稿见docs/mockups/；✨【回写#75】财务数据标签页新增「财务CSV增量更新」选项（finance_sync）：OPTIONS/DISPLAY_ORDER/EXEC_ORDER/TASKS/tab_defs 5处+新增_entry_finance_sync（调用FinancialSyncService.run_sync增量+自动入库，复用#74业务不重复）；✨【回写#76】删除「全部更新」选项（方案A）：OPTIONS/DISPLAY/EXEC/TASKS 删 all + MUTEX_GROUPS 收缩为[full,incremental] + 删_entry_all + tab_defs 财务分组4→3项；选项10→9项，财务侧统一走 finance_sync；全项目grep核验其它文件"all"均无关零改动
-；✨【回写#59】run_daily M0落增量审计文件incremental_YYYYMMDD.parquet + M1复用records消除双拉取 + M2分批限速 + M4单标原子隔离；✨【回写#67】run_daily save 返回 None 计入 save_failed 并告警 + GUI 完成信息改显 processed 实际写入数（不再以拉取成功数冒充）；✨【回写#68】「通达信单独下载」更名「通达信全量数据」并恢复全市场全量入库（run_daily 新增 scope 参数："full_market"=get_stock_list 全市场 A 股只写 quant.db 原始层不写 processed；"pool"=默认池内清洗写 processed；增量旁路独立）
+；✨【回写#59】run_daily M0落增量审计文件incremental_YYYYMMDD.parquet + M1复用records消除双拉取 + M2分批限速 + M4单标原子隔离；✨【回写#67】run_daily save 返回 None 计入 save_failed 并告警 + GUI 完成信息改显 processed 实际写入数（不再以拉取成功数冒充）；✨【回写#68】「通达信单独下载」更名「通达信全量数据」并恢复全市场全量入库（run_daily 新增 scope 参数："full_market"=get_stock_list 全市场 A 股只写 quant.db 原始层不写 processed；"pool"=默认池内清洗写 processed；增量旁路独立）；✨【回写#77】F5 run_daily pool 分支接 resolve_incremental_symbols 规则实时过滤（stats 记 logger，防焊死不写死数字）+ 汇总新增 no_data_symbols(含请求区间)/failed_symbols/pool_original/pool_after + _on_task_finished 展示 no_data/failed 清单（限10条）与 no_data 弹窗告警（休市/停牌/数据源缺失由用户结合日期判断）
 
     │   ├── widgets/
     │   ├── paper_run_dialog.py         # ✨【回写#62/#65】仿真运行弹窗
@@ -1822,3 +1824,21 @@ Pythonwdhmm/
    c. **未动其它应用代码**：routes/config_builder/live/risk/monitoring/scripts财务数据入库.py 等处的 "all" 均为无关字符串（mode="all"/scope="all" 等），已通过全项目 grep 核验并保持零改动；docstring "8项功能" 为历史残留文案（早于 tdx/web 新增），不在点名范围不扩大改动；:1311 汇总展示逻辑只检查 "daily" in summary（不引用 all key），保留安全
    d. **删除后日常流程**：「增量更新日线」+「财务CSV增量更新」（需因子时加「财务数据入库」）；「下载财务数据」（全市场）保留作季度全量刷新显式入口
    e. **纪律遵守**：补丁脚本精确字符串替换+断言幂等；工作区 git 未提交改动由用户拍板
+
+77. ✨【回写记录·2026-10-01·增量日线链路完整落地（执行A含F1格式层）】用户拍板执行A；三条硬约束验收红线：①数据进入 processed 前必须干净；②不修改 processed/*.parquet 表头及表头下任何数据（增量只追加缺失日、冲突保留存量、写回前存量逐值等价校验）；③不焊死 3208，标的范围每次运行时按清洗规则（14 条排除规则 + ST 名单）实时推导。全量侧 #70-#76 已完成（84d68a3）；本次为增量侧 F 清单：
+   a. **F5.4 滚掉清洗GUI增量清洗（入口唯一化）**：myquant/gui/data_clean_dialog.py 删除「增量清洗」按钮（原 :265-270）与 _on_incremental_clean（原 :429-461）；run_incremental_clean 业务函数保留（单测直接调用）；增量任务统一由 run_数据下载GUI.py「增量更新日线」=下载+清洗一体化完成；py_compile OK + 残留 grep 0 + test_data_incremental_clean_dual.py 4 passed
+   b. **F1 全量导出改扁平式（scripts/数据导出_DB到processed.py，8 处格式层改动）**：去 set_index（"日期"列整数 YYYYMMDD）、eps 段改按 df["日期"].dt.strftime、verify_parquet 改读"日期"列（旧索引式→校验失败触发重建，try 移入避免 KeyError 中断整批）、to_parquet(index=False)、新增 _int_date_to_iso；export_all 接入规则过滤（F4）——发现并修复"导出=DB全量 5317 只"污染 processed（2109 只规则外已移入 backups/processed_extra_20261001/，不删可追溯）；F1 重建前逐值等价验证（000001.SZ 8343 行/13 业务列/日期序列一致）PASS；processed==规则内集合（3208）断言 PASS
+   c. **F4 resolve_incremental_symbols（myquant/data_access/full_clean_service.py）**：新增公共函数（filter_excluded_symbols + filter_st_blacklist_symbols 串联，复用 #70）；读 config/data_clean_run.json 的 exclude_rules(14 条实口径) + exclude_st，json 缺失回退 DEFAULT_EXCLUDE_RULES(10 条) + warning；返回 (keep, stats{original, after, excluded_prefix, excluded_st})；防焊死：每次调用实时推导，绝不读历史数字
+   d. **F2 增量合并存量保护（myquant/data_access/manager.py）**：模块级新增 _normalize_processed_df（旧索引式 DatetimeIndex→reset_index 成"日期"列；datetime64→int YYYYMMDD）与 _verify_existing_unchanged（存量日期集在 merged 中逐值对比，NaN 相等、数值误差>1e-8 抛 RuntimeError）；合并段重写=冲突剔除新行保留存量 + logger.warning→concat→sort→写回前 _verify_existing_unchanged 校验（不等抛异常不写出）→write_parquet(index=False)；update_symbol no_data 分支补 start_date/end_date（缺口可见依赖）
+   e. **F5 范围过滤+缺口可见（myquant/gui/data_download_dialog.py）**：run_daily pool 分支接 resolve_incremental_symbols（stats 记 logger，防焊死不写死数字）；汇总新增 no_data_symbols(含请求区间)/failed_symbols/pool_original/pool_after；_on_task_finished 展示 no_data/failed 清单（限 10 条+"…等 N 只"），no_data 非空→QMessageBox.warning（休市/停牌/数据源缺失由用户结合日期判断）
+   f. **F6 报告误删修复（myquant/utils/cleanup_service.py）**：TEST_CLEAN_REPORT_PATTERN "clean_all_full_clean_*.json"→"clean_all_TEST_*.json"（生产报告受保护）；TEST_BACKUP_PATTERN "backup_*_quant_before_clean.db"→"backup_TEST_*_quant_before_clean.db"（真实清洗备份受保护）；docstring 同步；4 断言 PASS（verify_f6_patterns.py）
+   g. **测试计划落地（任务6，增量侧 8 文件 85 passed）**：新增 test_resolve_incremental_symbols.py（7 项：前缀过滤/ST 串联/json 缺失回退/防焊死反例——规则增删范围跟随/空池/统计字段/exclude_st 无名单）＋ test_cleanup_service.py（4 项：生产报告与备份不匹配/测试前缀匹配）；修改 test_data_export_columns.py（+4 项扁平式：日期列整数+RangeIndex/verify_parquet 扁平式通过/旧索引式判失败触发重建）；test_data_clean_incremental.py（+3 项：旧索引式存量兼容/写回扁平式 indexFalse/存量逐值等价冲突保留存量）；test_data_download_pool_scope.py（+3 项：池内规则实时过滤/no_data 缺口进汇总/failed 明细进汇总）；test_data_clean_incremental.py 重叠日断言由 keep=last 改为保留存量不覆盖（旧断言=09-29 事故机制）
+   h. **验证结果**：F1 逐值等价 PASS（verify_f1_flat_roundtrip.py）；processed 范围断言 PASS（fix_processed_scope.py，2109 个规则外 parquet 移入 backups/processed_extra_20261001/）；增量侧 8 文件 85 passed；全量 pytest tests/unit 以当日回归日志为准
+   i. **纪律遵守**：改动文件=scripts/数据导出_DB到processed.py、myquant/data_access/full_clean_service.py、myquant/data_access/manager.py、myquant/gui/data_download_dialog.py、myquant/gui/data_clean_dialog.py、myquant/utils/cleanup_service.py、tests/unit/test_resolve_incremental_symbols.py、tests/unit/test_cleanup_service.py、tests/unit/test_data_export_columns.py、tests/unit/test_data_clean_incremental.py、tests/unit/test_data_download_pool_scope.py（均已在蓝图登记）；未动全量 B 类派生量（邻居）；工作区 git 未提交改动由用户拍板
+
+78. ✨【回写记录·2026-10-01·增量新建文件列模板对齐全量14列（18只10列缺陷修复）】端到端亲测后核验发现：增量把 18 只池内规则内停牌老标的（000584.SZ 等，2025 年停牌/退市、DB financial_data=0）首次拉取入库并新建 processed，但新建文件仅 10 列（缺 换手率/流通股本/市盈动/每股收益），与全量导出 14 列 schema 不一致。根因：save_cleaned_incremental_parquet 无存量新建分支直接写清洗后现存列，B 类派生量依赖 financial_data（#69 缺失跳过）→ 列根本不建；存量追加靠 reindex 对齐存量列故不暴露。本次修复：
+   a. **myquant/data_access/manager.py**：模块级新增 PROCESSED_COLUMN_TEMPLATE 常量（日期+13 业务列，与 scripts/数据导出_DB到processed.py load_symbol_data 导出一致）；save_cleaned_incremental_parquet 合并段增加 else 分支——无存量新建时 cleaned_df reindex 对齐该模板（B 类 4 列缺失置 None、列顺序与全量一致）；有存量分支不动（存量已是 14 列，reindex 到存量 schema 保持）
+   b. **数据修复（一次性，脚本不入蓝图）**：18 只 10 列 parquet 重写对齐 14 列模板（只补 4 列 None，写回前逐值校验 10 列数据不变、写回后校验 14 列/行数一致/日期升序/B 类 3 列全 None）；18/18 PASS
+   c. **tests/unit/test_data_clean_incremental.py**：+1 项"无财务标的新建文件仍14列"（无存量+_db 为 None → 列=全量 14 列模板、B 类 3 列 None、行情列透传不被改动），现共 14 项
+   d. **验证结果**：py_compile manager.py PASS；test_data_clean_incremental.py 14 passed；增量链路相关 7 文件 53 passed；全量 pytest tests/unit 以当日回归日志为准
+   e. **纪律遵守**：只改 manager.py 无存量新建分支（增量侧）；未碰全量 B 类派生量；未动存量 processed 文件（18 只属本次增量新建的异常产物，重写仅补列不改行数据）；工作区 git 未提交改动由用户拍板
