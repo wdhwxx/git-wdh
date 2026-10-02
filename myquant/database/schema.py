@@ -500,7 +500,6 @@ def drop_all_tables(connection) -> None:
         TABLE_NAMES["factor_data"],
         TABLE_NAMES["adjust_factor"],
         TABLE_NAMES["share_change"],
-        TABLE_NAMES["share_change"],
         TABLE_NAMES["financial_data"],
         TABLE_NAMES["market_data"],
     ]
