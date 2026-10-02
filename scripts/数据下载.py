@@ -199,10 +199,11 @@ def download_daily(
                 "parquet_saved": 0, "symbols": []}
 
     # 批量更新（DataManager内部处理增量逻辑、数据库保存、同步状态）
+    # P0-1 口径：下载只存 raw 事实版本，复权在消费端现算（S1/S2），严禁 hfq 标签入库
     results = manager.update_symbols_batch(
         symbols,
         period="daily",
-        adjust="hfq",
+        adjust="raw",
         progress_callback=progress_callback,
     )
 

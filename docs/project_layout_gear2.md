@@ -334,6 +334,7 @@ Pythonwdhmm/
 │   │                                  # ✅已实现：CleanRuleLibrary规则对象映射（data_access/cleaner/rules_loader.py），支持yaml配置加载
 
 │   ├── data_clean_run.json       # ✨【回写】全量清洗运行时状态文件（不入库）：由gui/data_clean_dialog.py生成、供scripts/数据全量清洗.py --config读取；✅已修复【回写#32】：.gitignore 已追加 config/*.json 覆盖该文件（原⚠️误提交风险已消除）；同类核验：config/ 其余运行时文件（真实 yaml/stock_pool.yaml）均已被 config/*.yaml 覆盖，无同类遗漏；✨【回写#79】含 exclude_st:true + exclude_suspended_days:60（长期停牌/退市规则阈值，GUI 每次清洗重写并保留）
+│   ├── financial_exclude_rules.yaml # ✨【回写#83】财务增量定位排除规则（14条，与 data_clean_run.json 清洗口径一致；P2-③ config化，修改免改代码，删除回退内置+warning）
 
 │   ├── st_blacklist.example.yaml # ✨【回写#70】ST/*ST/S*ST/SST 风险警示股名单模板（真实名单 config/st_blacklist.yaml 不入库，由 GUI「刷新名单」联网生成或人工编辑；full_clean_service.load_st_blacklist 离线读取，resolve_symbols 按 symbol 命中剔除，与代码前缀规则正交串联）
 
@@ -485,12 +486,17 @@ Pythonwdhmm/
 │   │   ├── test_data_export_columns.py # ✨【回写#72】全量导出列集合统一测试（CN_COLUMN_MAP/SELECT含turnover/临时DB 13列集合/无财务eps列存在，4项）✅已完成；✨【回写#77】+4项扁平式（日期列整数+RangeIndex/verify_parquet扁平式通过/旧索引式判失败触发重建，现共8项）
 │   │   ├── test_resolve_incremental_symbols.py # ✨【回写#77】增量范围实时推导测试
 │   │   ├── test_factor_sync_service.py # ✨【回写#82】因子同步单测（符号转换/事件清洗/UPSERT幂等/as_of防未来/失败重试/sync统计，stub akshare 零网络，9项）✅已完成
-│   │   ├── test_data_loader_factor_adjust.py # ✨【回写#82】data_loader复权现算单测（raw原样/hfq=raw×factor/qfq÷最新因子/end_date透传防未来/无因子降级，合成parquet+stub因子，6项）✅已完成
+│   │   ├── test_data_loader_factor_adjust.py # ✨【回写#82】data_loader复权现算单测（raw原样/hfq=raw×factor/qfq÷最新因子/end_date透传防未来/无因子降级，合成parquet+stub因子，6项）✅已完成；✨【回写#83】S1 派生量复权现算测试（+3项：hfq除权日无假跳变/qfq与hfq比例一致/raw派生量保持原值首行None，现共9项）✅已完成
 │   │   ├── test_bar_cleaner_factor_exempt.py # ✨【回写#82】除权跳变豁免单测（函数版/类版豁免/非除权日仍检测/无因子回退，合成数据零网络，8项）✅已完成（前缀过滤/ST串联/json缺失回退/防焊死反例——规则增删范围跟随/空池/统计字段/exclude_st无名单，7项）；✨【回写#79】+长期停牌/退市规则5项（60天启用剔除/边界==阈值保留/DB无记录保留/未配置不启用/DB缺失不报错，sqlite临时库替身）✅已完成，现共12项
 │   │   ├── test_cleanup_service.py # ✨【回写#77】清理pattern保护语义测试（生产报告/真实备份不匹配、测试前缀匹配，4项）✅已完成
 │   │   ├── test_financial_sync_service.py # ✨【回写#74】财务CSV增量同步测试（定位缺失标的14条排除/新旧合并去重17列头/无新记录None/增量流程/自动入库monkeypatch/无可拉取跳过，6项）✅已完成
 │   │   ├── test_data_download_finance_sync.py # ✨【回写#75】GUI财务CSV增量更新选项测试（选项注册完整/执行顺序在入库前/_entry_finance_sync调用服务返回同构汇总，3项）✅已完成
 │   │   ├── test_adjust_raw_semantics.py # ✨【回写#81】P0-1 复权口径语义测试（默认值raw/入库标签透传/查询隔离raw与hfq不混读/网源raw→不复权映射，4项）✅已完成
+│   │   ├── test_live_data_feed_adjust.py # ✨【回写#83】S2 live复权口径单测（新浪轮询改拉raw adjust=""/除权跳变因子豁免/非除权仍告警/qfq现算÷最新因子/raw透传，stub akshare+因子服务零网络，6项）✅已完成
+│   │   ├── test_derived_metrics_report_deadline.py # ✨【回写#83】P1-①发布日推算单测（4报告期映射/异常保留/披露窗口pe=None防未来/披露后用当期年化，4项）✅已完成
+│   │   ├── test_web_source_volume_unit.py # ✨【回写#83】P1-④网源volume单位单测（腾讯K线手→股×100/网易股保持不动，stub requests零网络，2项）✅已完成
+│   │   ├── test_tdx_source_parse.py # ✨【回写#83】P1-⑤TDX .day解析单测（amount float32→float64语义锁定/volume股单位/畸形文件防空，2项）✅已完成
+│   │   ├── test_p2_anti_future_config.py # ✨【回写#83】P2纯修复单测（②财务兜底report_date=今天丢弃+留痕/③排除规则config化+缺省回退内置14条/⑤量比窗口跳0量日，5项）✅已完成
 
 │   │   ├── test_data_fingerprint.py  # ✨【V5·P0】数据指纹测试（哈希级差异检测：指纹生成/查询/缓存失效/旧数据替换，20项）
 
@@ -684,7 +690,7 @@ Pythonwdhmm/
 ；✨【回写#59】新增增量清洗通道 run_incremental_clean/_load_incremental_records/_normalize_incremental_date（读暂存增量→清洗→DB+processed双写，仅清洗模式）；✨【回写#70】新增 ST 风险警示剔除（load_st_blacklist/match_st_name/filter_st_blacklist_symbols/refresh_st_blacklist；resolve_symbols 串联代码前缀规则后；报告含 exclude_st/st_excluded_count/st_excluded_symbols）；✨【回写#71】B类财务缺失留痕（worker_clean 对 financial_data 无记录标的打 warning 并置 result["no_financial"]；run() 聚合 no_financial_symbols 并打印"待补财务标的"；build_report 新增 no_financial_count/no_financial_symbols）
 
     │   ├── financial_service.py      # ✨【回写#36】财务数据入库服务：FinancialImportService——财务CSV读取→字段映射(net_profit_parent→net_profit/report_date YYYYMMDD→YYYY-MM-DD)→分批批量入库financial_data；FactorEngine向量化计算14个技术因子(SMA5/10/20/60,EMA12/26,MACD_DIF/DEA/HIST,RSI14,BOLL_UP/MID/LOW,ATR14)+5个基本面因子(PE/PB/ROE/毛利率/资产负债率)映射最新报告期→长表写入factor_data；生成全中文表头HTML+CSV入库报告；防未来函数(财务仅取report_date<=trade_date最新一期)；调用方=scripts/财务数据入库.py + GUI财务数据入库选项
-    │   ├── financial_sync_service.py # ✨【回写#74】财务CSV增量同步服务：FinancialSyncService——定位financial_data缺失标的（与#71 no_financial同口径，排除规则对齐清洗14条）→逐标get_financial_history拉多期财务（防未来函数end_date过滤）→按symbol+report_date合并去重keep=新落盘financial_history_YYYYMMDD.csv→可选自动入库FinancialImportService→复查缺失；调用方=scripts/财务CSV更新.py + 豆包定时任务
+    │   ├── financial_sync_service.py # ✨【回写#74】财务CSV增量同步服务：FinancialSyncService——定位financial_data缺失标的（与#71 no_financial同口径，排除规则对齐清洗14条）→逐标get_financial_history拉多期财务（防未来函数end_date过滤）→按symbol+report_date合并去重keep=新落盘financial_history_YYYYMMDD.csv→可选自动入库FinancialImportService→复查缺失；调用方=scripts/财务CSV更新.py + 豆包定时任务；✨【回写#83】P2-③ 排除规则config化（_load_financial_exclude_rules 读 config/financial_exclude_rules.yaml，缺省回退内置14条+warning）
 
     │   ├── cleaner/                  # ✨【数据清洗核心模块】已重构为面向对象架构
 
@@ -704,7 +710,7 @@ Pythonwdhmm/
 
     │   │   ├── quality_reporter.py   # ✅已实现：质量报告生成器（json统计+分级告警+脏数据归档）
 
-    │   │   └── derived_metrics.py    # ✨【回写#41补录】派生指标计算（compute_derived_metrics：涨跌幅/振幅/量比，严格防未来-第t行只用历史行；compute_b_class_metrics：流通股本/总股本/换手率/市盈动，财务取report_date<=trade_date最新一期）；被full_clean_service.py全量清洗与manager.py增量清洗共同调用
+    │   │   └── derived_metrics.py    # ✨【回写#41补录】派生指标计算（compute_derived_metrics：涨跌幅/振幅/量比，严格防未来-第t行只用历史行；compute_b_class_metrics：流通股本/总股本/换手率/市盈动，财务取report_date<=trade_date最新一期）；被full_clean_service.py全量清洗与manager.py增量清洗共同调用；✨【回写#83】P1-① 财务判定改披露截止日（_report_deadline 发布日推算：03-31→04-30/06-30→08-31/09-30→10-31/12-31→次年04-30，消除报告期~披露窗口未来函数）+ P2-⑤ 量比窗口跳过0量日（valid_vol 过滤，均量不虚低）
 
     │   └── sources/                  # 多数据源适配器，只负责拿到外部原始数据，不做业务清洗
 
@@ -712,7 +718,7 @@ Pythonwdhmm/
 
     │       ├── base.py               # 数据源抽象基类
 
-    │       ├── akshare_source.py      # ✨【第10/11/12条】AkShare数据源（V2稳定链）：行情降级链=东财stock_zh_a_hist→腾讯原生HTTP fqkline→网易原生HTTP chddata CSV→新浪兜底；health_check用实际行情接口判活；每源独立会话级封锁；财务=新浪stock_financial_abstract主力+百度stock_zh_valuation_baidu独立兜底；✨【第12条】新增get_financial_history多报告期获取（防未来函数）；_retry_request失败计数只在最终失败时记录1次（重试不累积）；supports_financial=True
+    │       ├── akshare_source.py      # ✨【第10/11/12条】AkShare数据源（V2稳定链）：行情降级链=东财stock_zh_a_hist→腾讯原生HTTP fqkline→网易原生HTTP chddata CSV→新浪兜底；health_check用实际行情接口判活；每源独立会话级封锁；财务=新浪stock_financial_abstract主力+百度stock_zh_valuation_baidu独立兜底；✨【第12条】新增get_financial_history多报告期获取（防未来函数）；_retry_request失败计数只在最终失败时记录1次（重试不累积）；supports_financial=True；✨【回写#83】P1-④ 腾讯K线volume×100手→股（与腾讯实时/全库口径统一）+ P2-② 财务兜底report_date=今天丢弃+留痕（百度独立兜底/push2实时快照/datacenter TRADE_DATE缺失三处，防伪造报告期未来函数）
 
     │       ├── broker_source.py       # 券商实时数据源预留接口
 
@@ -720,7 +726,7 @@ Pythonwdhmm/
 
     │       ├── web_source.py         # ✨【回写】网页数据源（东方财富→新浪→腾讯三级降级）：当前仅供gui/data_download_dialog.py下载链路使用（直接实例化）；未注册入factory数据源体系；设计定位为实时行情/实盘统一标的池来源，为后续纳入实时数据源体系预留扩展点（# TODO: 后续迭代实现，v1暂不开发）
 
-    │       └── tdx_source.py         # 通达信本地数据源：解析.day文件(32字节/K线)，自动探测安装路径，纯本地毫秒级响应；已实现get_market_data/get_stock_list/health_check抽象方法；✨【#S4修复】补充get_financial_data/get_index_list/subscribe_realtime三个不支持功能的安全默认实现（返回空列表/False+warning日志，不抛NotImplementedError），避免调用方未检查supports_*时崩溃；supports_financial=False/supports_realtime=False/supported_periods={daily}；为实盘无缝对接预留DDE实时数据扩展点
+    │       └── tdx_source.py         # 通达信本地数据源：解析.day文件(32字节/K线)，自动探测安装路径，纯本地毫秒级响应；已实现get_market_data/get_stock_list/health_check抽象方法；✨【#S4修复】补充get_financial_data/get_index_list/subscribe_realtime三个不支持功能的安全默认实现（返回空列表/False+warning日志，不抛NotImplementedError），避免调用方未检查supports_*时崩溃；supports_financial=False/supports_realtime=False/supported_periods={daily}；为实盘无缝对接预留DDE实时数据扩展点；✨【回写#83】P1-④⑤ 注释与精度修正：.day成交量实为股（勿×100）/amount float32源→读取后float64语义（源精度亿级约百元，不可逆）
 
     │
 
@@ -774,7 +780,7 @@ Pythonwdhmm/
 
     │   ├── engine.py                 # ✨【V5·P1】回测引擎升级为三模式调度器：BacktestScheduler（按config engine.mode切换event/vectorized/mixed，统一数据加载+防未来函数校验+结果封装）+ run_backtest()便捷函数；原Engine保留为event真值基准（时间序列事件循环+内置LookaheadGuard：on_market_event记录成交铁律3、_execute_signal记录信号铁律4、on_stop assert_pass()；_bar_date_str/_order_signal_dates映射）
 
-    │   ├── data_loader.py            # 数据加载：DataProviderBase + HistoricalDataProvider，从processed加载，严格end_date过滤防未来；✨【回写#72】EN_TO_CN_COLUMN_MAP 加 turnover→换手率（与导出脚本列集合同步）
+    │   ├── data_loader.py            # 数据加载：DataProviderBase + HistoricalDataProvider，从processed加载，严格end_date过滤防未来；✨【回写#72】EN_TO_CN_COLUMN_MAP 加 turnover→换手率（与导出脚本列集合同步）；✨【回写#83】S1 派生量复权现算：_apply_factor_adjust 返回前调 _recompute_price_derived_metrics（hfq/qfq 现算后重算 涨跌幅/振幅，口径与清洗端一致，首行None，非价格派生量不动）
 
     │   ├── metrics.py                # 绩效指标：夏普、最大回撤、胜率、Calmar、Sortino
 
@@ -918,7 +924,7 @@ Pythonwdhmm/
 
     │   │                             #           合并持仓watch；统一health schema；context.data增量同步（策略数据源与回测同构，防未来）
 
-    │   ├── data_feed.py              # 实时行情接入订阅重连分发；流式清洗(单条校验+跳变检测) + attach_event_bus事件总线联动 + 脏数据钩子
+    │   ├── data_feed.py              # 实时行情接入订阅重连分发；流式清洗(单条校验+跳变检测) + attach_event_bus事件总线联动 + 脏数据钩子；✨【回写#83】S2 live复权口径统一：_fetch_from_akshare 改拉不复权raw（adjust=""，与腾讯快照/本地历史同口径）/新增 adjust_out 参数（"qfq"按最新因子现算÷因子）+_stream_clean 除权跳变因子豁免（_live_jump_change_with_factor）+_clean_bars 注入 factor_lookup（config副本不污染共享配置）
 
     │   ├── portfolio.py              # 实时持仓、市值、可用冻结资金
 
@@ -1895,3 +1901,25 @@ Pythonwdhmm/
    g. **测试（3 新文件 23 项）**：test_factor_sync_service.py 9 项（符号转换/清洗/UPSERT 幂等/as_of 防未来/失败重试/sync 统计，stub akshare 零网络）；test_data_loader_factor_adjust.py 6 项（raw 原样/hfq 事件生效/qfq÷最新/end_date 透传防未来/无因子降级，合成 parquet+stub 因子）；test_bar_cleaner_factor_exempt.py 8 项（函数版/类版豁免/非除权日仍检测/辅助函数，合成数据零网络）
    h. **验证结果**：py_compile 10 文件（schema/data_loader/bar_cleaner/full_clean_service/factor_sync_service/复权因子同步/test_database/3 新测试）PASS；新增 23 passed；test_database 66 passed；全量 pytest tests/unit = 1685 passed / 2 skipped / 0 failed
    i. **边界与遗留（披露）**：689009.SH 无因子（CDR 无传统除权，raw 口径正确）；live 实时 qfq 链路独立于 DB 未动（本地历史 raw+因子现算，实时 qfq 量纲错位为既有遗留）；派生量（processed 内 pct_chg 等）仍 raw 口径，复权口径重建列为二期；P1/P2 未在本次范围；git 提交延后至全部完成待用户拍板
+83. ✨【回写记录·2026-10-02·二期批1执行（S1/S2/P1纯修复/P2纯修复）】#80 深度审查缺陷修复工程二期。用户拍板：12 工作项打包任务 #16、"批 1 先做"（9 项纯修复）、P1-③ 整体后置批 2（与 P2-① 真实日历绑定）、每阶段回归后汇报。环境迁移：解释器 C:\Users\dgd\anaconda3\envs\conda_wdh\python.exe（Python 3.11.16 / akshare 1.18.94，旧 wdh52 路径失效）。事实来源：本次落地；代码级核验：py_compile 全 PASS + 新增 21 项单测 + 全量 pytest tests/unit = 1707 passed / 2 skipped / 0 failed（基线 1685 + 21 + 1 修正=1707）：
+
+   a. **S1 派生量复权口径重建（data_loader.py）**：_apply_factor_adjust 返回前调新方法 _recompute_price_derived_metrics——hfq/qfq 现算后重算 涨跌幅/振幅（基于复权价，口径与清洗端一致，首行无前收置 None；volume_ratio/turnover/pe_dynamic 非价格派生量不动）；测试 helper 加派生量列 + TestDerivedRecompute 3 项；1688 passed（基线 1685+3）
+   b. **S2 live 实时链路对齐（data_feed.py，D2-A=raw事实+qfq现算）**：_fetch_from_akshare 新浪源 adjust="qfq"→""（不复权 raw，与腾讯快照/本地历史同口径，消除量纲错位）；MarketDataFeed 新增 factor_svc（懒加载 FactorSyncService）/adjust_out（默认 raw 向后兼容，"qfq" 时 _maybe_adjust_bar 按最新因子现算）/factor_lookup 缓存；_stream_clean 跳变检测加因子豁免（模块级 _factor_on_or_before/_live_jump_change_with_factor：除权日 raw 缺口被 hfq 吸收不误报，非除权日仍检测；_clean_bars 注入 factor_lookup）；新测试 6 项；1694 passed
+   c. **P1-① 发布日推算（derived_metrics.py）**：新增 _report_deadline（03-31→04-30/06-30→08-31/09-30→10-31/12-31→次年04-30，异常格式保留不阻断）；compute_b_class_metrics 财务判定 report_date<=trade_date → _report_deadline(...)<=trade_date，消除 报告期~披露日 窗口（如 Q1 4/1~4/29）未来函数；实测披露窗口 pe=None、披露后用当期；新测试 4 项
+   d. **P1-④ 网源 volume 单位统一**：证据=.day 文件成交量实为股（代码值正确、注释"手"错误）、腾讯K线=手、网易=股、data_feed 腾讯实时已×100；akshare_source 腾讯K线 item[5]×100 手→股（与全库口径一致）；tdx_source 注释"手"→"股"（值不动，回测行为零变化）；网易不动；新测试 2 项
+   e. **P1-⑤ amount 精度（tdx_source.py）**：.day 文件 amount float32 源（亿级误差约百元，格式不可逆）；unpack 变量名标注 f32 + 显式 float() 转 float64 语义 + 精度注释；行为不变；新测试 2 项
+   f. **P2-② 财务兜底防未来（akshare_source.py 3 处）**：百度独立兜底（report_date=今天）/东财 push2 实时快照（report_date=今天）/datacenter TRADE_DATE 缺失兜底今天——三处全部改"丢弃 + 留痕"（logger.warning），不伪造报告期写库（伪造今天=回测因子可用"未来"快照=未来函数）；真实报表路径（新浪/东财 datacenter 有 TRADE_DATE）不受影响；新浪报表+百度补估值（有真实报告期）保留
+   g. **P2-③ 排除规则 config 化（financial_sync_service.py）**：FINANCIAL_EXCLUDE_RULES 14 条移入 config/financial_exclude_rules.yaml（模板入库）；新增 _load_financial_exclude_rules（读 yaml，缺文件/异常回退内置 14 条+warning）；_find_missing_financial_symbols 默认路径改读配置；新测试 2 项
+   h. **P2-⑤ 量比窗口跳 0 量日（derived_metrics.py）**：vol_history 均值计算过滤 0 量日（valid_vol=[v for v>0]，停牌/无成交日不拉低均量、不虚高量比）；全 0 窗口仍 None（防除零）；新测试 2 项
+   i. **验证结果**：py_compile 7 个改文件 + 4 新测试文件全 PASS；新增 21 项 passed；相关消费方回归（live/data_clean/data_manager/financial_sync/data_download_finance_sync）全过；全量 pytest tests/unit = 1707 passed / 2 skipped / 0 failed（1685 基线 + 21 新增 + 1 项 S2 helper 断言修正=1707，口径：1688→1694→1702→1707 逐阶段净增 3/6/8/5）
+   j. **边界与遗留（披露）**：P1-③ is_suspended 按用户拍板整体后置批 2（与 P2-① 真实日历绑定，占位行需 queries 加 NULL 价过滤，见交接摘要 D1）；批 2 三项（P1-② 真实股本/P2-① 真实日历/P2-④ 补北交所，其中 P2-④ 过滤B股=纯修复部分随批 1 已含于 P1-④ 注释语义）待用户拍板；git 提交方式未拍板（一期 4 笔分拆先例，二期批 1 待拍板）；蓝图 #83 本次回写；交接摘要补记见 docs/交接摘要_二期批1执行完成_20261002.md
+84. ✨【回写记录·2026-10-02·二期批2执行（B-1真实日历/B-2停牌判定/B-3真实股本/B-4北交所）+ 下载入口raw修复】#80 深度审查缺陷修复工程二期批 2（用户拍板 4 项打包：B-1 真实日历 → B-2 停牌判定 → B-3 真实股本 → B-4 北交所，完成后再跑全量清洗；全程治理流程：先出方案→确认→执行→py_compile+全量pytest→蓝图回写）。环境：解释器 C:\Users\dgd\anaconda3\envs\conda_wdh\python.exe（3.11.16 / akshare 1.18.94）。事实来源：本次落地；代码级核验：py_compile 全 PASS + 新增 23 项单测 + 全量 pytest tests/unit = 1730 passed / 2 skipped / 0 failed（基线 1707 + 23）：
+
+   a. **B-1 P2-① 真实交易日历**：akshare tool_trade_date_hist_sina() 冒烟通过（8797 行 1990-12-19~2026-12-31，国庆 2025-10-01~08 交易日数=0 验证正确）；新建 myquant/utils/trade_calendar.py（sync_trade_calendar/load_trade_calendar/save_trade_calendar）+ scripts/同步交易日历.py 薄入口 + data/trade_calendar.csv 真实落盘 8797 交易日；time_utils.py TradingCalendar 加 trade_days 注入/set_trade_days/next_trading_day guard 3660；base.py get_trading_dates 优先真实日历回退工作日；测试 9 项（2 处测试自身修正：2025-10-06 实为硬编码国庆假换普通周四；DataSourceBase 抽象需 _DummySource 具体子类）；1716 passed
+   b. **B-2 P1-③ 停牌判定**：落点=TDX 源头补齐——tdx_source.py 新增 _fill_suspended_placeholders（按真实日历补占位行 open/close=None、volume=0；只补历史缺口不补未来排期；无日历回退旧行为）；queries.py get_market_data + get_market_data_batch 两处 SELECT * 加 AND open IS NOT NULL AND close IS NOT NULL（防占位行污染回测；现有库无 NULL 价行零影响）；manager.py 既有 is_suspended=volume==0 判定自然生效；测试 5 项；1721 passed
+   c. **B-3 P1-② 真实股本**：冒烟发现 akshare 1.18.94 中 stock_zh_a_gbjg 与 stock_a_indicator_lg 均不存在（AttributeError 死路）；替代候选 stock_zh_a_gbjg_em（东财股本变动）可用（茅台 16 条含总股本/已上市流通A股/变更日期/变动原因）；schema.py 新增 share_change 表（symbol/change_date/total_share/float_share/change_reason，UNIQUE(symbol,change_date)）+ 索引 + 注册 + drop（事故：patch_b3.py 因 stdout 未回显被误判失败二次运行产生 schema 重复定义块，已按位置删除第二份，校验断言各=1 通过）；新建 share_change_sync_service.py（ShareChangeSyncService：fetch→清洗（NaN/1900 脏行过滤，float_share=0 上市前事实保留）→UPSERT 幂等、sync_market 限速 0.3s、get_share_lookup 防未来）；derived_metrics.py compute_b_class_metrics 加 share_records 参数（每交易日取 change_date<=trade_date 最近真实股本，优先于 circ_mv/close 反推，无记录/无事件回退近似，严格防未来）；full_clean_service.py + manager.py 注入（表缺失回退 None）；scripts/同步股本变动.py（DataFetcher+fetcher.get_stock_list() 同数据下载.py 口径）；测试 6 项（3 处测试自身修正：反推用最新收盘价统一值 15.0、float_share=0 事件保留）；test_database.py test_table_names_complete 9→10 表；全市场拉取 5319 只全部成功 fail=0、事件 156,903、耗时 2526.7s，DB 核验 156,903 行/覆盖 5,319 只/茅台 16 条/送股·解禁类 3,989 条；1727 passed
+   d. **B-4 P2-④ 北交所**：tdx_source.get_stock_list 过滤 B 股（sh 90/sz 20 剔除，纯修复——此前 B 股混入池）+ 补 bj 目录扫描（增强：82/83/87/88/92 开头保留；实测 bj 目录含 899050 北证50/899601 北证全指等指数与 81 段非股票 → 剔除；健康检查同步扫 bj）；真实标的池 5317→5589（SH 2329/SZ 2911/BJ 349），B 股 0 残留、899/81 指数 0 残留；测试 3 项（1 处测试自身修正：排序期望）；1730 passed
+   e. **下载入口 raw 修复（P0-1 遗漏）**：scripts/数据下载.py download_daily 写死 adjust="hfq"→"raw"（下载只存 raw 事实版本，复权消费端现算；否则增量写 hfq 标签污染 raw 库=孤岛复发）；增量下载（--incremental，PYTHONPATH 注入运行）补全 9-29/9-30：3185→5546/5539 行（创业板 1408/科创板 617/北交所 348 入库），标的 5316→5668，hfq 标签 0；B 股（90/20）按 B-4 决策不下载（DB 保留历史至 9-28）
+   f. **全量清洗落地（B-1/B-2/B-3 全库生效）**：batch full_clean_20261002_133333（GUI 运行）：全量 5317、排除规则 14 条（含 68/90/20/99）、实际清洗 3208 只、备份 backup_20261002_133358_quant_before_clean.db（5732.8MB）；与助手启动的 batch 132741（旧规则快照）并发写库风险已解除（停止助手批，保留 GUI 批独占）；清洗后 9-29/9-30 缺口由增量下载补齐（见 e）
+   g. **验证结果**：py_compile 全部改文件 + 4 新测试文件 PASS；新增 23 项 passed（test_trade_calendar 9 / test_suspended_placeholder 5 / test_share_change 6 / test_stock_list_filter 3）；全量 pytest tests/unit = 1730 passed / 2 skipped / 0 failed（口径 1716→1721→1727→1730 逐项净增 9/5/6/3，test_database 9→10 表测试同步更新）
+   h. **边界与遗留（披露）**：B 股（90/20）标的按 B-4 决策不纳入标的池/下载/清洗（DB 保留历史至 9-28，如需恢复可改规则）；全量清洗标的池=DB 内标的（北交所新标的经下载入库后随下次清洗覆盖）；二期 git 提交本次 5 笔分拆（B-1/B-2/B-3/B-4/下载修复+蓝图#84，信息含各笔范围与验证结论）；蓝图 #84 本次回写
