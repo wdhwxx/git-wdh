@@ -1246,9 +1246,9 @@ class AkshareDataSource(DataSourceBase):
                 name = str(row.get("名称", ""))
                 if not code or not code.isdigit():
                     continue
-                if code.startswith(("60", "68", "90")):
+                if code.startswith(("60", "68")):
                     symbol = f"{code}.SH"
-                elif code.startswith(("00", "30", "20")):
+                elif code.startswith(("00", "30")):
                     symbol = f"{code}.SZ"
                 elif code.startswith(("43", "83", "87", "88")):
                     symbol = f"{code}.BJ"

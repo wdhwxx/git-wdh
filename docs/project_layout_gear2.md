@@ -495,6 +495,7 @@ Pythonwdhmm/
 │   │   ├── test_live_data_feed_adjust.py # ✨【回写#83】S2 live复权口径单测（新浪轮询改拉raw adjust=""/除权跳变因子豁免/非除权仍告警/qfq现算÷最新因子/raw透传，stub akshare+因子服务零网络，6项）✅已完成
 │   │   ├── test_derived_metrics_report_deadline.py # ✨【回写#83】P1-①发布日推算单测（4报告期映射/异常保留/披露窗口pe=None防未来/披露后用当期年化，4项）✅已完成
 │   │   ├── test_web_source_volume_unit.py # ✨【回写#83】P1-④网源volume单位单测（腾讯K线手→股×100/网易股保持不动，stub requests零网络，2项）✅已完成
+│   │   ├── test_akshare_source_list_filter.py # ✨【回写#85】akshare_source.get_stock_list B股映射加固单测（B股900/200/老三板4/非法段过滤、A股与北交所保留、空列表源不崩溃，2项）✅已完成
 │   │   ├── test_tdx_source_parse.py # ✨【回写#83】P1-⑤TDX .day解析单测（amount float32→float64语义锁定/volume股单位/畸形文件防空，2项）✅已完成
 │   │   ├── test_p2_anti_future_config.py # ✨【回写#83】P2纯修复单测（②财务兜底report_date=今天丢弃+留痕/③排除规则config化+缺省回退内置14条/⑤量比窗口跳0量日，5项）✅已完成
 
@@ -718,7 +719,7 @@ Pythonwdhmm/
 
     │       ├── base.py               # 数据源抽象基类
 
-    │       ├── akshare_source.py      # ✨【第10/11/12条】AkShare数据源（V2稳定链）：行情降级链=东财stock_zh_a_hist→腾讯原生HTTP fqkline→网易原生HTTP chddata CSV→新浪兜底；health_check用实际行情接口判活；每源独立会话级封锁；财务=新浪stock_financial_abstract主力+百度stock_zh_valuation_baidu独立兜底；✨【第12条】新增get_financial_history多报告期获取（防未来函数）；_retry_request失败计数只在最终失败时记录1次（重试不累积）；supports_financial=True；✨【回写#83】P1-④ 腾讯K线volume×100手→股（与腾讯实时/全库口径统一）+ P2-② 财务兜底report_date=今天丢弃+留痕（百度独立兜底/push2实时快照/datacenter TRADE_DATE缺失三处，防伪造报告期未来函数）
+    │       ├── akshare_source.py      # ✨【第10/11/12条】AkShare数据源（V2稳定链）：行情降级链=东财stock_zh_a_hist→腾讯原生HTTP fqkline→网易原生HTTP chddata CSV→新浪兜底；health_check用实际行情接口判活；每源独立会话级封锁；财务=新浪stock_financial_abstract主力+百度stock_zh_valuation_baidu独立兜底；✨【第12条】新增get_financial_history多报告期获取（防未来函数）；_retry_request失败计数只在最终失败时记录1次（重试不累积）；supports_financial=True；✨【回写#83】P1-④ 腾讯K线volume×100手→股（与腾讯实时/全库口径统一）+ P2-② 财务兜底report_date=今天丢弃+留痕（百度独立兜底/push2实时快照/datacenter TRADE_DATE缺失三处，防伪造报告期未来函数）；✨【回写#85】get_stock_list B股映射加固（90/20 剔除，与 tdx_source B-4 过滤口径对齐，下载层彻底无 B 股出口）
 
     │       ├── broker_source.py       # 券商实时数据源预留接口
 
@@ -1923,3 +1924,9 @@ Pythonwdhmm/
    f. **全量清洗落地（B-1/B-2/B-3 全库生效）**：batch full_clean_20261002_133333（GUI 运行）：全量 5317、排除规则 14 条（含 68/90/20/99）、实际清洗 3208 只、备份 backup_20261002_133358_quant_before_clean.db（5732.8MB）；与助手启动的 batch 132741（旧规则快照）并发写库风险已解除（停止助手批，保留 GUI 批独占）；清洗后 9-29/9-30 缺口由增量下载补齐（见 e）
    g. **验证结果**：py_compile 全部改文件 + 4 新测试文件 PASS；新增 23 项 passed（test_trade_calendar 9 / test_suspended_placeholder 5 / test_share_change 6 / test_stock_list_filter 3）；全量 pytest tests/unit = 1730 passed / 2 skipped / 0 failed（口径 1716→1721→1727→1730 逐项净增 9/5/6/3，test_database 9→10 表测试同步更新）
    h. **边界与遗留（披露）**：B 股（90/20）标的按 B-4 决策不纳入标的池/下载/清洗（DB 保留历史至 9-28，如需恢复可改规则）；全量清洗标的池=DB 内标的（北交所新标的经下载入库后随下次清洗覆盖）；二期 git 提交本次 5 笔分拆（B-1/B-2/B-3/B-4/下载修复+蓝图#84，信息含各笔范围与验证结论）；蓝图 #84 本次回写
+
+85. ✨【回写记录·2026-10-02·akshare_source.get_stock_list B股映射加固】D1 决策（B 股永久剔除）收尾加固：消除 akshare 列表源的理论复发点。事实来源：本次落地；代码级核验：py_compile PASS + 新增 2 项单测 + 全量 pytest tests/ = 1750 passed / 2 skipped：
+   a. **myquant/data_access/sources/akshare_source.py get_stock_list**：代码段映射 ("60","68","90")→("60","68")、("00","30","20")→("00","30")——B 股（900/200）不再被 akshare 列表源映射为 A 股 symbol，与 tdx_source B-4 过滤口径对齐（下载层彻底无 B 股出口）；_symbol_to_sina/_symbol_to_netease 转换函数保留原映射（不产生新标的，最小改动）
+   b. **新增 tests/unit/test_akshare_source_list_filter.py**（2 项）：B 股（900/200）/老三板（4）/非法段（999）过滤、A 股与北交所保留；空列表源返回空列表不崩溃
+   c. **验证结果**：py_compile akshare_source.py + 新测试 PASS；新测试 2 passed；全量 pytest tests/ = 1750 passed / 2 skipped（含 B 股剔除后数据基线）
+   d. **纪律遵守**：业务逻辑归 akshare_source.py（蓝图已登记，目录树注释已同步 #85）；新增测试文件已登记目录树；无临时文件入库
