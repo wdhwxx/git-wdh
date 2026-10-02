@@ -28,6 +28,7 @@ import csv
 import logging
 import sqlite3
 import time
+import yaml
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -62,13 +63,36 @@ FINANCIAL_CSV_COLUMNS: List[str] = [
 #: 合并去重主键列
 DEDUP_KEYS: Tuple[str, str] = ("symbol", "report_date")
 
-#: 增量定位默认排除规则——对齐全量清洗实际口径（config/data_clean_run.json 14 条，
+#: 增量定位默认排除规则（P2-③ #83 config 化后为内置回退）——
+#: 对齐全量清洗实际口径（config/data_clean_run.json 14 条，
 #: 含科创板688/北交所4·8·92·68/创业板30·90/B股20·99等；full_clean_service 的
-#: DEFAULT_EXCLUDE_RULES 仅 10 条为脚本无 config 兜底，此处以清洗实际配置为准）
+#: DEFAULT_EXCLUDE_RULES 仅 10 条为脚本无 config 兜底，此处以清洗实际配置为准）。
+#: 优先读取 config/financial_exclude_rules.yaml（见 _load_financial_exclude_rules）。
 FINANCIAL_EXCLUDE_RULES: List[str] = [
     "000.SH", "399", "880", "5.SH", "1.SZ", "30.SZ", "688.SH",
     "4", "8", "92", "68", "90", "20", "99",
 ]
+
+
+def _load_financial_exclude_rules(project_root: Path) -> List[str]:
+    """读取 config/financial_exclude_rules.yaml（P2-③ #83）。
+
+    缺文件/格式异常 → 回退内置 14 条 + warning（不阻断增量定位）。
+    """
+    cfg_path = project_root / "config" / "financial_exclude_rules.yaml"
+    if cfg_path.exists():
+        try:
+            data = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+            rules = data.get("exclude_rules")
+            if isinstance(rules, list) and rules:
+                return [str(r) for r in rules]
+        except Exception as exc:
+            logger.warning(
+                "财务排除规则配置读取失败，回退内置 14 条: %s (%s)", cfg_path, exc
+            )
+    else:
+        logger.warning("财务排除规则配置缺失，使用内置 14 条: %s", cfg_path)
+    return list(FINANCIAL_EXCLUDE_RULES)
 
 
 # ════════════════════════════════════════════════════════════
@@ -117,7 +141,7 @@ def _find_missing_financial_symbols(
     Returns:
         List[str]: 待补财务的标的列表（升序）。
     """
-    rules = list(exclude_rules) if exclude_rules is not None else list(FINANCIAL_EXCLUDE_RULES)
+    rules = list(exclude_rules) if exclude_rules is not None else _load_financial_exclude_rules(project_root)
     db = db_path or (project_root / "database" / "quant.db")
     sql = (
         "SELECT DISTINCT m.symbol FROM market_data m "

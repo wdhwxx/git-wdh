@@ -212,6 +212,48 @@ def _period_from_frequency(frequency: str) -> int:
     return FREQUENCY_PERIOD_MAP.get(str(frequency).lower(), 60)
 
 
+def _factor_on_or_before(lookup: Dict[str, float], date_str: str) -> Optional[float]:
+    """因子表中 <= date_str 的最近因子（as_of 截断，防未来函数）。"""
+    if not lookup or not date_str:
+        return None
+    best: Optional[float] = None
+    best_date = ""
+    for d, f in lookup.items():
+        if d <= date_str:
+            if not best_date or d > best_date:
+                best_date = d
+                best = f
+    return best
+
+
+def _live_jump_change_with_factor(
+    prev_close: float,
+    cur_close: float,
+    prev_date: str,
+    cur_date: str,
+    factor_lookup: Dict[str, float],
+) -> Optional[float]:
+    """按复权因子吸收除权缺口后的真实跳变百分比（S2 #83）。
+
+    raw 价在除权事件日会跳空（如高送转 -50%），但 hfq 价连续；
+    本函数用事件日前后因子把两条价折算到 hfq 口径后求真实变化率。
+    无因子表 / 非事件日（因子未变）返回 None（不做豁免判定）。
+    """
+    if not factor_lookup or not prev_date or not cur_date:
+        return None
+    prev_factor = _factor_on_or_before(factor_lookup, prev_date)
+    cur_factor = _factor_on_or_before(factor_lookup, cur_date)
+    if prev_factor is None or cur_factor is None or prev_factor <= 0:
+        return None
+    if abs(cur_factor - prev_factor) < 1e-12:
+        return None  # 无除权事件
+    hfq_prev = prev_close * prev_factor
+    hfq_cur = cur_close * cur_factor
+    if hfq_prev <= 0:
+        return None
+    return abs(hfq_cur - hfq_prev) / hfq_prev
+
+
 def _quote_to_bar(quote: Dict[str, Any]) -> Dict[str, Any]:
     """
     实时快照 → 标准bar（单条，作为聚合周期首根或同周期更新基础）
@@ -739,6 +781,8 @@ class MarketDataFeed:
         bar_period: Optional[int] = None,
         backoff_cap: int = 60,
         local_history_dir: Optional[str] = None,
+        factor_svc: Optional[Any] = None,
+        adjust_out: str = "raw",
     ):
         """
         初始化实时行情接入
@@ -766,6 +810,10 @@ class MarketDataFeed:
             聚合周期（秒），None则按 frequency 自动映射
         backoff_cap : int
             指数退避上限（秒），默认60
+        factor_svc : Any | None
+            复权因子服务（方案B #82），hfq/qfq 现算与除权跳变豁免用；None 懒加载默认 DB 服务
+        adjust_out : str
+            对外输出口径："raw"（默认，事实价原样）或 "qfq"（按最新因子现算前复权）
         """
         self._source = source
         self._local_history_dir = local_history_dir
@@ -774,6 +822,11 @@ class MarketDataFeed:
         self._max_retry = max_retry
         self._retry_interval = retry_interval
         self._backoff_cap = int(backoff_cap)
+        # S2(#83)：复权现算——factor_svc 可选（None 懒加载默认 DB 服务）；
+        #   adjust_out="qfq" 时对分发 bar 按最新因子现算前复权，"raw" 原样透传
+        self._factor_svc = factor_svc
+        self._adjust_out = str(adjust_out or "raw").lower()
+        self._factor_lookup_cache: Dict[str, Dict[str, float]] = {}
 
         # 实时模式判定
         self._is_realtime_mode = str(source).lower().startswith("realtime")
@@ -1326,11 +1379,13 @@ class MarketDataFeed:
         sina_symbol = f"{market}{code}"
 
         try:
+            # S2(#83)：统一不复权 raw 事实（adjust=""），与腾讯快照/本地历史同口径；
+            #   复权价由消费端按 adjust_out 现算（_maybe_adjust_bar），消除量纲错位
             df = ak.stock_zh_a_daily(
                 symbol=sina_symbol,
                 start_date=start_date,
                 end_date=end_date,
-                adjust="qfq",  # 前复权，实时行情用前复权
+                adjust="",
             )
             if df is None or df.empty:
                 return []
@@ -1397,28 +1452,42 @@ class MarketDataFeed:
         # #O1修复：连续跳变次数阈值，抑制瞬时跳变误报和告警风暴
         jump_threshold = float(self._clean_config.get("price_jump_threshold", 0.15))
         prev_close = None
+        prev_bar = None
         with self._lock:
             prev = self._latest_bars.get(symbol)
             if prev:
                 prev_close = prev.get("close")
+                prev_bar = prev
         if prev_close and prev_close > 0 and bar.get("close", 0) > 0:
             change = abs(bar["close"] - prev_close) / prev_close
             if change > jump_threshold:
-                # 连续跳变计数 +1
-                streak = self._jump_streak.get(symbol, 0) + 1
-                self._jump_streak[symbol] = streak
-                msg = f"价格跳变 {change*100:.1f}% > {jump_threshold*100:.0f}%"
-                if streak >= self._jump_alert_threshold:
-                    # 达到连续阈值才告警
-                    self._stats["dirty_bars"] += 1
-                    logger.warning(f"[data_feed] 跳变告警(连续{streak}次): {symbol} {msg} "
-                                   f"prev={prev_close} now={bar['close']}",
-                                   extra={"source": "live", "symbol": symbol})
-                    self._notify_dirty(symbol, bar, [msg])
+                # S2(#83)：除权事件日 raw 缺口被因子吸收 → 视为正常行情，重置连续计数
+                exempt = _live_jump_change_with_factor(
+                    prev_close,
+                    float(bar.get("close", 0)),
+                    str(prev_bar.get("date", ""))[:10] if prev_bar else "",
+                    str(bar.get("date", ""))[:10],
+                    self._get_factor_lookup_cached(symbol),
+                )
+                if exempt is not None and exempt <= jump_threshold:
+                    if self._jump_streak.get(symbol, 0) > 0:
+                        self._jump_streak[symbol] = 0
                 else:
-                    # 未达阈值只记录debug，不告警（抑制瞬时跳变误报）
-                    logger.debug(f"[data_feed] 跳变检测(连续{streak}/{self._jump_alert_threshold}次): {symbol} {msg} "
-                                f"prev={prev_close} now={bar['close']}")
+                    # 连续跳变计数 +1
+                    streak = self._jump_streak.get(symbol, 0) + 1
+                    self._jump_streak[symbol] = streak
+                    msg = f"价格跳变 {change*100:.1f}% > {jump_threshold*100:.0f}%"
+                    if streak >= self._jump_alert_threshold:
+                        # 达到连续阈值才告警
+                        self._stats["dirty_bars"] += 1
+                        logger.warning(f"[data_feed] 跳变告警(连续{streak}次): {symbol} {msg} "
+                                       f"prev={prev_close} now={bar['close']}",
+                                       extra={"source": "live", "symbol": symbol})
+                        self._notify_dirty(symbol, bar, [msg])
+                    else:
+                        # 未达阈值只记录debug，不告警（抑制瞬时跳变误报）
+                        logger.debug(f"[data_feed] 跳变检测(连续{streak}/{self._jump_alert_threshold}次): {symbol} {msg} "
+                                    f"prev={prev_close} now={bar['close']}")
                 # 跳变是真实行情可能，不丢弃
             else:
                 # 无跳变，重置连续计数
@@ -1446,14 +1515,22 @@ class MarketDataFeed:
         清洗bar数据（原有批量路径）
 
         调用 clean_bar_records 清洗，脏数据记录告警，不返回脏数据。
+        S2(#83)：有因子时注入 factor_lookup（config 副本，不污染共享配置），
+        除权缺口跳变被因子吸收不误剔。
         """
         if not bars:
             return []
 
+        cfg = self._clean_config
+        lookup = self._get_factor_lookup_cached(symbol)
+        if lookup:
+            cfg = dict(self._clean_config)
+            cfg["factor_lookup"] = lookup
+
         try:
             result = clean_bar_records(
                 records=bars,
-                config=self._clean_config,
+                config=cfg,
             )
             # clean_bar_records 返回 (cleaned, bad, stats) 三元组
             if isinstance(result, tuple) and len(result) >= 2:
@@ -1482,13 +1559,72 @@ class MarketDataFeed:
             return bars
 
     # ═══════════════════════════════════════════
+    #  复权现算与除权跳变豁免（S2 #83）
+    # ═══════════════════════════════════════════
+
+    def _ensure_factor_svc(self) -> None:
+        """懒加载复权因子服务（DB 不存在时静默降级为 None）。"""
+        if self._factor_svc is not None:
+            return
+        from myquant.data_access.factor_sync_service import FactorSyncService
+
+        project_root = _Path(__file__).resolve().parents[2]
+        db_path = project_root / "database" / "quant.db"
+        if db_path.exists():
+            try:
+                self._factor_svc = FactorSyncService(project_root, db_path=db_path)
+            except Exception as e:
+                logger.error(f"初始化复权因子服务失败: {type(e).__name__}: {e}")
+                self._factor_svc = None
+
+    def _get_factor_lookup_cached(self, symbol: str) -> Dict[str, float]:
+        """按 symbol 缓存的因子事件表 {event_date: factor}（as_of=今天，防未来函数）。"""
+        cached = self._factor_lookup_cache.get(symbol)
+        if cached is not None:
+            return cached
+        self._ensure_factor_svc()
+        if self._factor_svc is None:
+            return {}
+        try:
+            lookup = self._factor_svc.get_factor_lookup(symbol)
+        except Exception as e:
+            logger.error(f"读取复权因子失败[{symbol}]: {type(e).__name__}: {e}")
+            return {}
+        self._factor_lookup_cache[symbol] = lookup
+        return lookup
+
+    def _maybe_adjust_bar(self, bar: Dict[str, Any]) -> Dict[str, Any]:
+        """adjust_out='qfq' 时按最新因子现算前复权（raw 事实 ÷ 最新因子）。
+
+        仅当该标的有因子事件时折算；无因子/因子无效保持原值（降级 raw）。
+        """
+        if self._adjust_out != "qfq" or not bar:
+            return bar
+        factors = self._get_factor_lookup_cached(str(bar.get("symbol", "")))
+        if not factors:
+            return bar
+        latest = max(factors.values())
+        if not latest or latest <= 0:
+            return bar
+        out = dict(bar)
+        for key in ("open", "high", "low", "close"):
+            if key in out:
+                try:
+                    out[key] = float(out[key]) / latest
+                except (ValueError, TypeError):
+                    pass
+        return out
+
+    # ═══════════════════════════════════════════
     #  行情缓存
     # ═══════════════════════════════════════════
 
     def _update_cache(self, symbol: str, bars: List[Dict[str, Any]]) -> None:
-        """更新行情缓存"""
+        """更新行情缓存（S2 #83：adjust_out='qfq' 时先现算前复权）"""
         if not bars:
             return
+        if self._adjust_out == "qfq":
+            bars = [self._maybe_adjust_bar(b) for b in bars]
 
         with self._lock:
             # 更新最新bar

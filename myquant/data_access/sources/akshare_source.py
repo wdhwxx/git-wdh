@@ -553,7 +553,7 @@ class AkshareDataSource(DataSourceBase):
                     "close": self._safe_float(item[2]),
                     "high": self._safe_float(item[3]),
                     "low": self._safe_float(item[4]),
-                    "volume": self._safe_float(item[5]),
+                    "volume": self._safe_float(item[5]) * 100.0,  # 手→股（P1-④ #83，与腾讯实时/全库口径一致）
                     "amount": None,  # 腾讯接口不直接返回成交额
                     "pct_chg": None,
                 })
@@ -739,27 +739,12 @@ class AkshareDataSource(DataSourceBase):
             # ── ④ 百度独立兜底（东财+新浪都失败时，用PE/PB生成最小记录）──
             baidu_val = self._fetch_baidu_valuation(ak, code)
             if baidu_val and (baidu_val.get("pe") is not None or baidu_val.get("pb") is not None):
-                baidu_result = {
-                    "symbol": symbol,
-                    "market": "A股",
-                    "report_date": datetime.now().strftime("%Y-%m-%d"),
-                    "report_type": "估值(百度兜底)",
-                    "pe": baidu_val.get("pe"),
-                    "pb": baidu_val.get("pb"),
-                    "total_mv": None,
-                    "circ_mv": None,
-                    "eps": None,
-                    "bps": None,
-                    "revenue": None,
-                    "net_profit": None,
-                    "net_profit_parent": None,
-                    "roe": None,
-                    "gross_margin": None,
-                    "debt_ratio": None,
-                    "data_source": f"{self.name}_baidu_fallback",
-                }
-                logger.info(f'百度兜底财务数据 [{symbol}]: PE={baidu_result["pe"]}, PB={baidu_result["pb"]}')
-                return [baidu_result]
+                # P2-②(#83)：百度估值为实时快照，无真实报告期；report_date=今天 伪造报告期
+                #   （回测因子回溯可用到"未来"快照=未来函数），丢弃 + 留痕，不写库
+                logger.warning(
+                    f"丢弃百度估值兜底记录 [{symbol}]（无真实报告期，防未来函数 P2-② #83）"
+                )
+                return []
 
             if chain_attempt == 0:
                 import time
@@ -792,21 +777,13 @@ class AkshareDataSource(DataSourceBase):
                 info_dict = {}
                 for _, row in df.iterrows():
                     info_dict[str(row.iloc[0])] = row.iloc[1]
-                result = {
-                    "symbol": symbol,
-                    "market": "A股",
-                    "report_date": datetime.now().strftime("%Y-%m-%d"),
-                    "report_type": "实时",
-                    "pe": self._safe_float(info_dict.get("市盈率-动态")),
-                    "pb": self._safe_float(info_dict.get("市净率")),
-                    "total_mv": self._safe_float(info_dict.get("总市值")),
-                    "circ_mv": self._safe_float(info_dict.get("流通市值")),
-                    "eps": self._safe_float(info_dict.get("每股收益")),
-                    "bps": self._safe_float(info_dict.get("每股净资产")),
-                    "data_source": f"{self.name}_eastmoney",
-                }
-                if end_date and result["report_date"] > end_date:
-                    return None  # 防未来函数：报告期晚于截止日
+                # P2-②(#83)：东财 push2 为实时估值快照，无真实报告期；
+                #   report_date=今天 伪造报告期（回测可用"未来"快照=未来函数），
+                #   丢弃 + 留痕，不写库（真实报表走通道② datacenter-web）
+                logger.warning(
+                    f"丢弃东财实时估值快照 [{symbol}]（无真实报告期，防未来函数 P2-② #83）"
+                )
+                return []
                 return result
             except Exception as e:
                 logger.warning(
@@ -875,7 +852,13 @@ class AkshareDataSource(DataSourceBase):
                 logger.warning(f"东财数据中心估值无数据 [{symbol}]")
                 return None
             row = rows[0]
-            report_date = str(row.get("TRADE_DATE") or "")[:10] or datetime.now().strftime("%Y-%m-%d")
+            # P2-②(#83)：TRADE_DATE 缺失时不兜底今天（伪造报告期=未来函数），丢弃+留痕
+            report_date = str(row.get("TRADE_DATE") or "")[:10]
+            if not report_date:
+                logger.warning(
+                    f"丢弃东财数据中心估值记录 [{symbol}]（TRADE_DATE 缺失，防未来函数 P2-② #83）"
+                )
+                return None
             if end_date and report_date > end_date:
                 return None  # 防未来函数：交易日晚于截止日
 

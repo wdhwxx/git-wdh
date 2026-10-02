@@ -40,6 +40,11 @@ def _make_provider(tmp_path, close_prices, factor_svc=None):
             "收盘价": close_prices,
             "成交量": [1000, 1200],
             "成交额": [20000, 24000],
+            "涨跌幅": [
+                None,
+                round((close_prices[1] - close_prices[0]) / close_prices[0] * 100.0, 4),
+            ],
+            "振幅": [2.0, 2.0],
         },
         index=dates,
     )
@@ -93,3 +98,34 @@ class TestFactorAdjust:
         provider = _make_provider(tmp_path, [1521.5, 1501.0], factor_svc=svc)
         df = provider.get_bars("600519.SH", start_date="2024-06-18", end_date="2024-06-19", adjust="hfq")
         assert list(df["收盘价"]) == [1521.5, 1501.0]
+
+
+class TestDerivedRecompute:
+    """S1（#83）：hfq/qfq 现算后重算 涨跌幅/振幅，消除除权日 raw 假跳变。"""
+
+    def test_hfq_pct_chg_no_fake_jump(self, tmp_path):
+        """hfq 下除权日涨跌幅按复权价重算，不再是 raw 假跳变值。"""
+        svc = StubFactorSvc({"2024-06-18": 8.071836, "2024-06-19": 8.239032})
+        provider = _make_provider(tmp_path, [1521.5, 1501.0], factor_svc=svc)
+        df = provider.get_bars("600519.SH", start_date="2024-06-18", end_date="2024-06-19", adjust="hfq")
+        c0 = 1521.5 * 8.071836
+        c1 = 1501.0 * 8.239032
+        expected = (c1 - c0) / c0 * 100.0
+        assert abs(df.loc["2024-06-19", "涨跌幅"] - expected) < 0.01
+        assert df.loc["2024-06-19", "涨跌幅"] != -1.3474  # raw 假跳变被替换
+
+    def test_qfq_pct_chg_same_ratio(self, tmp_path):
+        """qfq 涨跌幅与 hfq 一致（差常数倍，比例不变）。"""
+        svc = StubFactorSvc({"2024-06-18": 8.071836, "2024-06-19": 8.239032})
+        provider = _make_provider(tmp_path, [1521.5, 1501.0], factor_svc=svc)
+        df_qfq = provider.get_bars("600519.SH", start_date="2024-06-18", end_date="2024-06-19", adjust="qfq")
+        df_hfq = provider.get_bars("600519.SH", start_date="2024-06-18", end_date="2024-06-19", adjust="hfq")
+        assert abs(df_qfq.loc["2024-06-19", "涨跌幅"] - df_hfq.loc["2024-06-19", "涨跌幅"]) < 0.0001
+
+    def test_raw_derived_unchanged(self, tmp_path):
+        """raw 下派生量保持原文件值（不重算）。"""
+        provider = _make_provider(tmp_path, [1521.5, 1501.0])
+        df = provider.get_bars("600519.SH", start_date="2024-06-18", end_date="2024-06-19", adjust="raw")
+        assert df.loc["2024-06-19", "涨跌幅"] == -1.3474
+        assert df.loc["2024-06-19", "振幅"] == 2.0
+        assert pd.isna(df.loc["2024-06-18", "涨跌幅"])  # 首行无前收盘价 None

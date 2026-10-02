@@ -536,8 +536,46 @@ class HistoricalDataProvider(DataProviderBase):
                 merged[col] = pd.to_numeric(merged[col], errors="coerce") * merged["_factor"]
         out = merged.drop(columns=["_factor"]).set_index(CN_INDEX_NAME)
         out.index.name = CN_INDEX_NAME
-        return out.sort_index()
+        out = out.sort_index()
+        return self._recompute_price_derived_metrics(out)
 
+
+    def _recompute_price_derived_metrics(
+        self,
+        df: pd.DataFrame,
+    ) -> pd.DataFrame:
+        """复权现算后重算价格类派生量（涨跌幅/振幅），消除除权日 raw 假跳变。
+
+        S1（#83）：processed 派生量列仍为 raw 口径（除权日真实跳变）；消费端
+        hfq/qfq 现算后按复权价重算，口径与清洗端 compute_derived_metrics 一致：
+        pct_chg=(close_t-close_{t-1})/close_{t-1}*100、amplitude=(high_t-low_t)/
+        close_{t-1}*100，首行无前收盘价置 None；列缺失时跳过不创建。
+        volume_ratio/turnover/float_share/pe_dynamic 非价格派生量保持不动。
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            复权现算后的行情 DataFrame（中文表头，含 收盘价 列）。
+
+        Returns
+        -------
+        pd.DataFrame
+            重算 涨跌幅/振幅 后的同一 DataFrame（原文件 raw 派生量被覆盖）。
+        """
+        if df.empty or "收盘价" not in df.columns:
+            return df
+        close = pd.to_numeric(df["收盘价"], errors="coerce")
+        prev_close = close.shift(1)
+        denom_valid = prev_close.notna() & (prev_close != 0)
+        if "涨跌幅" in df.columns:
+            pct = ((close - prev_close) / prev_close * 100.0).round(4)
+            df["涨跌幅"] = pct.where(denom_valid)
+        if "振幅" in df.columns and "最高价" in df.columns and "最低价" in df.columns:
+            high = pd.to_numeric(df["最高价"], errors="coerce")
+            low = pd.to_numeric(df["最低价"], errors="coerce")
+            amp = ((high - low) / prev_close * 100.0).round(4)
+            df["振幅"] = amp.where(denom_valid)
+        return df
 
     def get_available_symbols(self) -> List[str]:
         """获取所有可用标的列表"""
