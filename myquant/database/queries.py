@@ -114,9 +114,12 @@ class DataQueries:
             conditions.append("trade_date <= ?")
             params.append(end_date)
 
+        # P1-③(#83)：过滤停牌占位行（open/close 为 NULL），防污染回测；
+        # is_suspended=1 事实行保留在库，由专用查询/统计消费
         sql = f"""
             SELECT * FROM {TABLE_NAMES['market_data']}
             WHERE {' AND '.join(conditions)}
+              AND open IS NOT NULL AND close IS NOT NULL
             ORDER BY trade_date ASC, trade_time ASC
         """
         rows = self.conn.execute(sql, tuple(params))
@@ -146,12 +149,14 @@ class DataQueries:
         if adjust:
             params.append(adjust)
 
+        # P1-③(#83)：过滤停牌占位行（open/close 为 NULL），防污染回测
         sql = f"""
             SELECT * FROM {TABLE_NAMES['market_data']}
             WHERE symbol IN ({placeholders})
               AND trade_date = ?
               AND period = ?
               AND {adjust_clause}
+              AND open IS NOT NULL AND close IS NOT NULL
         """
         rows = self.conn.execute(sql, tuple(params))
         return {row["symbol"]: dict(row) for row in rows}
