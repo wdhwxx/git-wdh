@@ -66,7 +66,7 @@ DEDUP_KEYS: Tuple[str, str] = ("symbol", "report_date")
 #: 增量定位默认排除规则（P2-③ #83 config 化后为内置回退）——
 #: 对齐全量清洗实际口径（config/data_clean_run.json 14 条，
 #: 含科创板688/北交所4·8·92·68/创业板30·90/B股20·99等；full_clean_service 的
-#: DEFAULT_EXCLUDE_RULES 仅 10 条为脚本无 config 兜底，此处以清洗实际配置为准）。
+#: DEFAULT_EXCLUDE_RULES 同为本 14 条，#87 已补齐，两处内置兜底一致）。
 #: 优先读取 config/financial_exclude_rules.yaml（见 _load_financial_exclude_rules）。
 FINANCIAL_EXCLUDE_RULES: List[str] = [
     "000.SH", "399", "880", "5.SH", "1.SZ", "30.SZ", "688.SH",

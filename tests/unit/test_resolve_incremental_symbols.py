@@ -5,7 +5,7 @@
   - 与全量清洗同一规则源：config/data_clean_run.json 的 exclude_rules + exclude_st
   - 规则外标的（指数/基金/板块/北交所）被剔除，规则内标的保留
   - ST 名单串联（exclude_st=true 时命中剔除）
-  - json 缺失 → 回退 DEFAULT_EXCLUDE_RULES（10 条静态兜底）且不抛错
+  - json 缺失 → 回退 DEFAULT_EXCLUDE_RULES（14 条静态兜底，与 config 实际口径一致，#87 补齐）且不抛错
   - 防焊死反例：规则增删 → 范围跟随变化（绝不读取任何历史标的数字）
   - 空池 / 统计字段完整
 """
@@ -112,13 +112,16 @@ class TestResolveIncrementalSymbols:
         assert stats["excluded_st"] == ["000001.SZ"]
 
     def test_JSON缺失回退默认规则(self, tmp_path: Path) -> None:
-        """config/data_clean_run.json 不存在 → 回退 DEFAULT_EXCLUDE_RULES（10 条），不抛错。"""
+        """config/data_clean_run.json 不存在 → 回退 DEFAULT_EXCLUDE_RULES（14 条），不抛错。"""
         keep, stats = resolve_incremental_symbols(_POOL, tmp_path)
-        # 10 条兜底无 "68" → 689009.SH 保留；有 000.SH → 000300.SH 仍剔除
+        # 14 条兜底含 "68" → 689009.SH 被剔除；有 000.SH → 000300.SH 仍剔除
+        # （#87：兜底与 config 实际口径一致，防 config 缺失时 B 股 90/20、科创板 68 复活）
         assert "000300.SH" not in keep
-        assert "689009.SH" in keep
+        assert "689009.SH" not in keep
+        assert keep == ["000001.SZ", "600519.SH", "600000.SH"]
         assert stats["original"] == 7
         assert stats["after"] == len(keep)
+        assert set(DEFAULT_EXCLUDE_RULES) == set(_RULES_14)  # 兜底 = 14 条口径
 
     def test_防焊死反例_规则变化范围跟随(self, tmp_path: Path) -> None:
         """规则增删 → 范围跟随变化（核心反例：绝不焊死任何标的数字）。"""
