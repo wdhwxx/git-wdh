@@ -19,7 +19,11 @@ import datetime as dt
 from datetime import date, datetime, timedelta, timezone
 from enum import Enum
 from functools import lru_cache
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Set, Tuple, Union
+
+from myquant.core.logger import get_logger
+
+logger = get_logger(__name__)
 
 # ─────────────────────────────────────────────
 # 时区定义（优先 zoneinfo，降级为固定偏移）
@@ -222,14 +226,22 @@ class TradingCalendar:
         date(2026, 10, 6), date(2026, 10, 7),  # 国庆
     }
 
-    def __init__(self, holidays: Optional[set] = None):
+    def __init__(
+        self,
+        holidays: Optional[set] = None,
+        trade_days: Optional[Set[date]] = None,
+    ):
         """
         Parameters
         ----------
         holidays : set[date] | None
             自定义节假日集合。None 则使用内置默认值。
+        trade_days : set[date] | None
+            真实交易日集合（P2-① #83）。None 回退 工作日-节假日 近似；
+            提供时 is_trading_day/偏移/序列全部按真实日历。
         """
         self._holidays: set = holidays if holidays is not None else set(self._DEFAULT_HOLIDAYS)
+        self._trade_days: Optional[Set[date]] = set(trade_days) if trade_days else None
 
     # ── 属性 ──
     @property
@@ -246,21 +258,38 @@ class TradingCalendar:
         return d in self._holidays
 
     def is_trading_day(self, d: Union[date, str]) -> bool:
-        """是否交易日 (非周末 且 非节假日)"""
+        """是否交易日（P2-① #83：注入真实交易日时按真实日历，否则 非周末且非节假日）"""
         if isinstance(d, str):
             d = parse_datetime(d).date()
+        if self._trade_days is not None:
+            return d in self._trade_days
         return not self.is_weekend(d) and not self.is_holiday(d)
+
+    def set_trade_days(self, trade_days: Optional[Set[date]]) -> None:
+        """运行时注入/清除真实交易日集合（P2-① #83；None 回退近似）。"""
+        self._trade_days = set(trade_days) if trade_days else None
 
     # ── 交易日偏移 ──
     def next_trading_day(self, d: date, n: int = 1) -> date:
-        """T+N 交易日 (n>0 向后, n<0 向前)"""
+        """T+N 交易日 (n>0 向后, n<0 向前)
+
+        P2-①(#83)：真实交易日模式若越过已知日历边界（guard 3660 天内未找齐），
+        按日偏移近似并 warning，避免死循环。
+        """
         step = 1 if n > 0 else -1
         count = 0
         current = d
-        while count < abs(n):
+        guard = 0
+        while count < abs(n) and guard < 3660:
             current += timedelta(days=step)
+            guard += 1
             if self.is_trading_day(current):
                 count += 1
+        if count < abs(n):
+            logger.warning(
+                "交易日历越界: %s 在 %d 天内未找到 %d 个交易日，按日偏移近似返回",
+                d, guard, abs(n),
+            )
         return current
 
     def prev_trading_day(self, d: date, n: int = 1) -> date:

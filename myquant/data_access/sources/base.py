@@ -352,13 +352,28 @@ class DataSourceBase(ABC):
         market: str = "A股",
     ) -> List[str]:
         """
-        获取交易日列表（默认返回区间内所有工作日，子类可覆盖为真实交易日历）
+        获取交易日列表（P2-① #83：优先查真实交易日历缓存 data/trade_calendar.csv，
+        缺失回退区间内工作日近似；子类可覆盖为各自真实日历）
 
         【防未来函数】end_date 之后的日期不返回
         """
         from datetime import date, timedelta
         start = datetime.strptime(start_date, "%Y-%m-%d").date()
         end = datetime.strptime(end_date, "%Y-%m-%d").date()
+
+        # 真实交易日历（缓存由 scripts/同步交易日历.py 维护）
+        try:
+            from pathlib import Path as _Path
+            from myquant.utils.trade_calendar import load_trade_calendar
+
+            project_root = _Path(__file__).resolve().parents[3]
+            trade_days = load_trade_calendar(project_root)
+        except Exception:
+            trade_days = None
+        if trade_days:
+            return [d.isoformat() for d in sorted(trade_days) if start <= d <= end]
+
+        # 回退：区间内工作日近似（原实现）
         dates = []
         current = start
         while current <= end:
