@@ -62,6 +62,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
+# CLI 直跑免设 PYTHONPATH（与 scripts/同步股本变动.py 对齐，#87）
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 
 # ─────────────────────────────────────────────
 # 路径探测

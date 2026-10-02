@@ -366,7 +366,7 @@ Pythonwdhmm/
 
 ├── scripts/                          # 一次性运维脚本，只做入口，业务逻辑全部调用myquant内部模块，禁止业务写在脚本内
 
-│   ├── 数据下载.py                    # 数据下载入口：调用fetcher拉取原始数据写入raw；可触发完整清洗流水线输出processed；V5新增--no-cache-sync跳过缓存同步；✨【回写#86】download_daily 池过滤（resolve_incremental_symbols 14条规则）+ processed 写回改 save_cleaned_incremental_parquet（根治 CLI 原始直写弄脏数据）；save_market_data_parquet 已废弃标注
+│   ├── 数据下载.py                    # 数据下载入口：调用fetcher拉取原始数据写入raw；可触发完整清洗流水线输出processed；V5新增--no-cache-sync跳过缓存同步；✨【回写#86】download_daily 池过滤（resolve_incremental_symbols 14条规则）+ processed 写回改 save_cleaned_incremental_parquet（根治 CLI 原始直写弄脏数据）；save_market_data_parquet 已废弃标注；✨【回写#87】顶部 sys.path 注入（与同步股本变动.py 对齐，CLI 直跑免设 PYTHONPATH）
 
 │   ├── 数据清洗.py                    # ✨【新增】独立清洗流水线入口脚本：对raw指定范围/标的执行清洗，输出processed，生成质量报告；V5新增--no-cache-sync跳过缓存同步
 
@@ -651,7 +651,7 @@ Pythonwdhmm/
 
     │   ├── connection.py             # SQLite连接管理上下文管理器
 
-    │   ├── schema.py                 # 表结构总览DDL
+    │   ├── schema.py                 # 表结构总览DDL；✨【回写#87】drop_all_tables 顺序 share_change 重复行清理（L502-503 双行→单行，幂等不变）
 
     │   │                             # ✅已实现：clean_run_meta(清洗运行元信息) + dirty_data_stats(脏数据统计14种类型) 两表 + CleanRunMetaSchema/DirtyDataStatsSchema + 9索引
 
@@ -687,7 +687,7 @@ Pythonwdhmm/
 
     │   ├── loader.py                 # ✨【V5·P0】数据加载器（回测专用）：预取next_chunk+分块加载（chunk_size）+流水线模式（多bar并行预取）+内存水位降级（联动utils/memory_watcher，超阈值自动降为单块流式）；三模式引擎共用同一加载路径；与backtest/data_loader.py（历史数据提供器）分工互补
 
-    │   ├── full_clean_service.py     # ✨【回写】全量清洗业务逻辑层：FullCleanService——DB读取→清洗管线→事务写回→清洗元信息落库→bad归档→可选重建processed（subprocess调scripts/数据导出_DB到processed.py）；唯一调用方=scripts/数据全量清洗.py（CLI与GUI全量清洗对话框共用）；业务逻辑归myquant，脚本只做薄入口（架构纪律）；✨【回写#77】F4 新增公共函数 resolve_incremental_symbols（filter_excluded_symbols+filter_st_blacklist_symbols串联，读config/data_clean_run.json 14条实口径，json缺失回退DEFAULT_EXCLUDE_RULES(10条)+warning；返回keep+stats；防焊死：每次调用实时推导）——供增量下载与全量导出共用范围口径；✨【回写#79】新增 SUSPEND_DB_REL_PATH + filter_long_suspended_symbols（按 market_data(daily,hfq) MAX(trade_date) 与参考日 gap > exclude_suspended_days 剔除，等于阈值保留；DB无记录/解析失败/查询异常/阈值≤0 均保留不阻断；ref_date 可注入防未来）；resolve_incremental_symbols 串联该规则（stats 增 excluded_suspended，config 缺省 0 不启用）；FullCleanService.__init__ 读 exclude_suspended_days、resolve_symbols 用 dq.conn 同口径串联（全量/增量一致）
+    │   ├── full_clean_service.py     # ✨【回写】全量清洗业务逻辑层：FullCleanService——DB读取→清洗管线→事务写回→清洗元信息落库→bad归档→可选重建processed（subprocess调scripts/数据导出_DB到processed.py）；唯一调用方=scripts/数据全量清洗.py（CLI与GUI全量清洗对话框共用）；业务逻辑归myquant，脚本只做薄入口（架构纪律）；✨【回写#77】F4 新增公共函数 resolve_incremental_symbols（filter_excluded_symbols+filter_st_blacklist_symbols串联，读config/data_clean_run.json 14条实口径，json缺失回退DEFAULT_EXCLUDE_RULES+warning；返回keep+stats；防焊死：每次调用实时推导）——供增量下载与全量导出共用范围口径；✨【回写#79】新增 SUSPEND_DB_REL_PATH + filter_long_suspended_symbols（按 market_data(daily,hfq) MAX(trade_date) 与参考日 gap > exclude_suspended_days 剔除，等于阈值保留；DB无记录/解析失败/查询异常/阈值≤0 均保留不阻断；ref_date 可注入防未来）；resolve_incremental_symbols 串联该规则（stats 增 excluded_suspended，config 缺省 0 不启用）；FullCleanService.__init__ 读 exclude_suspended_days、resolve_symbols 用 dq.conn 同口径串联（全量/增量一致）；✨【回写#87】DEFAULT_EXCLUDE_RULES 10→14 条（补 68/90/20/99，与 config/data_clean_run.json + financial_sync_service 内置兜底一致，防 config 缺失时 B 股/科创板复活）
     │   ├── factor_sync_service.py   # ✨【回写#82】方案B复权因子同步业务：akshare stock_zh_a_daily(adjust="hfq-factor") 东财事件表→清洗(1900脏行/NaN/排序去重)→UPSERT adjust_factor(symbol,event_date,factor)；hfq价=raw×factor事件日生效；qfq=hfq/最新因子；限速/失败留痕/as_of防未来；供清洗豁免与data_loader复权现算 ✅已完成
 ；✨【回写#59】新增增量清洗通道 run_incremental_clean/_load_incremental_records/_normalize_incremental_date（读暂存增量→清洗→DB+processed双写，仅清洗模式）；✨【回写#70】新增 ST 风险警示剔除（load_st_blacklist/match_st_name/filter_st_blacklist_symbols/refresh_st_blacklist；resolve_symbols 串联代码前缀规则后；报告含 exclude_st/st_excluded_count/st_excluded_symbols）；✨【回写#71】B类财务缺失留痕（worker_clean 对 financial_data 无记录标的打 warning 并置 result["no_financial"]；run() 聚合 no_financial_symbols 并打印"待补财务标的"；build_report 新增 no_financial_count/no_financial_symbols）
 
@@ -1940,3 +1940,11 @@ Pythonwdhmm/
    e. **验证结果**：py_compile 数据下载.py + 新测试通过；新测试 + 回归 test_data_download_pool_scope.py = 14 passed；全量 pytest tests/ = 1752 passed / 2 skipped（与基线一致，零破坏）
    f. **披露**：CLI --daily 与 --incremental 均增量定位（update_symbols_batch force_full=False，与历史行为一致；全量重下走 GUI 通达信全量/全量清洗）；GUI 池源=backtest_kunpeng.yaml 三因子池、CLI 池源=全市场候选过滤，二者经同一 14 条规则（清洗池 ⊇ 回测池，回测池标的必在清洗池内，覆盖不遗漏）
    g. **纪律遵守**：业务逻辑复用 myquant（resolve_incremental_symbols / save_cleaned_incremental_parquet），scripts 只做胶水；新增测试文件已登记目录树；无临时文件入库
+
+87. ✨【回写记录·2026-10-02·A2 排除规则兜底补齐 14 条 + B1 schema 清理 + P3-2 sys.path 注入】三期数据层留后三项一次性落地。事实来源：本次落地；代码级核验：py_compile + 单测 + 全量 pytest + CLI 冒烟。
+   a. **A2 full_clean_service.py DEFAULT_EXCLUDE_RULES 10→14 条**：补 "68"（科创板补充段 689）/ "90"（B股 900xxx.SH）/ "20"（B股 200xxx.SZ）/ "99"（特殊段），与 config/data_clean_run.json + financial_exclude_rules.yaml + financial_sync_service.FINANCIAL_EXCLUDE_RULES（原已 14 条）完全一致——config 缺失/损坏回退兜底时不再把 B 股/科创板 68/老三板 99 段误纳入清洗池（防 B 股复活）；financial_sync_service 过时注释同步（此前称 full_clean 仅 10 条）
+   b. **B1 schema.py drop_all_tables 顺序清理**：L502-503 share_change 重复两行 → 单行（DROP TABLE IF EXISTS 幂等，行为不变，纯清理）
+   c. **P3-2 scripts/数据下载.py sys.path 注入**：顶部 sys.path.insert(0, 项目根)，与 scripts/同步股本变动.py 对齐——CLI 直跑免设 PYTHONPATH（冒烟：清空 PYTHONPATH 后 --help 正常 + exec 验证项目根在 sys.path）
+   d. **测试更新**：test_resolve_incremental_symbols.py test_JSON缺失回退默认规则 断言 10 条→14 条（689009.SH 现被 68 剔除，与 config 实际口径一致）+ docstring 同步
+   e. **验证结果**：py_compile 五文件通过；相关单测（resolve/p2_anti_future/database/cli_incremental）87 passed / 1 skipped；全量 pytest tests/ = 1755 passed / 2 skipped（与 #86 基线一致，零破坏）
+   f. **纪律遵守**：业务逻辑归 myquant；scripts 只做入口胶水；无临时文件入库；git 按 A2/B1/P3-2 分笔提交（本回写随最后一批）
