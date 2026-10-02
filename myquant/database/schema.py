@@ -34,6 +34,8 @@ TABLE_NAMES = {
     "financial_data": "financial_data",     # 财务数据表
     "factor_data": "factor_data",           # 因子数据表
     "adjust_factor": "adjust_factor",       # 复权因子表（除权除息事件，方案B #82）
+    "share_change": "share_change",         # 股本变动表（真实总/流通股本事件，P1-② #83）
+    "share_change": "share_change",         # 股本变动表（真实总/流通股本事件，P1-② #83）
     "strategy_state": "strategy_state",     # 策略状态表
     "data_source": "data_source",           # 数据源注册表
     "sync_status": "sync_status",           # 数据同步状态表
@@ -156,6 +158,26 @@ CREATE TABLE IF NOT EXISTS adjust_factor (
 CREATE_ADJUST_FACTOR_INDEX_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_adj_factor_symbol ON adjust_factor(symbol);",
     "CREATE INDEX IF NOT EXISTS idx_adj_factor_symbol_date ON adjust_factor(symbol, event_date);",
+]
+
+# 股本变动表（真实总股本/流通股本事件，P1-② #83：变更日及之后生效，消除解禁/增发/回购偏差）
+CREATE_SHARE_CHANGE_SQL = """
+CREATE TABLE IF NOT EXISTS share_change (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol        TEXT    NOT NULL,           -- 股票代码（600519.SH）
+    change_date   TEXT    NOT NULL,           -- 股本变更生效日期 YYYY-MM-DD（该日及之后生效）
+    total_share   REAL,                        -- 总股本（股）
+    float_share   REAL,                        -- 已上市流通A股（股）
+    change_reason TEXT,                        -- 变动原因（首发/送股/回购等）
+    data_source   TEXT,                        -- 数据来源（akshare_em）
+    created_at    TEXT    DEFAULT (datetime('now')),
+    UNIQUE(symbol, change_date)
+);
+"""
+
+CREATE_SHARE_CHANGE_INDEX_SQL = [
+    "CREATE INDEX IF NOT EXISTS idx_share_change_symbol ON share_change(symbol);",
+    "CREATE INDEX IF NOT EXISTS idx_share_change_symbol_date ON share_change(symbol, change_date);",
 ]
 
 # 策略状态表（回测/实盘状态持久化，崩溃恢复用）
@@ -289,6 +311,7 @@ ALL_CREATE_TABLE_SQL = [
     CREATE_FINANCIAL_DATA_SQL,
     CREATE_FACTOR_DATA_SQL,
     CREATE_ADJUST_FACTOR_SQL,
+    CREATE_SHARE_CHANGE_SQL,
     CREATE_STRATEGY_STATE_SQL,
     CREATE_DATA_SOURCE_SQL,
     CREATE_SYNC_STATUS_SQL,
@@ -301,6 +324,7 @@ ALL_CREATE_INDEX_SQL = (
     + CREATE_FINANCIAL_INDEX_SQL
     + CREATE_FACTOR_INDEX_SQL
     + CREATE_ADJUST_FACTOR_INDEX_SQL
+    + CREATE_SHARE_CHANGE_INDEX_SQL
     + CREATE_STRATEGY_INDEX_SQL
     + CREATE_SYNC_INDEX_SQL
     + CREATE_CLEAN_RUN_INDEX_SQL
@@ -475,6 +499,8 @@ def drop_all_tables(connection) -> None:
         TABLE_NAMES["strategy_state"],
         TABLE_NAMES["factor_data"],
         TABLE_NAMES["adjust_factor"],
+        TABLE_NAMES["share_change"],
+        TABLE_NAMES["share_change"],
         TABLE_NAMES["financial_data"],
         TABLE_NAMES["market_data"],
     ]

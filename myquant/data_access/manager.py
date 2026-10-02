@@ -1250,6 +1250,16 @@ class DataManager:
                     (symbol,),
                 )
                 fin_all = [dict(r) for r in fin_rows]
+                # P1-②(#83)：真实股本事件（share_change 表，无表/无记录回退反推近似）
+                try:
+                    share_rows = dq.conn.execute(
+                        "SELECT change_date, total_share, float_share FROM share_change "
+                        "WHERE symbol=? ORDER BY change_date",
+                        (symbol,),
+                    )
+                    share_recs = [dict(r) for r in share_rows] if share_rows else None
+                except Exception:
+                    share_recs = None
                 if fin_all:
                     fin_b = [
                         {
@@ -1266,7 +1276,7 @@ class DataManager:
                     for rec in cleaned:
                         if "date" in rec and "trade_date" not in rec:
                             rec["trade_date"] = rec["date"]
-                    compute_b_class_metrics(cleaned, fin_b)
+                    compute_b_class_metrics(cleaned, fin_b, share_records=share_recs)
                     # 每股收益：按交易日匹配最近一期（同全量导出口径，防未来函数）
                     fin_dates = [str(f.get("report_date", "")) for f in fin_all]
                     fin_eps = [f.get("eps") for f in fin_all]

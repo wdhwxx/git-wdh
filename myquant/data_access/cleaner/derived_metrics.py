@@ -84,9 +84,14 @@ def compute_derived_metrics(records: List[Dict[str, Any]]) -> List[Dict[str, Any
 
         # ── 量比（过去 N 日均量，不含当日）──
         if vol_history and volume is not None:
-            avg_vol = sum(vol_history) / len(vol_history)
-            if avg_vol > 0:
-                rec["volume_ratio"] = round(volume / avg_vol, 4)
+            # P2-⑤(#83)：窗口内 0 量日（停牌/无成交）不计入均量，避免均量虚低、量比虚高
+            valid_vol = [v for v in vol_history if v and v > 0]
+            if valid_vol:
+                avg_vol = sum(valid_vol) / len(valid_vol)
+                if avg_vol > 0:
+                    rec["volume_ratio"] = round(volume / avg_vol, 4)
+                else:
+                    rec["volume_ratio"] = None
             else:
                 rec["volume_ratio"] = None
         else:
@@ -127,6 +132,7 @@ def _to_float(value: Any) -> Optional[float]:
 def compute_b_class_metrics(
     records: List[Dict[str, Any]],
     financial_records: List[Dict[str, Any]],
+    share_records: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """
     B类派生量计算：换手率、流通股本、市盈(动)。
@@ -135,6 +141,9 @@ def compute_b_class_metrics(
         records: 按日期升序的清洗后行情记录列表（含 close/volume）。
         financial_records: 该标的的财务记录列表，每条含 report_date/circ_mv/total_mv/net_profit。
             circ_mv（流通市值）、total_mv（总市值）通常仅最新一期有值。
+        share_records: 该标的的股本变动事件列表（P1-② #83，可为空），每条含
+            change_date/total_share/float_share，按 change_date 升序；
+            每个交易日取 <= trade_date 最近变更的真实股本，无记录回退 circ_mv 反推近似。
 
     计算口径（近似说明）:
         - 流通股本 = 最新一期 circ_mv / 最新一期 close（近似，忽略历史股本变化）
@@ -175,7 +184,7 @@ def compute_b_class_metrics(
             latest_close = c
             break
 
-    # 反推流通股本/总股本（股）
+    # 反推流通股本/总股本（股）（真实股本缺失时的兜底近似）
     float_share: Optional[float] = None
     total_share: Optional[float] = None
     if latest_circ_mv and latest_close:
@@ -183,30 +192,53 @@ def compute_b_class_metrics(
     if latest_total_mv and latest_close:
         total_share = latest_total_mv / latest_close
 
+    # P1-②(#83)：真实股本事件（按 change_date 升序），每交易日取 <= trade_date 最近变更
+    share_sorted = sorted(
+        (share_records or []), key=lambda r: str(r.get("change_date", ""))
+    )
+
     for rec in records:
         trade_date = rec.get("trade_date", "")
         close = _to_float(rec.get("close"))
         volume = _to_float(rec.get("volume"))
 
+        # P1-②(#83)：真实股本优先（<= trade_date 最近变更），否则反推近似
+        eff_float: Optional[float] = None
+        eff_total: Optional[float] = None
+        for sh in share_sorted:
+            if str(sh.get("change_date", "")) <= trade_date:
+                f_sh = _to_float(sh.get("float_share"))
+                t_sh = _to_float(sh.get("total_share"))
+                if f_sh and f_sh > 0:
+                    eff_float = f_sh
+                if t_sh and t_sh > 0:
+                    eff_total = t_sh
+            else:
+                break  # 升序事件，后续变更日 > 该交易日（防未来）
+        cur_float = eff_float if eff_float else float_share
+        cur_total = eff_total if eff_total else total_share
+
         # 换手率
-        if float_share and volume and float_share > 0:
-            rec["turnover"] = round(volume / float_share * 100.0, 4)
+        if cur_float and volume and cur_float > 0:
+            rec["turnover"] = round(volume / cur_float * 100.0, 4)
         else:
             rec["turnover"] = None
 
-        # 流通股本（写回每条记录）
-        rec["float_share"] = round(float_share, 2) if float_share else None
+        # 流通股本（写回每条记录，真实股本优先）
+        rec["float_share"] = round(cur_float, 2) if cur_float else None
 
         # 市盈(动)：找该交易日之前最近一期财务数据
+        # P1-①(#83)：按披露截止日（发布日推算）而非报告期判定，
+        #   消除 报告期~披露日 窗口（如 Q1: 4/1~4/29）的未来函数
         fin_idx = -1
         for i, fin in enumerate(fin_sorted):
-            if fin.get("report_date", "") <= trade_date:
+            if _report_deadline(str(fin.get("report_date", ""))) <= trade_date:
                 fin_idx = i
             else:
                 break
 
         pe_dynamic: Optional[float] = None
-        if fin_idx >= 0 and close and total_share:
+        if fin_idx >= 0 and close and cur_total:
             fin = fin_sorted[fin_idx]
             net_profit = _to_float(fin.get("net_profit"))
             report_date = fin.get("report_date", "")
@@ -214,10 +246,34 @@ def compute_b_class_metrics(
                 annual_factor = _annualize_factor(report_date)
                 annual_profit = net_profit * annual_factor
                 if annual_profit > 0:
-                    pe_dynamic = round(close * total_share / annual_profit, 4)
+                    pe_dynamic = round(close * cur_total / annual_profit, 4)
         rec["pe_dynamic"] = pe_dynamic
 
     return records
+
+
+def _report_deadline(report_date: str) -> str:
+    """财报报告期 → 法定披露截止日（发布日推算，P1-① #83）。
+
+    规则：一季报 4-30 / 半年报 8-31 / 三季报 10-31 / 年报 次年 4-30；
+    异常报告期格式保留原值（不阻断下游，交接方案原定）。
+    """
+    if not report_date or len(report_date) < 10:
+        return report_date
+    try:
+        year = int(report_date[:4])
+    except (ValueError, TypeError):
+        return report_date
+    month_day = report_date[5:10]
+    if month_day == "03-31":
+        return f"{year}-04-30"
+    if month_day == "06-30":
+        return f"{year}-08-31"
+    if month_day == "09-30":
+        return f"{year}-10-31"
+    if month_day == "12-31":
+        return f"{year + 1}-04-30"
+    return report_date
 
 
 def _annualize_factor(report_date: str) -> float:

@@ -555,8 +555,18 @@ def worker_clean(task: Tuple[str, str, Dict[str, Any]]) -> Dict[str, Any]:
             # B类：换手率/流通股本/市盈(动)（需读financial_data）
             try:
                 fin_rows = dq.conn.execute("SELECT report_date, circ_mv, total_mv, net_profit FROM financial_data WHERE symbol=? ORDER BY report_date", (symbol,))
+                # P1-②(#83)：真实股本事件（share_change 表，无表/无记录回退反推近似）
+                try:
+                    share_rows = dq.conn.execute(
+                        "SELECT change_date, total_share, float_share FROM share_change "
+                        "WHERE symbol=? ORDER BY change_date",
+                        (symbol,),
+                    )
+                    share_recs = [dict(r) for r in share_rows] if share_rows else None
+                except Exception:
+                    share_recs = None
                 if fin_rows:
-                    compute_b_class_metrics(cleaned, [dict(r) for r in fin_rows])
+                    compute_b_class_metrics(cleaned, [dict(r) for r in fin_rows], share_records=share_recs)
                 else:
                     # 有行情但 financial_data 无记录：B类留空并留痕（与增量侧 no_data 可见留痕对齐）
                     logger.warning(
