@@ -11,8 +11,8 @@ tdx_source.py - 通达信本地数据源
   8     4     float32   最高价（元）
   12    4     float32   最低价（元）
   16    4     float32   收盘价（元）
-  20    4     float32   成交额（元）
-  24    4     int32     成交量（手）
+  20    4     float32   成交额（元）（float32 源精度：亿级误差约百元，读取后转 float64）
+  24    4     int32     成交量（股）（.day 源实为股，勿 ×100）
   28    4     int32     保留字段
 
 文件路径规则:
@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import os
 import struct
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -220,9 +220,9 @@ class TdxDataSource(DataSourceBase):
                 # 格式: <iiiiifii
                 #   date(int32), open(int32,单位:分), high(int32,单位:分),
                 #   low(int32,单位:分), close(int32,单位:分),
-                #   amount(float32,成交额,单位:元), volume(int32,成交量,单位:手),
+                #   amount(float32,成交额,单位:元,源精度受限), volume(int32,成交量,单位:股),
                 #   reserved(int32,保留)
-                date_int, open_p, high_p, low_p, close_p, amount, volume, _ = struct.unpack(
+                date_int, open_p, high_p, low_p, close_p, amount_f32, volume, _ = struct.unpack(
                     "<iiiiifii", raw
                 )
                 # 日期转换：20240101 -> "2024-01-01"
@@ -241,10 +241,66 @@ class TdxDataSource(DataSourceBase):
                     "high": round(high_price, 4),
                     "low": round(low_price, 4),
                     "close": round(close_price, 4),
-                    "volume": float(volume),      # 手
-                    "amount": round(amount, 2),    # 元
+                    "volume": float(volume),      # 股（.day 源实为股，勿 ×100）
+                    "amount": round(float(amount_f32), 2),  # 元（float32 源→float64，P1-⑤ #83）
                 })
         return records
+
+    # ── 停牌占位行（P1-③ #83）──
+
+    def _fill_suspended_placeholders(
+        self,
+        records: List[Dict],
+        start_date: Optional[str],
+        end_date: Optional[str],
+    ) -> List[Dict]:
+        """
+        真实交易日历对齐：TDX 停牌日无行情行（.day 不写），按日历补占位行
+        （open/high/low/close=None、volume/amount=0），供上层 manager 判
+        is_suspended=1（volume==0 既有判定）；占位行价列为 NULL，查询端
+        queries.get_market_data 过滤 NULL 价，不污染回测。
+
+        无日历缓存/异常时回退原序列（旧行为，零侵入部署）。
+        防未来函数：只补到已解析数据最大日期（end_date 缺省时不补未来排期）。
+        """
+        try:
+            from myquant.utils.trade_calendar import load_trade_calendar
+
+            project_root = Path(__file__).resolve().parents[3]
+            trade_days = load_trade_calendar(project_root)
+        except Exception:
+            trade_days = None
+        if not trade_days or not records:
+            return records
+
+        have = {r["date"] for r in records}
+        # 区间边界：只补历史缺口（不补 end_date 缺省时的未来排期）
+        max_have = max(have)
+        lower = start_date or min(have)
+        upper = end_date or max_have
+        if upper > max_have:
+            upper = max_have
+        lower_d = date.fromisoformat(str(lower)[:10])
+        upper_d = date.fromisoformat(str(upper)[:10])
+
+        placeholders = [
+            {
+                "date": d.isoformat(),
+                "open": None,
+                "high": None,
+                "low": None,
+                "close": None,
+                "volume": 0.0,
+                "amount": 0.0,
+            }
+            for d in sorted(trade_days)
+            if lower_d <= d <= upper_d and d.isoformat() not in have
+        ]
+        if not placeholders:
+            return records
+        merged = list(records) + placeholders
+        merged.sort(key=lambda r: r["date"])
+        return merged
 
     # ═══════════════════════════════════════════
     # 核心接口实现
@@ -294,6 +350,8 @@ class TdxDataSource(DataSourceBase):
             all_data = self._parse_day_file(file_path)
             # 【防未来函数】按日期范围过滤
             filtered = self._filter_by_date(all_data, start_date, end_date)
+            # P1-③(#83)：真实日历对齐补停牌占位行（volume=0 → is_suspended=1）
+            filtered = self._fill_suspended_placeholders(filtered, start_date, end_date)
             self._record_success()
             return MarketDataResult(
                 symbol=symbol,
@@ -311,11 +369,11 @@ class TdxDataSource(DataSourceBase):
         """
         获取本地已下载的A股股票列表（扫描.day文件）
 
-        【过滤规则】只保留沪深两市A股股票，剔除指数、可转债、基金等非股票：
-          - 沪市(sh)：60(主板)、68(科创板)、90(B股)
-          - 深市(sz)：00(主板)、30(创业板)、20(B股)
-          - 剔除：sh目录下00开头的指数(000001上证指数等)、11开头的可转债
-          - 剔除：sz目录下39开头的指数(399001深证成指等)、15开头的基金
+        【过滤规则】只保留沪深北A股股票（P2-④ #83：B 股剔除、北交所纳入），
+        剔除指数、可转债、基金、B股：
+          - 沪市(sh)：60(主板)、68(科创板)；剔除 90(B股)、00(指数)、11(可转债)
+          - 深市(sz)：00(主板)、30(创业板)；剔除 20(B股)、39(指数)、15(基金)
+          - 北交所(bj)：82/83/87/88/92 开头（920 段等，P2-④ #83）；剔除 81/89 开头（北证指数 899xxx 等）
 
         Returns
         -------
@@ -325,27 +383,34 @@ class TdxDataSource(DataSourceBase):
             return []
         stocks = []
         vipdoc_path = Path(self._tdx_root) / "vipdoc"
-        for market_dir in ["sh", "sz"]:
+        for market_dir in ["sh", "sz", "bj"]:
             lday_path = vipdoc_path / market_dir / "lday"
             if not lday_path.exists():
                 continue
             for day_file in lday_path.glob("*.day"):
-                # 文件名如 sh600519.day / sz000001.day
+                # 文件名如 sh600519.day / sz000001.day / bj832001.day
                 name = day_file.stem  # sh600519
-                if len(name) < 8:  # sh/sz + 6位代码
+                if len(name) < 8:  # 市场前缀 + 6位代码
                     continue
-                prefix = name[:2]  # sh/sz
+                prefix = name[:2]  # sh/sz/bj
                 code = name[2:]    # 600519
                 if not code.isdigit() or len(code) != 6:
                     continue
-                # ── 过滤非股票：只保留沪深A股 ──
+                # ── 过滤非股票：只保留沪深北A股（P2-④ #83：B 股剔除、北交所纳入）──
                 if market_dir == "sh":
-                    # 沪市股票：60(主板)、68(科创板)、90(B股)
-                    if not code.startswith(("60", "68", "90")):
+                    # 沪市A股：60(主板)、68(科创板)；B股 90 剔除
+                    if not code.startswith(("60", "68")):
                         continue
-                else:  # sz
-                    # 深市股票：00(主板)、30(创业板)、20(B股)
-                    if not code.startswith(("00", "30", "20")):
+                elif market_dir == "sz":
+                    # 深市A股：00(主板)、30(创业板)；B股 20 剔除
+                    if not code.startswith(("00", "30")):
+                        continue
+                else:  # bj
+                    # 北交所A股：92 段（老 82/83/87/88 段同规则）；
+                    # 剔除 81/89 开头（实测 bj 目录含 899050 北证50/899601 北证全指等指数、81 段非股票）
+                    if code.startswith(("81", "89")):
+                        continue
+                    if not code.startswith(("8", "92")):
                         continue
                 symbol = f"{code}.{prefix.upper()}"
                 stocks.append({
@@ -376,7 +441,7 @@ class TdxDataSource(DataSourceBase):
         # 检查是否有至少一个.day文件
         vipdoc_path = Path(self._tdx_root) / "vipdoc"
         has_data = False
-        for market_dir in ["sh", "sz"]:
+        for market_dir in ["sh", "sz", "bj"]:
             lday_path = vipdoc_path / market_dir / "lday"
             if lday_path.exists() and any(lday_path.glob("*.day")):
                 has_data = True
