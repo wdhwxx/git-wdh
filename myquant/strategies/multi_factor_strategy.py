@@ -57,6 +57,12 @@ import numpy as np
 import pandas as pd
 
 from myquant.core.logger import get_logger
+from myquant.indicators.factor_validator import (
+    FACTOR_ECONOMIC_LOGIC,
+    FactorProfile,
+    ic_weighted_weights,
+    validate_factor_logic,
+)
 from myquant.models.market_data import Bar
 from myquant.models.trade import OrderSide, OrderType, Position
 from myquant.strategies.base import (
@@ -85,12 +91,20 @@ class MultiFactorStrategy(StrategyBase):
       max_positions:      最大持仓数（默认5）
       equal_weight:       是否等权分配（默认True；False=按综合得分加权）
       factor_weights:     因子权重字典，覆盖默认权重（默认None=用默认权重）
+      ic_based_weights:   是否启用 IC 加权权重（默认False=沿用默认/手工权重，
+                          现有回测行为零变化；True 时须注入 factor_profiles，
+                          权重 = IC 档案加权 + 下限约束，来源可追溯）
+      factor_profiles:    IC 档案字典 {因子名: FactorProfile 或 dict}，
+                          供 ic_based_weights=True 时计算 IC 加权权重
+      ic_weight_min:      IC 加权单因子权重下限（默认0.05）
       zscore_mode:        标准化模式："cross_sectional"(默认) / "ts_rolling"
       ts_roll_window:     ts_rolling 模式滚动标准化窗口（默认60）
       min_factor_stocks:  额外因子有效样本下限，不足则丢弃该因子（默认2）
       min_score:          综合得分下限过滤（默认None=不过滤）
       extra_factors:      额外因子配置字典，预留价值/质量因子，例:
-                          {"quality_roe": {"weight":0.20, "higher_better":True}}
+                          {"quality_roe": {"weight":0.20, "higher_better":True,
+                           "economic_logic":"高ROE企业盈利质量更优（质量溢价）"}}
+                          缺省 economic_logic（经济逻辑说明）的额外因子禁止进组合
       factor_provider:    额外因子数据提供器，需实现 get_factor(symbol, name)
                           返回 Optional[float]；为None时额外因子全部跳过
 
@@ -141,6 +155,9 @@ class MultiFactorStrategy(StrategyBase):
         max_positions: int = 5,
         equal_weight: bool = True,
         factor_weights: Optional[Dict[str, float]] = None,
+        ic_based_weights: bool = False,
+        factor_profiles: Optional[Dict[str, Any]] = None,
+        ic_weight_min: float = 0.05,
         zscore_mode: str = "cross_sectional",
         ts_roll_window: int = 60,
         min_factor_stocks: int = 2,
@@ -164,6 +181,9 @@ class MultiFactorStrategy(StrategyBase):
             max_positions=max_positions,
             equal_weight=equal_weight,
             factor_weights=factor_weights,
+            ic_based_weights=ic_based_weights,
+            factor_profiles=factor_profiles,
+            ic_weight_min=ic_weight_min,
             zscore_mode=zscore_mode,
             ts_roll_window=ts_roll_window,
             min_factor_stocks=min_factor_stocks,
@@ -198,6 +218,8 @@ class MultiFactorStrategy(StrategyBase):
             raise ValueError(f"ts_rolling 模式滚动窗口({ts_roll_window})必须>=2")
         if min_factor_stocks < 1:
             raise ValueError(f"额外因子有效样本下限({min_factor_stocks})必须>=1")
+        if ic_based_weights and not (0.0 < ic_weight_min <= 1.0):
+            raise ValueError(f"IC 加权权重下限({ic_weight_min})必须在(0,1]")
 
         # ── 因子参数 ──
         self.momentum_period = momentum_period
@@ -233,16 +255,23 @@ class MultiFactorStrategy(StrategyBase):
         }
 
         # ── 额外因子配置（价值/质量，预留）──
+        # F-02：缺省 economic_logic（经济逻辑说明）的额外因子禁止进组合
         self.extra_factors: Dict[str, Dict[str, Any]] = dict(extra_factors) if extra_factors else {}
         self._extra_factor_configs: Dict[str, Dict[str, Any]] = {}
         for fname, cfg in self.extra_factors.items():
             if not isinstance(cfg, dict):
                 raise ValueError(f"额外因子 {fname} 配置必须是字典，含 weight/higher_better")
+            logic = str(cfg.get("economic_logic", "")).strip()
+            if not validate_factor_logic(fname, logic):
+                logger.warning(f"[多因子] 额外因子 {fname} 无经济逻辑说明，禁止进组合")
+                continue
             w = float(cfg.get("weight", 0.0))
             hb = bool(cfg.get("higher_better", True))
             if w <= 0:
                 raise ValueError(f"额外因子 {fname} 的 weight 必须>0")
-            self._extra_factor_configs[fname] = {"weight": w, "higher_better": hb}
+            self._extra_factor_configs[fname] = {
+                "weight": w, "higher_better": hb, "economic_logic": logic,
+            }
 
         # ── 额外因子数据提供器（可插拔）──
         self.factor_provider = factor_provider
@@ -250,6 +279,28 @@ class MultiFactorStrategy(StrategyBase):
             logger.warning(
                 "[多因子] factor_provider 未实现 get_factor(symbol, factor_name) 接口，"
                 "额外因子将无法取数"
+            )
+
+        # ── IC 加权配置（F-02，默认关闭=现有回测行为零变化）──
+        self.ic_based_weights = bool(ic_based_weights)
+        self.ic_weight_min = float(ic_weight_min)
+        self._factor_profiles: Dict[str, FactorProfile] = {}
+        if factor_profiles:
+            for fname, data in factor_profiles.items():
+                if isinstance(data, FactorProfile):
+                    self._factor_profiles[fname] = data
+                elif isinstance(data, dict):
+                    try:
+                        self._factor_profiles[fname] = FactorProfile.from_dict(data)
+                    except ValueError as e:
+                        logger.warning(f"[多因子] 忽略非法 IC 档案 {fname}: {e}")
+                else:
+                    logger.warning(
+                        f"[多因子] 忽略非法 IC 档案类型 {fname}: {type(data).__name__}"
+                    )
+        if self.ic_based_weights and not self._factor_profiles:
+            logger.warning(
+                "[多因子] ic_based_weights=True 但未注入 factor_profiles，回退默认权重"
             )
 
         # 因子序列最少bar数（取最大周期+1）
@@ -269,7 +320,8 @@ class MultiFactorStrategy(StrategyBase):
             f"多因子策略初始化: 动量{momentum_period}/反转{reversal_period}/"
             f"低波动{volatility_period}/量价{vol_price_period}, "
             f"top_n={top_n}, 调仓={rebalance_days}bar, "
-            f"权重={self._base_factor_weights}, 标准化={zscore_mode}, "
+            f"权重={self._base_factor_weights}, IC加权={self.ic_based_weights}, "
+            f"标准化={zscore_mode}, "
             f"等权={equal_weight}, 止损{stop_loss_pct:.0%}/止盈{take_profit_pct:.0%}, "
             f"额外因子={list(self._extra_factor_configs.keys()) if self._extra_factor_configs else '无'}"
         )
@@ -410,7 +462,8 @@ class MultiFactorStrategy(StrategyBase):
         )
 
         active_factors = active_base + active_extra
-        weights = self._normalize_weights(active_factors)
+        # F-02：权重来源可追溯——IC 加权（启用时）或默认/手工权重（关闭时）
+        weights = self._resolve_weights(active_factors)
         if not weights:
             logger.warning(
                 f"[多因子调仓#{self._rebalance_count}] 激活因子权重为空，跳过"
@@ -732,6 +785,48 @@ class MultiFactorStrategy(StrategyBase):
             return {}
         return {f: w / total for f, w in weights.items()}
 
+    def _resolve_weights(
+        self, active_factors: List[str],
+    ) -> Dict[str, float]:
+        """解析因子权重（F-02：IC 加权优先，回退默认/手工权重）
+
+        ic_based_weights=True 且有对应 IC 档案 → IC 加权（方向校正 +
+        下限约束 + 归一化），权重来源可追溯（档案样本区间/ICIR）；
+        否则回退 _normalize_weights（默认/手工权重，与原行为一致）。
+        """
+        if self.ic_based_weights:
+            ic_weights = self._ic_weighted_weights(active_factors)
+            if ic_weights:
+                logger.info(
+                    f"[多因子] 使用 IC 加权权重: {ic_weights}（档案数="
+                    f"{len(self._factor_profiles)}，下限={self.ic_weight_min}）"
+                )
+                return ic_weights
+            logger.warning(
+                "[多因子] IC 加权无可用档案/无正贡献，回退默认权重"
+            )
+        return self._normalize_weights(active_factors)
+
+    def _ic_weighted_weights(
+        self, active_factors: List[str],
+    ) -> Dict[str, float]:
+        """按 IC 档案计算权重（方向校正 + 下限约束 + 归一化）。
+
+        仅对 active_factors 中已注入档案的因子计算；方向取策略方向
+        （FACTOR_DIRECTION / 额外因子 higher_better），负向贡献因子权重为 0。
+        """
+        profiles: Dict[str, FactorProfile] = {
+            f: self._factor_profiles[f] for f in active_factors
+            if f in self._factor_profiles
+        }
+        if not profiles:
+            return {}
+        directions: Dict[str, int] = {
+            f: self._factor_direction(f) for f in profiles
+        }
+        return ic_weighted_weights(
+            profiles, min_weight=self.ic_weight_min, directions=directions)
+
     def _alloc_weights(
         self, new_pool: List[str], composite: Dict[str, float],
     ) -> Dict[str, float]:
@@ -895,6 +990,13 @@ class MultiFactorStrategy(StrategyBase):
             "base_factor_weights": dict(self._base_factor_weights),
             "extra_factor_configs": dict(self._extra_factor_configs),
             "has_factor_provider": self.factor_provider is not None,
+            "ic_based_weights": self.ic_based_weights,
+            "ic_weight_min": self.ic_weight_min,
+            "weight_source": (
+                "ic_profile" if self.ic_based_weights and self._factor_profiles
+                else "manual"
+            ),
+            "factor_profile_names": sorted(self._factor_profiles.keys()),
             "current_pool": self.current_pool,
             "composite_scores": dict(self._composite_scores),
             "factor_snapshot": {

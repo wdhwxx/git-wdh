@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>因子与机器学习层优化实施报告</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2316324F'/%3E%3Cpath d='M7 22 L14 12 L19 17 L25 8' stroke='%23E8B04B' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='25' cy='8' r='2.6' fill='%23E8B04B'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --ink:#16324F;
+    --blue:#1F6FB2;
+    --blue-soft:#EAF2F9;
+    --amber:#B97D1F;
+    --amber-soft:#FBF3E2;
+    --red:#B4483F;
+    --red-soft:#FBEDEB;
+    --green:#3E8E63;
+    --green-soft:#EAF5EE;
+    --gray:#5E6A78;
+    --line:#E3E8EE;
+    --bg:#F6F8FB;
+    --text:#232C36;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html{scroll-behavior:smooth;}
+  body{
+    font-family:"Microsoft YaHei","PingFang SC","Noto Sans SC","Segoe UI",sans-serif;
+    color:var(--text);
+    background:var(--bg);
+    line-height:1.75;
+    font-size:15px;
+  }
+  .wrap{max-width:1080px;margin:0 auto;padding:0 28px;}
+
+  /* ===== Hero ===== */
+  header.hero{
+    background:linear-gradient(135deg,#0F2740 0%,#16324F 55%,#1F4E76 100%);
+    color:#F2F6FA;
+    padding:56px 0 44px;
+    border-bottom:4px solid var(--amber);
+  }
+  .hero .meta{
+    display:flex;flex-wrap:wrap;gap:10px 22px;
+    font-size:12.5px;color:#B9C9D9;letter-spacing:.04em;margin-bottom:26px;
+  }
+  .hero h1{
+    font-size:34px;font-weight:800;letter-spacing:.01em;line-height:1.3;margin-bottom:14px;
+  }
+  .hero .sub{font-size:16px;color:#C9D7E5;max-width:760px;margin-bottom:30px;}
+  .kpis{
+    display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:rgba(255,255,255,.14);
+    border:1px solid rgba(255,255,255,.16);border-radius:10px;overflow:hidden;
+  }
+  .kpi{background:rgba(15,39,64,.55);padding:14px 18px;}
+  .kpi b{display:block;font-size:24px;font-weight:800;color:#F5C86B;line-height:1.25;}
+  .kpi span{font-size:12px;color:#AFC1D3;}
+  .hero .flag{margin-top:20px;font-size:13px;color:#E7EEF5;}
+  .hero .flag b{color:#F5C86B;}
+  .flag-line{display:block;}
+
+  /* ===== 章节 ===== */
+  section.block{padding:44px 0 8px;}
+  .sec-head{display:flex;align-items:baseline;gap:14px;margin-bottom:22px;}
+  .sec-no{
+    font-size:13px;font-weight:700;color:var(--blue);letter-spacing:.1em;
+    border:1px solid var(--blue);border-radius:6px;padding:2px 10px;flex:none;
+  }
+  h2{font-size:23px;font-weight:800;color:var(--ink);}
+  .lead{color:var(--gray);font-size:14.5px;max-width:860px;margin-bottom:26px;}
+  h3{font-size:17px;font-weight:700;color:var(--ink);margin:26px 0 12px;}
+  h4{font-size:15px;font-weight:700;color:var(--ink);margin:18px 0 8px;}
+  p{margin-bottom:10px;}
+
+  /* ===== 表格 ===== */
+  .tbl-scroll{overflow-x:auto;margin:14px 0 22px;border:1px solid var(--line);border-radius:10px;background:#fff;}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;table-layout:fixed;min-width:760px;}
+  th{
+    background:var(--ink);color:#EAF1F7;text-align:left;font-weight:600;
+    padding:10px 12px;font-size:13px;line-height:1.5;
+  }
+  td{padding:9px 12px;border-top:1px solid var(--line);vertical-align:top;line-height:1.55;}
+  tr:nth-child(even) td{background:#FAFBFD;}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;}
+
+  /* ===== 等级徽章 ===== */
+  .badge{display:inline-block;font-size:12px;font-weight:700;border-radius:5px;padding:1px 9px;white-space:nowrap;}
+  .b-high{background:var(--red-soft);color:var(--red);border:1px solid #E8B8B3;}
+  .b-mid{background:var(--amber-soft);color:var(--amber);border:1px solid #E6CDA0;}
+  .b-low{background:var(--green-soft);color:var(--green);border:1px solid #BFDCCB;}
+  .b-ink{background:var(--blue-soft);color:var(--blue);border:1px solid #C4D9EC;}
+
+  /* ===== 摘要卡片 ===== */
+  .summary-box{
+    background:#fff;border:1px solid var(--line);border-left:4px solid var(--ink);
+    border-radius:10px;padding:18px 22px;margin:16px 0 26px;
+  }
+  .summary-box .verdict{font-size:15px;font-weight:700;color:var(--ink);margin-bottom:6px;}
+  .root-causes{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:18px 0 26px;}
+  .cause{border:1px solid var(--line);border-radius:10px;padding:16px 18px;background:#fff;}
+  .cause .tag{font-size:12px;font-weight:700;color:var(--blue);margin-bottom:6px;letter-spacing:.06em;}
+  .cause h4{margin:0 0 6px;}
+  .cause p{font-size:13px;color:var(--gray);margin:0;}
+  .goal-steps{display:flex;flex-wrap:wrap;gap:0;margin:14px 0 10px;}
+  .goal-step{
+    flex:1;min-width:200px;border:1px solid var(--line);border-top:3px solid var(--blue);
+    background:#fff;border-radius:8px;padding:12px 16px;margin:0 6px 10px 0;
+  }
+  .goal-step b{display:block;color:var(--ink);font-size:14.5px;}
+  .goal-step span{font-size:12.5px;color:var(--gray);}
+  .arrow{color:var(--blue);font-weight:800;align-self:center;padding:0 2px;}
+
+  /* ===== 图表容器 ===== */
+  .chart-box{background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px 10px 8px;margin:14px 0 8px;}
+  .chart-title{font-size:13.5px;font-weight:700;color:var(--ink);padding:0 8px 4px;}
+  .chart-note{font-size:12px;color:var(--gray);padding:0 8px 6px;}
+  #riskHeatmap{width:100%;height:430px;min-width:860px;}
+  .chart-scroll{overflow-x:auto;}
+
+  /* ===== 优先级区块 ===== */
+  .prio{
+    border:1px solid var(--line);border-radius:10px;margin:16px 0 20px;background:#fff;overflow:hidden;
+  }
+  .prio-head{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--line);}
+  .prio-head .p-tag{font-size:13px;font-weight:800;border-radius:6px;padding:3px 12px;color:#fff;}
+  .p0 .p-tag{background:var(--red);}
+  .p1 .p-tag{background:var(--amber);}
+  .p2 .p-tag{background:var(--blue);}
+  .prio-head b{font-size:16px;color:var(--ink);}
+  .prio-head span{font-size:12.5px;color:var(--gray);}
+  .item{padding:14px 18px;border-top:1px solid var(--line);}
+  .item:first-of-type{border-top:none;}
+  .item .it-title{display:flex;align-items:center;gap:10px;margin-bottom:6px;}
+  .item .it-title .n{font-weight:800;color:var(--blue);font-size:13.5px;}
+  .item .it-title b{font-size:15px;color:var(--ink);}
+  .item .it-meta{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 6px;}
+  .chip{font-size:12px;color:var(--ink);background:var(--blue-soft);border-radius:5px;padding:1px 9px;}
+  .item ul{margin:6px 0 0 18px;}
+  .item li{font-size:13.5px;margin-bottom:4px;}
+  .acc{margin-top:8px;font-size:13px;background:#F3F7FB;border:1px dashed #B9CFE3;border-radius:7px;padding:8px 12px;}
+  .acc b{color:var(--blue);}
+
+  /* ===== 时间轴 ===== */
+  .timeline{margin:22px 0 8px;}
+  .tl-row{display:grid;grid-template-columns:112px 44px 1fr;margin-bottom:14px;}
+  .tl-time{font-size:13px;font-weight:700;color:var(--ink);text-align:right;padding-top:6px;font-variant-numeric:tabular-nums;}
+  .tl-axis{position:relative;display:flex;justify-content:center;}
+  .tl-axis::before{content:"";position:absolute;top:0;bottom:-14px;width:2px;background:var(--line);}
+  .tl-dot{position:relative;top:8px;width:14px;height:14px;border-radius:50%;background:var(--blue);border:3px solid #fff;box-shadow:0 0 0 2px var(--blue);z-index:1;}
+  .tl-dot.d-red{background:var(--red);box-shadow:0 0 0 2px var(--red);}
+  .tl-dot.d-green{background:var(--green);box-shadow:0 0 0 2px var(--green);}
+  .tl-card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin-left:2px;}
+  .tl-card h4{margin:0 0 4px;font-size:14.5px;}
+  .tl-card p{font-size:13px;color:var(--gray);margin:0;}
+  .tl-card .gate{font-size:12.5px;margin-top:8px;color:var(--ink);}
+  .tl-card .gate b{color:var(--blue);}
+
+  /* ===== 架构图 ===== */
+  .arch-box{background:#fff;border:1px solid var(--line);border-radius:10px;padding:18px;margin:14px 0 8px;overflow-x:auto;}
+  .arch-box svg{display:block;min-width:920px;width:100%;height:auto;}
+
+  /* ===== 页脚 ===== */
+  footer{margin-top:40px;padding:26px 0 34px;border-top:1px solid var(--line);}
+  .foot-note{font-size:12px;color:var(--gray);max-width:860px;}
+
+  @media (max-width:720px){
+    .wrap{padding:0 16px;}
+    header.hero{padding:36px 0 30px;}
+    .hero h1{font-size:25px;}
+    .hero .meta{font-size:13px;}
+    .kpi span{font-size:12.5px;}
+    .hero .flag{font-size:14px;line-height:1.9;}
+    .kpis{grid-template-columns:repeat(2,1fr);}
+    .root-causes{grid-template-columns:1fr;}
+    .goal-steps{flex-direction:column;}
+    .tl-row{grid-template-columns:74px 30px 1fr;}
+    .lead{font-size:15px;}
+    .cause p{font-size:14px;}
+    .item li{font-size:14px;}
+    .item .acc{font-size:13.5px;}
+    td{font-size:13px;}
+    h2{font-size:19px;}
+  }
+  @media print{
+    body{background:#fff;}
+    .chart-box,.tbl-scroll,.arch-box{box-shadow:none;}
+    header.hero{background:var(--ink) !important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    th,.b-high,.b-mid,.b-low,.prio-head .p-tag,.tl-dot{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  }
+</style>
+</head>
+<body>
+
+<!-- ===================== Hero ===================== -->
+<header class="hero">
+  <div class="wrap">
+    <div class="meta">
+      <span>myquant 量化交易系统</span>
+      <span>因子与机器学习层 · 优化实施报告</span>
+      <span>版本 v1.0</span>
+      <span>2026-10-02</span>
+      <span>编制：量化系统战略顾问</span>
+    </div>
+    <h1>因子与机器学习层优化实施报告</h1>
+    <div class="sub">基于 2026-10-02 风险审查结论，将「6 项高风险 + 12 项中风险 + 2 项低风险」转化为 15 项可执行整改任务，按 P0 / P1 / P2 三级优先级在三个阶段内落地，并给出仿真、模拟盘、实盘试运行三级验收门。</div>
+    <div class="kpis">
+      <div class="kpi"><b>20</b><span>项检查点（5 模块 × 4 项）</span></div>
+      <div class="kpi"><b>6 / 12 / 2</b><span>高风险 / 中风险 / 低风险</span></div>
+      <div class="kpi"><b>15</b><span>项整改任务（P0×6 / P1×6 / P2×3）</span></div>
+      <div class="kpi"><b>3 阶段</b><span>止血 → 加固 → 增强（约 6 周）</span></div>
+    </div>
+    <div class="flag">
+      <div class="flag-line">审查结论：<b>不满足实盘上线条件</b>（研究/仿真级）</div>
+      <div class="flag-line">优化目标：<b>因子可度量 · 回测可复现 · 模型可治理 · 线上可回退</b></div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<!-- ===================== 一、执行摘要 ===================== -->
+<section class="block" id="s1">
+  <div class="sec-head"><span class="sec-no">01</span><h2>执行摘要</h2></div>
+  <p class="lead">上一轮审查确认：技术因子层面防未来函数与工程护栏（缓存指纹、时序切分、版本链、checksum）明显优于一般个人量化项目，但系统在<b>因子有效性验证、因子处理标准化、训练-推理一致性、模型生命周期治理</b>四个支柱上存在结构性缺失，叠加回测幸存者偏差，整体判定为高风险、不可直接实盘。</p>
+
+  <div class="summary-box">
+    <div class="verdict">核心结论</div>
+    <p>本报告将 20 项风险收敛为三大根因，据此设计 15 项整改任务。P0 六项（特征一致性、因子有效性、去极值与中性化、幸存者偏差、失效监控、端到端测试）是上线阻塞项，须在阶段一内完成；完成全部 P0 后系统可达「仿真准入」水平，再经模拟盘 3 个月与 Gate 验收后方可评估实盘试运行。</p>
+  </div>
+
+  <h3>三大根因</h3>
+  <div class="root-causes">
+    <div class="cause">
+      <div class="tag">根因 R1</div>
+      <h4>因子有效性缺失</h4>
+      <p>无 IC/ICIR 校验、无去极值与中性化、无经济学约束，因子权重手工设定——信号质量不可知。</p>
+    </div>
+    <div class="cause">
+      <div class="tag">根因 R2</div>
+      <h4>回测可信度不足</h4>
+      <p>幸存者偏差、训练目标不含成本、面板切分缓冲失真——历史绩效不可信、不可复现。</p>
+    </div>
+    <div class="cause">
+      <div class="tag">根因 R3</div>
+      <h4>工程治理断链</h4>
+      <p>训练-推理特征一致性断裂、无模型失效监控、元数据缺数据快照与签名——线上不可靠、不可回退。</p>
+    </div>
+  </div>
+
+  <h3>优化目标（递进四层）</h3>
+  <div class="goal-steps">
+    <div class="goal-step"><b>因子可度量</b><span>IC / ICIR / 衰减 / 门槛全部可计算、可审计</span></div>
+    <div class="goal-step"><b>回测可复现</b><span>数据快照 + 版本链 + 成本口径统一</span></div>
+    <div class="goal-step"><b>模型可治理</b><span>全生命周期元数据 + 失效自动降级</span></div>
+    <div class="goal-step"><b>线上可回退</b><span>训练-推理一致 + 模型热回滚 + 因子开关</span></div>
+  </div>
+</section>
+
+<!-- ===================== 二、审查基线回顾 ===================== -->
+<section class="block" id="s2">
+  <div class="sec-head"><span class="sec-no">02</span><h2>审查基线回顾：风险矩阵</h2></div>
+  <p class="lead">以下 20 项检查点与风险等级直接取自 2026-10-02 审查结论（严重度：高 / 中 / 低）。色块矩阵与明细表互为对照，矩阵的「整改编号」对应第四章实施计划。</p>
+
+  <div class="chart-box">
+    <div class="chart-title">20 项检查点风险矩阵（行 = 模块，列 = 检查点，色深 = 风险等级）</div>
+    <div class="chart-note">数据口径：来自本报告引用的代码审查结论；3 = 高风险，2 = 中风险，1 = 低风险。</div>
+    <div class="chart-scroll"><div id="riskHeatmap"></div></div>
+  </div>
+
+  <div class="tbl-scroll">
+    <table>
+      <colgroup><col style="width:14%"><col style="width:12%"><col style="width:9%"><col style="width:46%"><col style="width:9%"><col style="width:10%"></colgroup>
+      <thead><tr><th>模块</th><th>检查点</th><th>等级</th><th>核心问题（审查结论摘要）</th><th>模块内风险</th><th>整改编号</th></tr></thead>
+      <tbody>
+        <tr><td rowspan="4">1. factor_engine 因子引擎</td><td>未来函数</td><td><span class="badge b-mid">中</span></td><td>技术因子 trailing 实现、防未来结构成立；但基本面因子未实现，financial_data 仅存报告期、无公告日，接入即产生未来函数</td><td rowspan="4">中高</td><td>F-15</td></tr>
+        <tr><td>因子缓存一致性</td><td><span class="badge b-mid">中</span></td><td>指纹联动机制良好；无指纹时永不失效（仅 7 天 TTL），L2 失效按「_」解析，因子名含下划线时残留过期结果</td><td>F-13</td></tr>
+        <tr><td>基础有效性校验</td><td><span class="badge b-high">高</span></td><td>全库无 IC/ICIR/因子显著性计算；权重手工设定，无经济逻辑门槛，纯数据挖掘因子可直接进池</td><td>F-02</td></tr>
+        <tr><td>可交易性校验</td><td><span class="badge b-mid">中</span></td><td>停牌/涨跌停由撮合层兜底；因子层与特征层无流动性过滤，信号可落在流动性枯竭标的</td><td>F-11</td></tr>
+        <tr><td rowspan="4">2. 选层/归残/波动率</td><td>去极值逻辑</td><td><span class="badge b-high">高</span></td><td>完全缺失；横截面 z-score 无 MAD/分位数截断，单只异常值整体拉偏截面</td><td rowspan="4">高</td><td>F-03</td></tr>
+        <tr><td>中性化处理</td><td><span class="badge b-high">高</span></td><td>无行业分层、无市值中性化、无回归归残与残差检验，行业/风格暴露残留</td><td>F-03</td></tr>
+        <tr><td>波动率计算</td><td><span class="badge b-mid">中</span></td><td>固定 20 日滚动 std，非自适应；极端行情（股灾/熔断）下估计滞后且残留高企</td><td>F-10</td></tr>
+        <tr><td>选层逻辑</td><td><span class="badge b-high">高</span></td><td>回测池仅含当前存续标的，无退市股历史数据，幸存者偏差致回测虚高</td><td>F-04</td></tr>
+        <tr><td rowspan="4">3. ml_training_pipeline</td><td>数据划分合规性</td><td><span class="badge b-mid">中</span></td><td>时序切分正确；面板数据下 horizon 缓冲按行数计，边界标签可能泄露</td><td rowspan="4">中高</td><td>F-08</td></tr>
+        <tr><td>过拟合防控</td><td><span class="badge b-mid">中</span></td><td>仅一次单切分，无滚动/扩展窗口 CV、无 walk-forward、无超参验证</td><td>F-12</td></tr>
+        <tr><td>特征工程隔离</td><td><span class="badge b-low">低</span></td><td>fit 仅作用于训练集，标准化基于训练集计算；合格，但缺独立测试集</td><td>F-06</td></tr>
+        <tr><td>交易成本纳入</td><td><span class="badge b-mid">中</span></td><td>训练目标为裸未来收益，不含滑点/佣金；成本仅在回测撮合层扣除</td><td>F-09</td></tr>
+        <tr><td rowspan="4">4. inference_service</td><td>特征一致性</td><td><span class="badge b-high">高</span></td><td>指标要求中文列，bars_to_df 产出英文列，指标计算被静默跳过；训练-推理特征集随输入语言漂移</td><td rowspan="4">中高</td><td>F-01</td></tr>
+        <tr><td>延迟达标性</td><td><span class="badge b-mid">中</span></td><td>线性模型推理毫秒级，但无延迟基准；增量推理默认全量重算 O(T)，随历史增长退化</td><td>F-14</td></tr>
+        <tr><td>异常兜底逻辑</td><td><span class="badge b-mid">中</span></td><td>NaN/缺列走显式抛错（fail-loud 安全），但无默认值、无「不可用即不交易」的服务级策略</td><td>F-01</td></tr>
+        <tr><td>缓存同步性</td><td><span class="badge b-low">低</span></td><td>无推理结果缓存，无过期预测风险；代价是每 bar 全量重算，无复用</td><td>F-14</td></tr>
+        <tr><td rowspan="4">5. model_registry</td><td>元数据完整性</td><td><span class="badge b-mid">中</span></td><td>缺训练数据快照引用、运行环境依赖、常驻绩效/回撤指标</td><td rowspan="4">中高</td><td>F-07</td></tr>
+        <tr><td>版本溯源能力</td><td><span class="badge b-mid">中</span></td><td>版本链 + 热回滚健全；无法追溯到训练数据快照与训练代码版本</td><td>F-07</td></tr>
+        <tr><td>安全校验</td><td><span class="badge b-mid">中</span></td><td>有 sha256 checksum 防意外损坏；metadata 未签名，篡改可连带重算，pickle 为执行面</td><td>F-07</td></tr>
+        <tr><td>失效预警</td><td><span class="badge b-high">高</span></td><td>无 IC 衰减监控、无失效自动标记/降级，失效模型会被持续调用</td><td>F-05</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ===================== 三、优化目标架构 ===================== -->
+<section class="block" id="s3">
+  <div class="sec-head"><span class="sec-no">03</span><h2>优化目标架构</h2></div>
+  <p class="lead">在不推翻现有分层的前提下，于既有链路上插入五个新组件，形成「计算 → 预处理 → 校验 → 训练 → 推理 → 治理」完整闭环。虚线框为新增/改造组件，实线框为既有组件。</p>
+
+  <div class="arch-box">
+    <svg viewBox="0 0 1020 560" xmlns="http://www.w3.org/2000/svg" font-family="Microsoft YaHei,PingFang SC,sans-serif">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#8AA2B8"/>
+        </marker>
+        <style>
+          .layer{fill:#F6F8FB;stroke:#D5DEE7;stroke-width:1.2;}
+          .box{fill:#FFFFFF;stroke:#B9C9D9;stroke-width:1.2;rx:7;}
+          .box-new{fill:#EAF2F9;stroke:#1F6FB2;stroke-width:1.6;stroke-dasharray:5 4;rx:7;}
+          .lbl{font-size:13px;font-weight:700;fill:#16324F;}
+          .lbl-s{font-size:11.5px;fill:#5E6A78;}
+          .new-tag{font-size:10px;fill:#1F6FB2;font-weight:700;}
+          .g-title{font-size:12px;font-weight:700;fill:#5E6A78;letter-spacing:.08em;}
+          .flow{stroke:#8AA2B8;stroke-width:1.4;fill:none;marker-end:url(#arr);}
+        </style>
+      </defs>
+
+      <!-- 数据层 -->
+      <rect class="layer" x="8" y="8" width="1004" height="96" rx="8"/>
+      <text class="g-title" x="20" y="26">数据层（既有）</text>
+      <rect class="box" x="20" y="36" width="170" height="58"/>
+      <text class="lbl" x="34" y="62">行情 / 财务数据</text>
+      <text class="lbl-s" x="34" y="80">akshare · CSV · 清洗流水线</text>
+      <rect class="box" x="220" y="36" width="190" height="58"/>
+      <text class="lbl" x="234" y="62">financial_data 表</text>
+      <text class="lbl-s" x="234" y="80">须新增公告日（ann_date）</text>
+      <rect class="box-new" x="440" y="36" width="230" height="58"/>
+      <text class="lbl" x="454" y="62">data_versioner（新增）</text>
+      <text class="lbl-s" x="454" y="80">数据指纹 · 快照引用 · 时点化</text>
+      <text class="new-tag" x="654" y="30">NEW</text>
+      <rect class="box" x="700" y="36" width="300" height="58"/>
+      <text class="lbl" x="714" y="62">因子缓存 L1/L2/L3</text>
+      <text class="lbl-s" x="714" y="80">指纹失效修复 · 命名解析修复</text>
+
+      <!-- 因子层 -->
+      <rect class="layer" x="8" y="116" width="1004" height="116" rx="8"/>
+      <text class="g-title" x="20" y="134">因子层（改造）</text>
+      <rect class="box" x="20" y="144" width="160" height="80"/>
+      <text class="lbl" x="34" y="170">factor_engine</text>
+      <text class="lbl-s" x="34" y="188">指标注册表 · 批量/流式</text>
+      <rect class="box-new" x="210" y="144" width="200" height="80"/>
+      <text class="lbl" x="224" y="170">factor_preprocessor（新增）</text>
+      <text class="lbl-s" x="224" y="188">去极值（MAD/分位）</text>
+      <text class="lbl-s" x="224" y="204">行业/市值中性化 · 残差检验</text>
+      <text class="new-tag" x="394" y="138">NEW</text>
+      <rect class="box-new" x="440" y="144" width="200" height="80"/>
+      <text class="lbl" x="454" y="170">factor_validator（新增）</text>
+      <text class="lbl-s" x="454" y="188">IC / ICIR / 衰减 / 门槛</text>
+      <text class="lbl-s" x="454" y="204">因子生命周期状态机</text>
+      <text class="new-tag" x="624" y="138">NEW</text>
+      <rect class="box" x="670" y="144" width="150" height="80"/>
+      <text class="lbl" x="684" y="170">可交易性过滤</text>
+      <text class="lbl-s" x="684" y="188">流动性 · 停牌 · 涨跌停</text>
+      <rect class="box" x="850" y="144" width="150" height="80"/>
+      <text class="lbl" x="864" y="170">波动率稳健化</text>
+      <text class="lbl-s" x="864" y="188">EWMA / 区制自适应</text>
+
+      <!-- 特征/训练层 -->
+      <rect class="layer" x="8" y="244" width="1004" height="112" rx="8"/>
+      <text class="g-title" x="20" y="262">特征与训练层（改造）</text>
+      <rect class="box" x="20" y="272" width="210" height="76"/>
+      <text class="lbl" x="34" y="298">FeatureEngine</text>
+      <text class="lbl-s" x="34" y="316">列名契约统一 · 失败显式化</text>
+      <rect class="box-new" x="260" y="272" width="200" height="76"/>
+      <text class="lbl" x="274" y="298">feature_contract（新增）</text>
+      <text class="lbl-s" x="274" y="316">训练/推理特征列一致性校验</text>
+      <text class="new-tag" x="444" y="266">NEW</text>
+      <rect class="box" x="490" y="272" width="240" height="76"/>
+      <text class="lbl" x="504" y="298">TrainingPipeline</text>
+      <text class="lbl-s" x="504" y="316">日历化切分缓冲 · 滚动CV</text>
+      <text class="lbl-s" x="504" y="332">成本化标签 · walk-forward</text>
+      <rect class="box" x="760" y="272" width="240" height="76"/>
+      <text class="lbl" x="774" y="298">评估与选型</text>
+      <text class="lbl-s" x="774" y="316">扣费后指标 · 新版本必须跑赢</text>
+      <text class="lbl-s" x="774" y="332">上线质量门槛</text>
+
+      <!-- 推理层 -->
+      <rect class="layer" x="8" y="368" width="1004" height="92" rx="8"/>
+      <text class="g-title" x="20" y="386">推理层（改造）</text>
+      <rect class="box" x="20" y="396" width="260" height="56"/>
+      <text class="lbl" x="34" y="422">InferenceService</text>
+      <text class="lbl-s" x="34" y="440">一致校验 · NaN 兜底策略 · 延迟基准</text>
+      <rect class="box-new" x="310" y="396" width="260" height="56"/>
+      <text class="lbl" x="324" y="422">增量特征加速 + 推理缓存（新增）</text>
+      <text class="lbl-s" x="324" y="440">O(1) 增量 · 结果缓存 TTL</text>
+      <text class="new-tag" x="554" y="390">NEW</text>
+      <rect class="box" x="600" y="396" width="400" height="56"/>
+      <text class="lbl" x="614" y="422">回退开关：模型热回滚 · 因子开关 · 不交易兜底</text>
+      <text class="lbl-s" x="614" y="440">异常输入 → 该 bar 不出信号，不崩溃</text>
+
+      <!-- 治理层 -->
+      <rect class="layer" x="8" y="472" width="1004" height="94" rx="8"/>
+      <text class="g-title" x="20" y="490">治理层（新增/改造）</text>
+      <rect class="box-new" x="20" y="500" width="260" height="58"/>
+      <text class="lbl" x="34" y="524">model_monitor（新增）</text>
+      <text class="lbl-s" x="34" y="543">IC 衰减 · 失效自动降级</text>
+      <rect class="box" x="300" y="500" width="260" height="58"/>
+      <text class="lbl" x="314" y="524">ModelRegistry 元数据补全</text>
+      <text class="lbl-s" x="314" y="543">快照 · 环境 · 签名</text>
+      <rect class="box" x="580" y="500" width="420" height="58"/>
+      <text class="lbl" x="594" y="531">ML 端到端测试 · 延迟基准 · 回测防幸存者偏差</text>
+
+      <!-- 流向箭头 -->
+      <path class="flow" d="M105,144 C105,130 105,120 105,104"/>
+      <path class="flow" d="M360,144 C360,132 360,122 360,104"/>
+      <path class="flow" d="M600,224 C600,238 600,248 600,262"/>
+      <path class="flow" d="M640,348 C640,362 640,372 640,386"/>
+      <path class="flow" d="M440,424 C440,438 440,450 440,472"/>
+    </svg>
+  </div>
+
+  <div class="tbl-scroll">
+    <table>
+      <colgroup><col style="width:20%"><col style="width:44%"><col style="width:20%"><col style="width:16%"></colgroup>
+      <thead><tr><th>新增/改造组件</th><th>职责</th><th>消除的风险点</th><th>对应整改</th></tr></thead>
+      <tbody>
+        <tr><td>data_versioner</td><td>为每次训练登记数据指纹/快照引用，财务表补公告日字段，实现「报告期 ≠ 可得时点」的时点化</td><td>未来函数（潜伏）、版本溯源</td><td>F-07 / F-15</td></tr>
+        <tr><td>factor_preprocessor</td><td>统一预处理管线：MAD/分位去极值 → 行业/市值中性化 → 回归归残与残差检验，输出带暴露审计的干净因子</td><td>去极值、中性化、波动率稳健化</td><td>F-03 / F-10</td></tr>
+        <tr><td>factor_validator</td><td>内置 IC/ICIR/因子衰减计算与有效性门槛，因子生命周期状态机（候选→活跃→观察→淘汰）</td><td>基础有效性校验缺失</td><td>F-02</td></tr>
+        <tr><td>feature_contract</td><td>统一列名契约与特征签名，训练/推理双向一致性校验，指标失败显式报错并记录</td><td>训练-推理特征一致性</td><td>F-01</td></tr>
+        <tr><td>model_monitor</td><td>滚动窗口监控 IC/绩效/漂移，触发阈值自动标记失效并降级到上一活跃版本，输出告警</td><td>失效预警缺失</td><td>F-05</td></tr>
+        <tr><td>推理缓存与增量特征</td><td>特征 O(1) 增量更新 + 推理结果短 TTL 缓存 + 延迟基准压测</td><td>延迟退化、无缓存复用</td><td>F-14</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ===================== 四、分模块实施计划 ===================== -->
+<section class="block" id="s4">
+  <div class="sec-head"><span class="sec-no">04</span><h2>分模块实施计划（15 项整改任务）</h2></div>
+  <p class="lead">按「上线阻塞 → 关键增强 → 进阶优化」三级划分。每项含目标、具体改动、涉及文件与验收标准；验收标准为硬性门禁，未通过不得进入下一阶段。</p>
+
+  <div class="prio p0">
+    <div class="prio-head"><span class="p-tag">P0</span><b>上线阻塞项（阶段一，第 1–2 周）</b><span>6 项 · 全部完成方可进入仿真验收</span></div>
+
+    <div class="item">
+      <div class="it-title"><span class="n">F-01</span><b>修复训练-推理特征一致性断裂</b><span class="badge b-high">高</span></div>
+      <div class="it-meta"><span class="chip">模块 4 · inference_service</span><span class="chip">模块 3 · features.py</span></div>
+      <ul>
+        <li>统一列名契约：指标层与特征层全部收敛到同一套 OHLC 列名（中文列），bars_to_df 产出对齐；删除 `_validate_data` 与 `bars_to_df` 的隐式语言差异</li>
+        <li>指标计算失败从「warning + 跳过」改为显式抛错/写入失败登记，禁止静默降级</li>
+        <li>新增 feature_contract：训练注册特征签名，推理前双向比对（列名、顺序、dtype），不一致即拒预测</li>
+      </ul>
+      <div class="acc"><b>验收：</b>train → register → inference 全链路端到端测试通过；特征列不一致在推理侧 100% 被拦截；无任何静默跳过的指标</div>
+    </div>
+
+    <div class="item">
+      <div class="it-title"><span class="n">F-02</span><b>因子有效性校验（IC/ICIR）</b><span class="badge b-high">高</span></div>
+      <div class="it-meta"><span class="chip">模块 1 · factor_engine</span><span class="chip">新增 factor_validator</span></div>
+      <ul>
+        <li>内置 IC/ICIR/因子收益率/衰减曲线计算器（RankIC + PearsonIC 双口径，按截面-时间双维度）</li>
+        <li>为每个因子登记：样本区间、IC 均值、ICIR、胜率、换手、经济逻辑说明；低于门槛自动进入「观察/淘汰」</li>
+        <li>multi_factor_strategy 权重改为「IC 加权 + 下限约束」，废除纯手工权重</li>
+      </ul>
+      <div class="acc"><b>验收：</b>全部活跃因子均有可审计的 IC 档案；权重来源可追溯到因子验证结果；无经济学说明的因子默认不进入组合</div>
+    </div>
+
+    <div class="item">
+      <div class="it-title"><span class="n">F-03</span><b>去极值 + 中性化 + 残差检验</b><span class="badge b-high">高</span></div>
+      <div class="it-meta"><span class="chip">模块 2 · 选层/归残/波动率</span><span class="chip">新增 factor_preprocessor</span></div>
+      <ul>
+        <li>去极值：按因子分布特性自适应——对称分布用 MAD 截断，偏态分布用分位数（如 1%/99%）截断；禁止对波动率类因子用固定 MAD 一刀切</li>
+        <li>中性化：行业（申万一级）哑变量 + 对数市值回归，取残差作为中性化因子</li>
+        <li>残差检验：行业/市值暴露显著性检验（t 值）、残差正态性与异方差检查，残留暴露超阈值即告警</li>
+      </ul>
+      <div class="acc"><b>验收：</b>预处理后因子对行业/市值回归 t 值全部不显著；异常值对截面均值影响 < 阈值；检验报告入档</div>
+    </div>
+
+    <div class="item">
+      <div class="it-title"><span class="n">F-04</span><b>消除幸存者偏差</b><span class="badge b-high">高</span></div>
+      <div class="it-meta"><span class="chip">模块 2 · 选层逻辑</span><span class="chip">数据层 · 清洗流水线</span></div>
+      <ul>
+        <li>回测引入已退市/长期停牌标的的历史行情（akshare 退市股接口或本地归档），股票池按「当时时点是否存续」逐期构建</li>
+        <li>无法完整补齐时，明确量化偏差：计算「存续池回测 vs 全样本池回测」的收益差，输出偏差折价系数并在报告中披露</li>
+      </ul>
+      <div class="acc"><b>验收：</b>回测报告声明口径（是否含退市股）；含偏差折价或完整退市数据，二者必居其一</div>
+    </div>
+
+    <div class="item">
+      <div class="it-title"><span class="n">F-05</span><b>模型失效监控与自动降级</b><span class="badge b-high">高</span></div>
+      <div class="it-meta"><span class="chip">模块 5 · model_registry</span><span class="chip">新增 model_monitor</span></div>
+      <ul>
+        <li>内置失效判定规则：滚动窗口 IC 连续 3 个月低于阈值（初始建议 |IC|&lt;0.02，按市场校准）或绩效回撤超限 → 自动标记失效</li>
+        <li>失效模型：从 active 自动切换至上一活跃版本，并触发告警；禁止失效版本被调用</li>
+        <li>新版本注册必须「跑赢当前 active」方可激活，否则保留为候选</li>
+      </ul>
+      <div class="acc"><b>验收：</b>模拟失效场景（注入低 IC 序列），失效检出并降级时间 &lt; 1 个监控周期；失效版本 0 次被调用</div>
+    </div>
+
+    <div class="item">
+      <div class="it-title"><span class="n">F-06</span><b>ML 端到端测试与延迟基准</b><span class="badge b-high">高</span></div>
+      <div class="it-meta"><span class="chip">模块 3/4 · 训练与推理</span><span class="chip">tests/</span></div>
+      <ul>
+        <li>补齐 tests/test_ml_*：特征一致性、时序切分、标签无泄露、registry 读写、推理兜底等单元与集成测试</li>
+        <li>新增推理延迟基准：分钟级策略 P99 &lt; 500ms（初始目标 P99 &lt; 200ms），随历史长度增长压测</li>
+        <li>训练数据注入「未来函数样本」应被守卫拒绝（负向测试）</li>
+      </ul>
+      <div class="acc"><b>验收：</b>pytest 全绿；延迟基准报告入档；未来函数负向用例通过</div>
+    </div>
+  </div>
+
+  <div class="prio p1">
+    <div class="prio-head"><span class="p-tag">P1</span><b>关键增强（阶段二，第 3–4 周）</b><span>6 项 · 提升回测可信度与治理完备度</span></div>
+
+    <div class="item">
+      <div class="it-title"><span class="n">F-07</span><b>模型元数据补全与签名</b><span class="badge b-mid">中</span></div>
+      <div class="it-meta"><span class="chip">模块 5 · model_registry</span></div>
+      <ul>
+        <li>元数据补全：训练数据快照 ID/指纹、python 与关键库版本、模型参数量、常驻绩效（IC/最大回撤）</li>
+        <li>签名校验：registry 元数据加入 HMAC/密钥签名，加载时校验签名后再校验 checksum，杜绝「连带重算」式篡改</li>
+      </ul>
+      <div class="acc"><b>验收：</b>每个 active 模型均可追溯到数据快照与环境版本；签名被篡改时加载被拒</div>
+    </div>
+
+    <div class="item">
+      <div class="it-title"><span class="n">F-08</span><b>面板数据切分缓冲日历化</b><span class="badge b-mid">中</span></div>
+      <div class="it-meta"><span class="chip">模块 3 · training_pipeline</span></div>
+      <ul>
+        <li>time_series_split 的缓冲从「行数」改为「日历时间」：验证集起点 = 训练集最后时间戳 + horizon 交易日数，适配多标的面板数据</li>
+        <li>增加跨标的同时间戳分组的确定性归属规则</li>
+      </ul>
+      <div class="acc"><b>验收：</b>面板数据下，训练集末尾样本的未来 horizon 收益 0% 落入验证集；负向测试覆盖</div>
+    </div>
+
+    <div class="item">
+      <div class="it-title"><span class="n">F-09</span><b>训练目标纳入交易成本</b><span class="badge b-mid">中</span></div>
+      <div class="it-meta"><span class="chip">模块 3 · 训练流水线</span></div>
+      <ul>
+        <li>标签生成支持成本化：forward return 减去双边滑点+佣金（复用 fee_table 参数）</li>
+        <li>模型选型阶段改用「扣费后指标」（净 IC、扣费后收益、换手惩罚）</li>
+      </ul>
+      <div class="acc"><b>验收：</b>训练标签口径与回测撮合层成本参数一致；选型报告同时给出毛/净指标</div>
+    </div>
+
+    <div class="item">
+      <div class="it-title"><span class="n">F-10</span><b>波动率稳健化与自适应</b><span class="badge b-mid">中</span></div>
+      <div class="it-meta"><span class="chip">模块 2 · 波动率处理</span></div>
+      <ul>
+        <li>低波因子改用 EWMA 波动率（λ 自适应）或 稳健估计，叠加极端行情区制标记（如滚动收益绝对分位超阈值）</li>
+        <li>波动率因子输出前经去极值管线，避免极端行情残留污染</li>
+      </ul>
+      <div class="acc"><b>验收：</b>股灾/熔断区间内波动率估计相对真实波动偏差收敛；与固定 20 日 std 对比报告入档</div>
+    </div>
+
+    <div class="item">
+      <div class="it-title"><span class="n">F-11</span><b>因子层可交易性过滤</b><span class="badge b-mid">中</span></div>
+      <div class="it-meta"><span class="chip">模块 1 · 因子引擎</span></div>
+      <ul>
+        <li>因子计算/选层前统一过滤：当日停牌、成交额低于阈值（初始建议：近 20 日均额 &gt; 500 万元，按样本校准）、一字涨跌停</li>
+        <li>过滤逻辑入因子管线而非仅靠撮合层兜底，与 ML 特征层共享同一过滤函数</li>
+      </ul>
+      <div class="acc"><b>验收：</b>选层结果中 0 个不可交易标的；过滤前后换手率与收益对比报告入档</div>
+    </div>
+
+    <div class="item">
+      <div class="it-title"><span class="n">F-12</span><b>滚动/扩展窗口交叉验证 + walk-forward</b><span class="badge b-mid">中</span></div>
+      <div class="it-meta"><span class="chip">模块 3 · 训练流水线</span></div>
+      <ul>
+        <li>接入扩展窗口（或滚动窗口）时序 CV，输出各折 IC 均值/波动，超参选择基于 CV 而非单次留出</li>
+        <li>加入 walk-forward 逐期重训评估，输出策略在时序上的稳定性曲线</li>
+      </ul>
+      <div class="acc"><b>验收：</b>CV 折间 IC 波动报告入档；任何超参调整都须附 CV 证据，禁止单次留出定参</div>
+    </div>
+  </div>
+
+  <div class="prio p2">
+    <div class="prio-head"><span class="p-tag">P2</span><b>进阶优化（阶段三，第 5–6 周+）</b><span>3 项 · 性能与因子库扩展</span></div>
+
+    <div class="item">
+      <div class="it-title"><span class="n">F-13</span><b>因子缓存失效解析修复</b><span class="badge b-mid">中</span></div>
+      <div class="it-meta"><span class="chip">模块 1 · factor_cache</span></div>
+      <ul>
+        <li>L2 文件名解析改为结构化解码（固定分隔或注册表查询），修复因子名含下划线（bollinger_bands 等）导致失效匹配失败的问题</li>
+        <li>无指纹输入禁止使用「nofp」永久占位，强制要求指纹或缩短 TTL 并显式告警</li>
+      </ul>
+      <div class="acc"><b>验收：</b>含下划线因子名在数据更新后 L2 缓存 100% 失效；nofp 场景日志告警可见</div>
+    </div>
+
+    <div class="item">
+      <div class="it-title"><span class="n">F-14</span><b>增量特征加速与推理缓存</b><span class="badge b-mid">中</span></div>
+      <div class="it-meta"><span class="chip">模块 4 · inference_service</span></div>
+      <ul>
+        <li>compute_incremental 接入指标流式 update 接口，实现 O(1)/O(窗口) 增量而非每 bar 全量重算</li>
+        <li>推理结果短 TTL 缓存（跨模块重复调用复用），并接入延迟基准回归</li>
+      </ul>
+      <div class="acc"><b>验收：</b>相同历史下增量 vs 全量特征结果一致（容差内）；单 bar 推理耗时不随历史长度增长</div>
+    </div>
+
+    <div class="item">
+      <div class="it-title"><span class="n">F-15</span><b>基本面因子接入（含公告日时点）</b><span class="badge b-mid">中</span></div>
+      <div class="it-meta"><span class="chip">模块 1 · 因子引擎</span><span class="chip">数据层 · financial_data</span></div>
+      <ul>
+        <li>financial_data 表新增公告日（ann_date）字段与数据回填，查询改为「公告日 ≤ 信号日」的严格时点过滤</li>
+        <li>基本面因子（PE/PB/ROE/市值）在时点化数据上实现并纳入 factor_validator 门槛</li>
+      </ul>
+      <div class="acc"><b>验收：</b>任何财报值在公告日之前不可见（负向测试）；因子 IC 档案齐全后方可入组合</div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 五、实施路线图与里程碑 ===================== -->
+<section class="block" id="s5">
+  <div class="sec-head"><span class="sec-no">05</span><h2>实施路线图与里程碑</h2></div>
+  <p class="lead">三个阶段串行推进，每阶段结束设验收门（Gate）；Gate 未通过不进入下一阶段。整体建议节奏约 6 周（可按人力并行压缩）。</p>
+
+  <div class="timeline">
+    <div class="tl-row">
+      <div class="tl-time">第 1–2 周</div>
+      <div class="tl-axis"><div class="tl-dot d-red"></div></div>
+      <div class="tl-card">
+        <h4>阶段一 · 止血（P0 六项）</h4>
+        <p>F-01 特征一致性修复、F-02 IC/ICIR 校验、F-03 去极值与中性化、F-04 幸存者偏差、F-05 失效监控、F-06 端到端测试。目标：系统从「不可信」变为「可信可测」。</p>
+        <div class="gate">Gate 1（仿真准入）：<b>P0 六项验收全通过 → 允许进入仿真回测与因子档案评审</b></div>
+      </div>
+    </div>
+    <div class="tl-row">
+      <div class="tl-time">第 3–4 周</div>
+      <div class="tl-axis"><div class="tl-dot"></div></div>
+      <div class="tl-card">
+        <h4>阶段二 · 加固（P1 六项）</h4>
+        <p>F-07 元数据与签名、F-08 面板切分日历化、F-09 成本化标签、F-10 波动率稳健化、F-11 可交易性过滤、F-12 滚动 CV 与 walk-forward。目标：回测结论可信、模型选择有据。</p>
+        <div class="gate">Gate 2（模拟盘准入）：<b>P1 六项验收通过 + 仿真期无重大缺陷 → 开启 3 个月模拟盘（paper）运行</b></div>
+      </div>
+    </div>
+    <div class="tl-row">
+      <div class="tl-time">第 5–6 周+</div>
+      <div class="tl-axis"><div class="tl-dot"></div></div>
+      <div class="tl-card">
+        <h4>阶段三 · 增强（P2 三项 + 观察）</h4>
+        <p>F-13 缓存失效解析、F-14 增量特征与推理缓存、F-15 基本面因子（公告日时点化）。模拟盘并行运行 3 个月，监控因子 IC 与模型绩效。</p>
+        <div class="gate">Gate 3（实盘试运行准入）：<b>模拟盘 ≥ 3 个月、扣费后绩效达标、失效监控 0 漏报 → 小额实盘试运行（建议 ≤ 10% 计划资金）</b></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 六、风险与回退策略 ===================== -->
+<section class="block" id="s6">
+  <div class="sec-head"><span class="sec-no">06</span><h2>实施风险与回退策略</h2></div>
+  <div class="tbl-scroll">
+    <table>
+      <colgroup><col style="width:22%"><col style="width:34%"><col style="width:44%"></colgroup>
+      <thead><tr><th>实施风险</th><th>说明</th><th>对策与回退</th></tr></thead>
+      <tbody>
+        <tr><td>整改引入新回归</td><td>列名契约、预处理管线改动可能破坏现有回测/特征结果</td><td>指纹与版本链保留旧版结果；新旧管线双跑对比，差异超容差即阻断；必要时回滚到上一版本代码</td></tr>
+        <tr><td>数据口径切换</td><td>退市股接入、公告日时点化会改变历史数据分布</td><td>data_versioner 登记每个数据集指纹；历史结论标注数据口径版本，不做跨口径直接比较</td></tr>
+        <tr><td>性能退化</td><td>去极值/中性化/IC 计算增加回测耗时</td><td>向量化 + 缓存；P2 增量特征兜底；延迟基准作为回归门禁</td></tr>
+        <tr><td>模型上线后失效</td><td>市场结构变化导致模型衰减</td><td>model_monitor 自动降级到上一活跃版本；因子开关独立启停；「预测不可用 → 不交易」为最终兜底</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ===================== 七、验收 KPI 清单 ===================== -->
+<section class="block" id="s7">
+  <div class="sec-head"><span class="sec-no">07</span><h2>验收 KPI 清单</h2></div>
+  <p class="lead">以下阈值为<b>初始建议值</b>，须在仿真期按实际市场与样本校准后固化为正式门槛；所有 KPI 均须可复现、可审计。</p>
+  <div class="tbl-scroll">
+    <table>
+      <colgroup><col style="width:18%"><col style="width:46%"><col style="width:20%"><col style="width:16%"></colgroup>
+      <thead><tr><th>类别</th><th>指标</th><th>初始建议阈值</th><th>数据来源</th></tr></thead>
+      <tbody>
+        <tr><td rowspan="3">因子有效性</td><td>活跃因子 IC 档案覆盖率</td><td>100%</td><td>factor_validator</td></tr>
+        <tr><td>入组合因子 IC 均值 / ICIR</td><td>|IC| ≥ 0.02 / ICIR ≥ 0.3（校准后）</td><td>factor_validator</td></tr>
+        <tr><td>无经济逻辑说明因子占比</td><td>0%</td><td>因子登记表</td></tr>
+        <tr><td rowspan="2">回测可信度</td><td>回测口径声明（是否含退市股/偏差折价）</td><td>必含</td><td>回测报告</td></tr>
+        <tr><td>面板切分标签泄露</td><td>0 例（负向测试）</td><td>tests/test_ml_*</td></tr>
+        <tr><td rowspan="3">训练-推理链路</td><td>端到端测试通过率</td><td>100%</td><td>pytest</td></tr>
+        <tr><td>特征不一致拦截率</td><td>100%（拒绝预测）</td><td>feature_contract</td></tr>
+        <tr><td>分钟级推理延迟 P99</td><td>&lt; 200ms（硬限 500ms）</td><td>延迟基准</td></tr>
+        <tr><td rowspan="3">模型治理</td><td>active 模型元数据完备率（快照/环境/签名）</td><td>100%</td><td>model_registry</td></tr>
+        <tr><td>失效模型检出并降级时间</td><td>&lt; 1 个监控周期</td><td>model_monitor</td></tr>
+        <tr><td>失效版本调用次数</td><td>0</td><td>调用日志</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ===================== 八、附录 ===================== -->
+<section class="block" id="s8">
+  <div class="sec-head"><span class="sec-no">08</span><h2>附录</h2></div>
+
+  <h3>附录 A：风险 → 整改任务映射表（20 项）</h3>
+  <div class="tbl-scroll">
+    <table>
+      <colgroup><col style="width:26%"><col style="width:12%"><col style="width:14%"><col style="width:10%"><col style="width:38%"></colgroup>
+      <thead><tr><th>检查点（20 项）</th><th>等级</th><th>整改编号</th><th>优先级</th><th>整改要点</th></tr></thead>
+      <tbody>
+        <tr><td>1·未来函数（潜伏）</td><td><span class="badge b-mid">中</span></td><td>F-15</td><td><span class="badge b-ink">P2</span></td><td>公告日时点化，报告期不可作可得时点</td></tr>
+        <tr><td>1·缓存一致性</td><td><span class="badge b-mid">中</span></td><td>F-13</td><td><span class="badge b-ink">P2</span></td><td>解析修复 + nofp 防护</td></tr>
+        <tr><td>1·IC/ICIR 校验</td><td><span class="badge b-high">高</span></td><td>F-02</td><td><span class="badge b-high">P0</span></td><td>因子档案 + 权重 IC 化</td></tr>
+        <tr><td>1·可交易性</td><td><span class="badge b-mid">中</span></td><td>F-11</td><td><span class="badge b-mid">P1</span></td><td>因子层流动性/停牌过滤</td></tr>
+        <tr><td>2·去极值</td><td><span class="badge b-high">高</span></td><td>F-03</td><td><span class="badge b-high">P0</span></td><td>分布自适应截断</td></tr>
+        <tr><td>2·中性化/归残</td><td><span class="badge b-high">高</span></td><td>F-03</td><td><span class="badge b-high">P0</span></td><td>行业/市值中性化 + 残差检验</td></tr>
+        <tr><td>2·波动率计算</td><td><span class="badge b-mid">中</span></td><td>F-10</td><td><span class="badge b-mid">P1</span></td><td>EWMA/区制自适应</td></tr>
+        <tr><td>2·选层偏差</td><td><span class="badge b-high">高</span></td><td>F-04</td><td><span class="badge b-high">P0</span></td><td>退市股纳入或偏差折价披露</td></tr>
+        <tr><td>3·数据划分</td><td><span class="badge b-mid">中</span></td><td>F-08</td><td><span class="badge b-mid">P1</span></td><td>缓冲日历化</td></tr>
+        <tr><td>3·过拟合防控</td><td><span class="badge b-mid">中</span></td><td>F-12</td><td><span class="badge b-mid">P1</span></td><td>滚动 CV + walk-forward</td></tr>
+        <tr><td>3·特征工程隔离</td><td><span class="badge b-low">低</span></td><td>F-06</td><td><span class="badge b-high">P0</span></td><td>补独立测试集与负向用例</td></tr>
+        <tr><td>3·交易成本</td><td><span class="badge b-mid">中</span></td><td>F-09</td><td><span class="badge b-mid">P1</span></td><td>成本化标签 + 扣费选型</td></tr>
+        <tr><td>4·特征一致性</td><td><span class="badge b-high">高</span></td><td>F-01</td><td><span class="badge b-high">P0</span></td><td>列名契约 + 失败显式化 + 签名校验</td></tr>
+        <tr><td>4·延迟达标</td><td><span class="badge b-mid">中</span></td><td>F-14</td><td><span class="badge b-ink">P2</span></td><td>增量特征 + 延迟基准</td></tr>
+        <tr><td>4·异常兜底</td><td><span class="badge b-mid">中</span></td><td>F-01</td><td><span class="badge b-high">P0</span></td><td>服务级「不可用即不交易」策略</td></tr>
+        <tr><td>4·缓存同步</td><td><span class="badge b-low">低</span></td><td>F-14</td><td><span class="badge b-ink">P2</span></td><td>推理缓存（可选）</td></tr>
+        <tr><td>5·元数据完整性</td><td><span class="badge b-mid">中</span></td><td>F-07</td><td><span class="badge b-mid">P1</span></td><td>数据快照/环境/常驻绩效</td></tr>
+        <tr><td>5·版本溯源</td><td><span class="badge b-mid">中</span></td><td>F-07</td><td><span class="badge b-mid">P1</span></td><td>数据快照追溯</td></tr>
+        <tr><td>5·安全校验</td><td><span class="badge b-mid">中</span></td><td>F-07</td><td><span class="badge b-mid">P1</span></td><td>元数据签名</td></tr>
+        <tr><td>5·失效预警</td><td><span class="badge b-high">高</span></td><td>F-05</td><td><span class="badge b-high">P0</span></td><td>IC 衰减监控 + 自动降级</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>附录 B：涉及文件清单</h3>
+  <div class="tbl-scroll">
+    <table>
+      <colgroup><col style="width:52%"><col style="width:48%"></colgroup>
+      <thead><tr><th>文件</th><th>整改动作</th></tr></thead>
+      <tbody>
+        <tr><td>myquant/indicators/__init__.py</td><td>列名契约统一、lookahead_check 升级为可配置强校验</td></tr>
+        <tr><td>myquant/indicators/factor_engine.py / factor_cache.py</td><td>F-13 缓存解析修复；可交易性过滤接入</td></tr>
+        <tr><td>myquant/ml/features.py</td><td>F-01 列名契约与失败显式化；F-08 日历化切分配套</td></tr>
+        <tr><td>myquant/ml/training_pipeline.py</td><td>F-08 缓冲日历化；F-09 成本化标签；F-12 滚动 CV</td></tr>
+        <tr><td>myquant/ml/inference_service.py</td><td>F-01 一致性校验；F-14 增量与兜底策略</td></tr>
+        <tr><td>myquant/ml/model_registry.py</td><td>F-05 失效监控接入；F-07 元数据与签名</td></tr>
+        <tr><td>myquant/strategies/multi_factor_strategy.py</td><td>F-02 IC 权重化；F-03 预处理管线接入；F-11 过滤</td></tr>
+        <tr><td>myquant/backtest/candidate_pool.py / 数据清洗流水线</td><td>F-04 退市股数据接入与时点池构建</td></tr>
+        <tr><td>myquant/database/schema.py / queries.py</td><td>F-15 财务表新增公告日字段与时点查询</td></tr>
+        <tr><td>新增：factor_validator / factor_preprocessor / feature_contract / model_monitor / data_versioner</td><td>对应 F-02 / F-03 / F-01 / F-05 / F-07</td></tr>
+        <tr><td>新增：tests/test_ml_*（端到端、负向、延迟基准）</td><td>F-06</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<footer>
+  <div class="foot-note">
+    <p><b>本报告依据：</b>2026-10-02《因子与机器学习层风险审查》（5 模块 × 4 检查点 = 20 项；6 高 / 12 中 / 2 低；整体评级：高风险，不满足实盘上线条件）。</p>
+    <p><b>说明：</b>所有 KPI 阈值为初始建议值，须在仿真期按实际市场与样本校准；整改验收标准为硬性门禁。报告 v1.0，2026-10-02。</p>
+  </div>
+</footer>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<script>
+(function () {
+  var box = document.getElementById('riskHeatmap');
+  if (!window.echarts) {
+    box.style.display = 'none';
+    var note = document.createElement('div');
+    note.style.cssText = 'padding:14px;color:#5E6A78;font-size:13px;';
+    note.textContent = '图表库未加载（可能处于离线环境），风险等级请查看下方明细表。';
+    box.parentNode.appendChild(note);
+    return;
+  }
+  var checks = ['未来函数','缓存一致性','IC/ICIR 校验','可交易性','去极值逻辑','中性化/归残','波动率计算','选层偏差','数据划分','过拟合防控','特征隔离','成本纳入','特征一致性','延迟达标','异常兜底','缓存同步','元数据完整性','版本溯源','安全校验','失效预警'];
+  var mods = ['factor_engine 因子引擎','选层/归残/波动率','ml_training_pipeline','inference_service','model_registry'];
+  var lv = ['', '低', '中', '高'];
+  var option = {
+    title: { text: '风险矩阵（高=红 / 中=琥珀 / 低=绿）', left: 'center', top: 4, textStyle: { fontSize: 14, color: '#16324F' } },
+    tooltip: {
+      trigger: 'item',
+      triggerOn: 'mousemove|click',
+      renderMode: 'richText',
+      confine: true,
+      formatter: function (p) {
+        if (!p || !p.value) { return ''; }
+        return mods[p.value[1]] + String.fromCharCode(10) + checks[p.value[0]] + String.fromCharCode(10) + '风险等级：' + lv[p.value[2]];
+      }
+    },
+    grid: { left: 152, right: 20, top: 46, bottom: 66, containLabel: true },
+    xAxis: { type: 'category', data: checks, axisLabel: { rotate: 40, interval: 0, fontSize: 11, color: '#5E6A78' }, axisLine: { lineStyle: { color: '#C9D4DF' } } },
+    yAxis: { type: 'category', data: mods, axisLabel: { fontSize: 11, color: '#16324F' }, axisLine: { lineStyle: { color: '#C9D4DF' } } },
+    visualMap: {
+      type: 'piecewise',
+      min: 1, max: 3,
+      orient: 'horizontal',
+      left: 'center',
+      bottom: 8,
+      itemWidth: 16, itemHeight: 12,
+      textStyle: { fontSize: 11, color: '#5E6A78' },
+      pieces: [
+        { value: 3, label: '高' },
+        { value: 2, label: '中' },
+        { value: 1, label: '低' }
+      ]
+    },
+    series: [{
+      type: 'heatmap',
+      data: [
+        [0,0,2],[1,0,2],[2,0,3],[3,0,2],
+        [4,1,3],[5,1,3],[6,1,2],[7,1,3],
+        [8,2,2],[9,2,2],[10,2,1],[11,2,2],
+        [12,3,3],[13,3,2],[14,3,2],[15,3,1],
+        [16,4,2],[17,4,2],[18,4,2],[19,4,3]
+      ],
+      label: {
+        show: true,
+        fontSize: 11,
+        color: '#FFFFFF',
+        fontWeight: 'bold',
+        formatter: function (p) {
+          var v = p.value[2];
+          if (v >= 3) { return '高'; }
+          if (v === 2) { return '中'; }
+          return '低';
+        }
+      }
+    }]
+  };
+  var chart = echarts.init(box);
+  chart.setOption(option);
+  window.addEventListener('resize', function () { chart.resize(); });
+})();
+</script>
+
+</body>
+</html>
+

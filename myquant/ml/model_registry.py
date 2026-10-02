@@ -143,6 +143,7 @@ class ModelVersion:
     source: str = "offline"
     feature_config_hash: Optional[str] = None
     feature_columns: List[str] = field(default_factory=list)
+    feature_signature: Optional[Dict[str, Any]] = None
     label_column: Optional[str] = None
     train_start_time: Optional[str] = None
     train_end_time: Optional[str] = None
@@ -163,6 +164,7 @@ class ModelVersion:
             "source": self.source,
             "feature_config_hash": self.feature_config_hash,
             "feature_columns": list(self.feature_columns),
+            "feature_signature": self.feature_signature,
             "label_column": self.label_column,
             "train_start_time": self.train_start_time,
             "train_end_time": self.train_end_time,
@@ -279,9 +281,17 @@ class ModelRegistry:
         feature_config 支持：
           - FeatureConfig 对象：用 FeatureEngine(config).feature_columns 预演
           - FeatureEngine 对象 / 带 feature_columns 属性的对象：直接读取
+
+        F-01 补充：metadata 显式 feature_columns 优先（训练实际列）；
+        feature_columns 缺失时回退到 feature_signature.columns（有序列名）。
         """
         if metadata and isinstance(metadata.get("feature_columns"), list) and metadata["feature_columns"]:
             return [str(c) for c in metadata["feature_columns"]]
+        # F-01：feature_signature 回退（训练实际列，与注册签名一致）
+        if metadata and isinstance(metadata.get("feature_signature"), dict):
+            sig_cols = metadata["feature_signature"].get("columns")
+            if isinstance(sig_cols, list) and sig_cols:
+                return [str(c) for c in sig_cols]
         if feature_config is not None:
             # 已带 feature_columns 属性（如 FeatureEngine）→ 直接读取
             if hasattr(feature_config, "feature_columns"):
@@ -411,6 +421,11 @@ class ModelRegistry:
 
             # 解析特征列与配置 hash
             feature_columns = self._resolve_feature_columns(metadata, feature_config)
+            feature_signature = metadata.get("feature_signature")
+            if feature_signature is not None and not isinstance(feature_signature, dict):
+                logger.warning("[ml] 非法 feature_signature 类型 %s，忽略持久化",
+                               type(feature_signature).__name__)
+                feature_signature = None
             fcfg_hash = None
             if feature_config is not None:
                 fcfg_hash = self._feature_config_hash(feature_config)
@@ -427,6 +442,7 @@ class ModelRegistry:
                 source=source,
                 feature_config_hash=fcfg_hash,
                 feature_columns=feature_columns,
+                feature_signature=feature_signature,
                 label_column=metadata.get("label_column"),
                 train_start_time=metadata.get("train_start_time"),
                 train_end_time=metadata.get("train_end_time"),

@@ -499,6 +499,8 @@ Pythonwdhmm/
 │   │   ├── test_akshare_source_list_filter.py # ✨【回写#85】akshare_source.get_stock_list B股映射加固单测（B股900/200/老三板4/非法段过滤、A股与北交所保留、空列表源不崩溃，2项）✅已完成
 │   │   ├── test_tdx_source_parse.py # ✨【回写#83】P1-⑤TDX .day解析单测（amount float32→float64语义锁定/volume股单位/畸形文件防空，2项）✅已完成
 │   │   ├── test_p2_anti_future_config.py # ✨【回写#83】P2纯修复单测（②财务兜底report_date=今天丢弃+留痕/③排除规则config化+缺省回退内置14条/⑤量比窗口跳0量日，5项）✅已完成
+│   │   ├── test_ml_feature_contract.py # ✨【回写#88】F-01 训练-推理特征一致性测试（中文列契约/price_col默认收盘价/英文列显式拒绝/指标不再静默跳过/指标失败fail-fast/签名构建往返与双向校验/训练→注册→推理端到端/签名不一致拦截，12项）✅已完成
+│   │   ├── test_factor_validator.py # ✨【回写#89】F-02 因子有效性校验测试（RankIC/PearsonIC双口径、ICIR/t/胜率手算对拍、衰减曲线1/5/10/20、5层分层收益+换手、active/observe/eliminated三态、IC加权方向校正+下限约束+归一化、经济逻辑缺省拒绝、FactorProfile序列化往返、策略IC加权集成+默认零变化+extra因子缺逻辑拒绝，22项）✅已完成
 
 │   │   ├── test_data_fingerprint.py  # ✨【V5·P0】数据指纹测试（哈希级差异检测：指纹生成/查询/缓存失效/旧数据替换，20项）
 
@@ -748,6 +750,8 @@ Pythonwdhmm/
 
     │   └── factor_engine.py          # ✨【V5·P0】向量化因子引擎：按indicator注册表批量并行计算因子（num_workers），内部复用factor_cache三级缓存，输出因子DataFrame（多因子合并列），防未来函数校验（因子仅用历史）
 
+    │   └── factor_validator.py       # ✨【回写#89】F-02 因子有效性校验器：RankIC（Spearman主口径）+PearsonIC（辅口径）截面IC时序、ICIR=mean/std、IC t统计量=ICIR·√N、IC胜率、衰减曲线（1/5/10/20持有期）、5层分层因子收益+换手、FactorProfile档案（样本区间/IC/ICIR/胜率/换手/经济逻辑/状态）、active→observe→eliminated门槛自动流转、ic_weighted_weights（方向校正+下限约束+归一化）、经济逻辑登记（内置4因子逻辑表，额外因子缺economic_logic禁止进组合）；防未来铁律：因子值t时刻trailing，未来收益仅作评估标签（compute_forward_returns显式标注禁止进信号路径）；纯函数无状态，统计复用math_utils
+
     │
 
     ├── strategies/                   # 策略模块，输入是经过清洗后的标准行情事件；回测/实盘共用同一注册器与实例
@@ -770,7 +774,7 @@ Pythonwdhmm/
 
     │   ├── mean_reversion_strategy.py# 均值回归策略（震荡市，布林+RSI，按当前bar截断防未来）
 
-    │   ├── multi_factor_strategy.py  # 多因子策略（动量+反转+低波动+量价，复合打分选top_n）
+    │   ├── multi_factor_strategy.py  # 多因子策略（动量+反转+低波动+量价，复合打分选top_n）；✨【回写#89】F-02 权重IC化：新增 ic_based_weights（默认False=现有行为零变化）/factor_profiles注入/ic_weight_min下限；开启后权重=IC档案加权（方向校正+下限约束+归一化，来源可追溯）；extra_factors缺economic_logic（经济逻辑说明）禁止进组合；get_multi_factor_status 增加 weight_source/ic_based_weights/factor_profile_names
 
     │   └── kunpeng_strategy.py       # ✨【2026-09-16】鲲鹏起爆点策略（量均线量比+均线粘合+MACD多维共振三重过滤；三接口 on_bar/generate_mixed_loop/generate_signals_vectorized；出场三档默认标准型+60日持有兜底；公式转译见 docs/鲲鹏壹号策略_回测实施报告.md 第4章）
 
@@ -1010,13 +1014,15 @@ Pythonwdhmm/
 
     │   ├── __init__.py
 
-    │   ├── features.py               # 特征工程因子计算标签生成
+    │   ├── feature_contract.py        # ✨【回写#88】特征签名契约（F-01）：FeatureSignature（有序列名+规范化dtype+config_hash）+ build_signature_from_frame + validate_feature_signature（列集合/顺序硬校验、dtype软校验，不一致抛 FeatureContractError）；训练注册时构建、推理前校验，根治训练-推理特征一致性断裂
 
-    │   ├── model_registry.py         # 模型注册版本管理
+    │   ├── features.py               # 特征工程因子计算标签生成；✨【回写#88】中文列契约（bars_to_df 输出 开盘价/最高价/最低价/收盘价/成交量/成交额，price_col 默认"收盘价"，英文列输入显式报错）+ 指标计算失败由 warning+continue 改为记日志后抛错（禁止静默降级）
 
-    │   ├── training_pipeline.py      # 训练流水线
+    │   ├── model_registry.py         # 模型注册版本管理；✨【回写#88】ModelVersion 新增 feature_signature 字段并持久化（metadata 优先解析，feature_columns 缺失时回退 signature.columns）
 
-    │   └── inference_service.py      # 批量/实时预测服务
+    │   ├── training_pipeline.py      # 训练流水线；✨【回写#88】注册 metadata 增加 feature_signature（由实际训练特征 DataFrame 构建，含 config_hash）
+
+    │   └── inference_service.py      # 批量/实时预测服务；✨【回写#88】_build_engine 校验升级为注册签名（列集合+顺序双向硬校验），无签名旧模型回退静态列比对
 
     │
 
@@ -1948,3 +1954,22 @@ Pythonwdhmm/
    d. **测试更新**：test_resolve_incremental_symbols.py test_JSON缺失回退默认规则 断言 10 条→14 条（689009.SH 现被 68 剔除，与 config 实际口径一致）+ docstring 同步
    e. **验证结果**：py_compile 五文件通过；相关单测（resolve/p2_anti_future/database/cli_incremental）87 passed / 1 skipped；全量 pytest tests/ = 1755 passed / 2 skipped（与 #86 基线一致，零破坏）
    f. **纪律遵守**：业务逻辑归 myquant；scripts 只做入口胶水；无临时文件入库；git 按 A2/B1/P3-2 分笔提交（本回写随最后一批）
+
+88. ✨【回写记录·2026-10-03·F-01 修复训练-推理特征一致性断裂】《因子与机器学习层优化实施报告》P0 整改第一项落地。问题链（审查确认）：指标层要求中文列（_validate_data：开盘价/最高价/最低价/收盘价），而 ML 特征层 bars_to_df 产出英文列（open/high/low/close）→ indicator.calculate 抛 ValueError 被 except 吞掉静默跳过 → 训练实际列 ≠ 静态 feature_columns → 推理 _build_engine 对齐校验抛 FeatureMisalignmentError；且中文列输入路径因 price_col="close" 校验同样走不通（两条输入路径均有缺陷）。事实来源：本次落地；代码级核验：py_compile 全 PASS + 新增 12 项单测 + 全量 pytest tests/ = 1767 passed / 2 skipped（基线 1755 + 12，零回归）：
+
+   a. **features.py 中文列契约**：bars_to_df 输出 开盘价/最高价/最低价/收盘价/成交量/成交额+trades（BAR_CN_COLUMN_MAP，与 processed 导出层 CN_COLUMN_MAP/指标层同口径）；FeatureConfig.price_col 默认 "close"→"收盘价"；_prepare_df 显式契约校验（英文列输入报清晰错误，不做静默兼容；缺中文契约列同样拦截）；compute_features 指标计算失败由 warning+continue 改为记日志后向上抛错（禁止静默降级——静默跳过曾导致训练实际列与静态列名漂移）；feature_columns 静态属性同步去静默化（指标实例化失败显式抛出）
+   b. **新增 myquant/ml/feature_contract.py（特征签名契约）**：FeatureSignature（有序列名+规范化dtype+config_hash，frozen dataclass，to_dict/from_dict 往返）+ build_signature_from_frame（从训练实际特征 DataFrame 构建）+ validate_feature_signature（列集合缺失/多余/顺序为硬校验抛 FeatureContractError，dtype 差异为软校验仅告警不阻断）
+   c. **training_pipeline.py 注册签名**：metadata 增加 feature_signature（由 dataset.X 实际列构建，config_hash 与 registry 同算法=FeatureConfig.to_json 的 sha256）
+   d. **model_registry.py 持久化签名**：ModelVersion 新增 feature_signature 字段（dataclass/to_dict 同步）；register_model 从 metadata 取并校验类型后落盘 metadata.json；_resolve_feature_columns metadata feature_columns 优先、feature_signature.columns 回退
+   e. **inference_service.py 签名校验**：_build_engine 优先用注册签名（FeatureSignature.from_dict + validate_feature_signature，列集合+顺序双向硬校验），不一致抛 FeatureMisalignmentError；无签名旧模型回退静态 feature_columns 集合比对（兼容存量模型）
+   f. **新增 tests/unit/test_ml_feature_contract.py（12 项）**：中文列输出/price_col默认收盘价/英文列显式拒绝/指标不再静默跳过（sma_20_*/atr_14_*/sma_gap 实际产出）/指标失败fail-fast/签名构建往返/校验一致与缺失多余顺序拦截/非法签名防御/训练→注册（签名持久化）→推理端到端一致/签名不一致拦截（_build_engine 抛 FeatureMisalignmentError）；端到端用 tmp_path 独立模型目录，不污染真实 datasets/models
+   g. **验证结果**：py_compile 6 文件（5 改+1 新）PASS；新测试 12 passed（0.24s）；全量 pytest tests/ = 1767 passed / 2 skipped（基线 1755 + 12，零回归）；既有 25 warnings 与改动无关（event_bus DeprecationWarning/run_实盘入口 finally-return 为存量）
+   h. **纪律遵守**：业务逻辑归 myquant/ml（新增文件已登记蓝图 ml/ 段 + tests/unit 段）；防未来函数无新增风险（特征仍 trailing，签名校验不触碰数据路径）；全量类型注解 + Google docstring + 防御式校验（feature_contract.py）；无临时文件入库；git 提交待 P0 全部完成后统一拍板
+
+89. ✨【回写记录·2026-10-03·F-02 IC/ICIR 因子有效性校验】《因子与机器学习层优化实施报告》P0 整改第二项落地。问题链（审查确认）：全库无 IC/ICIR/因子显著性计算；MultiFactorStrategy 权重为纯手工设定（动量0.35/反转0.25/低波0.20/量价0.20）运行时固化、不可追溯、无有效性依据、无淘汰机制；无经济学逻辑支撑的纯数据挖掘因子无从拦截。事实来源：本次落地；代码级核验：py_compile 全 PASS + 新增 22 项单测 + 全量 pytest tests/ = 1789 passed / 2 skipped（基线 1767 + 22，零回归）：
+   a. **新增 myquant/indicators/factor_validator.py（因子有效性校验器）**：RankIC（Spearman 主口径）+PearsonIC（辅口径）双维度截面 IC 时序（compute_ic_series，逐日截面相关，有效标的<2 跳过）；ICIR=mean/std（ddof=1）、IC t 统计量=ICIR·√N、IC 胜率；衰减曲线（1/5/10/20 持有期 IC 均值）；5 层分层因子收益（layer_returns）+调仓换手（factor_turnover，Jaccard 距离均值）；FactorProfile 档案（样本区间/IC/ICIR/胜率/换手/经济逻辑/状态，frozen dataclass，to_dict/from_dict 序列化往返）；decide_status 门槛自动流转 active→observe→eliminated（|IC|≥0.02 且 ICIR≥0.30 且 |t|≥2 且胜率≥0.55→active；ICIR≤0 或 |t|<1 或 |IC|<阈值半→eliminated；其余 observe）；ic_weighted_weights（权重∝max(direction·ICIR,0)，负贡献归零，下限约束 min_weight 迭代提升+按比例削减，归一化和为1）；经济逻辑登记 FACTOR_ECONOMIC_LOGIC（内置 momentum/reversal/low_vol/vol_price 逻辑表），validate_factor_logic 缺 economic_logic 默认禁止进组合
+   b. **防未来合规**：compute_forward_returns（t→t+horizon 未来收益）显式标注"评估标签，仅审计用途，禁止进实时信号路径"；因子值为 t 时刻 trailing（策略层保证）；IC 评估属事后审计与信号生成严格隔离
+   c. **multi_factor_strategy.py 权重 IC 化**：新增 ic_based_weights（默认 False=现有回测行为零变化）/factor_profiles 注入（FactorProfile 或 dict 均可，from_dict 解析+非法档案告警忽略）/ic_weight_min（默认 0.05，校验 (0,1]）；开启后 _resolve_weights 走 _ic_weighted_weights（方向校正取 FACTOR_DIRECTION/higher_better，下限约束+归一化，日志记录权重来源），无档案/无正贡献回退默认权重并告警；extra_factors 缺 economic_logic 拒绝进组合（warning+skip，默认路径零破坏）；get_multi_factor_status 增加 ic_based_weights/ic_weight_min/weight_source（"ic_profile"|"manual"）/factor_profile_names
+   d. **新增 tests/unit/test_factor_validator.py（22 项）**：build_panel 对齐/空面板；强相关因子→高 IC（RankIC）、随机因子→近 0 IC、RankIC 与 PearsonIC 双口径、非法 method 报错；ICIR/t/胜率与手算 pandas 对拍（|Δ|<1e-3）；衰减曲线 1/5/10/20；5 层分层收益+换手（0~1）；min_periods 防护（20 日面板不产出档案）；decide_status 三态（active/observe/eliminated 边界）；IC 加权（归一化+下限+高下限收敛不崩+负贡献归零+方向校正负 ICIR 转正+空输入）；经济逻辑（内置通过/显式提供通过/缺省拒绝）；FactorProfile 序列化往返；策略集成（ic_based_weights=True 权重 IC 化且 reversal 方向校正后有权重/无档案回退默认/默认 False 零变化/extra 因子缺逻辑拒绝进组合）
+   e. **验证结果**：py_compile 3 文件（2 新+1 改）PASS；新测试 22 passed（2.2s）；全量 pytest tests/ = 1789 passed / 2 skipped（基线 1767 + 22，零回归）；warnings 24 为存量（event_bus DeprecationWarning 与改动无关）
+   f. **纪律遵守**：业务逻辑归 myquant/indicators/factor_validator.py + myquant/strategies/multi_factor_strategy.py（新增文件已登记蓝图 indicators/ 段 + tests/unit 段，strategies/ multi_factor 注释已同步）；防未来函数铁律 11 显式标注（评估标签与信号路径隔离）；全量类型注解 + Google docstring + 防御式校验；factor_engine.py 未改（纯调度/缓存引擎职责不含有效性判断，IC 校验独立于 validator 层）；无临时文件入库；git 提交待 P0 全部完成后统一拍板

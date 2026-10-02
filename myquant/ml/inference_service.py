@@ -212,14 +212,36 @@ class InferenceService:
         """
         构建推理特征引擎，并校验特征列与训练绑定一致（核心防偏移）
 
+        F-01 整改：优先使用注册 feature_signature（有序列名 + 顺序双向校验），
+        无签名旧模型回退到静态 feature_columns 比对（兼容存量模型）。
+
         Raises
         ------
-        FeatureMisalignmentError : 推理特征列与训练 feature_columns 不一致
+        FeatureMisalignmentError : 推理特征列与训练不一致
         """
         cfg = feature_config if feature_config is not None else self.feature_config
         engine = FeatureEngine(cfg)
         train_cols = list(meta.feature_columns or [])
-        if train_cols:
+        if meta.feature_signature is not None:
+            # F-01：签名校验（列集合 + 顺序硬校验，dtype 软校验）
+            from myquant.ml.feature_contract import (
+                FeatureSignature,
+                FeatureContractError,
+                validate_feature_signature,
+            )
+            try:
+                signature = FeatureSignature.from_dict(meta.feature_signature)
+            except FeatureContractError as e:
+                raise FeatureMisalignmentError(
+                    f"模型 {meta.tag} 注册签名损坏: {e}")
+            infer_cols = list(engine.feature_columns)
+            try:
+                validate_feature_signature(signature, infer_cols)
+            except FeatureContractError as e:
+                raise FeatureMisalignmentError(
+                    f"推理特征列与训练签名不一致（模型 {meta.tag}）: {e}")
+        elif train_cols:
+            # 兼容无签名旧模型：静态列名集合比对
             infer_cols = list(engine.feature_columns)
             missing = sorted(set(train_cols) - set(infer_cols))
             extra = sorted(set(infer_cols) - set(train_cols))

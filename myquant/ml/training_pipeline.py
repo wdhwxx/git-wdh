@@ -46,6 +46,7 @@ training_pipeline.py - 训练流水线（内置模型 + 时间序列切分 + 评
 
 from __future__ import annotations
 
+import hashlib
 import time
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -54,6 +55,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from myquant.core.logger import get_logger
+from myquant.ml.feature_contract import build_signature_from_frame
 from myquant.ml.features import FeatureConfig, FeatureDataset, FeatureEngine
 from myquant.ml.model_registry import ModelRegistry
 
@@ -660,13 +662,22 @@ class TrainingPipeline:
         train_start = _ts_to_str(float(min(train_ts)))
         train_end = _ts_to_str(float(max(train_ts)))
 
-        # 7. 注册闭环（绑定特征 + 截止时间 + 指标 + 超参 + source）
+        # 7. 注册闭环（绑定特征 + 截止时间 + 指标 + 超参 + 特征签名 + source）
+        # F-01：注册 feature_signature（有序列名 + dtype），
+        # 推理侧据此做训练-推理特征一致性硬校验。
+        config_hash = (
+            hashlib.sha256(eff_config.to_json().encode("utf-8")).hexdigest()
+            if hasattr(eff_config, "to_json") else None
+        )
+        feature_signature = build_signature_from_frame(
+            dataset.X, config_hash=config_hash)
         metadata = {
             "metrics": metrics,
             "hyperparameters": (
                 model_obj.get_params() if hasattr(model_obj, "get_params") else {}),
             "label_column": dataset.label_column,
             "feature_columns": dataset.feature_columns,
+            "feature_signature": feature_signature.to_dict(),
             "train_start_time": train_start,
             "train_end_time": train_end,
             "parent_version": parent_version,

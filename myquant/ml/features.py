@@ -68,6 +68,25 @@ except ImportError:  # pragma: no cover
 #  默认特征配置
 # ═══════════════════════════════════════════════
 
+# 中文列契约（F-01 整改，2026-10-03）
+# 与 myquant/indicators（_validate_data 要求 开盘价/最高价/最低价/收盘价）、
+# scripts/数据导出_DB到processed.py 的 CN_COLUMN_MAP 同口径；
+# ML 特征层统一使用中文列契约，禁止混用英文列（open/high/low/close）。
+BAR_CN_COLUMN_MAP: Dict[str, str] = {
+    "open": "开盘价",
+    "high": "最高价",
+    "low": "最低价",
+    "close": "收盘价",
+    "volume": "成交量",
+    "amount": "成交额",
+}
+# 指标层 _validate_data 要求的最小列集（防御式校验用）
+CN_REQUIRED_COLUMNS: List[str] = ["开盘价", "最高价", "最低价", "收盘价"]
+# bars_to_df 输出列顺序（timestamp 为时间列，与 processed 契约一致）
+BAR_CN_COLUMNS: List[str] = (
+    ["timestamp"] + list(BAR_CN_COLUMN_MAP.values()) + ["trades"]
+)
+
 # 技术指标默认配置（复用 myquant.indicators，prefix 为列名前缀）
 # 输出列命名规则：{prefix}_{指标输出列}，例如 sma_20 → sma_20_sma
 DEFAULT_INDICATOR_CONFIGS: List[Dict[str, Any]] = [
@@ -122,7 +141,7 @@ class FeatureConfig:
     """
     horizon: int = 5
     label_type: str = "return"
-    price_col: str = "close"
+    price_col: str = "收盘价"
     return_windows: List[int] = field(default_factory=lambda: [1, 5, 10, 20])
     rolling_windows: List[int] = field(default_factory=lambda: [5, 20, 60])
     momentum_windows: List[int] = field(default_factory=lambda: [5, 20])
@@ -227,10 +246,12 @@ class FeatureDataset:
 
 def bars_to_df(bars: List[Any]) -> pd.DataFrame:
     """
-    将 Bar 列表转换为标准 DataFrame
+    将 Bar 列表转换为标准 DataFrame（中文列契约）
 
     输入必须是 processed 清洗后数据（Bar 对象列表），禁止 raw 原始数据。
-    输出列：timestamp/open/high/low/close/volume/amount/trades。
+    输出列：timestamp/开盘价/最高价/最低价/收盘价/成交量/成交额/trades
+    （F-01 整改：列名与指标层、processed 导出层统一为中文契约，
+    杜绝指标计算因列名不匹配被静默跳过）。
 
     Parameters
     ----------
@@ -239,24 +260,23 @@ def bars_to_df(bars: List[Any]) -> pd.DataFrame:
 
     Returns
     -------
-    pd.DataFrame : 标准化行情 DataFrame（按 timestamp 升序）
+    pd.DataFrame : 标准化行情 DataFrame（按 timestamp 升序，中文列契约）
     """
     if not bars:
-        return pd.DataFrame(columns=["timestamp", "open", "high", "low",
-                                     "close", "volume", "amount", "trades"])
+        return pd.DataFrame(columns=BAR_CN_COLUMNS)
     rows = []
     for b in bars:
         rows.append({
             "timestamp": float(getattr(b, "timestamp", 0.0)),
-            "open": float(getattr(b, "open", 0.0)),
-            "high": float(getattr(b, "high", 0.0)),
-            "low": float(getattr(b, "low", 0.0)),
-            "close": float(getattr(b, "close", 0.0)),
-            "volume": float(getattr(b, "volume", 0.0)),
-            "amount": float(getattr(b, "amount", 0.0)),
+            "开盘价": float(getattr(b, "open", 0.0)),
+            "最高价": float(getattr(b, "high", 0.0)),
+            "最低价": float(getattr(b, "low", 0.0)),
+            "收盘价": float(getattr(b, "close", 0.0)),
+            "成交量": float(getattr(b, "volume", 0.0)),
+            "成交额": float(getattr(b, "amount", 0.0)),
             "trades": int(getattr(b, "trades", 0) or 0),
         })
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(rows, columns=BAR_CN_COLUMNS)
     df = df.sort_values("timestamp").reset_index(drop=True)
     return df
 
@@ -288,7 +308,7 @@ class FeatureEngine:
     # ─────────────────────────────────────────────
 
     def _prepare_df(self, data: Any) -> pd.DataFrame:
-        """标准化输入：Bar 列表或 DataFrame → 按时间升序的 DataFrame"""
+        """标准化输入：Bar 列表或 DataFrame → 按时间升序的 DataFrame（中文列契约）"""
         if isinstance(data, pd.DataFrame):
             df = data.copy()
         elif BAR_AVAILABLE and isinstance(data, (list, tuple)) and data and isinstance(data[0], Bar):
@@ -299,8 +319,21 @@ class FeatureEngine:
             raise TypeError(f"不支持的数据类型: {type(data)}")
         if df.empty:
             return df
+        # 契约校验（F-01：统一中文列契约，杜绝英文列导致指标静默跳过/特征漂移）
         if self.config.price_col not in df.columns:
-            raise ValueError(f"输入数据缺少价格列: {self.config.price_col}")
+            raise ValueError(
+                f"输入数据缺少价格列: {self.config.price_col!r}。"
+                f"ML 特征层统一使用中文列契约（收盘价等，与 processed 导出层/"
+                f"指标层一致），当前列: {list(df.columns)}。"
+                f"请勿混用英文列（open/high/low/close）。"
+            )
+        missing_cn = [c for c in CN_REQUIRED_COLUMNS if c not in df.columns]
+        if missing_cn:
+            raise ValueError(
+                f"输入数据缺少中文契约列: {missing_cn}（当前列: {list(df.columns)}）。"
+                f"ML 特征层与指标层统一要求中文列契约，请使用 processed 数据"
+                f"或 bars_to_df 输出。"
+            )
         # 按时间升序（防未来：确保特征按时间因果顺序计算）
         if "timestamp" in df.columns:
             df = df.sort_values("timestamp")
@@ -341,6 +374,8 @@ class FeatureEngine:
             feat[f"momentum_{n}"] = close / close.shift(n) - 1
 
         # 2. 技术指标（复用 myquant.indicators）
+        # F-01 整改：指标计算失败显式抛错（记录日志后向上抛出），
+        # 禁止静默跳过——静默跳过曾导致训练实际特征列与静态列名漂移。
         if INDICATORS_AVAILABLE:
             for cfg in self.config.indicator_configs:
                 name = cfg["name"]
@@ -349,9 +384,10 @@ class FeatureEngine:
                 try:
                     indicator = get_indicator(name, **params)
                     res = indicator.calculate(df)
-                except Exception as e:  # pragma: no cover
-                    logger.warning(f"[ml] 指标 {name} 计算失败，跳过: {e}")
-                    continue
+                except Exception as e:
+                    logger.error(
+                        "[ml] 指标 %s 计算失败（F-01 起禁止静默跳过）: %s", name, e)
+                    raise
                 out_cols = [c for c in res.columns if c not in df.columns]
                 for oc in out_cols:
                     feat[f"{prefix}_{oc}"] = res[oc]
@@ -401,12 +437,11 @@ class FeatureEngine:
             for cfg in self.config.indicator_configs:
                 name = cfg["name"]
                 prefix = cfg.get("prefix", name)
-                try:
-                    indicator = get_indicator(name, **cfg.get("params", {}))
-                    for oc in getattr(indicator, "output_columns", []) or []:
-                        cols.append(f"{prefix}_{oc}")
-                except Exception:  # pragma: no cover
-                    continue
+                # F-01：指标实例化失败显式抛出（与 compute_features 一致，
+                # 禁止静默降级导致静态列名与实际列漂移）
+                indicator = get_indicator(name, **cfg.get("params", {}))
+                for oc in getattr(indicator, "output_columns", []) or []:
+                    cols.append(f"{prefix}_{oc}")
         for name in self.config.derived_features:
             if name in ("sma_gap", "atr_norm", "bb_width"):
                 cols.append(name)
