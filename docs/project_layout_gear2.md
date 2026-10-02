@@ -366,7 +366,7 @@ Pythonwdhmm/
 
 ├── scripts/                          # 一次性运维脚本，只做入口，业务逻辑全部调用myquant内部模块，禁止业务写在脚本内
 
-│   ├── 数据下载.py                    # 数据下载入口：调用fetcher拉取原始数据写入raw；可触发完整清洗流水线输出processed；V5新增--no-cache-sync跳过缓存同步
+│   ├── 数据下载.py                    # 数据下载入口：调用fetcher拉取原始数据写入raw；可触发完整清洗流水线输出processed；V5新增--no-cache-sync跳过缓存同步；✨【回写#86】download_daily 池过滤（resolve_incremental_symbols 14条规则）+ processed 写回改 save_cleaned_incremental_parquet（根治 CLI 原始直写弄脏数据）；save_market_data_parquet 已废弃标注
 
 │   ├── 数据清洗.py                    # ✨【新增】独立清洗流水线入口脚本：对raw指定范围/标的执行清洗，输出processed，生成质量报告；V5新增--no-cache-sync跳过缓存同步
 
@@ -491,6 +491,7 @@ Pythonwdhmm/
 │   │   ├── test_cleanup_service.py # ✨【回写#77】清理pattern保护语义测试（生产报告/真实备份不匹配、测试前缀匹配，4项）✅已完成
 │   │   ├── test_financial_sync_service.py # ✨【回写#74】财务CSV增量同步测试（定位缺失标的14条排除/新旧合并去重17列头/无新记录None/增量流程/自动入库monkeypatch/无可拉取跳过，6项）✅已完成
 │   │   ├── test_data_download_finance_sync.py # ✨【回写#75】GUI财务CSV增量更新选项测试（选项注册完整/执行顺序在入库前/_entry_finance_sync调用服务返回同构汇总，3项）✅已完成
+│   │   ├── test_data_download_cli_incremental.py # ✨【回写#86】CLI数据下载增量链路测试（池过滤只进清洗池/写回走清洗链路复用records无二次拉取/写回失败逐只计数不阻断，3项）✅已完成
 │   │   ├── test_adjust_raw_semantics.py # ✨【回写#81】P0-1 复权口径语义测试（默认值raw/入库标签透传/查询隔离raw与hfq不混读/网源raw→不复权映射，4项）✅已完成
 │   │   ├── test_live_data_feed_adjust.py # ✨【回写#83】S2 live复权口径单测（新浪轮询改拉raw adjust=""/除权跳变因子豁免/非除权仍告警/qfq现算÷最新因子/raw透传，stub akshare+因子服务零网络，6项）✅已完成
 │   │   ├── test_derived_metrics_report_deadline.py # ✨【回写#83】P1-①发布日推算单测（4报告期映射/异常保留/披露窗口pe=None防未来/披露后用当期年化，4项）✅已完成
@@ -1930,3 +1931,12 @@ Pythonwdhmm/
    b. **新增 tests/unit/test_akshare_source_list_filter.py**（2 项）：B 股（900/200）/老三板（4）/非法段（999）过滤、A 股与北交所保留；空列表源返回空列表不崩溃
    c. **验证结果**：py_compile akshare_source.py + 新测试 PASS；新测试 2 passed；全量 pytest tests/ = 1750 passed / 2 skipped（含 B 股剔除后数据基线）
    d. **纪律遵守**：业务逻辑归 akshare_source.py（蓝图已登记，目录树注释已同步 #85）；新增测试文件已登记目录树；无临时文件入库
+
+86. ✨【回写记录·2026-10-02·CLI 数据下载增量链路修复（A1：池过滤 + 清洗写回）】根治 CLI 下载直写 processed 弄脏数据（创业板/科创板/北交所 6 列残留 2,376 只已清理，见交接摘要_processed清理）。事实来源：本次落地；代码级核验：py_compile + 单测 + 全量 pytest。
+   a. **scripts/数据下载.py download_daily**：候选池 = fetcher.get_stock_list()（#85 已剔 B 股）→ resolve_incremental_symbols（优先读 config/data_clean_run.json 14 条规则 + ST + 长期停牌，实时推导防焊死）→ 只下载主板清洗池内标的；processed 写回改 manager.save_cleaned_incremental_parquet（与 GUI 增量更新同一清洗链路：14列中文扁平 + 派生量 + 合并写回 + 复用已拉 records 消除二次网络请求）；删除 save_market_data_parquet 原始直写调用，函数标注废弃保留（防误用）
+   b. **计数语义**：写回失败"异常"与"未产出文件"互斥计数（各一次不双计；GUI run_daily 同款逻辑存在异常双计，另披露待后续统一）
+   c. **缓存同步**：main()/交互菜单的 run_cache_sync 改全量扫描（result 不再含 symbols 字段；CacheSyncManager.sync_all 比对 processed 指纹，等价超集更稳健）
+   d. **新增 tests/unit/test_data_download_cli_incremental.py（3 项）**：池过滤只进清洗池（池外创业/科创/北交不下载）/ 写回走清洗链路复用 records 且无二次拉取（get_market_data 计数=0）/ 写回失败逐只计数不阻断批次
+   e. **验证结果**：py_compile 数据下载.py + 新测试通过；新测试 + 回归 test_data_download_pool_scope.py = 14 passed；全量 pytest tests/ = 1752 passed / 2 skipped（与基线一致，零破坏）
+   f. **披露**：CLI --daily 与 --incremental 均增量定位（update_symbols_batch force_full=False，与历史行为一致；全量重下走 GUI 通达信全量/全量清洗）；GUI 池源=backtest_kunpeng.yaml 三因子池、CLI 池源=全市场候选过滤，二者经同一 14 条规则（清洗池 ⊇ 回测池，回测池标的必在清洗池内，覆盖不遗漏）
+   g. **纪律遵守**：业务逻辑复用 myquant（resolve_incremental_symbols / save_cleaned_incremental_parquet），scripts 只做胶水；新增测试文件已登记目录树；无临时文件入库

@@ -138,6 +138,9 @@ def save_market_data_parquet(result, project_root: Path) -> Path:
     保存行情数据到 processed 目录（Parquet格式）
 
     薄入口：调用 myquant.utils.file_utils.write_parquet
+    ⚠️ 已废弃（见回写记录#86）：日线 processed 写回改由
+    manager.save_cleaned_incremental_parquet 统一清洗写回（14列中文+派生量+合并），
+    本函数为原始直写（6列英文、覆盖式），自 #86 起不再被调用。
     """
     from myquant.utils.file_utils import ensure_dir, write_parquet
 
@@ -176,30 +179,54 @@ def download_daily(
     progress_callback=None,
 ) -> dict:
     """
-    下载日线数据（全量或增量）
+    下载日线数据（池内增量定位 + 清洗合并写回 processed）
 
-    薄入口：调用 DataManager.update_symbols_batch
-    【防未来函数】DataManager内部严格截止到当前日期
+    薄入口：调用 DataManager.update_symbols_batch 入库 raw 事实版本；
+    processed 走 manager.save_cleaned_incremental_parquet（与 GUI 增量更新同一
+    清洗链路：14列中文扁平 + 派生量 + 合并写回），根治 CLI 原始直写弄脏数据。
+    【防未来函数】DataManager 内部严格截止到当前日期。
+
+    Args:
+        fetcher: 数据获取器。
+        manager: 数据管理器（写 quant.db + sync_status + processed）。
+        project_root: 项目根目录。
+        incremental: 兼容保留参数；现统一池内增量定位（force_full=False，
+            由 DataManager 依据 sync_status 自动补缺失区间；全量重下走 GUI
+            通达信全量/全量清洗）。
+        progress_callback: 进度回调 callback(current, total, result)。
 
     Returns:
-        包含 total/success/failed/skipped/parquet_saved/symbols 的字典，
-        其中 symbols 为成功下载并保存Parquet的标的代码列表。
+        包含 total/success/failed/skipped/parquet_saved/save_failed/
+        save_failed_symbols/pool_original/pool_after 的字典。
     """
+    from myquant.data_access.full_clean_service import resolve_incremental_symbols
     from myquant.utils.file_utils import ensure_dir
 
     ensure_dir(project_root / "datasets" / "raw" / "daily")
     ensure_dir(project_root / "datasets" / "processed")
 
-    # 获取股票列表
+    # 候选池 = 下载源全市场列表（#85 已剔 B 股），经清洗规则实时过滤
+    # （14条排除规则 + ST 名单 + 长期停牌，与全量清洗同一规则源；防焊死：
+    # 每次运行实时推导，绝不读取历史标的数字）——只下载主板清洗池内标的，
+    # 杜绝创业板/科创板/北交所等池外标的进入 processed
     stocks = fetcher.get_stock_list()
-    symbols = [s["symbol"] for s in stocks if s.get("symbol")]
-
-    if not symbols:
+    candidates = [s["symbol"] for s in stocks if s.get("symbol")]
+    if not candidates:
         return {"total": 0, "success": 0, "failed": 0, "skipped": 0,
-                "parquet_saved": 0, "symbols": []}
+                "parquet_saved": 0, "save_failed": 0, "save_failed_symbols": [],
+                "pool_original": 0, "pool_after": 0}
+    symbols, scope_stats = resolve_incremental_symbols(candidates, project_root)
+    if not symbols:
+        print("  候选池全被清洗规则排除，空转")
+        return {"total": 0, "success": 0, "failed": 0, "skipped": 0,
+                "parquet_saved": 0, "save_failed": 0, "save_failed_symbols": [],
+                "pool_original": len(candidates), "pool_after": 0}
+    print(f"  下载范围(实时推导): 候选{len(candidates)} → 规则内{len(symbols)}"
+          f"(排除规则{len(scope_stats.get('excluded_prefix', []))}/"
+          f"ST{len(scope_stats.get('excluded_st', []))}/"
+          f"停牌{len(scope_stats.get('excluded_suspended', []))})")
 
-    # 批量更新（DataManager内部处理增量逻辑、数据库保存、同步状态）
-    # P0-1 口径：下载只存 raw 事实版本，复权在消费端现算（S1/S2），严禁 hfq 标签入库
+    # 批量更新（入库 raw 事实版本，复权在消费端现算 S1/S2，严禁 hfq 标签入库）
     results = manager.update_symbols_batch(
         symbols,
         period="daily",
@@ -207,21 +234,36 @@ def download_daily(
         progress_callback=progress_callback,
     )
 
-    # 同时保存到Parquet（回测/实盘读取用）
+    # processed 写回：清洗管线 + 派生量 + 中文列扁平（对齐 GUI 增量更新链路，
+    # 根治增量直写弄脏数据）；单标的"拉取→清洗→写 processed"原子隔离，
+    # 失败只影响该标的，不影响批次
     success_count = 0
-    saved_symbols: List[str] = []
+    save_failed = 0
+    save_failed_symbols: List[str] = []
     for r in results:
         if r["status"] == "completed" and r.get("record_count", 0) > 0:
-            # 重新获取数据并保存Parquet（从缓存读取，快）
-            result = fetcher.get_market_data(
-                r["symbol"],
-                start_date=r.get("start_date"),
-                end_date=r.get("end_date"),
-            )
-            if result and result.count > 0:
-                save_market_data_parquet(result, project_root)
+            try:
+                processed_file = manager.save_cleaned_incremental_parquet(
+                    r["symbol"],
+                    start_date=r.get("start_date"),
+                    end_date=r.get("end_date"),
+                    # 复用 update_symbol 已拉记录，消除 save 阶段二次网络请求
+                    records=r.get("data"),
+                )
+            except Exception as e:
+                # 异常视为写回失败：单标的计数一次（与"未产出文件"互斥，不双计），不阻断批次
+                save_failed += 1
+                save_failed_symbols.append(r["symbol"])
+                print(f"    增量清洗写 processed 失败 [{r['symbol']}]: {type(e).__name__}: {e}")
+                continue
+            if processed_file:
                 success_count += 1
-                saved_symbols.append(r["symbol"])
+            else:
+                # 清洗写 processed 未产出文件（None）同样视为写入失败并告警，
+                # 避免"拉取成功但 processed 未更新"被静默吞掉
+                save_failed += 1
+                save_failed_symbols.append(r["symbol"])
+                print(f"    增量清洗写 processed 未产出文件 [{r['symbol']}]")
 
     summary = {
         "total": len(results),
@@ -229,7 +271,10 @@ def download_daily(
         "failed": sum(1 for r in results if r["status"] == "failed"),
         "skipped": sum(1 for r in results if r["status"] == "skipped"),
         "parquet_saved": success_count,
-        "symbols": saved_symbols,
+        "save_failed": save_failed,
+        "save_failed_symbols": save_failed_symbols,
+        "pool_original": len(candidates),
+        "pool_after": len(symbols),
     }
     return summary
 
@@ -488,16 +533,18 @@ def main() -> int:
             print("  [任务] 全量下载日线数据")
             result = download_daily(fetcher, manager, project_root, incremental=False,
                                     progress_callback=show_progress)
-            print(f"\n  完成：成功{result['success']} | 失败{result['failed']} | 跳过{result['skipped']}")
-            if not args.no_cache_sync and result.get("symbols"):
-                run_cache_sync(project_root, result["symbols"])
+            print(f"\n  完成：成功{result['success']} | 失败{result['failed']} | 跳过{result['skipped']}"
+                  f" | 清洗写回{result['parquet_saved']} | 写回失败{result['save_failed']}")
+            if not args.no_cache_sync:
+                run_cache_sync(project_root)
         if args.incremental:
             print("  [任务] 增量更新日线数据")
             result = download_daily(fetcher, manager, project_root, incremental=True,
                                     progress_callback=show_progress)
-            print(f"\n  完成：成功{result['success']} | 失败{result['failed']} | 跳过{result['skipped']}")
-            if not args.no_cache_sync and result.get("symbols"):
-                run_cache_sync(project_root, result["symbols"])
+            print(f"\n  完成：成功{result['success']} | 失败{result['failed']} | 跳过{result['skipped']}"
+                  f" | 清洗写回{result['parquet_saved']} | 写回失败{result['save_failed']}")
+            if not args.no_cache_sync:
+                run_cache_sync(project_root)
         if args.finance or args.all:
             print("  [任务] 下载财务数据")
             result = download_finance(fetcher, project_root)
@@ -539,16 +586,16 @@ def main() -> int:
             if confirm == "y":
                 result = download_daily(fetcher, manager, project_root, incremental=False,
                                         progress_callback=show_progress)
-                print(f"\n  完成：成功{result['success']} | 失败{result['failed']} | 跳过{result['skipped']}")
-                if result.get("symbols"):
-                    run_cache_sync(project_root, result["symbols"])
+                print(f"\n  完成：成功{result['success']} | 失败{result['failed']} | 跳过{result['skipped']}"
+                      f" | 清洗写回{result['parquet_saved']} | 写回失败{result['save_failed']}")
+                run_cache_sync(project_root)
         elif choice == "2":
             print("  [任务] 增量更新日线数据")
             result = download_daily(fetcher, manager, project_root, incremental=True,
                                     progress_callback=show_progress)
-            print(f"\n  完成：成功{result['success']} | 失败{result['failed']} | 跳过{result['skipped']}")
-            if result.get("symbols"):
-                run_cache_sync(project_root, result["symbols"])
+            print(f"\n  完成：成功{result['success']} | 失败{result['failed']} | 跳过{result['skipped']}"
+                  f" | 清洗写回{result['parquet_saved']} | 写回失败{result['save_failed']}")
+            run_cache_sync(project_root)
         elif choice == "3":
             print("  [任务] 下载财务数据")
             result = download_finance(fetcher, project_root)
@@ -557,9 +604,9 @@ def main() -> int:
             print("  [任务] 全部更新（日线增量 + 财务）")
             result1 = download_daily(fetcher, manager, project_root, incremental=True,
                                      progress_callback=show_progress)
-            print(f"\n  日线完成：成功{result1['success']} | 失败{result1['failed']}")
-            if result1.get("symbols"):
-                run_cache_sync(project_root, result1["symbols"])
+            print(f"\n  日线完成：成功{result1['success']} | 失败{result1['failed']}"
+                  f" | 清洗写回{result1['parquet_saved']} | 写回失败{result1['save_failed']}")
+            run_cache_sync(project_root)
             print("\n  开始下载财务数据...")
             result2 = download_finance(fetcher, project_root)
             print(f"\n  财务完成：成功{result2['success']} | 失败{result2['failed']} | 跳过{result2['skipped']} | 共{result2['records']}条")
