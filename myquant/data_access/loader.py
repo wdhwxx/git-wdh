@@ -21,7 +21,9 @@ V5回测性能优化 P0 第6项：预取/分块/流水线 + MemoryWatcher 内存
 
 依赖:
     - pandas, numpy, psutil（可选，MemoryWatcher 用）
-    - myquant.backtest.data_loader.HistoricalDataProvider
+    - myquant.data_access.provider.HistoricalDataProvider（2026-10-03 架构治理：
+      原从 backtest.data_loader import，形成 data_access <-> backtest 循环依赖，
+      现归位数据层同包 import）
     - myquant.utils.memory_watcher.MemoryWatcher, MemoryLevel
 """
 
@@ -40,7 +42,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 
-from myquant.backtest.data_loader import HistoricalDataProvider
+from myquant.data_access.provider import HistoricalDataProvider
 from myquant.utils.memory_watcher import (
     DEFAULT_CRITICAL_PCT,
     DEFAULT_WARNING_PCT,
