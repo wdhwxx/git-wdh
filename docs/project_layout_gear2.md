@@ -2387,3 +2387,15 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
   同帧哈希稳定，2 用例。
 
 【验证】py_compile PASS；新测试 2 passed；pytest 全量 2060 passed/2 skipped/0 failed（219s）。
+
+121. ✨【回写记录·2026-10-04·P1-05 processed读失败静默覆盖修复（P1批次第8项）】
+
+【P1-05｜存量 processed 读失败→按"无存量"整体覆盖（全史丢失）】
+- 根因：read_parquet 异常仅 warning，existing_df 保持 None → 控制流落到 else 分支，
+  用当次增量直接 write_parquet 覆盖原文件，绕过逐值存量校验。
+- 修复：manager.py 读失败置 processed_read_failed=True（logger.error）；
+  写盘前若该标志为真 → return None 拒绝写盘，原文件字节保持不变。
+- 测试：旧用例 test_存量损坏仍写入且列对齐（把bug写成断言）改写为
+  test_存量损坏拒绝写入保护全史——损坏文件返回 None 且字节不变。
+
+【验证】py_compile PASS；相关 25 passed；pytest 全量 2060 passed/2 skipped/0 failed（216s）。

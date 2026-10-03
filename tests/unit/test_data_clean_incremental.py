@@ -182,19 +182,17 @@ def test_无数据返回None(monkeypatch, tmp_path: Path) -> None:
     assert manager.save_cleaned_incremental_parquet(symbol, start_date="2026-09-19", end_date="2026-09-19") is None
 
 
-def test_存量损坏仍写入且列对齐(monkeypatch, tmp_path: Path) -> None:
-    """存量 parquet 损坏 → 不崩溃，仅写入清洗后的区间；且列对齐存量 schema。"""
+def test_存量损坏拒绝写入保护全史(monkeypatch, tmp_path: Path) -> None:
+    """P1-05：存量 parquet 损坏 → 拒绝写盘（返回 None），绝不覆盖原文件致全史丢失。"""
     symbol = "TST.SZ"
     manager, processed = _make_manager(monkeypatch, tmp_path, [_bar("20260919", 11, 11.5, 10.8, 11.2)])
     bad = processed / f"{symbol}.parquet"
     bad.write_bytes(b"\x00\x01not-a-valid-parquet")
+    before = bad.read_bytes()
 
     out = manager.save_cleaned_incremental_parquet(symbol, start_date="2026-09-19", end_date="2026-09-19")
-    assert out is not None
-    df = pd.read_parquet(Path(out))
-    assert len(df) == 1
-    assert int(df["日期"].iloc[0]) == 20260919
-    assert "收盘价" in df.columns
+    assert out is None, "存量读失败必须拒绝写入，不得按无存量新建覆盖全史"
+    assert bad.read_bytes() == before, "损坏的存量文件不得被覆盖"
 
 
 def test_传入records后不再重新拉取(monkeypatch, tmp_path: Path) -> None:

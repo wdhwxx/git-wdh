@@ -1181,13 +1181,19 @@ class DataManager:
         processed_dir = get_project_path("datasets", "processed")
         output_path = processed_dir / f"{symbol}.parquet"
         existing_df: Optional["pd.DataFrame"] = None
+        # P1-05修复：存量读失败必须拒绝写入，绝不退化为"无存量新建"覆盖全史
+        processed_read_failed = False
         if output_path.exists():
             try:
                 existing_df = pd.read_parquet(output_path)
                 # 归一化存量（兼容旧索引式/扁平 datetime64 → 整数「日期」列）
                 existing_df = _normalize_processed_df(existing_df)
-            except Exception:
-                logger.warning("存量 processed parquet 读取失败，跳过合并: %s", output_path)
+            except Exception as exc:
+                processed_read_failed = True
+                logger.error(
+                    "存量 processed parquet 读取失败，拒绝本次写入以防全史覆盖: %s, err=%s",
+                    output_path, exc,
+                )
 
         # M3修复：前收盘上下文优先读 quant.db（增量写入权威），processed 兜底，
         # 避免 processed 落后导致跳变检测基准错；仅用于清洗，不写入。
@@ -1345,6 +1351,13 @@ class DataManager:
             if not cleaned_df.empty:
                 cleaned_df = cleaned_df.reindex(columns=PROCESSED_COLUMN_TEMPLATE)
                 merged = cleaned_df
+
+        # P1-05：存量读失败 → 拒绝写盘，绝不覆盖原文件（防全史丢失）
+        if processed_read_failed:
+            logger.error(
+                "存量 processed 读失败，放弃写盘以保护全史: %s", output_path,
+            )
+            return None
 
         write_parquet(output_path, merged, index=False)
         return str(output_path)
