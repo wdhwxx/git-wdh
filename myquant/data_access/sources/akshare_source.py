@@ -937,8 +937,18 @@ class AkshareDataSource(DataSourceBase):
                 "debt_ratio": self._safe_float(fin_dict.get("资产负债率")),
                 "data_source": f"{self.name}_sina",
             }
-            if (end_date and result["report_date"]
-                    and result["report_date"] > end_date.replace("-", "")):
+            # P1-06修复：report_date 归一化为 YYYYMMDD 后再做防未来比较；
+            # 列名格式随 akshare 版本而异（可能带分隔符），不归一化会因字符串序恒假而静默放行。
+            raw_period = str(result["report_date"] or "").strip()
+            norm_period = raw_period.replace("-", "").replace("/", "")[:8]
+            if not (len(norm_period) == 8 and norm_period.isdigit()):
+                logger.warning(
+                    "新浪财务摘要 report_date 无法解析[%s]: %r，拒绝该期数据以防未来",
+                    symbol, raw_period,
+                )
+                return None
+            result["report_date"] = norm_period
+            if end_date and norm_period > end_date.replace("-", ""):
                 return None  # 防未来函数：报告期晚于截止日
             return result
         except Exception as e2:

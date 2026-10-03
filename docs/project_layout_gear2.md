@@ -2360,3 +2360,15 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
   断言 auto_grid upper=108/lower=92（走high-low ATR分支，旧错会得到102）。
 
 【验证】py_compile PASS；新测试 1 passed；pytest 全量 2055 passed/2 skipped/0 failed（220s）。
+
+119. ✨【回写记录·2026-10-04·P1-06 report_date归一化修复（P1批次第6项）】
+
+【P1-06｜新浪摘要通道 report_date 未归一化→防未来校验可能恒假】
+- 根因：report_date 取自 akshare stock_financial_abstract 列名，格式随版本而异
+  （可能带 '-'）；直接与 YYYYMMDD 的 end_date 比字符串序（'-'<'0'）恒假，防未来静默失效。
+- 修复：_try_sina_finance 末尾把 report_date 去分隔符归一为 8 位数字再比较；
+  无法解析（len!=8/非数字）→ logger.warning 拒绝该期，不静默放行。
+- 单测：test_p106_report_date_normalize 3 用例——
+  '2024-03-31'归一为20240331且未超期返回；'2024-09-30'超期None；非法列名'最新'拒绝。
+
+【验证】py_compile PASS；新测试 3 passed；pytest 全量 2058 passed/2 skipped/0 failed（217s）。
