@@ -12,7 +12,8 @@
   4. 生成全中文 HTML + CSV 入库报告
 
 【防未来函数】
-  - 财务因子仅取 ``report_date <= trade_date`` 的最新一期（向后映射，不引用未披露数据）
+  - 财务因子仅取「公告日 ann_date <= trade_date」的最新一期（F-15 修正：
+    旧版误用报告期 report_date，会在财报实际披露前引用未来数据）
   - 技术因子全部基于历史窗口 rolling/ewm，第 t 行仅使用 ``iloc[:t+1]`` 数据
 """
 
@@ -106,7 +107,7 @@ FACTOR_WRITE_COLUMNS: Tuple[str, ...] = (
 
 #: financial_data 表写入列（与 FinancialDataSchema.COLUMNS[1:] 对齐，排除自增 id）
 FIN_WRITE_COLUMNS: Tuple[str, ...] = (
-    "symbol", "market", "report_date", "report_type",
+    "symbol", "market", "report_date", "report_type", "ann_date",
     "pe", "pb", "ps", "total_mv", "circ_mv",
     "revenue", "net_profit", "net_profit_yoy", "revenue_yoy",
     "roe", "gross_margin", "debt_ratio", "eps", "bps",
@@ -270,6 +271,11 @@ class FinancialImportService:
         if not report_date:
             return None
 
+        # F-15：公告日（实际披露日）。CSV 若提供 ann_date 列则解析；
+        # 否则置 None，时点查询时回退 report_date（向后兼容存量数据）。
+        ann_date_raw = (raw.get("ann_date") or "").strip()
+        ann_date = self._normalize_report_date(ann_date_raw) if ann_date_raw else None
+
         def _f(key: str) -> Optional[float]:
             val = (raw.get(key) or "").strip()
             if val == "":
@@ -284,6 +290,7 @@ class FinancialImportService:
             "market": (raw.get("market") or "A股").strip() or "A股",
             "report_date": report_date,
             "report_type": (raw.get("report_type") or "").strip(),
+            "ann_date": ann_date,
             "pe": _f("pe"),
             "pb": _f("pb"),
             "ps": None,
@@ -498,7 +505,13 @@ class FinancialImportService:
         """
         为批次标的构建基本面因子行。
 
-        【防未来函数】每只标的取最新交易日，映射 report_date <= 该交易日的最新一期财务值。
+        【防未来函数 F-15 修正】每只标的对每个信号交易日 td，仅选取
+        「公告日 <= td」的最新一期财报。公告日取 ``ann_date``（实际披露日），
+        若该字段为 NULL（存量数据）则回退 ``report_date``。
+
+        时序语义：本行使用的数据截至 t 时刻——仅引用在 t 日开盘前已公开披露
+        的财报，杜绝用报告期（report_date，如 6/30）提前于披露日（如 8/28）
+        引用未来财报的未来函数。
         """
         rows: List[Dict[str, Any]] = []
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -509,29 +522,39 @@ class FinancialImportService:
                 continue
             if not fin:
                 continue
+            # 有效披露日 = ann_date 优先，缺失回退 report_date
+            def _eff_date(r: Dict[str, Any]) -> str:
+                return str(r.get("ann_date") or r.get("report_date") or "")
+
+            # 按有效披露日降序排序（覆盖原 report_date 排序假设）
+            fin_sorted = sorted(fin, key=_eff_date, reverse=True)
             # 取该标的最近行情交易日
             trade_dates = self._latest_trade_dates(sym, lookback_days)
             if not trade_dates:
                 continue
-            # fin 已按 report_date DESC 排序，第一条即为最新
-            latest = fin[0]
-            for field_key, factor_name in FUNDAMENTAL_FACTOR_MAP.items():
-                val = latest.get(field_key)
-                if val is None:
+            for td in trade_dates:
+                # 在 td 时点可见的最新一期：有效披露日 <= td
+                visible = next(
+                    (r for r in fin_sorted if _eff_date(r) and _eff_date(r) <= str(td)),
+                    None,
+                )
+                if visible is None:
                     continue
-                for td in trade_dates:
-                    if str(latest["report_date"]) <= str(td):
-                        rows.append({
-                            "symbol": sym,
-                            "market": latest.get("market", "A股"),
-                            "trade_date": td,
-                            "factor_name": factor_name,
-                            "factor_value": float(val),
-                            "factor_rank": None,
-                            "calc_method": "基本面因子(财务映射)",
-                            "data_source": latest.get("data_source", "financial_import"),
-                            "created_at": now_str,
-                        })
+                for field_key, factor_name in FUNDAMENTAL_FACTOR_MAP.items():
+                    val = visible.get(field_key)
+                    if val is None:
+                        continue
+                    rows.append({
+                        "symbol": sym,
+                        "market": visible.get("market", "A股"),
+                        "trade_date": td,
+                        "factor_name": factor_name,
+                        "factor_value": float(val),
+                        "factor_rank": None,
+                        "calc_method": "基本面因子(公告日时点映射)",
+                        "data_source": visible.get("data_source", "financial_import"),
+                        "created_at": now_str,
+                    })
         return rows
 
     def _latest_trade_dates(self, symbol: str, n: int) -> List[str]:

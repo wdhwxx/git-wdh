@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS financial_data (
     market          TEXT    NOT NULL DEFAULT 'A股',
     report_date     TEXT    NOT NULL,       -- 报告期 YYYY-MM-DD（如2025-03-31一季报）
     report_type     TEXT,                    -- 报告类型：Q1/Q2/Q3/Q4/年报
+    ann_date        TEXT,                    -- 公告日 YYYY-MM-DD（实际披露日，防未来函数时点）
     pe              REAL,                    -- 市盈率(TTM)
     pb              REAL,                    -- 市净率
     ps              REAL,                    -- 市销率
@@ -118,6 +119,7 @@ CREATE TABLE IF NOT EXISTS financial_data (
 CREATE_FINANCIAL_INDEX_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_fin_symbol ON financial_data(symbol);",
     "CREATE INDEX IF NOT EXISTS idx_fin_report_date ON financial_data(report_date);",
+    "CREATE INDEX IF NOT EXISTS idx_fin_ann_date ON financial_data(ann_date);",
 ]
 
 # 因子数据表（存储指标计算结果，避免重复计算）
@@ -353,7 +355,7 @@ class FinancialDataSchema:
     """财务数据表结构定义"""
     TABLE_NAME = TABLE_NAMES["financial_data"]
     COLUMNS = [
-        "id", "symbol", "market", "report_date", "report_type",
+        "id", "symbol", "market", "report_date", "report_type", "ann_date",
         "pe", "pb", "ps", "total_mv", "circ_mv",
         "revenue", "net_profit", "net_profit_yoy", "revenue_yoy",
         "roe", "gross_margin", "debt_ratio", "eps", "bps",
@@ -469,6 +471,25 @@ def _migrate_market_data_columns(connection) -> None:
             )
 
 
+def _migrate_financial_data_columns(connection) -> None:
+    """
+    迁移 financial_data 表：补加公告日列 ann_date（F-15）。
+
+    公告日（实际披露日）区别于报告期（report_date）：Q2 报告期 6/30
+    实际披露常在 8 月底，用 report_date <= trade_date 会在披露前
+    错误引用未来财报。ann_date 为 NULL 的存量行在查询时回退 report_date，
+    保持向后兼容。幂等：先 PRAGMA 判断列是否存在。
+    """
+    existing_rows = connection.execute(
+        "PRAGMA table_info(financial_data)"
+    )
+    existing_cols = {row["name"] for row in existing_rows}
+    if "ann_date" not in existing_cols:
+        connection.execute_update(
+            "ALTER TABLE financial_data ADD COLUMN ann_date TEXT"
+        )
+
+
 def create_all_tables(connection) -> None:
     """
     创建所有表和索引
@@ -482,11 +503,12 @@ def create_all_tables(connection) -> None:
         # 建表
         for sql in ALL_CREATE_TABLE_SQL:
             connection.execute_update(sql)
+        # 迁移：对已存在的表补加列（幂等，须在建索引之前，否则新列索引报错）
+        _migrate_market_data_columns(connection)
+        _migrate_financial_data_columns(connection)
         # 建索引
         for sql in ALL_CREATE_INDEX_SQL:
             connection.execute_update(sql)
-        # 迁移：对已存在的 market_data 表补加派生量列（幂等）
-        _migrate_market_data_columns(connection)
 
 
 def drop_all_tables(connection) -> None:
