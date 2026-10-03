@@ -48,7 +48,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from myquant.utils.file_utils import (
     ensure_dir,
@@ -86,6 +86,10 @@ class ModelVersionNotFoundError(ModelRegistryError):
 
 class ModelIntegrityError(ModelRegistryError):
     """模型工件完整性校验失败（checksum 不匹配）"""
+
+
+class ModelRetiredError(ModelRegistryError):
+    """模型版本已失效（retired），禁止调用"""
 
 
 # ═══════════════════════════════════════════════
@@ -128,7 +132,8 @@ class ModelVersion:
     hyperparameters : Dict[str, Any]
         超参数
     status : str
-        状态：active（当前生效）/ archived（归档）
+        状态：active（当前生效）/ archived（归档）/ retired（失效，禁止调用，
+        F-05 失效监控自动标记并降级）
     parent_version : Optional[int]
         派生链：从哪个版本训练而来
     description : str
@@ -374,6 +379,8 @@ class ModelRegistry:
         version: Optional[int] = None,
         source: str = "offline",
         description: str = "",
+        require_win_gate: bool = False,
+        win_metric: str = "ic",
     ) -> ModelVersion:
         """
         注册模型（版本自增 + 工件落盘 + 元数据 + checksum + 索引双写）
@@ -397,6 +404,12 @@ class ModelRegistry:
             offline（离线训练）/ live（实盘）
         description : str
             版本描述
+        require_win_gate : bool
+            F-05：是否要求"新版本必须跑赢当前 active"方可激活
+            （默认 False 零变化；True 时新旧版本均有 win_metric 指标才比较，
+            新 < 旧 则注册为 archived 不激活并告警，缺指标跳过门控并告警）
+        win_metric : str
+            F-05：门控比较指标（默认 "ic"，从 metadata.metrics 取值）
 
         Returns
         -------
@@ -452,16 +465,81 @@ class ModelRegistry:
                 parent_version=metadata.get("parent_version"),
                 description=description,
             )
+            # F-05：注册门控（require_win_gate 时新版本必须跑赢 active 方可激活）
+            gate_passed = True
+            if require_win_gate:
+                gate_passed = self._win_gate_passes(index, ver, metadata, win_metric)
+            if not gate_passed:
+                meta.status = "archived"
             # metadata.json 落盘
             write_json(str(self._metadata_path(model_name, ver)), meta.to_dict())
-            # 索引双写（新增版本 + 该版本为最新 + active 默认指向最新）
+            # 索引双写（新增版本 + 该版本为最新；门控通过才激活）
             index.setdefault("versions", {})[str(ver)] = self._summary(meta)
             head = index.setdefault("head", {})
             head["latest"] = ver
-            head["active"] = ver
+            if gate_passed:
+                head["active"] = ver
+            else:
+                logger.warning(
+                    "[ml] 新版本 %s@v%d 未跑赢 active，注册为 archived 不激活",
+                    meta.model_name, ver,
+                )
             self._write_index(model_name, index)
             logger.info(f"[ml] 模型注册成功: {meta.tag} ({meta.model_type})")
             return meta
+
+    # ─────────────────────────────────────────────
+    #  F-05 注册门控
+    # ─────────────────────────────────────────────
+
+    @staticmethod
+    def _metric_value(metrics: Dict[str, Any], name: str) -> Optional[float]:
+        """从绩效 dict 取数值指标（缺失/非法返回 None，防御式）。"""
+        raw = metrics.get(name) if isinstance(metrics, dict) else None
+        if raw is None:
+            return None
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return None
+
+    def _win_gate_passes(
+        self,
+        index: Dict[str, Any],
+        new_version: int,
+        metadata: Dict[str, Any],
+        win_metric: str,
+    ) -> bool:
+        """注册门控：新版本 win_metric 必须 >= 当前 active 版本方可通过。
+
+        无 active 基准 → 通过；新旧缺指标 → 跳过门控（不阻断）并告警。
+        """
+        head = index.get("head", {})
+        active = head.get("active")
+        versions = index.get("versions", {})
+        if active is None or str(active) not in versions:
+            return True  # 无 active 基准（首版本）→ 直接通过
+        new_v = self._metric_value(metadata.get("metrics") or {}, win_metric)
+        try:
+            old_meta = self.get_model_metadata(
+                self._safe_name(index.get("model_name") or ""), int(active))
+        except (ModelVersionNotFoundError, ModelIntegrityError):
+            logger.warning("[ml] 读取 active 元数据失败，跳过注册门控")
+            return True
+        old_v = self._metric_value(old_meta.metrics, win_metric)
+        if new_v is None or old_v is None:
+            logger.warning(
+                "[ml] 新旧版本缺少 win_metric=%s（新=%s 旧=%s），跳过门控不阻断",
+                win_metric, new_v, old_v,
+            )
+            return True
+        if new_v < old_v:
+            logger.warning(
+                "[ml] 新版本 %s=%.4f < active 版本 %s=%.4f，门控不通过",
+                win_metric, new_v, win_metric, old_v,
+            )
+            return False
+        return True
 
     # ─────────────────────────────────────────────
     #  查询
@@ -553,18 +631,31 @@ class ModelRegistry:
     #  加载 / 校验
     # ─────────────────────────────────────────────
 
-    def load_model(self, model_name: str, version: Optional[int] = None) -> Any:
+    def load_model(
+        self,
+        model_name: str,
+        version: Optional[int] = None,
+        allow_retired: bool = False,
+    ) -> Any:
         """
         加载模型对象（checksum 完整性校验）
+
+        【F-05】失效（retired）版本默认拒绝加载（失效版本 0 次被调用）；
+        allow_retired=True 供评估/审计显式加载历史失效版本。
 
         【防未来】加载后由调用方（任务21 推理服务）配合 train_end_time
         校验只使用 <= 训练截止的数据。
 
         Raises
         ------
+        ModelRetiredError : 加载的版本已失效（且未显式 allow_retired）
         ModelIntegrityError : 工件 checksum 校验失败（被篡改/损坏）
         """
         meta = self.get_model_info(model_name, version)
+        if meta.status == "retired" and not allow_retired:
+            raise ModelRetiredError(
+                f"模型已失效禁止调用: {meta.tag}（如需评估请 allow_retired=True）"
+            )
         apath = self._artifact_path(meta.model_name, meta.version, meta.artifact)
         if not apath.exists():
             raise ModelVersionNotFoundError(f"模型工件缺失: {apath}")
@@ -653,6 +744,77 @@ class ModelRegistry:
             logger.info(f"[ml] 模型回滚: {model_name} v{active} → v{target}")
             return self.get_model_metadata(model_name, target)
 
+    def mark_retired(
+        self,
+        model_name: str,
+        version: int,
+        degrade_on_retire: bool = True,
+        reason: str = "",
+    ) -> Tuple[ModelVersion, Optional[int]]:
+        """
+        【F-05】标记版本失效（retired）：禁止调用 + 可选自动降级。
+
+        若被标记的版本是当前 active：
+          - degrade_on_retire=True：自动降级到"版本号最大的非失效版本"
+            （无候选则 head.active 置空并告警）；
+          - degrade_on_retire=False：仅标记失效，active 保持指向失效版本
+            （由调用方决定后续处置）。
+        降级动作记录 index.last_retire（可审计）。
+
+        Args:
+            model_name: 模型名称。
+            version: 待标记失效的版本号。
+            degrade_on_retire: 是否自动降级（默认 True）。
+            reason: 失效原因（监控判定明细，写入 last_retire）。
+
+        Returns:
+            (被标记版本的 ModelVersion, 降级目标版本或 None)。
+
+        Raises:
+            ModelNotFoundError: 模型不存在。
+            ModelVersionNotFoundError: 版本不存在。
+        """
+        with self._lock:
+            index = self._read_index(model_name)
+            versions = index.get("versions", {})
+            if not versions:
+                raise ModelNotFoundError(f"模型不存在: {model_name}")
+            if str(version) not in versions:
+                raise ModelVersionNotFoundError(f"模型 {model_name} 版本 {version} 不存在")
+            versions[str(version)]["status"] = "retired"
+            head = index.setdefault("head", {})
+            degraded_to: Optional[int] = None
+            if degrade_on_retire and head.get("active") == version:
+                candidates = [
+                    v for v in sorted(int(x) for x in versions)
+                    if versions[str(v)]["status"] != "retired" and v < version
+                ]
+                if candidates:
+                    degraded_to = max(candidates)
+                    versions[str(degraded_to)]["status"] = "active"
+                    head["active"] = degraded_to
+                else:
+                    head["active"] = None
+            index["last_retire"] = {
+                "retired": version,
+                "degraded_to": degraded_to,
+                "time": self._now(),
+                "reason": reason,
+            }
+            self._write_index(model_name, index)
+            if degraded_to is not None:
+                logger.warning(
+                    "[ml] 模型失效标记: %s v%d retired，降级至 v%d",
+                    model_name, version, degraded_to,
+                )
+            else:
+                logger.warning(
+                    "[ml] 模型失效标记: %s v%d retired（无可用降级版本%s）",
+                    model_name, version,
+                    "，active 已置空" if head.get("active") is None else "",
+                )
+            return self.get_model_metadata(model_name, version), degraded_to
+
     # ─────────────────────────────────────────────
     #  删除
     # ─────────────────────────────────────────────
@@ -720,4 +882,5 @@ __all__ = [
     "ModelNotFoundError",
     "ModelVersionNotFoundError",
     "ModelIntegrityError",
+    "ModelRetiredError",
 ]

@@ -503,6 +503,7 @@ Pythonwdhmm/
 │   │   ├── test_factor_validator.py # ✨【回写#89】F-02 因子有效性校验测试（RankIC/PearsonIC双口径、ICIR/t/胜率手算对拍、衰减曲线1/5/10/20、5层分层收益+换手、active/observe/eliminated三态、IC加权方向校正+下限约束+归一化、经济逻辑缺省拒绝、FactorProfile序列化往返、策略IC加权集成+默认零变化+extra因子缺逻辑拒绝，22项）✅已完成
 │   │   ├── test_factor_preprocessor.py # ✨【回写#90】F-03 因子预处理测试（对称/偏态分布判定、MAD截断、分位数截断、自适应方法选择、中性化后市值相关≈0、行业哑变量后行业均值差≈0、暴露t值、残差诊断告警、报告序列化往返、策略默认none零变化+neutralize集成+非法mode报错，25项）✅已完成
 │   │   ├── test_survivorship_bias.py # ✨【回写#91】F-04 幸存者偏差测试（审计字段齐全、折价数值合成数据对拍、逐期池as_of过滤、报告口径声明注入零变化、非法参数防御，15项）✅已完成
+│   │   ├── test_model_monitor.py     # ✨【回写#92】F-05 模型失效监控测试（低IC连续3月检出/回升不失效/回撤超限判定/HealthReport序列化/from_config非法防御/降级切换/无候选清空/retired加载拒绝/win gate激活与拒绝/缺指标跳过/默认零变化回归/防未来序列，27项）✅已完成
 
 │   │   ├── test_data_fingerprint.py  # ✨【V5·P0】数据指纹测试（哈希级差异检测：指纹生成/查询/缓存失效/旧数据替换，20项）
 
@@ -1024,11 +1025,13 @@ Pythonwdhmm/
 
     │   ├── features.py               # 特征工程因子计算标签生成；✨【回写#88】中文列契约（bars_to_df 输出 开盘价/最高价/最低价/收盘价/成交量/成交额，price_col 默认"收盘价"，英文列输入显式报错）+ 指标计算失败由 warning+continue 改为记日志后抛错（禁止静默降级）
 
-    │   ├── model_registry.py         # 模型注册版本管理；✨【回写#88】ModelVersion 新增 feature_signature 字段并持久化（metadata 优先解析，feature_columns 缺失时回退 signature.columns）
+    │   ├── model_registry.py         # 模型注册版本管理；✨【回写#88】ModelVersion 新增 feature_signature 字段并持久化（metadata 优先解析，feature_columns 缺失时回退 signature.columns）；✨【回写#92】status 扩展 retired（失效禁止调用）+ ModelRetiredError + mark_retired（自动降级到版本号最大的非失效版本/无候选清空active+记录last_retire）+ load_model(allow_retired=False 默认拒绝加载失效版本) + register_model(require_win_gate/win_metric 默认 False 零变化，开启后新版本必须跑赢 active 方可激活)
 
-    │   ├── training_pipeline.py      # 训练流水线；✨【回写#88】注册 metadata 增加 feature_signature（由实际训练特征 DataFrame 构建，含 config_hash）
+    │   ├── training_pipeline.py      # 训练流水线；✨【回写#88】注册 metadata 增加 feature_signature（由实际训练特征 DataFrame 构建，含 config_hash）；✨【回写#92】evaluate_model 增加 compute_ic（numpy 手写 Spearman：回归=预测vs真实收益、分类=正类概率vs标签）写入 metrics["ic"]，run() 增加 enable_win_gate/win_metric（默认 False 零变化，开启后注册侧门控"跑赢当前 active"）
 
-    │   └── inference_service.py      # 批量/实时预测服务；✨【回写#88】_build_engine 校验升级为注册签名（列集合+顺序双向硬校验），无签名旧模型回退静态列比对
+    │   ├── inference_service.py      # 批量/实时预测服务；✨【回写#88】_build_engine 校验升级为注册签名（列集合+顺序双向硬校验），无签名旧模型回退静态列比对
+
+    │   └── model_monitor.py          # ✨【回写#92】F-05 模型失效监控器：HealthReport（frozen dataclass：healthy/degraded/retired + 最新IC/连续低IC月数/回撤超限/失效原因/降级目标）+ ModelMonitor（失效判定①滚动IC序列连续N月|IC|<阈值（默认N=3/阈值0.02）；②绩效最大回撤超限（默认20%）；run() 一次调用内 检出→mark_retired→自动降级→告警，<1监控周期；只消费已观测历史序列防未来；参数全可注入+from_config(dict/JSON路径)，默认值常量集中）
 
     │
 
@@ -1996,3 +1999,11 @@ Pythonwdhmm/
    e. **真实数据冒烟（实证）**：audit（DB 5589/processed 3195/最新交易日 2026-09-30/停牌近似池 17 只/退市覆盖=False）；折价估计 2025-01-01~2026-09-30：存续池等权 +27.12%，全样本近似 +26.76%，折价 **-0.366%（年化 -0.145%）**——停牌近似池拖累有限（17/5584 占比小），数值合理；口径声明注明"停牌风险下界，真退市股损失通常更极端"
    f. **验证结果**：py_compile 3 文件（1 新+1 改+1 新测试）PASS；新测试 15 passed（0.23s）；全量 pytest tests/ = 1829 passed / 2 skipped（基线 1814 + 15，零回归）；warnings 24 为存量
    g. **纪律遵守**：业务逻辑归 myquant/backtest/survivorship_bias.py + myquant/backtest/batch_report.py（新增文件已登记蓝图 backtest/ 段 + tests/unit 段，batch_report 注释已同步）；先更新蓝图再创建新文件（目录树登记先行）；防未来函数铁律 11 显式标注；全量类型注解 + Google docstring + 防御式校验（DB 缺失/区间非法/样本不足/HTML 注入全部拦截）；无临时文件入库（探查脚本已删）；git 提交待用户拍板
+
+92. ✨【回写记录·2026-10-03·F-05 模型失效监控与自动降级】《因子与机器学习层优化实施报告》P0 整改第五项落地。问题链（审查确认）：model_registry 的 status 仅 active/archived 无失效态——模型 IC 持续衰减/回撤超限后仍保持 active 被推理调用，无自动降级机制；新版本注册无条件激活，无"跑赢 active"门控。任务卡验收：注入低 IC 序列后失效检出并降级时间 <1 监控周期；失效版本 0 次被调用。事实来源：本次落地；代码级核验：py_compile 4 文件全 PASS + 新增 27 项单测 + 全量 pytest tests/ = 1856 passed / 2 skipped（基线 1829 + 27，零回归）：
+   a. **新增 myquant/ml/model_monitor.py（模型失效监控器）**：HealthReport（frozen dataclass：healthy/degraded/retired + ic_latest/连续低IC月数/回撤超限/失效原因/degraded_to，to_dict/from_dict 必填校验）；ModelMonitor（失效判定①滚动 IC 序列从末尾向前统计连续 |IC|<阈值 月数 ≥N（默认 N=3/阈值0.02，严格 <）；②绩效最大回撤 abs 超限（默认 0.20）；单月低未连续→degraded 观察态；run() 一次调用内 检出→registry.mark_retired→自动降级→logging 告警（<1 监控周期验收）；参数全可注入+from_config(dict/JSON 路径)外置 config 通道，默认值常量 DEFAULT_* 集中，非法参数 ModelMonitorConfigError）
+   b. **model_registry.py F-05 扩展**：ModelVersion.status 文档补 retired；新增 ModelRetiredError；register_model 增 require_win_gate/win_metric（默认 False 零变化；True 时新旧均有 win_metric 才比较，新<旧 注册为 archived 不激活+告警，缺指标跳过门控并告警，首版本无 active 直接通过）；_win_gate_passes/_metric_value（防御式 float 解析）；load_model 增 allow_retired=False（默认拒绝加载 retired 版本抛 ModelRetiredError——失效版本 0 次被调用；allow_retired=True 供评估/审计）；mark_retired（标失效+degrade_on_retire=True 自动降级到版本号最大的非失效版本/无候选 head.active 置空并告警，记录 index.last_retire 可审计）
+   c. **training_pipeline.py 注册侧**：新增 _rank_ic（numpy 手写 Spearman 秩相关：并列取平均秩、样本<2/常数序列返回 None 防御）；evaluate_model 增 compute_ic（默认 False 零变化；True 时 metrics 追加 "ic"：回归=预测值 vs y_true、分类=predict_proba 正类概率 vs y_true，无 proba 回退 0/1 预测，不可计算记 0.0）；run() 增 enable_win_gate=False/win_metric="ic"（True 时评估 compute_ic=True + 注册 require_win_gate=True，实盘 retrain 建议开启）
+   d. **新增 tests/unit/test_model_monitor.py（27 项）**：IC 连续3月低 retired/序列不足2低 degraded/回升中断不失效/阈值边界==0.02 不算低/回撤超限 retired/阈值内 healthy/非法序列 ModelMonitorError；HealthReport 往返+非法输入；参数非法 ModelMonitorConfigError（阈值0/月数0/回撤负/周期0）；from_config dict+JSON 路径/缺文件/非法类型/非法参数；run 集成降级（active v3 失效→v2 active+last_retire 记录）/无候选 active 置空/健康不降级；retired 加载拒绝 ModelRetiredError/allow_retired=True 通过/mark_retired 状态反映；win gate（新 IC 低→archived 不激活+active 保持/新 IC 高→激活/缺指标跳过/默认 False 无条件激活零变化）；evaluate_model 回归完美预测 IC≈1/分类正类概率 IC>0.8 且保留分类指标/compute_ic=False 无 ic 键零变化/_rank_ic 样本不足常数防御；防未来（同一已给序列判定确定，无时间推进依赖）
+   e. **验证结果**：py_compile 4 文件（1 新+3 改）PASS；新测试 27 passed（0.39s）；全量 pytest tests/ = 1856 passed / 2 skipped（基线 1829 + 27，零回归）；warnings 24 为存量；降级演练验收（test_run_retire_and_degrade：单次 run() 内检出+降级完成 <1 监控周期；test_load_retired_rejected：失效版本加载抛错 0 次调用）
+   f. **纪律遵守**：业务逻辑归 myquant/ml/model_monitor.py + model_registry.py + training_pipeline.py（新增文件已登记蓝图 ml/ 段 + tests/unit 段，ml/ 段既有文件注释已同步 #92）；先更新蓝图再创建新文件（目录树登记先行）；防未来函数铁律 11 显式标注（监控只消费已观测历史 IC 序列与训练时绩效，无预测性未来信息）；全量类型注解 + Google docstring + 防御式校验（配置非法/序列非法/指标缺失/版本不存在全部显式报错）；inference_service.py 未改（默认取 active 天然不触 retired，load_model 拦截在 registry 层兜底）；无临时文件入库；git 提交待用户拍板

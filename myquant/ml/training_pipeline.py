@@ -343,20 +343,91 @@ def classification_metrics(
     return {"accuracy": accuracy, "precision": precision, "recall": recall, "f1": f1}
 
 
+def _rank_ic(continuous_pred: Any, y_true: Any) -> Optional[float]:
+    """评估集 IC（numpy 手写 Spearman 秩相关，F-05 注册门控用）。
+
+    连续预测（回归=预测值；分类=正类概率）与真实标签的秩相关，
+    反映模型排序能力（>0 为正相关，|IC| 越大越有效）。
+
+    本行使用的数据截至 t 时刻：仅消费验证集（训练之后的数据）的
+    已得预测与标签，无未来数据。
+
+    Args:
+        continuous_pred: 连续预测值（1D）。
+        y_true: 真实标签（1D）。
+
+    Returns:
+        Spearman 秩相关系数；样本<2 或方差为 0 返回 None（不可计算）。
+    """
+    pred = np.asarray(continuous_pred, dtype=float).ravel()
+    y = np.asarray(y_true, dtype=float).ravel()
+    if pred.shape != y.shape or len(pred) < 2:
+        return None
+    mask = np.isfinite(pred) & np.isfinite(y)
+    pred, y = pred[mask], y[mask]
+    if len(pred) < 2:
+        return None
+
+    def _rank(v: np.ndarray) -> np.ndarray:
+        # 并列值取平均秩（Spearman 标准做法）
+        order = np.argsort(v, kind="stable")
+        ranks = np.empty_like(v, dtype=float)
+        ranks[order] = np.arange(1, len(v) + 1, dtype=float)
+        # 并列值平均化
+        sorted_v = v[order]
+        i = 0
+        while i < len(sorted_v):
+            j = i
+            while j + 1 < len(sorted_v) and sorted_v[j + 1] == sorted_v[i]:
+                j += 1
+            if j > i:
+                avg = (ranks[order[i]] + ranks[order[j]]) / 2.0
+                ranks[order[i:j + 1]] = avg
+            i = j + 1
+        return ranks
+
+    rp = _rank(pred)
+    ry = _rank(y)
+    if float(np.std(rp)) == 0.0 or float(np.std(ry)) == 0.0:
+        return None
+    return float(np.corrcoef(rp, ry)[0, 1])
+
+
 def evaluate_model(
-    model: Any, X: Any, y: Any, label_type: str = "return", positive_label: int = 1
+    model: Any, X: Any, y: Any, label_type: str = "return",
+    positive_label: int = 1, compute_ic: bool = False,
 ) -> Dict[str, float]:
     """
     通用评估：按标签类型分发回归 / 分类指标
 
     label_type='direction' → 分类指标；其余（return 等）→ 回归指标
+
+    compute_ic=True（F-05）时追加 "ic"：分类用正类概率（若模型支持
+    predict_proba）否则用 0/1 预测，回归用预测值，与 y_true 的秩相关。
     """
     X = np.asarray(X, dtype=float)
     y = np.asarray(y, dtype=float).ravel()
     pred = model.predict(X)
     if label_type == "direction":
-        return classification_metrics(y, pred, positive_label=positive_label)
-    return regression_metrics(y, pred)
+        metrics = classification_metrics(y, pred, positive_label=positive_label)
+        cont = pred
+        if hasattr(model, "predict_proba"):
+            try:
+                proba = np.asarray(model.predict_proba(X), dtype=float)
+                if proba.ndim == 2 and proba.shape[1] >= 2:
+                    cont = proba[:, 1]  # 正类概率
+            except Exception:  # pragma: no cover
+                pass
+    else:
+        metrics = regression_metrics(y, pred)
+        cont = pred
+    if compute_ic:
+        ic = _rank_ic(cont, y)
+        if ic is not None:
+            metrics["ic"] = float(ic)
+        else:
+            metrics["ic"] = 0.0  # 不可计算（方差为0等）记 0，避免缺失键
+    return metrics
 
 
 # ═══════════════════════════════════════════════
@@ -595,6 +666,8 @@ class TrainingPipeline:
         source: str = "offline",
         description: str = "",
         parent_version: Optional[int] = None,
+        enable_win_gate: bool = False,
+        win_metric: str = "ic",
         **model_params: Any,
     ) -> TrainingResult:
         """
@@ -622,6 +695,12 @@ class TrainingPipeline:
             版本描述
         parent_version : int | None
             父版本（重训链）
+        enable_win_gate : bool
+            F-05 注册门控：True 时验证集评估追加 IC（metrics["ic"]），
+            且注册要求"新版本 win_metric 必须跑赢当前 active 方可激活"
+            （默认 False 零变化；实盘 retrain 建议开启）
+        win_metric : str
+            F-05 门控比较指标（默认 "ic"）
         **model_params
             内置模型超参数（透传 model_factory）
 
@@ -652,10 +731,11 @@ class TrainingPipeline:
         # 4. 训练（仅用训练集）
         model_obj.fit(dataset.X.values[train_idx], dataset.y.values[train_idx])
 
-        # 5. 验证集评估（只用训练之后的数据）
+        # 5. 验证集评估（只用训练之后的数据；enable_win_gate 时追加 IC）
         metrics = evaluate_model(
             model_obj, dataset.X.values[valid_idx],
-            dataset.y.values[valid_idx], eff_label)
+            dataset.y.values[valid_idx], eff_label,
+            compute_ic=enable_win_gate)
 
         # 6. 训练时间范围（防未来：train_end_time 记录训练数据截止）
         train_ts = [dataset.timestamps[int(i)] for i in train_idx]
@@ -688,6 +768,8 @@ class TrainingPipeline:
             feature_config=eff_config,
             source=source,
             description=description,
+            require_win_gate=enable_win_gate,
+            win_metric=win_metric,
         )
 
         training_seconds = time.perf_counter() - t0
