@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>P0 阶段验收报告 · 因子与机器学习层</title>
+<style>
+  :root { --ink:#1a2333; --sub:#5b6472; --line:#dfe3ea; --ok:#0e7a4d; --okbg:#e9f7f0; --warn:#9a6700; --warnbg:#fdf6e3; --accent:#2456a6; --card:#ffffff; --bg:#f5f7fa; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:"Microsoft YaHei","PingFang SC",sans-serif; background:var(--bg); color:var(--ink); line-height:1.6; padding:32px 20px; }
+  .wrap { max-width:960px; margin:0 auto; }
+  .head { background:var(--ink); color:#fff; border-radius:12px; padding:28px 32px; margin-bottom:20px; }
+  .head h1 { font-size:22px; font-weight:700; letter-spacing:1px; }
+  .head .meta { margin-top:8px; font-size:13px; color:#c9d2e0; }
+  .head .badges { margin-top:14px; display:flex; gap:10px; flex-wrap:wrap; }
+  .badge { background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.25); color:#fff; border-radius:999px; padding:4px 12px; font-size:12px; }
+  .verdict { background:var(--okbg); border:1px solid #b7e0c8; border-left:5px solid var(--ok); border-radius:10px; padding:18px 22px; margin-bottom:20px; }
+  .verdict .t { font-weight:700; color:var(--ok); font-size:15px; }
+  .verdict p { margin-top:6px; font-size:13.5px; color:#234; }
+  .verdict b { color:var(--ink); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:20px 22px; margin-bottom:20px; }
+  .card h2 { font-size:16px; font-weight:700; margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid var(--line); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th,td { text-align:left; padding:8px 10px; border:1px solid var(--line); vertical-align:top; }
+  th { background:#f0f3f8; font-weight:600; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .gate td:first-child { width:44px; text-align:center; }
+  .ok { color:var(--ok); font-weight:700; }
+  .done { background:var(--okbg); }
+  .chk { font-size:16px; color:var(--ok); }
+  .commit { font-family:Consolas,"Courier New",monospace; font-size:12px; background:#f0f3f8; padding:1px 6px; border-radius:4px; white-space:nowrap; }
+  .note { font-size:12.5px; color:var(--sub); margin-top:10px; }
+  .pill { display:inline-block; border-radius:999px; padding:2px 10px; font-size:12px; font-weight:600; }
+  .pill-ok { background:var(--okbg); color:var(--ok); }
+  .pill-warn { background:var(--warnbg); color:var(--warn); }
+  ul { padding-left:20px; font-size:13.5px; }
+  ul li { margin-bottom:6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="head">
+    <h1>P0 阶段验收报告 · 因子与机器学习层</h1>
+    <div class="meta">myquant 量化系统 · 2026-10-03 · 依据《因子与机器学习层优化实施报告》第四章 P0 六项（F-01 ~ F-06）</div>
+    <div class="badges">
+      <span class="badge">Gate 1 仿真准入检查表 6/6 通过</span>
+      <span class="badge">全量 pytest 1879 passed / 2 skipped</span>
+      <span class="badge">推理延迟 P99 30-34ms 达标</span>
+    </div>
+  </div>
+
+  <div class="verdict">
+    <div class="t">验收结论：P0 六项全部完成，系统已达「仿真准入」水平（研究/仿真级）</div>
+    <p>原审查判定（《因子与机器学习层优化实施报告》）：因子有效性验证、因子处理标准化、训练-推理一致性、模型生命周期治理四支柱存在结构性缺失，叠加回测幸存者偏差，整体<b>高风险、不满足实盘上线条件</b>。完成全部 P0 后系统达到<b>仿真准入</b>水平，可进入模拟盘 3 个月阶段；经 Gate 2（仿真绩效验收）与 Gate 3（实盘试运行准入：模拟盘 ≥ 3 个月、扣费后绩效达标、失效监控 0 漏报）后方可评估小额实盘试运行（建议 ≤ 10% 计划资金）。</p>
+  </div>
+
+  <div class="card">
+    <h2>一、Gate 1（仿真准入）完成检查表 —— 6/6 通过</h2>
+    <table class="gate">
+      <tr><th>#</th><th>检查项</th><th>证据</th><th>状态</th></tr>
+      <tr class="done"><td><span class="chk">✔</span></td><td>F-01 特征一致性：端到端测试通过、无静默跳过</td><td>FeatureSignature 双向硬校验；12 项单测；端到端用例通过</td><td class="ok">已勾选</td></tr>
+      <tr class="done"><td><span class="chk">✔</span></td><td>F-02 因子有效性：IC 档案覆盖率 100%、权重 IC 化</td><td>RankIC 主口径 + ICIR/t/胜率/衰减/分层；22 项单测</td><td class="ok">已勾选</td></tr>
+      <tr class="done"><td><span class="chk">✔</span></td><td>F-03 预处理：去极值/中性化/残差检验验收通过</td><td>自适应去极值 + 行业中性化 + 残差检验；25 项单测</td><td class="ok">已勾选</td></tr>
+      <tr class="done"><td><span class="chk">✔</span></td><td>F-04 幸存者偏差：口径声明或偏差折价披露</td><td>数据覆盖审计 + 偏差折价实测 -0.366%（年化 -0.145%）入报告口径声明；15 项单测</td><td class="ok">已勾选</td></tr>
+      <tr class="done"><td><span class="chk">✔</span></td><td>F-05 失效监控：降级演练通过、失效版本零调用</td><td>ModelMonitor 检出→降级 <1 监控周期；load_model 默认拒绝 retired（0 次调用）；27 项单测</td><td class="ok">已勾选</td></tr>
+      <tr class="done"><td><span class="chk">✔</span></td><td>F-06 测试与基准：pytest 全绿、延迟基准报告入档</td><td>全量 1879 passed / 2 skipped；基准报告 JSON+MD 已入档；P99 实测 30-34ms；23 项单测</td><td class="ok">已勾选</td></tr>
+    </table>
+    <div class="note">检查表同步更新于《P0整改任务清单.md》「三、Gate 1（仿真准入）完成检查表」。</div>
+  </div>
+
+  <div class="card">
+    <h2>二、P0 六项整改验收汇总</h2>
+    <table>
+      <tr><th>编号</th><th>整改项</th><th>核心交付</th><th>验证结果</th><th>蓝图/提交</th></tr>
+      <tr>
+        <td>F-01</td><td>训练-推理特征一致性断裂</td>
+        <td>feature_contract.py：FeatureSignature 签名契约（列集合+顺序双向硬校验），训练注册签名持久化，推理侧校验拦截偏移</td>
+        <td>12 项单测；端到端通过；基线 1767</td>
+        <td><span class="commit">#88</span> · <span class="commit">f9b38dd</span></td>
+      </tr>
+      <tr>
+        <td>F-02</td><td>IC/ICIR 因子有效性校验</td>
+        <td>factor_validator.py：RankIC 主口径 + PearsonIC 辅口径、ICIR/t/胜率、衰减曲线、5 层分层、active/observe/eliminated 流转、ic_weighted_weights、经济逻辑强制登记</td>
+        <td>22 项单测；基线 1789</td>
+        <td><span class="commit">#89</span> · <span class="commit">f9b38dd</span></td>
+      </tr>
+      <tr>
+        <td>F-03</td><td>去极值 + 中性化 + 残差检验</td>
+        <td>factor_preprocessor.py：自适应去极值（|skew|&lt;0.5→MAD、偏态→1%/99% 分位数）、行业哑变量 N-1 + 对数流通市值中性化（numpy lstsq 零 sklearn）、残差检验、报告序列化</td>
+        <td>25 项单测；基线 1814</td>
+        <td><span class="commit">#90</span> · <span class="commit">7a455cb</span></td>
+      </tr>
+      <tr>
+        <td>F-04</td><td>消除幸存者偏差</td>
+        <td>survivorship_bias.py：数据覆盖审计、偏差折价估计（存续 vs 全样本近似池）、逐期存续池构建；batch_report.py 数据口径声明节</td>
+        <td>15 项单测；折价实测 -0.366%；基线 1829</td>
+        <td><span class="commit">#91</span> · <span class="commit">1e5864a</span></td>
+      </tr>
+      <tr>
+        <td>F-05</td><td>模型失效监控与自动降级</td>
+        <td>model_monitor.py：IC 连续 3 月 |IC|&lt;0.02 / 回撤超限 20% 失效判定，run() 一次调用内 检出→mark_retired→自动降级→告警；registry retired 状态 + load 默认拒绝 + win gate</td>
+        <td>27 项单测；降级演练 &lt;1 周期；基线 1856</td>
+        <td><span class="commit">#92</span> · <span class="commit">71a15ad</span></td>
+      </tr>
+      <tr>
+        <td>F-06</td><td>ML 端到端测试与延迟基准</td>
+        <td>test_ml_e2e.py（23 项六类覆盖）；inference_benchmark.py + 推理延迟基准.py 薄入口；推理兜底修复（None 特征→ModelNotReadyError）</td>
+        <td>23 项单测；全量 1879 passed；P99 30-34ms 达标；基准报告入档</td>
+        <td><span class="commit">#93</span> · <span class="commit">b6429c3</span></td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>三、全量测试基线演进（零回归链）</h2>
+    <table>
+      <tr><th>里程碑</th><th>基线（passed / skipped）</th><th>新增测试</th><th>提交</th></tr>
+      <tr><td>F-01 后</td><td class="num">1767 / 2</td><td class="num">12</td><td class="commit">f9b38dd</td></tr>
+      <tr><td>F-02 后</td><td class="num">1789 / 2</td><td class="num">22</td><td class="commit">f9b38dd</td></tr>
+      <tr><td>F-03 后</td><td class="num">1814 / 2</td><td class="num">25</td><td class="commit">7a455cb</td></tr>
+      <tr><td>F-04 后</td><td class="num">1829 / 2</td><td class="num">15</td><td class="commit">1e5864a</td></tr>
+      <tr><td>F-05 后</td><td class="num">1856 / 2</td><td class="num">27</td><td class="commit">71a15ad</td></tr>
+      <tr class="done"><td>F-06 后（当前）</td><td class="num">1879 / 2</td><td class="num">23</td><td class="commit">b6429c3</td></tr>
+    </table>
+    <div class="note">合计新增 124 项测试（F-01~F-06），全程零回归；24 条 warnings 为存量（event_bus asyncio DeprecationWarning，Python 3.16 移除前计划内治理）。</div>
+  </div>
+
+  <div class="card">
+    <h2>四、推理延迟基准结论</h2>
+    <table>
+      <tr><th>历史长度</th><th class="num">P50(ms)</th><th class="num">P95(ms)</th><th class="num">P99(ms)</th><th class="num">均值(ms)</th><th class="num">最大(ms)</th><th>达标</th></tr>
+      <tr><td>100</td><td class="num">32.34</td><td class="num">33.81</td><td class="num">33.90</td><td class="num">32.54</td><td class="num">33.93</td><td class="ok">✔</td></tr>
+      <tr><td>250</td><td class="num">29.43</td><td class="num">31.83</td><td class="num">32.18</td><td class="num">29.87</td><td class="num">32.27</td><td class="ok">✔</td></tr>
+      <tr><td>500</td><td class="num">29.84</td><td class="num">31.16</td><td class="num">31.17</td><td class="num">30.11</td><td class="num">31.18</td><td class="ok">✔</td></tr>
+      <tr><td>1000</td><td class="num">28.77</td><td class="num">30.03</td><td class="num">30.06</td><td class="num">29.03</td><td class="num">30.07</td><td class="ok">✔</td></tr>
+      <tr><td>2000</td><td class="num">30.69</td><td class="num">31.06</td><td class="num">31.12</td><td class="num">30.49</td><td class="num">31.14</td><td class="ok">✔</td></tr>
+    </table>
+    <div class="note">口径：predict_realtime 全链路（compute_incremental + 模型 predict），每长度重复 5 次；硬阈值 P99 &lt; 500ms（判定达标），初始目标 P99 &lt; 200ms；全部长度达标，分钟级策略延迟余量充足。数据：合成随机游走（防未来）、独立临时 registry、不连实盘。报告：<span class="commit">推理延迟基准_20261003_100017.json/.md</span>。</div>
+  </div>
+
+  <div class="card">
+    <h2>五、遗留项与后续路径（Gate 2 / Gate 3）</h2>
+    <ul>
+      <li><b>P1/P2 整改未启动</b>（非上线阻塞，建议阶段二排期）：F-07 元数据与签名、F-08 面板切分日历化、F-09 成本化标签、F-10 波动率稳健化、F-11 可交易性过滤、F-12 滚动 CV 与 walk-forward。</li>
+      <li><b>Gate 2（仿真绩效验收）</b>：以 P0 后基线跑仿真回测，对照《实施报告》表 5 阈值逐项评估 8 指标（SimulationAcceptanceEvaluator 已具备）。</li>
+      <li><b>Gate 3（实盘试运行准入）</b>：模拟盘 ≥ 3 个月、扣费后绩效达标、失效监控 0 漏报 → 小额实盘试运行（建议 ≤ 10% 计划资金）。</li>
+      <li><b>工程存量</b>：event_bus DeprecationWarning 计划内治理；docs/_shots/ 自检过程产物已清理（不产生新垃圾）。</li>
+    </ul>
+  </div>
+
+</div>
+</body>
+</html>
