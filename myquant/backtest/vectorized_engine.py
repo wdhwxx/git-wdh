@@ -388,10 +388,9 @@ class VectorizedBacktestEngine:
         self.result.extra["symbols"] = valid_symbols
         self.result.extra["capital_mode"] = self.capital_mode
         self.result.extra["per_symbol_initial"] = sub_initial
-        self.result.mark_complete()
-
-        # #H2修复：回测结束统一校验防未来函数（失败记日志不中断结果，与 event 引擎一致）
-        self._run_lookahead_assert()
+        # #H2修复：回测结束统一校验防未来函数（P0-01：通过才标记 completed；失败已 mark_failed）
+        if self._run_lookahead_assert():
+            self.result.mark_complete()
 
         # 汇总告警：子账户预算不足导致信号落空的标的数（超大股票池提示换 mixed）
         if self._no_trade_symbols > 0:
@@ -496,9 +495,11 @@ class VectorizedBacktestEngine:
                 sub_initial,
             )
 
-        # T+1 持仓与成交：position[t] = target[t-1]
-        position = np.concatenate([[0.0], target_arr[:-1]])
-        exec_shares = np.diff(np.concatenate([[0.0], position]))
+        # T+1 订单：目标持仓每日递推，当日开盘执行的订单量 = 目标变动
+        # P0-10修复：持仓不得直接由 target 递推（未成交时记幽灵持仓、净值虚高）；
+        #   实际持仓在撮合后按 fill_qty 回写（见下方 signed_fill / act_after）。
+        target_pos = np.concatenate([[0.0], target_arr[:-1]])
+        exec_shares = np.diff(np.concatenate([[0.0], target_pos]))
         qty_abs = np.abs(exec_shares)
 
         # 统一撮合（市价单，T 日开盘成交；逻辑与 event 引擎一致）
@@ -518,6 +519,13 @@ class VectorizedBacktestEngine:
         fill_price = fill_result.fill_prices
         fill_qty = fill_result.fill_quantities
         traded = fill_qty > 0
+        # P0-10修复：按实际成交量回写持仓。原 position 全程由 target 递推，
+        # 而现金流/费用只对 traded 生效——停牌(volume=0)/涨停拦截导致买单未成交时，
+        # cashflow=0（未支出）但 position 仍记为已持有 → 幽灵持仓、净值虚高。
+        # 正确口径：position[t] = 当日开盘实际净成交累加（signed_fill），
+        # 全部成交时 signed_fill=exec_shares，cumsum 与原 target 递推逐点一致。
+        signed_fill = np.where(exec_shares > 0, fill_qty, -fill_qty)
+        position = np.cumsum(signed_fill)
         # 未成交的价格用 0 替代，避免 0*NaN=NaN 向下游传播（停牌/涨跌停未成交时 fill_price=NaN）
         fill_price_safe = np.where(traded, fill_price, 0.0)
 
@@ -686,10 +694,17 @@ class VectorizedBacktestEngine:
     # #H2修复：防未来函数校验
     # ─────────────────────────────────────────
 
-    def _run_lookahead_assert(self) -> None:
-        """回测结束统一校验防未来函数（失败记日志并附加到结果，不中断回测）。"""
+    def _run_lookahead_assert(self) -> bool:
+        """回测结束统一校验防未来函数（P0-01修复）。
+
+        本方法不读取任何行情数据，仅消费回测过程中按 t 时刻记录的 guard 快照。
+
+        Returns:
+            True 表示通过（或 guard 被显式关闭），调用方可标记 completed；
+            False 表示发现违规，本方法已将结果 mark_failed，调用方不得再标记 completed。
+        """
         if not self._lookahead_guard:
-            return
+            return True
         try:
             guard_stats = self._lookahead_guard.stats
             logger.info(
@@ -700,13 +715,19 @@ class VectorizedBacktestEngine:
             )
             self._lookahead_guard.assert_pass()
             logger.info("✅ 防未来函数校验通过：未发现未来函数违规")
+            return True
         except Exception as exc:
+            # P0-01修复：违规回测必须标记为失败，禁止以 completed / is_success=True 收尾
             logger.error("❌ 防未来函数校验未通过：%s", exc)
-            if self.result is not None and hasattr(self.result, "extra"):
-                self.result.extra["lookahead_guard_violations"] = (
-                    self._lookahead_guard.violations
-                )
-                self.result.extra["lookahead_guard_passed"] = False
+            if self.result is not None:
+                if hasattr(self.result, "extra"):
+                    self.result.extra["lookahead_guard_violations"] = (
+                        self._lookahead_guard.violations
+                    )
+                    self.result.extra["lookahead_guard_passed"] = False
+                if hasattr(self.result, "mark_failed"):
+                    self.result.mark_failed(f"防未来函数校验未通过: {exc}")
+            return False
 
     # ─────────────────────────────────────────
     # 组合聚合

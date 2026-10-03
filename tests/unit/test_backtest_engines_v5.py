@@ -591,3 +591,52 @@ class TestEngineConsistency:
             )
             assert trade.commission == pytest.approx(bd.total_commission, abs=1e-6)
             assert trade.slippage == pytest.approx(bd.slippage, abs=1e-6)
+
+
+# ═══════════════════════════════════════════
+#  P0-10回归：停牌日买单未成交 → 不得记幽灵持仓
+# ═══════════════════════════════════════════
+
+class TestP010GhostPosition:
+    """P0-10：持仓必须按实际成交量回写，未成交不得虚记持仓。
+
+    原缺陷：position 全程由 target 递推，而现金流只对 traded 生效——
+    停牌(volume=0)/涨跌停拦截导致买单未成交时，cashflow=0 但持仓仍记为已持有
+    → 幽灵持仓、净值虚高（污染参数扫描与生产阶段一筛选）。
+    """
+
+    def test_halted_buy_not_recorded_as_position(self) -> None:
+        """第3根(index=2)停牌：T+1买入1000股无法成交 → 无BUY成交、其后持仓市值恒为0"""
+        n = 8
+        closes = np.full(n, 10.0)
+        idx = pd.date_range("2024-01-01", periods=n, freq="B")
+        vol = np.full(n, 1_000_000.0)
+        vol[2] = 0.0  # 停牌日
+        df = pd.DataFrame(
+            {
+                "open": closes * 0.995,
+                "high": closes * 1.02,
+                "low": closes * 0.98,
+                "close": closes,
+                "volume": vol,
+            },
+            index=idx,
+        )
+        # target[1]=1000 → T+1 在 index=2 开盘买1000股（恰遇停牌）
+        targets = [0.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0]
+        engine = VectorizedBacktestEngine(
+            config=_make_config(), strategy=_TargetVecStrategy(targets),
+            data={"000001.SZ": df},
+        )
+        result = engine.run()
+        assert result.is_success
+
+        # 停牌日买单未成交 → 无任何 BUY 成交记录
+        buys = [t for t in result.trades if t.side == OrderSide.BUY.value]
+        assert buys == [], f"停牌日不应成交，实际BUY成交: {buys}"
+
+        # 停牌后任一日持仓市值必须为0（原缺陷会记为 1000股×10元=1万幽灵持仓）
+        for pt in result.equity_curve[2:]:
+            assert pt.position_value == pytest.approx(0.0, abs=1e-6), (
+                f"P0-10：{pt.date} 出现幽灵持仓市值 {pt.position_value}"
+            )
