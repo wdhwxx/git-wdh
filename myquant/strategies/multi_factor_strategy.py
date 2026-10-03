@@ -70,6 +70,11 @@ from myquant.indicators.factor_validator import (
     ic_weighted_weights,
     validate_factor_logic,
 )
+from myquant.indicators.tradability import (
+    TradabilityConfig,
+    filter_tradable,
+    rejected_summary,
+)
 from myquant.models.market_data import Bar
 from myquant.models.trade import OrderSide, OrderType, Position
 from myquant.strategies.base import (
@@ -185,6 +190,9 @@ class MultiFactorStrategy(StrategyBase):
         capital_base: float = 1_000_000.0,
         **params: Any,
     ):
+        # F-11：从透传参数提取可交易性过滤配置（不传给基类 super，默认关闭零变化）
+        tradability = params.pop("tradability", False)
+        tradability_params = params.pop("tradability_params", None)
         super().__init__(
             momentum_period=momentum_period,
             reversal_period=reversal_period,
@@ -338,6 +346,17 @@ class MultiFactorStrategy(StrategyBase):
                 "（报告记录口径，不静默）"
             )
 
+        # ── F-11 可交易性过滤配置（默认关闭=现有行为零变化）──
+        self.tradability = bool(tradability)
+        self._tradability_config: TradabilityConfig = TradabilityConfig.from_dict(
+            tradability_params
+        )
+        self._tradability_stats: Dict[str, Any] = {
+            "enabled": self.tradability,
+            "rejected": 0,
+            "by_symbol": {},
+        }
+
         # 因子序列最少bar数（取最大周期+1）
         self._min_factor_bars: int = max(
             momentum_period, reversal_period, volatility_period, vol_price_period
@@ -476,6 +495,19 @@ class MultiFactorStrategy(StrategyBase):
                 continue
             series = self._calc_factor_series(sym, df)
             if series is not None:
+                if self.tradability:
+                    # F-11：因子计算/选层前过滤不可交易标的。df 已截断到当前
+                    # bar 时点（防未来），filter_tradable 均额 rolling 仅用 <=t
+                    # 数据；取末尾行=当前时点可交易性，False 则剔除出候选
+                    mask, tstats = filter_tradable(df, self._tradability_config)
+                    if not bool(mask.iloc[-1]):
+                        self._tradability_stats["rejected"] += 1
+                        self._tradability_stats["by_symbol"][sym] = tstats
+                        logger.debug(
+                            f"[多因子调仓#{self._rebalance_count}] {sym} 不可交易，"
+                            f"剔除: {rejected_summary(tstats)}"
+                        )
+                        continue
                 factor_series[sym] = series
                 mc = self._calc_market_cap(df)
                 if mc is not None:
@@ -1131,6 +1163,16 @@ class MultiFactorStrategy(StrategyBase):
             "preprocess_mode": self.preprocess_mode,
             "industry_map_size": len(self.industry_map),
             "last_preprocess_report": preprocess_summary,
+            "tradability": self.tradability,
+            "tradability_rejected_total": self._tradability_stats["rejected"],
+            "tradability_config": {
+                "min_avg_amount": self._tradability_config.min_avg_amount,
+                "lookback_days": self._tradability_config.lookback_days,
+                "limit_pct": self._tradability_config.limit_pct,
+                "filter_suspend": self._tradability_config.filter_suspend,
+                "filter_liquidity": self._tradability_config.filter_liquidity,
+                "filter_limit": self._tradability_config.filter_limit,
+            },
             "current_pool": self.current_pool,
             "composite_scores": dict(self._composite_scores),
             "factor_snapshot": {

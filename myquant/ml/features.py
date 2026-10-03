@@ -60,6 +60,8 @@ except ImportError:  # pragma: no cover
     INDICATORS_AVAILABLE = False
     logger.warning("[ml] myquant.indicators 不可用，技术指标特征将跳过")
 
+from myquant.indicators.tradability import TradabilityConfig, filter_tradable
+
 try:
     from myquant.models.market_data import Bar
     BAR_AVAILABLE = True
@@ -236,6 +238,12 @@ class FeatureConfig:
         训练标签成本化模型（F-09；None=不成本化零变化）。
         开启后 generate_labels 的 forward_return 扣除双边往返成本率（与回测
         撮合层 sim_broker 段同口径），direction 用扣费后方向。
+    tradability : Optional[Dict[str, Any]]
+        F-11 可交易性过滤配置（None=不过滤零变化）。dict 为
+        TradabilityConfig 字段（min_avg_amount/lookback_days/limit_pct/
+        min_periods/filter_suspend/filter_liquidity/filter_limit）；
+        启用后 compute_features/generate_labels 对不可交易行置 NaN
+        （行级 mask 保对齐，build_dataset dropna 自动剔除）。
     """
     horizon: int = 5
     label_type: str = "return"
@@ -251,6 +259,7 @@ class FeatureConfig:
     )
     min_periods: int = 30
     cost: Optional[TradeCost] = None
+    tradability: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """序列化为可 JSON 持久化的 dict（cost 走 TradeCost.to_dict 枚举字符串化）"""
@@ -489,6 +498,27 @@ class FeatureEngine:
         df = df.reset_index(drop=True)
         return df
 
+    def _tradability_mask(self, df: pd.DataFrame) -> pd.Series:
+        """F-11 行级可交易性 mask（True=可交易，index 与 df 对齐）。
+
+        config.tradability 为 None 时返回全 True（现有行为零变化）；
+        启用时调用共享过滤函数 filter_tradable（与多因子策略同口径）。
+
+        【防未来函数】filter_tradable 内部均额 rolling 只消费 <=t 成交额，
+        一字板判定用 t 时点收盘后已得 OHLC/涨跌幅，无未来引用。
+
+        Args:
+            df: 中文列契约 DataFrame（_prepare_df 产物，时间升序）。
+
+        Returns:
+            pd.Series：bool 行级 mask（全部 True=不过滤）。
+        """
+        if self.config.tradability is None:
+            return pd.Series(True, index=df.index, dtype=bool)
+        cfg = TradabilityConfig.from_dict(self.config.tradability)
+        mask, _ = filter_tradable(df, cfg)
+        return mask.astype(bool)
+
     # ─────────────────────────────────────────────
     #  特征计算（严格因果）
     # ─────────────────────────────────────────────
@@ -547,6 +577,11 @@ class FeatureEngine:
         # 4. 窗口不足置 NaN（min_periods 之前）
         if self.config.min_periods > 0 and len(feat) > 0:
             feat.iloc[: self.config.min_periods] = np.nan
+
+        # 5. F-11 可交易性过滤：不可交易行特征置 NaN（行级 mask 保对齐，
+        #    build_dataset dropna 自动剔除；防未来见 _tradability_mask docstring）
+        if self.config.tradability is not None and not feat.empty:
+            feat.loc[~self._tradability_mask(df), :] = np.nan
 
         return feat
 
@@ -635,6 +670,10 @@ class FeatureEngine:
             labels["direction"] = (forward_return > 0).astype(float)
             labels.loc[forward_return.isna(), "direction"] = np.nan
         labels["horizon"] = horizon
+        # F-11 可交易性过滤：不可交易行标签置 NaN（保行对齐，build_dataset
+        # 中与特征一并 dropna；防未来见 _tradability_mask docstring）
+        if self.config.tradability is not None and not labels.empty:
+            labels.loc[~self._tradability_mask(df), ["forward_return", "direction"]] = np.nan
         return labels
 
     @property
