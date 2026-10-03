@@ -362,39 +362,9 @@ class MeanReversionStrategy(StrategyBase):
 
         self._signal_count += 1
 
-        # 卖出信号（含止损止盈）→ 市价单清仓
-        if signal.is_sell:
-            position = context.get_position(bar.symbol)
-            if position and position.quantity > 0:
-                order = self.create_order(
-                    symbol=bar.symbol,
-                    side=OrderSide.SELL,
-                    quantity=position.quantity,
-                    order_type=OrderType.MARKET,
-                    reason=signal.reason,
-                )
-                context.submit_order(order)
-            return [signal]
-
-        # 买入信号 → 市价单
-        if signal.is_buy:
-            cash = context.get_cash()
-            if cash > 0 and signal.price > 0:
-                amount = cash * self.max_position_pct
-                quantity = int(amount / signal.price / 100) * 100
-                quantity = max(0, quantity)
-                if quantity > 0:
-                    order = self.create_order(
-                        symbol=bar.symbol,
-                        side=OrderSide.BUY,
-                        quantity=quantity,
-                        order_type=OrderType.MARKET,
-                        price=signal.price,
-                        reason=signal.reason,
-                    )
-                    context.submit_order(order)
-            return [signal]
-
+        # P0-06修复：策略只产信号，订单由引擎统一执行
+        # （引擎路径经 RiskManager / LookaheadGuard / signal_id 幂等去重）；
+        # 不再在策略内 create_order + context.submit_order，避免双重报单并绕过风控。
         return [signal]
 
     # ═══════════════════════════════════════════════

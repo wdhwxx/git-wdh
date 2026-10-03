@@ -1588,6 +1588,9 @@ class LiveEngine(BaseEngine):
         if self._active_trading_date != today:
             self._active_trading_date = today
             self._day_start_assets = total_assets if total_assets > 0 else 0.0
+            # P1-01修复：跨日必须重置每日下单计数（此前只增不减，累计 max_daily_trades 后
+            # 连止损卖单都会被 RateLimitRule 永久拒绝，导致持仓无法退出——真钱红线）
+            self._order_count_today = 0
         current_price: Dict[str, float] = dict(self._last_prices)
         if bar is not None:
             current_price[bar.symbol] = float(bar.close)

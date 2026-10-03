@@ -397,13 +397,13 @@ class MultiFactorStrategy(StrategyBase):
             rebalance_signals = self._do_rebalance(bar, context)
             signals.extend(rebalance_signals)
 
-        # 统计信号数并提交订单
+        # 统计信号数
         non_hold = [s for s in signals if not s.is_hold]
         if non_hold:
             self._signal_count += len(non_hold)
-            for sig in non_hold:
-                self._submit_signal_order(sig, bar, context)
 
+        # P0-06修复：策略只产信号，不再 create_order + context.submit_order
+        # （_submit_signal_order 已删除）；订单由引擎统一执行，经风控/防未来/幂等链。
         return signals
 
     def generate_signal(self, bar: Bar, context: StrategyContext) -> Signal:
@@ -1056,43 +1056,6 @@ class MultiFactorStrategy(StrategyBase):
     # ═══════════════════════════════════════════════
     #  订单提交
     # ═══════════════════════════════════════════════
-
-    def _submit_signal_order(
-        self, signal: Signal, bar: Bar, context: StrategyContext,
-    ) -> None:
-        """将信号转换为订单并提交（止损止盈市价，调仓市价）"""
-        if signal.is_hold:
-            return
-
-        if signal.is_sell:
-            position = context.get_position(signal.symbol)
-            if position and position.quantity > 0:
-                order = self.create_order(
-                    symbol=signal.symbol,
-                    side=OrderSide.SELL,
-                    quantity=position.quantity,
-                    order_type=OrderType.MARKET,
-                    reason=signal.reason,
-                )
-                context.submit_order(order)
-            return
-
-        if signal.is_buy:
-            # 买入数量从 signal.extra 取（调仓时已计算）
-            quantity = signal.extra.get("quantity", 0)
-            if quantity <= 0 and signal.price > 0:
-                cash = context.get_cash()
-                quantity = int(cash * self.max_position_pct / signal.price / 100) * 100
-            if quantity > 0:
-                order = self.create_order(
-                    symbol=signal.symbol,
-                    side=OrderSide.BUY,
-                    quantity=quantity,
-                    order_type=OrderType.MARKET,
-                    price=signal.price,
-                    reason=signal.reason,
-                )
-                context.submit_order(order)
 
     # ═══════════════════════════════════════════════
     #  状态查询

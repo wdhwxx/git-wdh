@@ -347,65 +347,16 @@ class GridStrategy(StrategyBase):
     # ═══════════════════════════════════════════════
 
     def on_bar(self, bar: Bar, context: StrategyContext) -> List[Signal]:
-        """每根bar处理（生成信号 + 转换为限价订单）"""
+        """每根bar处理（仅返回信号；订单由引擎统一执行）"""
         signal = self.generate_signal(bar, context)
         if signal.is_hold:
             return []
 
         self._signal_count += 1
 
-        # 止损/止盈 → 市价单清仓
-        if signal.signal_type in (SignalType.STOP_LOSS, SignalType.TAKE_PROFIT):
-            position = context.get_position(bar.symbol)
-            if position and position.quantity > 0:
-                order = self.create_order(
-                    symbol=bar.symbol,
-                    side=OrderSide.SELL,
-                    quantity=position.quantity,
-                    order_type=OrderType.MARKET,
-                    reason=signal.reason,
-                )
-                context.submit_order(order)
-            return [signal]
-
-        # 网格买入 → 限价单（每格用 position_per_grid 比例资金）
-        if signal.is_buy:
-            cash = context.get_cash()
-            if cash > 0 and signal.price > 0:
-                amount = cash * self.position_per_grid
-                quantity = int(amount / signal.price / 100) * 100  # A股整手
-                quantity = max(0, quantity)
-                if quantity > 0:
-                    order = self.create_order(
-                        symbol=bar.symbol,
-                        side=OrderSide.BUY,
-                        quantity=quantity,
-                        order_type=OrderType.LIMIT,
-                        price=signal.price,
-                        reason=signal.reason,
-                    )
-                    context.submit_order(order)
-            return [signal]
-
-        # 网格卖出 → 限价单（卖出一份 = 持仓按份数均摊）
-        if signal.is_sell:
-            position = context.get_position(bar.symbol)
-            if position and position.quantity > 0:
-                units = max(1, self._position_units.get(bar.symbol, 1))
-                sell_qty = int(position.quantity / units / 100) * 100
-                sell_qty = max(100, sell_qty)  # 至少1手
-                sell_qty = min(sell_qty, position.quantity)
-                order = self.create_order(
-                    symbol=bar.symbol,
-                    side=OrderSide.SELL,
-                    quantity=sell_qty,
-                    order_type=OrderType.LIMIT,
-                    price=signal.price,
-                    reason=signal.reason,
-                )
-                context.submit_order(order)
-            return [signal]
-
+        # P0-06修复：策略只产信号，订单由引擎统一执行
+        # （引擎路径经 RiskManager / LookaheadGuard / signal_id 幂等去重）；
+        # 不再在策略内 create_order + context.submit_order，避免双重报单并绕过风控。
         return [signal]
 
     # ═══════════════════════════════════════════════

@@ -432,6 +432,22 @@ class TestRateLimitRule:
         result = rule.check(order, ctx)
         assert result.passed is True
 
+    def test_sell_bypasses_daily_limit_p101(self):
+        """P1-01回归：日下单数已达上限时，平仓/止损卖单（SELL）仍放行——持仓必须可退出"""
+        rule = RateLimitRule(max_orders_per_day=10, min_interval_seconds=0)
+        sell_order = _make_order(side=OrderSide.SELL)
+        ctx = _make_context(order_count_today=11, last_order_time=0)
+        result = rule.check(sell_order, ctx)
+        assert result.passed is True
+
+    def test_buy_still_rejected_at_limit_p101(self):
+        """P1-01回归：日下单数达上限时，开仓买单（BUY）仍被拒绝（原有语义不回退）"""
+        rule = RateLimitRule(max_orders_per_day=10, min_interval_seconds=0)
+        buy_order = _make_order(side=OrderSide.BUY)
+        ctx = _make_context(order_count_today=11, last_order_time=0)
+        result = rule.check(buy_order, ctx)
+        assert result.passed is False
+
 
 # ═══════════════════════════════════════════
 #  TestRiskManager - 风控管理器

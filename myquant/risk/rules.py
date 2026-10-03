@@ -373,7 +373,10 @@ class RateLimitRule(RiskRule):
         self.min_interval_seconds = min_interval_seconds
 
     def check(self, order: Order, context: RiskContext) -> RiskCheckResult:
-        if context.order_count_today >= self.max_orders_per_day:
+        # P1-01修复：每日最大下单数只约束开仓（BUY）；平仓/止损卖单（SELL）不受其限，
+        # 防止累计到上限后连止损卖单都被拒绝、持仓无法退出（真钱安全红线）。
+        # 最小间隔检查仍对所有方向生效。
+        if order.side == OrderSide.BUY and context.order_count_today >= self.max_orders_per_day:
             return self._reject(
                 f"今日下单数超限: {context.order_count_today}笔, 上限{self.max_orders_per_day}笔")
         now = time.time()
