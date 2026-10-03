@@ -436,10 +436,51 @@ def _max_drawdown(continuous_pred: Any, y_true: Any, label_type: str) -> float:
     return float(np.max(drawdown))
 
 
+def _net_strategy(
+    continuous_pred: Any, y_true: Any, label_type: str,
+) -> tuple[float, float]:
+    """策略毛收益与换手率（F-09 扣费后指标）。
+
+    策略收益序列 = 方向信号 × 真实标签（与 _max_drawdown 同口径）：
+    回归用预测收益符号（>0 做多）、分类用正类概率阈值 0.5（>0.5 做多）。
+
+    换手率（turnover）= 方向信号反转比例：|diff|/2 归一（1↔-1 计一次反转，
+    对应一次"卖出旧仓+买入新仓"的往返），取值范围 0~1。
+
+    【防未来函数】只消费验证集评估时点已得数据（铁律11）；
+    本行使用的数据截至验证集评估时刻。
+
+    Args:
+        continuous_pred: 连续预测（回归=预测收益；分类=正类概率）。
+        y_true: 真实标签（1D，回归=收益；分类=0/1）。
+        label_type: 标签类型（direction 用 0.5 阈值，其余用 0 阈值）。
+
+    Returns:
+        (gross_return, turnover)：毛策略累计收益；换手率（0~1）。
+        样本<2 或不可计算返回 (0.0, 0.0)（防御式）。
+    """
+    pred = np.asarray(continuous_pred, dtype=float).ravel()
+    y = np.asarray(y_true, dtype=float).ravel()
+    if pred.shape != y.shape or len(pred) < 2:
+        return 0.0, 0.0
+    mask = np.isfinite(pred) & np.isfinite(y)
+    pred, y = pred[mask], y[mask]
+    if len(pred) < 2:
+        return 0.0, 0.0
+    if label_type == "direction":
+        direction = np.where(pred > 0.5, 1.0, -1.0)
+    else:
+        direction = np.where(pred > 0.0, 1.0, -1.0)
+    gross = float(np.sum(direction * y))
+    turnover = float(np.mean(np.abs(np.diff(direction)) / 2.0))
+    return gross, turnover
+
+
 def evaluate_model(
     model: Any, X: Any, y: Any, label_type: str = "return",
     positive_label: int = 1, compute_ic: bool = False,
-    compute_drawdown: bool = False,
+    compute_drawdown: bool = False, compute_net: bool = False,
+    roundtrip_rate: float = 0.0,
 ) -> Dict[str, float]:
     """
     通用评估：按标签类型分发回归 / 分类指标
@@ -452,6 +493,12 @@ def evaluate_model(
     compute_drawdown=True（F-07）时追加 "max_drawdown"：基于方向信号
     （回归=预测收益符号 / 分类=正类概率 0.5 阈值）× 真实标签的策略累计
     净值最大回撤——常驻绩效字段，仅用验证集已得数据（防未来）。
+
+    compute_net=True（F-09）时追加 "turnover" 与 "net_return"：
+      毛策略累计收益 = Σ(方向信号×真实标签)；换手率 = 方向信号反转比例；
+      net_return = 毛策略累计收益 − 换手率 × roundtrip_rate（换手惩罚，
+      往返成本率与训练标签成本化同口径）——毛/净指标并存，供选型阶段
+      win_metric="net_return" 等扣费后指标比较。
     """
     X = np.asarray(X, dtype=float)
     y = np.asarray(y, dtype=float).ravel()
@@ -477,6 +524,13 @@ def evaluate_model(
             metrics["ic"] = 0.0  # 不可计算（方差为0等）记 0，避免缺失键
     if compute_drawdown:
         metrics["max_drawdown"] = _max_drawdown(cont, y, label_type)
+    if compute_net:
+        if roundtrip_rate < 0:
+            raise ValueError(
+                f"roundtrip_rate 不能为负: {roundtrip_rate}")
+        gross, turnover = _net_strategy(cont, y, label_type)
+        metrics["turnover"] = turnover
+        metrics["net_return"] = gross - turnover * roundtrip_rate
     return metrics
 
 
@@ -903,12 +957,20 @@ class TrainingPipeline:
         model_obj.fit(dataset.X.values[train_idx], dataset.y.values[train_idx])
 
         # 5. 验证集评估（只用训练之后的数据；enable_win_gate 时追加 IC；
-        #    F-07：compute_drawdown=True 常驻绩效 max_drawdown 总在验证集上计算）
+        #    F-07：compute_drawdown=True 常驻绩效 max_drawdown 总在验证集上计算；
+        #    F-09：成本化开启（FeatureConfig.cost）时 compute_net=True，追加
+        #    turnover / net_return 扣费后指标，供选型 win_metric="net_return"）
+        roundtrip = (
+            eff_config.cost.roundtrip_rate()
+            if eff_config.cost is not None else 0.0
+        )
         metrics = evaluate_model(
             model_obj, dataset.X.values[valid_idx],
             dataset.y.values[valid_idx], eff_label,
             compute_ic=enable_win_gate,
-            compute_drawdown=True)
+            compute_drawdown=True,
+            compute_net=eff_config.cost is not None,
+            roundtrip_rate=roundtrip)
 
         # 6. 训练时间范围（防未来：train_end_time 记录训练数据截止）
         train_ts = [dataset.timestamps[int(i)] for i in train_idx]

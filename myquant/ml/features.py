@@ -48,6 +48,8 @@ import pandas as pd
 
 from myquant.core.logger import get_logger
 
+from myquant.models.backtest import CommissionModel, CommissionType, SlippageModel
+
 logger = get_logger("ml.features")
 
 try:
@@ -109,6 +111,96 @@ DEFAULT_DERIVED_FEATURES: List[str] = ["sma_gap", "atr_norm", "bb_width"]
 
 
 # ═══════════════════════════════════════════════
+#  训练标签成本模型（F-09 训练目标纳入交易成本）
+# ═══════════════════════════════════════════════
+
+@dataclass
+class TradeCost:
+    """
+    训练标签成本化模型（F-09 训练目标纳入交易成本）
+
+    组合复用回测撮合层成本模型（CommissionModel/SlippageModel，同一类同一参数），
+    保证训练标签口径与回测撮合层成本参数一致（验收：标签口径 = config sim_broker 段）。
+
+    roundtrip_rate() 返回一笔「买入→卖出」往返的交易成本率（按成交金额比例）：
+      佣金（买卖双向） + 印花税（仅卖出） + 过户费（买卖双向） + 滑点（买卖双向）
+      = 0.0002*2 + 0.001 + 0.00001*2 + 2/10000*2 = 0.00182（A股写实默认口径）
+
+    最低佣金（min_commission，5 元）是撮合层的金额维度约束；标签层是收益率维度、
+    无单笔金额信息，按费率近似（与 config_builder 同源参数，口径对拍测试锁定）。
+
+    【防未来函数】成本率是配置常量、不来自行情数据，非时序计算；
+    本行使用的数据截至 t 时刻（成本化仅做常数减法）。
+    """
+
+    commission: CommissionModel
+    slippage: SlippageModel
+
+    def __post_init__(self) -> None:
+        """防御式校验：佣金/印花税/过户费/滑点必须非负"""
+        if self.commission.buy_rate < 0 or self.commission.sell_rate < 0:
+            raise ValueError("佣金费率不能为负")
+        if self.commission.stamp_tax < 0 or self.commission.transfer_fee < 0:
+            raise ValueError("印花税/过户费费率不能为负")
+        if self.slippage.fixed_bps < 0:
+            raise ValueError("滑点基点不能为负")
+
+    def roundtrip_rate(self) -> float:
+        """双边往返成本率（按成交金额比例，一买一卖）"""
+        slip = self.slippage.fixed_bps / 10000.0
+        return (
+            self.commission.buy_rate
+            + self.commission.sell_rate
+            + self.commission.stamp_tax
+            + 2.0 * self.commission.transfer_fee
+            + 2.0 * slip
+        )
+
+    @classmethod
+    def from_sim_broker_cfg(cls, cfg: Dict[str, Any]) -> "TradeCost":
+        """从 config 的 sim_broker 段构造（与回测撮合层同口径，见 config_builder）"""
+        slippage_mode = cfg.get("slippage_mode", "ratio")
+        slippage_value = cfg.get("slippage_value", 0.0002)
+        # ratio 模式：slippage_value 是比例（如 0.0002=万2），转为基点（与 config_builder 一致）
+        fixed_bps = (
+            slippage_value * 10000.0 if slippage_mode == "ratio" else slippage_value
+        )
+        return cls(
+            commission=CommissionModel(
+                type=CommissionType.RATIO,
+                buy_rate=cfg.get("commission_rate", 0.0002),
+                sell_rate=cfg.get("commission_rate", 0.0002),
+                min_commission=cfg.get("min_commission", 5.0),
+                stamp_tax=cfg.get("stamp_tax_rate", 0.001),
+                transfer_fee=cfg.get("transfer_fee_rate", 0.00001),
+            ),
+            slippage=SlippageModel(type="fixed_bps", fixed_bps=fixed_bps),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """序列化为可 JSON 持久化的 dict（枚举转字符串）"""
+        commission = asdict(self.commission)
+        commission["type"] = commission["type"].value
+        return {"commission": commission, "slippage": asdict(self.slippage)}
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "TradeCost":
+        """从 dict 反序列化（缺失字段用模型默认值，兼容旧数据）"""
+        cdata = data.get("commission") or {}
+        if "type" in cdata and isinstance(cdata["type"], str):
+            cdata = {**cdata, "type": CommissionType(cdata["type"])}
+        cknown = {f.name for f in CommissionModel.__dataclass_fields__.values()}
+        sknown = {f.name for f in SlippageModel.__dataclass_fields__.values()}
+        return cls(
+            commission=CommissionModel(
+                **{k: v for k, v in cdata.items() if k in cknown}),
+            slippage=SlippageModel(
+                **{k: v for k, v in (data.get("slippage") or {}).items()
+                   if k in sknown}),
+        )
+
+
+# ═══════════════════════════════════════════════
 #  FeatureConfig 特征配置
 # ═══════════════════════════════════════════════
 
@@ -140,6 +232,10 @@ class FeatureConfig:
         派生特征开关（sma_gap/atr_norm/bb_width）
     min_periods : int
         特征最小有效行数（窗口不足置 NaN）
+    cost : Optional[TradeCost]
+        训练标签成本化模型（F-09；None=不成本化零变化）。
+        开启后 generate_labels 的 forward_return 扣除双边往返成本率（与回测
+        撮合层 sim_broker 段同口径），direction 用扣费后方向。
     """
     horizon: int = 5
     label_type: str = "return"
@@ -154,16 +250,23 @@ class FeatureConfig:
         default_factory=lambda: list(DEFAULT_DERIVED_FEATURES)
     )
     min_periods: int = 30
+    cost: Optional[TradeCost] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        """序列化为可 JSON 持久化的 dict"""
-        return asdict(self)
+        """序列化为可 JSON 持久化的 dict（cost 走 TradeCost.to_dict 枚举字符串化）"""
+        d = asdict(self)
+        if self.cost is not None:
+            d["cost"] = self.cost.to_dict()
+        return d
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "FeatureConfig":
-        """从 dict 反序列化（缺失字段用默认值）"""
+        """从 dict 反序列化（缺失字段用默认值；cost 嵌套 dict 转 TradeCost）"""
         known = {f.name for f in cls.__dataclass_fields__.values()}
-        return cls(**{k: v for k, v in data.items() if k in known})
+        kwargs = {k: v for k, v in data.items() if k in known}
+        if isinstance(kwargs.get("cost"), dict):
+            kwargs["cost"] = TradeCost.from_dict(kwargs["cost"])
+        return cls(**kwargs)
 
     def to_json(self) -> str:
         """序列化为 JSON 字符串（训练配置持久化）"""
@@ -508,7 +611,10 @@ class FeatureEngine:
 
         【防未来函数】标签引用未来数据，但仅用于训练目标：
           - return 型：forward_return = close.shift(-horizon)/close - 1
-          - direction 型：(forward_return > 0) 二分类
+            配置 cost（F-09）时扣双边往返成本率：毛收益 − roundtrip_rate
+          - direction 型：(forward_return > 0) 二分类（cost 开启时用扣费后方向）
+        成本率是配置常量、非时序数据（本行使用的数据截至 t 时刻）；成本化只做
+        常数减法，不引入任何未来行情引用。
         标签列在 build_dataset 中与特征对齐，无标签尾部行被丢弃（不参与训练）。
         推理阶段绝不使用标签列。
         """
@@ -519,6 +625,10 @@ class FeatureEngine:
         label_type = label_type if label_type is not None else self.config.label_type
         close = df[self.config.price_col].astype(float)
         forward_return = close.shift(-horizon) / close - 1.0
+        cost = self.config.cost
+        if cost is not None:
+            # F-09 训练目标纳入交易成本：扣双边往返成本率（一买一卖，与撮合层同口径）
+            forward_return = forward_return - cost.roundtrip_rate()
         labels = pd.DataFrame(index=df.index)
         labels["forward_return"] = forward_return
         if label_type == "direction":
