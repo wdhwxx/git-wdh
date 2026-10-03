@@ -472,8 +472,10 @@ class BlacklistRule(RiskRule):
         self.blacklist.discard(symbol)
 
     def check(self, order: Order, context: RiskContext) -> RiskCheckResult:
-        if order.symbol in self.blacklist:
-            return self._reject(f"标的在黑名单中: {order.symbol}")
+        # P1-18：黑名单只禁止买入/新开仓，允许卖出平仓（否则持仓标的入黑名单即困仓无法卖出）
+        from myquant.models.trade import OrderSide
+        if order.symbol in self.blacklist and order.side == OrderSide.BUY:
+            return self._reject(f"标的在黑名单中（禁止买入）: {order.symbol}")
         return self._pass()
 
 
@@ -617,8 +619,11 @@ class RiskRuleLibrary:
         default_library = create_default_library()
         for rule_name, rule_config in config.items():
             if rule_name not in RULE_REGISTRY:
-                logger.warning(f"[risk] 未知规则，跳过: {rule_name}")
-                continue
+                # P1-18：未知规则名必须硬失败，不允许静默跳过（否则配置拼错=无任何风控）
+                raise ValueError(
+                    f"[risk] 未知风控规则: {rule_name!r}，不在注册表中，"
+                    f"配置拼错必须显式暴露，禁止静默跳过（可用规则: {sorted(RULE_REGISTRY)}）"
+                )
             rule_class = RULE_REGISTRY[rule_name]
             enabled = rule_config.get("enabled", True)
             params = {k: v for k, v in rule_config.items() if k != "enabled"}

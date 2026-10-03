@@ -50,6 +50,18 @@ from myquant.ml.model_registry import ModelRegistry, ModelVersion
 logger = get_logger("ml.inference_service")
 
 
+def _dates_to_epoch(series: Any) -> List[float]:
+    """P1-18：processed「日期」列（int/str YYYYMMDD）转 unix 秒列表。"""
+    out: List[float] = []
+    for v in series:
+        s = str(int(float(v))) if not isinstance(v, str) else v
+        try:
+            out.append(datetime.strptime(s[:8], "%Y%m%d").timestamp())
+        except ValueError:
+            continue
+    return out
+
+
 # ═══════════════════════════════════════════════
 #  异常类
 # ═══════════════════════════════════════════════
@@ -286,6 +298,9 @@ class InferenceService:
         """
         if isinstance(data, pd.DataFrame) and "timestamp" in data.columns and len(data):
             return data["timestamp"].astype(float).sort_values().tolist()
+        # P1-18：processed 中文列 DataFrame 无 timestamp，识别「日期」(int YYYYMMDD) 列
+        if isinstance(data, pd.DataFrame) and "日期" in data.columns and len(data):
+            return _dates_to_epoch(data["日期"])
         if isinstance(data, (list, tuple)) and data:
             ts = [getattr(b, "timestamp", None) for b in data]
             if all(t is not None for t in ts):
@@ -297,6 +312,9 @@ class InferenceService:
         """输入最新 bar 时间戳（无则 None）"""
         if isinstance(data, pd.DataFrame) and "timestamp" in data.columns and len(data):
             return float(data["timestamp"].astype(float).max())
+        if isinstance(data, pd.DataFrame) and "日期" in data.columns and len(data):
+            ts = _dates_to_epoch(data["日期"])
+            return max(ts) if ts else None
         if isinstance(data, (list, tuple)) and data:
             t = getattr(data[-1], "timestamp", None)
             return float(t) if t is not None else None

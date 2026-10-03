@@ -2428,3 +2428,23 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
   预热重放绕过时间校验、工厂层无confirm门、ML报告期守卫误伤。
 
 【验证】py_compile PASS；broker相关39 passed；新断言17 passed；pytest全量2061 passed/0 failed（215s）。
+
+124. ✨【回写记录·2026-10-04·P1-18 非真钱子项批量修复（P1批次第11项）】
+
+【P1-18 补单连带——按指令：真钱相关预留备注，其余全部修掉】
+本轮实际修复（非真钱、有断言）：
+- 黑名单禁卖：BlacklistRule.check 只拒 BUY，SELL 平仓放行（消除困仓）；
+- 未知规则名静默跳过：from_config 对未注册规则名 raise ValueError（配置拼错=零风控，硬失败）；
+- ML报告期守卫误伤：_extract/_latest_timestamp 识别 processed 中文「日期」列(YYYYMMDD→epoch)，
+  不再退化为 list(range(n)) 导致 strict=True 必抛 InferenceError。
+单测 test_p118_non_cash_fixes 3 用例。
+
+【真钱相关子项——按要求预留备注，待开通真机券商后人工核验】
+- 补发绕过风控/占位/统计；强平假成功(executed=True但不下单)；snapshot损坏静默空仓；
+  工厂层无confirm门；预热重放绕过时间校验用假价真下单；在途买入资金不冻结；
+  LIVE账本不权威(sync_from_broker无调用者)；check_positions回撤熔断无调用者；
+  巡检failover/auto_reconnect无生产调用；T+1结算无调用者(SIM证据链)；
+  涨跌停规则在LIVE层空转(交易所兜底)。
+以上均与真钱下单/资金/主备切换直接相关，列待真机开通后逐项验证与接线。
+
+【验证】py_compile PASS；risk/ml相关278 passed；新断言3 passed；pytest全量2064 passed/0 failed（216s）。
