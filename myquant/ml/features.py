@@ -40,6 +40,7 @@ features.py - 特征工程（因子计算 + 标签生成）
 from __future__ import annotations
 
 import json
+from collections import deque
 from dataclasses import dataclass, field, asdict
 from typing import Any, Dict, List, Optional
 
@@ -822,6 +823,17 @@ class FeatureEngine:
         row = feats.iloc[-1]
         return {k: (None if pd.isna(v) else float(v)) for k, v in row.items()}
 
+    def create_incremental_session(self) -> "IncrementalFeatureSession":
+        """创建有状态增量特征会话（F-14）。
+
+        实盘逐 bar 场景：首次 update(全量历史) warmup，之后每来新 bar
+        update(历史+新bar) 只做 O(1)/O(窗口) 增量，单 bar 耗时不随历史增长。
+
+        Returns:
+            IncrementalFeatureSession 实例。
+        """
+        return IncrementalFeatureSession(self)
+
     # ─────────────────────────────────────────────
     #  防未来断言
     # ─────────────────────────────────────────────
@@ -873,6 +885,222 @@ class FeatureEngine:
         return True
 
 
+# ═══════════════════════════════════════════════════════════
+#  增量特征会话（F-14）：有状态 warmup + push(new_bar)，O(1)/O(窗口)
+# ═══════════════════════════════════════════════════════════
+
+# 基类 update 方法引用（用于检测子类是否真正实现了流式 update）
+_BASE_INDICATOR_UPDATE = None
+if INDICATORS_AVAILABLE:
+    try:
+        from myquant.indicators import IndicatorBase as _IB
+        _BASE_INDICATOR_UPDATE = _IB.update
+    except ImportError:  # pragma: no cover
+        _BASE_INDICATOR_UPDATE = None
+
+
+class IncrementalFeatureSession:
+    """有状态增量特征会话（F-14）。
+
+    解决问题：原 compute_incremental 每次对全量历史 compute_features 重算，
+    耗时随历史长度 O(N) 线性增长。本会话：
+      - 首次 update(df)：回放全量历史，逐行喂入各指标流式 update() 建立内部状态，
+        价格衍生特征落入 deque 环形缓冲；返回最后一行特征。
+      - 之后 update(df_grown)：只处理新增行（df 比上次多的尾部），每个指标 O(1)/O(窗口)，
+        单 bar 耗时不随历史长度增长。
+
+    防未来函数（铁律 11）：
+      - 流式 update(bar) 传入的 bar 视为已收盘 K 线，结果在该 bar 收盘后可用；
+      - deque 只保留最近 max_window+2 根收盘价，计算尾部特征仅用 <=t 数据；
+      - 不生成任何标签（无 forward_return 未来引用）。
+
+    降级兜底（零变化纪律）：
+      - 任一已配置指标未实现流式 update()（沿用基类 NotImplementedError），
+        会话自动置 streaming_ok=False，后续每次 update 回退全量 compute_features 重算——
+        宁可慢，不可错。
+
+    Usage:
+        engine = FeatureEngine(cfg)
+        sess = IncrementalFeatureSession(engine)
+        feats0 = sess.update(df_history)           # warmup（含全量历史）
+        feats1 = sess.update(df_history + new_bar) # 仅新 bar，O(1)
+    """
+
+    def __init__(self, engine: "FeatureEngine"):
+        """
+        Args:
+            engine: 已配置好的 FeatureEngine（复用其 config 与 _prepare_df）。
+        """
+        self.engine = engine
+        self.config = engine.config
+
+        # 收盘价环形缓冲（价格衍生特征尾部 O(窗口) 计算用）
+        need = 1
+        for lst in (self.config.return_windows,
+                    self.config.rolling_windows,
+                    self.config.momentum_windows):
+            if lst:
+                need = max(need, max(lst))
+        self._closes: deque[float] = deque(maxlen=need + 2)
+
+        # 流式指标实例：[indicator, prefix, out_cols, last_return_dict]
+        self._indicators: List[Any] = []
+        self._streaming_ok = True
+        if INDICATORS_AVAILABLE:
+            for cfg in self.config.indicator_configs:
+                name = cfg["name"]
+                params = cfg.get("params", {})
+                prefix = cfg.get("prefix", name)
+                ind = get_indicator(name, **params)
+                # 检测是否真正实现了 update()（仍为基类方法 → 未实现）
+                if _BASE_INDICATOR_UPDATE is not None and type(ind).update is _BASE_INDICATOR_UPDATE:
+                    self._streaming_ok = False
+                self._indicators.append(
+                    [ind, prefix, list(getattr(ind, "output_columns", []) or []), {}]
+                )
+
+        # 已喂入行数（用于 diff 新增尾部）
+        self._last_len: int = 0
+        self._ready: bool = False
+
+    # ─────────────────────────────────────────
+    #  价格衍生特征（deque 尾部，O(窗口)）
+    # ─────────────────────────────────────────
+    def _price_features_tail(self) -> Dict[str, float]:
+        """从收盘价 deque 计算最后一行的价格衍生特征（全部 trailing）。
+
+        【防未来】只用 deque 内 <=t 的收盘价。
+        """
+        c = list(self._closes)
+        n = len(c)
+        out: Dict[str, float] = {}
+        if n == 0:
+            return out
+        last = c[-1]
+        for w in self.config.return_windows:
+            out[f"return_{w}"] = last / c[-1 - w] - 1.0 if n > w else float("nan")
+        out["log_return_1"] = (
+            float(np.log(last / c[-2])) if n >= 2 else float("nan")
+        )
+        for w in self.config.rolling_windows:
+            if n >= w:
+                win = c[-w:]
+                out[f"rolling_mean_{w}"] = float(np.mean(win))
+                out[f"rolling_std_{w}"] = float(np.std(win, ddof=1))
+                out[f"rolling_max_{w}"] = float(np.max(win))
+                out[f"rolling_min_{w}"] = float(np.min(win))
+            else:
+                for k in ("mean", "std", "max", "min"):
+                    out[f"rolling_{k}_{w}"] = float("nan")
+        for w in self.config.momentum_windows:
+            out[f"momentum_{w}"] = last / c[-1 - w] - 1.0 if n > w else float("nan")
+        return out
+
+    def _compose_row(self, last_close: float) -> Dict[str, Any]:
+        """组合价格衍生 + 指标流式末值 + 派生特征，NaN→None（JSON 安全）。"""
+        out = self._price_features_tail()
+        # 指标流式末值（key 加 prefix，与 compute_features 列名一致）
+        for _ind, prefix, out_cols, last_ret in self._indicators:
+            for oc in out_cols:
+                v = last_ret.get(oc, float("nan"))
+                out[f"{prefix}_{oc}"] = v
+        # 派生特征（与 _compute_derived 同口径）
+        for name in self.config.derived_features:
+            try:
+                if (name == "sma_gap" and "sma_20_sma" in out
+                        and "sma_60_sma" in out
+                        and not pd.isna(out.get("sma_20_sma"))
+                        and not pd.isna(out.get("sma_60_sma"))):
+                    out["sma_gap"] = out["sma_20_sma"] / out["sma_60_sma"] - 1.0
+                elif (name == "atr_norm" and "atr_14_atr" in out
+                      and not pd.isna(out.get("atr_14_atr"))
+                      and last_close != 0):
+                    out["atr_norm"] = out["atr_14_atr"] / last_close
+                elif (name == "bb_width" and "bb_upper" in out
+                      and "bb_lower" in out and "bb_mid" in out
+                      and not pd.isna(out.get("bb_mid"))
+                      and out.get("bb_mid") not in (0, 0.0)):
+                    out["bb_width"] = (
+                        out["bb_upper"] - out["bb_lower"]
+                    ) / out["bb_mid"]
+            except Exception as e:  # pragma: no cover
+                logger.warning("[ml] 派生特征 %s 增量计算失败: %s", name, e)
+        # NaN → None
+        return {k: (None if pd.isna(v) else float(v)) for k, v in out.items()}
+
+    # ─────────────────────────────────────────
+    #  主入口：update（自动区分 warmup / push）
+    # ─────────────────────────────────────────
+    def update(self, data: Any) -> Dict[str, Any]:
+        """喂入数据（全量历史或历史+新 bar），返回最新 bar 特征 dict。
+
+        首次调用自动 warmup；后续调用自动 diff 新增尾部行做 O(1) push。
+
+        Args:
+            data: Bar 列表 / DataFrame（中文列契约，时间升序）。
+
+        Returns:
+            dict：最新 bar 特征（NaN→None，JSON 安全）。
+        """
+        df = self.engine._prepare_df(data)
+        if df.empty:
+            return {}
+
+        # 降级：任一指标无流式 update → 每次全量重算（零变化兜底）
+        if not self._streaming_ok:
+            feats = self.engine.compute_features(df)
+            self._last_len = len(df)
+            if feats.empty:
+                return {}
+            row = feats.iloc[-1]
+            return {k: (None if pd.isna(v) else float(v)) for k, v in row.items()}
+
+        new_start = self._last_len if self._ready else 0
+        # 数据变短/重置：强制 warmup
+        if len(df) < self._last_len:
+            new_start = 0
+            self._closes.clear()
+            for tup in self._indicators:
+                tup[0].reset()
+                tup[3] = {}
+
+        for i in range(new_start, len(df)):
+            row = df.iloc[i]
+            self._closes.append(float(row[self.config.price_col]))
+            bar = row.to_dict()
+            degraded = False
+            for ind, _prefix, _out_cols, last_ret in self._indicators:
+                try:
+                    last_ret.update(ind.update(bar))
+                except NotImplementedError:
+                    # 运行期才暴露的未实现 → 降级全量（保险）
+                    self._streaming_ok = False
+                    degraded = True
+                    break
+            if degraded:
+                feats = self.engine.compute_features(df)
+                self._last_len = len(df)
+                if feats.empty:
+                    return {}
+                r = feats.iloc[-1]
+                return {k: (None if pd.isna(v) else float(v)) for k, v in r.items()}
+
+        self._last_len = len(df)
+        self._ready = True
+        last_close = float(df.iloc[-1][self.config.price_col])
+        return self._compose_row(last_close)
+
+    @property
+    def streaming_ok(self) -> bool:
+        """当前是否走流式增量（False=已降级全量重算）。"""
+        return self._streaming_ok
+
+    @property
+    def rows_fed(self) -> int:
+        """已喂入会话的行数。"""
+        return self._last_len
+
+
 __all__ = [
     "FeatureConfig",
     "FeatureEngine",
@@ -880,4 +1108,5 @@ __all__ = [
     "bars_to_df",
     "DEFAULT_INDICATOR_CONFIGS",
     "DEFAULT_DERIVED_FEATURES",
+    "IncrementalFeatureSession",
 ]

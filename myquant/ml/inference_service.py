@@ -35,6 +35,7 @@ inference_service.py - 批量/实时预测服务
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -162,11 +163,24 @@ class InferenceService:
         self,
         registry: Optional[ModelRegistry] = None,
         feature_config: Optional[FeatureConfig] = None,
+        result_cache_ttl_ms: float = 0.0,
     ):
+        """
+        Args:
+            registry: 模型注册中心（默认新建）。
+            feature_config: 特征配置（默认 FeatureConfig()）。
+            result_cache_ttl_ms: F-14 推理结果短 TTL 缓存（毫秒）；
+                默认 0.0=关闭（零变化）。>0 时，同 (模型,版本,最新时间戳) 在 TTL 内
+                重复调用 predict_realtime 直接复用上次结果，不重复特征+预测。
+        """
         self.registry = registry if registry is not None else ModelRegistry()
         self.feature_config = feature_config if feature_config is not None else FeatureConfig()
+        # F-14 结果短 TTL 缓存：{(model_name,version,latest_ts): (expiry_epoch, InferenceResult)}
+        self._result_cache_ttl = max(0.0, float(result_cache_ttl_ms)) / 1000.0
+        self._result_cache: Dict[Tuple[str, Optional[int], float], Tuple[float, InferenceResult]] = {}
         logger.info(
-            f"[ml] 推理服务初始化：label_type={self.feature_config.label_type}")
+            f"[ml] 推理服务初始化：label_type={self.feature_config.label_type}, "
+            f"result_cache_ttl_ms={result_cache_ttl_ms}")
 
     # ─────────────────────────────────────────────
     #  模型加载 / 查询
@@ -420,6 +434,20 @@ class InferenceService:
         InferenceResult : 最新 bar 预测（n_samples=1）
         """
         model, meta = self.load_model(model_name, version)
+
+        # F-14 短 TTL 结果缓存：同 (模型,版本,最新时间戳) 在 TTL 内复用
+        latest_ts = self._latest_timestamp(data)
+        if self._result_cache_ttl > 0 and latest_ts is not None:
+            ckey = (model_name, meta.version, float(latest_ts))
+            hit = self._result_cache.get(ckey)
+            if hit is not None:
+                expiry, cached = hit
+                if time.time() < expiry:
+                    logger.debug("[ml] 推理结果缓存命中: %s", ckey)
+                    return cached
+                else:
+                    self._result_cache.pop(ckey, None)
+
         engine, _cfg = self._build_engine(meta, feature_config)
         # 防未来：增量特征（trailing），与训练最后一行逐列一致
         features = engine.compute_incremental(data, lookback=lookback)
@@ -449,7 +477,7 @@ class InferenceService:
             self._check_time_window(float(latest_ts), meta, strict)
 
         label_type = "direction" if meta.label_column == "direction" else "return"
-        return InferenceResult(
+        result = InferenceResult(
             predictions=pred,
             timestamps=[latest_ts] if latest_ts is not None else [],
             model_name=meta.model_name, version=meta.version,
@@ -457,6 +485,11 @@ class InferenceService:
             feature_columns=train_cols, train_end_time=meta.train_end_time,
             probabilities=proba, source=meta.source,
         )
+        # F-14 写回结果缓存
+        if self._result_cache_ttl > 0 and latest_ts is not None:
+            ckey = (model_name, meta.version, float(latest_ts))
+            self._result_cache[ckey] = (time.time() + self._result_cache_ttl, result)
+        return result
 
 
 __all__ = [
