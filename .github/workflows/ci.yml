@@ -104,10 +104,13 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: 安装项目（dev + benchmark + gui 依赖）
+      - name: 安装项目（dev + benchmark + gui + web 依赖）
         # P2-D12-001 整改：补 gui extras —— test_paper_run_dialog.py 依赖 PySide6，
         # 缺此组 CI 在收集阶段即失败（该文件 L19 已设 QT_QPA_PLATFORM=offscreen）
-        run: pip install -e ".[dev,benchmark,gui]"
+        # P0-08 整改：补 web extras —— tests/unit/test_api_middleware.py 顶层 import fastapi
+        # （myquant/api/routes.py 依赖），缺 web 组 test job 收集期 ModuleNotFoundError，
+        # 并连带 needs:[lint,test] 的 backtest-smoke/docker-build/live-config-check/data-clean 4 job 全阻塞
+        run: pip install -e ".[dev,benchmark,gui,web]"
 
       - name: "关键工具版本断言（L5修复: 依赖未锁定，防版本漂移导致基线失真）"
         run: |

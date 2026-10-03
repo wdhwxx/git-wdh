@@ -92,7 +92,9 @@ services:
         condition: service_healthy
         required: false    # db 为可选（profile: postgres），默认 sqlite 模式无需等待
     # 实盘服务默认启动实盘入口（模拟模式）
-    command: ["python", "run_实盘入口.py", "--mode", "simulate"]
+    # P0-09修复：--mode 合法枚举为 monitor/paper/sim/live，原 "simulate" 为非法值
+    # （argparse 退出码2，容器启动即崩），改为 "sim"。
+    command: ["python", "run_实盘入口.py", "--mode", "sim"]
     healthcheck:
       # M10修复: 实盘入口不提供 HTTP 服务，原 curl 8000/health 永远失败；
       # 改为进程存活检查（业务进程常驻即健康）
