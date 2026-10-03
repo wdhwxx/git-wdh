@@ -270,14 +270,14 @@ def load_market_data(
         data_dir = str(Path(find_project_root()) / data_dir)
     provider = HistoricalDataProvider(
         processed_dir=data_dir,
-        default_adjust=data_cfg.get("adjust", "hfq"),
+        default_adjust=data_cfg.get("adjust", "raw"),
         data_format=data_cfg.get("data_format", "parquet"),
     )
     data = provider.load_multiple(
         symbols,
         start_date=start_date or None,
         end_date=end_date or None,
-        adjust=data_cfg.get("adjust", "hfq"),
+        adjust=data_cfg.get("adjust", "raw"),
     )
     if not data:
         raise RuntimeError("全部标的数据加载失败（processed 目录为空或无有效行情）")

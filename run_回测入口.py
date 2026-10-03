@@ -294,7 +294,7 @@ def run_backtest(args: argparse.Namespace) -> int:
             data_dir = str(project_root / data_dir)
         data_provider = HistoricalDataProvider(
             processed_dir=data_dir,
-            default_adjust=data_cfg.get("adjust", "hfq"),
+            default_adjust=data_cfg.get("adjust", "raw"),
             data_format=data_cfg.get("data_format", "parquet"),
         )
         logger.info(f"数据提供器初始化: {data_provider}")

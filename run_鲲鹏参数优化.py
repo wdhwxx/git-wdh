@@ -133,10 +133,10 @@ def load_data(symbols: List[str], start_date: str = START_DATE,
               end_date: str = END_DATE) -> Dict[str, Any]:
     """加载真实行情（统一 end_date 防未来函数）。"""
     provider = HistoricalDataProvider(
-        processed_dir=PROCESSED_DIR, default_adjust="hfq", data_format="parquet",
+        processed_dir=PROCESSED_DIR, default_adjust="raw", data_format="parquet",
     )
     data = provider.load_multiple(
-        symbols, start_date=start_date, end_date=end_date, adjust="hfq",
+        symbols, start_date=start_date, end_date=end_date, adjust="raw",
     )
     missing = [s for s in symbols if s not in data]
     if missing:

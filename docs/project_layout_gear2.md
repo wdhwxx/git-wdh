@@ -2399,3 +2399,18 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
   test_存量损坏拒绝写入保护全史——损坏文件返回 None 且字节不变。
 
 【验证】py_compile PASS；相关 25 passed；pytest 全量 2060 passed/2 skipped/0 failed（216s）。
+
+122. ✨【回写记录·2026-10-04·P1-02 hfq硬编码收口raw（P1批次第9项）】
+
+【P1-02｜复权口径raw迁移未收口：5处仍硬编码hfq】
+- 根因：DB=不复权原始层raw（回写#81），但入口脚本仍默认/裸SQL用hfq，
+  库中无hfq标签→查询恒0行/走hfq现算口径。
+- 修复：
+  * scripts/标的预筛选.py 4处裸SQL adjust='hfq'→'raw'；
+  * run_回测入口.py:297、run_鲲鹏批量回测.py:273/280、scripts/生成回测报告.py:202
+    data_cfg.get("adjust","hfq")→"raw"；
+  * run_鲲鹏参数优化.py:136/139 default_adjust/adjust 硬编码"hfq"→"raw"；
+  * scripts/数据清洗.py --adjust 默认"hfq"→"raw"，choices补"raw"。
+- 说明：myquant内部hfq均为因子表现算语义（hfq价=raw价×factor），属正确保留。
+
+【验证】py_compile 6脚本 PASS；grep确认目标处无hfq默认值；pytest全量2060 passed/0 failed（215s）。

@@ -199,7 +199,7 @@ def main() -> int:
             data_dir = str(project_root / data_dir)
         data_provider = HistoricalDataProvider(
             processed_dir=data_dir,
-            default_adjust=data_cfg.get("adjust", "hfq"),
+            default_adjust=data_cfg.get("adjust", "raw"),
         )
         print(f"[数据] 提供器初始化: {data_provider}")
     except Exception as e:

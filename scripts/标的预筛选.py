@@ -75,7 +75,7 @@ def load_all_symbols_with_dates(
     cur.execute("""
         SELECT symbol, MIN(trade_date), MAX(trade_date), COUNT(*)
         FROM market_data
-        WHERE period='daily' AND adjust='hfq'
+        WHERE period='daily' AND adjust='raw'
         GROUP BY symbol
         ORDER BY symbol
     """)
@@ -105,7 +105,7 @@ def load_liquidity_batch(
     # 先检查 turnover 字段是否有数据
     cur.execute("""
         SELECT COUNT(*) FROM market_data
-        WHERE period='daily' AND adjust='hfq'
+        WHERE period='daily' AND adjust='raw'
           AND trade_date >= ? AND trade_date <= ?
           AND turnover IS NOT NULL AND turnover >= 0
     """, (calc_start, calc_end))
@@ -115,7 +115,7 @@ def load_liquidity_batch(
         cur.execute("""
             SELECT symbol, AVG(amount), AVG(turnover), COUNT(*)
             FROM market_data
-            WHERE period='daily' AND adjust='hfq'
+            WHERE period='daily' AND adjust='raw'
               AND trade_date >= ? AND trade_date <= ?
               AND amount > 0 AND turnover >= 0
             GROUP BY symbol
@@ -125,7 +125,7 @@ def load_liquidity_batch(
         cur.execute("""
             SELECT symbol, AVG(amount), COUNT(*)
             FROM market_data
-            WHERE period='daily' AND adjust='hfq'
+            WHERE period='daily' AND adjust='raw'
               AND trade_date >= ? AND trade_date <= ?
               AND amount > 0
             GROUP BY symbol

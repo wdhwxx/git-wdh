@@ -106,9 +106,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--adjust",
         type=str,
-        default="hfq",
-        choices=["hfq", "qfq", "none"],
-        help="复权方式: hfq(后复权)/qfq(前复权)/none，默认 hfq",
+        default="raw",
+        choices=["raw", "hfq", "qfq", "none"],
+        help="复权方式: raw(不复权原始层,默认)/hfq(后复权)/qfq(前复权)/none",
     )
     parser.add_argument(
         "--config", "-c",
