@@ -2462,3 +2462,17 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
   属配置层（live_config.yaml 驱动注册），留待部署时配置，不阻塞代码正确性。
 
 【验证】py_compile PASS；monitor/alert 140 passed；新断言1 passed；pytest全量2065 passed/0 failed（216s）。
+
+126. ✨【回写记录·2026-10-04·P1剩余项工程待办登记（P1批次收尾评估）】
+
+对 P1 剩余需GUI/设计/真机验证的条目，本轮不盲改代码（无单测覆盖、改后无法可视化验证），登记如下：
+- P1-14 GUI预筛选按钮阻塞主线程300s：backtest_config_dialog.py:1080 subprocess.run 同步阻塞；
+  整改方向=改 QThread+信号（同文件:1260/1512 已有 Popen+reader 线程范式可参照），需在GUI实机验证。
+- P1-11 三引擎接口不等价：momentum/multi_factor 横截面选股无法在 vectorized 逐bar复现；
+  整改方向=参数扫描入口对这两策略禁止选 vectorized 并标注，或实现真横截面target数组（大改）。
+- P1-12 API/事件总线未接线：监控端点形同虚设，需 live 部署接 event_bus→HTTP 路由。
+- P1-15 GUI双实现900行去重：纯重构，不影响正确性。
+- P1-09 ML未接线 / P1-10 fee_table·allocation孤岛：文档级记录，不阻塞真钱。
+以上均不阻塞当前 2065 测试基线，列入 P2 工程体验与部署接线批次。
+
+【基线】pytest 2065 passed/2 skipped/0 failed。
