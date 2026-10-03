@@ -501,6 +501,7 @@ Pythonwdhmm/
 │   │   ├── test_p2_anti_future_config.py # ✨【回写#83】P2纯修复单测（②财务兜底report_date=今天丢弃+留痕/③排除规则config化+缺省回退内置14条/⑤量比窗口跳0量日，5项）✅已完成
 │   │   ├── test_ml_feature_contract.py # ✨【回写#88】F-01 训练-推理特征一致性测试（中文列契约/price_col默认收盘价/英文列显式拒绝/指标不再静默跳过/指标失败fail-fast/签名构建往返与双向校验/训练→注册→推理端到端/签名不一致拦截，12项）✅已完成
 │   │   ├── test_factor_validator.py # ✨【回写#89】F-02 因子有效性校验测试（RankIC/PearsonIC双口径、ICIR/t/胜率手算对拍、衰减曲线1/5/10/20、5层分层收益+换手、active/observe/eliminated三态、IC加权方向校正+下限约束+归一化、经济逻辑缺省拒绝、FactorProfile序列化往返、策略IC加权集成+默认零变化+extra因子缺逻辑拒绝，22项）✅已完成
+│   │   ├── test_factor_preprocessor.py # ✨【回写#90】F-03 因子预处理测试（对称/偏态分布判定、MAD截断、分位数截断、自适应方法选择、中性化后市值相关≈0、行业哑变量后行业均值差≈0、暴露t值、残差诊断告警、报告序列化往返、策略默认none零变化+neutralize集成+非法mode报错，25项）✅已完成
 
 │   │   ├── test_data_fingerprint.py  # ✨【V5·P0】数据指纹测试（哈希级差异检测：指纹生成/查询/缓存失效/旧数据替换，20项）
 
@@ -752,6 +753,8 @@ Pythonwdhmm/
 
     │   └── factor_validator.py       # ✨【回写#89】F-02 因子有效性校验器：RankIC（Spearman主口径）+PearsonIC（辅口径）截面IC时序、ICIR=mean/std、IC t统计量=ICIR·√N、IC胜率、衰减曲线（1/5/10/20持有期）、5层分层因子收益+换手、FactorProfile档案（样本区间/IC/ICIR/胜率/换手/经济逻辑/状态）、active→observe→eliminated门槛自动流转、ic_weighted_weights（方向校正+下限约束+归一化）、经济逻辑登记（内置4因子逻辑表，额外因子缺economic_logic禁止进组合）；防未来铁律：因子值t时刻trailing，未来收益仅作评估标签（compute_forward_returns显式标注禁止进信号路径）；纯函数无状态，统计复用math_utils
 
+    │   └── factor_preprocessor.py   # ✨【回写#90】F-03 因子预处理（去极值+中性化+残差检验）：自适应去极值（|skew|<0.5对称→MAD截断 median±k·1.4826·MAD，偏态→1%/99%分位数截断，波动率类因子不再固定MAD一刀切）、中性化（行业哑变量N-1+对数流通市值，numpy lstsq回归取残差，零sklearn依赖）、残差检验（暴露t值β/se、残差偏度/峰度正态性、残差-拟合异方差近似检验，超阈值告警）、PreprocessReport可序列化检验报告入档；防未来铁律：去极值/中性化统计量均基于当前调仓截面内数据（单截面无跨期引用），市值=processed当日流通股本×收盘价现算（t时刻可得）；纯函数无状态
+
     │
 
     ├── strategies/                   # 策略模块，输入是经过清洗后的标准行情事件；回测/实盘共用同一注册器与实例
@@ -774,7 +777,7 @@ Pythonwdhmm/
 
     │   ├── mean_reversion_strategy.py# 均值回归策略（震荡市，布林+RSI，按当前bar截断防未来）
 
-    │   ├── multi_factor_strategy.py  # 多因子策略（动量+反转+低波动+量价，复合打分选top_n）；✨【回写#89】F-02 权重IC化：新增 ic_based_weights（默认False=现有行为零变化）/factor_profiles注入/ic_weight_min下限；开启后权重=IC档案加权（方向校正+下限约束+归一化，来源可追溯）；extra_factors缺economic_logic（经济逻辑说明）禁止进组合；get_multi_factor_status 增加 weight_source/ic_based_weights/factor_profile_names
+    │   ├── multi_factor_strategy.py  # 多因子策略（动量+反转+低波动+量价，复合打分选top_n）；✨【回写#89】F-02 权重IC化：新增 ic_based_weights（默认False=现有行为零变化）/factor_profiles注入/ic_weight_min下限；开启后权重=IC档案加权（方向校正+下限约束+归一化，来源可追溯）；extra_factors缺economic_logic（经济逻辑说明）禁止进组合；get_multi_factor_status 增加 weight_source/ic_based_weights/factor_profile_names；✨【回写#90】F-03 因子预处理接入：新增 preprocess_mode（none/winsorize/neutralize/full，默认none=现有行为零变化）/industry_map注入/preprocess_report_sink，调仓现算流通市值（收盘价×流通股本，trailing），_zscore_cross_sectional 前插入去极值+中性化管线，_last_preprocess_report 检验报告入档
 
     │   └── kunpeng_strategy.py       # ✨【2026-09-16】鲲鹏起爆点策略（量均线量比+均线粘合+MACD多维共振三重过滤；三接口 on_bar/generate_mixed_loop/generate_signals_vectorized；出场三档默认标准型+60日持有兜底；公式转译见 docs/鲲鹏壹号策略_回测实施报告.md 第4章）
 
@@ -1973,3 +1976,11 @@ Pythonwdhmm/
    d. **新增 tests/unit/test_factor_validator.py（22 项）**：build_panel 对齐/空面板；强相关因子→高 IC（RankIC）、随机因子→近 0 IC、RankIC 与 PearsonIC 双口径、非法 method 报错；ICIR/t/胜率与手算 pandas 对拍（|Δ|<1e-3）；衰减曲线 1/5/10/20；5 层分层收益+换手（0~1）；min_periods 防护（20 日面板不产出档案）；decide_status 三态（active/observe/eliminated 边界）；IC 加权（归一化+下限+高下限收敛不崩+负贡献归零+方向校正负 ICIR 转正+空输入）；经济逻辑（内置通过/显式提供通过/缺省拒绝）；FactorProfile 序列化往返；策略集成（ic_based_weights=True 权重 IC 化且 reversal 方向校正后有权重/无档案回退默认/默认 False 零变化/extra 因子缺逻辑拒绝进组合）
    e. **验证结果**：py_compile 3 文件（2 新+1 改）PASS；新测试 22 passed（2.2s）；全量 pytest tests/ = 1789 passed / 2 skipped（基线 1767 + 22，零回归）；warnings 24 为存量（event_bus DeprecationWarning 与改动无关）
    f. **纪律遵守**：业务逻辑归 myquant/indicators/factor_validator.py + myquant/strategies/multi_factor_strategy.py（新增文件已登记蓝图 indicators/ 段 + tests/unit 段，strategies/ multi_factor 注释已同步）；防未来函数铁律 11 显式标注（评估标签与信号路径隔离）；全量类型注解 + Google docstring + 防御式校验；factor_engine.py 未改（纯调度/缓存引擎职责不含有效性判断，IC 校验独立于 validator 层）；无临时文件入库；git 提交待 P0 全部完成后统一拍板
+
+90. ✨【回写记录·2026-10-03·F-03 去极值+中性化+残差检验】《因子与机器学习层优化实施报告》P0 整改第三项落地。问题链（审查确认）：因子计算后无去极值（极端值直接进 z-score/打分，少数异常标的扭曲截面均值方差）；无中性化（行业/市值风格暴露未剔除，选股混入风格 Beta）；无残差检验（暴露显著性/正态性/异方差无从审计）。事实来源：本次落地（数据层核对：processed 含 流通股本 列→流通市值=收盘价×流通股本 当日现算 trailing 无未来；本地无行业表→industry_map 可注入，缺省降级仅市值中性化+报告披露口径）；代码级核验：py_compile 3 文件全 PASS + 新增 25 项单测 + 全量 pytest tests/ = 1814 passed / 2 skipped（基线 1789 + 25，零回归）：
+   a. **新增 myquant/indicators/factor_preprocessor.py（因子预处理）**：自适应去极值（detect_distribution 按 |skew|<0.5 判定对称/偏态；对称→MAD 截断 median±k·1.4826·MAD（k=3）；偏态→1%/99% 分位数截断——波动率类因子不再固定 MAD 一刀切）；中性化 neutralize（行业哑变量 N-1（首行业基准避免共线）+ 对数流通市值，numpy lstsq 回归取残差，零 sklearn 依赖；任一暴露变量缺失的标的当前截面内剔除防 NaN 传播；样本<MIN_OBS_FOR_NEUTRALIZE=10 或仅截距→降级中心化+口径 note）；残差检验 residual_diagnostics（残差偏度/峰度正态性告警（|skew|≥1 或峰度≥8）、残差幅值-拟合幅值相关异方差近似检验（|corr|≥0.3 告警））；PreprocessReport（frozen dataclass：方法/截断数/均值偏移（极端值影响验收口径）/暴露 t 值/残差诊断/flags/note，to_dict/from_dict 序列化往返）；preprocess_panel 一站式管线（逐因子列独立执行去极值→中性化→检验）
+   b. **防未来合规**：去极值与中性化统计量均基于"当前调仓截面内"数据计算（单截面无跨期引用，天然不含未来信息）；市值=processed 当日流通股本×收盘价现算（t 时刻可得）；行业映射为当前分类快照（低频变动，近似历史，报告 note 披露口径）；注释显式标注"本行使用的数据截至 t 时刻"
+   c. **multi_factor_strategy.py 预处理接入**：新增 preprocess_mode（none/winsorize/neutralize/full，默认 none=现有行为零变化，非法值构造即报错）/industry_map 注入（中性化模式缺映射 warning 降级不静默）/preprocess_report_sink（报告 JSON 落盘可选，失败告警不阻断调仓）；_do_rebalance 现算流通市值（_calc_market_cap：最新收盘价×最新流通股本，trailing）传入 _standardize_base_factors→_zscore_cross_sectional，raw 面板构建后、z-score 前插入预处理管线（winsorize=仅去极值；neutralize/full=去极值+中性化+检验）；_last_preprocess_report 报告入档（mode/生成时间/factors 明细/industry_map_size/口径 note）；get_multi_factor_status 增加 preprocess_mode/industry_map_size/last_preprocess_report 摘要（含暴露 t 值与告警 flags）
+   d. **新增 tests/unit/test_factor_preprocessor.py（25 项）**：分布判定（对称/偏态/样本不足默认对称）；MAD 截断（极端值裁剪+常量序列不变）；分位数截断（P1/P99 边界）；自适应方法选择（对称→mad/偏态→quantile）；市值中性化（因子=3×log市值+噪声→残差后相关≈0 且暴露 t 显著识别）；行业中性化（两行业哑变量→残差后行业组均值差≈0）；无暴露数据/样本不足降级仅中心化；残差诊断（正态无告警/异方差告警/样本不足说明）；PreprocessReport 往返+非法输入；preprocess_panel（仅去极值/全流程报告含暴露与诊断/空面板报错）；策略集成（默认 none 与手工 z-score 对拍零变化/winsorize 仅去极值报告/neutralize 全流程报告含暴露/非法 mode 报错/流通市值现算）
+   e. **验证结果**：py_compile 3 文件（1 新+1 改+1 新测试）PASS；新测试 25 passed（0.22s）；全量 pytest tests/ = 1814 passed / 2 skipped（基线 1789 + 25，零回归）；warnings 24 为存量（event_bus DeprecationWarning 与改动无关）
+   f. **纪律遵守**：业务逻辑归 myquant/indicators/factor_preprocessor.py + myquant/strategies/multi_factor_strategy.py（新增文件已登记蓝图 indicators/ 段 + tests/unit 段，strategies/ multi_factor 注释已同步）；先更新蓝图再创建新文件（目录树登记先行）；防未来函数铁律 11 显式标注；全量类型注解 + Google docstring + 防御式校验（NaN 防御/阈值常量集中定义）；factor_validator.py 未改（预处理独立于有效性校验层）；无临时文件入库；git 提交待用户拍板

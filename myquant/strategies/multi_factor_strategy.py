@@ -51,12 +51,19 @@ z-score 标准化后加权打分，定期调仓选 top_n 持有。
 __version__ = "0.1.0"
 __author__ = "Pythonwdhmm"
 
+import json
+import os
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
 from myquant.core.logger import get_logger
+from myquant.indicators.factor_preprocessor import (
+    PreprocessReport,
+    preprocess_panel,
+)
 from myquant.indicators.factor_validator import (
     FACTOR_ECONOMIC_LOGIC,
     FactorProfile,
@@ -97,6 +104,13 @@ class MultiFactorStrategy(StrategyBase):
       factor_profiles:    IC 档案字典 {因子名: FactorProfile 或 dict}，
                           供 ic_based_weights=True 时计算 IC 加权权重
       ic_weight_min:      IC 加权单因子权重下限（默认0.05）
+      preprocess_mode:    因子预处理模式（F-03，默认"none"=现有行为零变化）：
+                          "none"不预处理 / "winsorize"仅自适应去极值 /
+                          "neutralize"去极值+行业/市值中性化+残差检验 /
+                          "full"同"neutralize"（全流程语义，当前实现一致）
+      industry_map:       行业映射 {symbol: 行业}（中性化用；缺省时降级为
+                          仅市值中性化，报告记录口径，不静默）
+      preprocess_report_sink: 预处理检验报告 JSON 落盘路径（可选，None=不落盘）
       zscore_mode:        标准化模式："cross_sectional"(默认) / "ts_rolling"
       ts_roll_window:     ts_rolling 模式滚动标准化窗口（默认60）
       min_factor_stocks:  额外因子有效样本下限，不足则丢弃该因子（默认2）
@@ -158,6 +172,9 @@ class MultiFactorStrategy(StrategyBase):
         ic_based_weights: bool = False,
         factor_profiles: Optional[Dict[str, Any]] = None,
         ic_weight_min: float = 0.05,
+        preprocess_mode: str = "none",
+        industry_map: Optional[Dict[str, str]] = None,
+        preprocess_report_sink: Optional[str] = None,
         zscore_mode: str = "cross_sectional",
         ts_roll_window: int = 60,
         min_factor_stocks: int = 2,
@@ -184,6 +201,9 @@ class MultiFactorStrategy(StrategyBase):
             ic_based_weights=ic_based_weights,
             factor_profiles=factor_profiles,
             ic_weight_min=ic_weight_min,
+            preprocess_mode=preprocess_mode,
+            industry_map=industry_map,
+            preprocess_report_sink=preprocess_report_sink,
             zscore_mode=zscore_mode,
             ts_roll_window=ts_roll_window,
             min_factor_stocks=min_factor_stocks,
@@ -220,6 +240,10 @@ class MultiFactorStrategy(StrategyBase):
             raise ValueError(f"额外因子有效样本下限({min_factor_stocks})必须>=1")
         if ic_based_weights and not (0.0 < ic_weight_min <= 1.0):
             raise ValueError(f"IC 加权权重下限({ic_weight_min})必须在(0,1]")
+        if preprocess_mode not in ("none", "winsorize", "neutralize", "full"):
+            raise ValueError(
+                f"preprocess_mode 必须为 none/winsorize/neutralize/full，当前: {preprocess_mode}"
+            )
 
         # ── 因子参数 ──
         self.momentum_period = momentum_period
@@ -301,6 +325,17 @@ class MultiFactorStrategy(StrategyBase):
         if self.ic_based_weights and not self._factor_profiles:
             logger.warning(
                 "[多因子] ic_based_weights=True 但未注入 factor_profiles，回退默认权重"
+            )
+
+        # ── 因子预处理配置（F-03，默认 none=现有行为零变化）──
+        self.preprocess_mode = preprocess_mode
+        self.industry_map: Dict[str, str] = dict(industry_map) if industry_map else {}
+        self.preprocess_report_sink = preprocess_report_sink
+        self._last_preprocess_report: Optional[Dict[str, Any]] = None
+        if self.preprocess_mode in ("neutralize", "full") and not self.industry_map:
+            logger.warning(
+                "[多因子] 中性化模式未提供 industry_map，降级为仅市值中性化"
+                "（报告记录口径，不静默）"
             )
 
         # 因子序列最少bar数（取最大周期+1）
@@ -434,6 +469,7 @@ class MultiFactorStrategy(StrategyBase):
         # ── 1. 收集候选标的的因子序列（按当前bar截断，防未来）──
         candidates = self._get_all_symbols(context)
         factor_series: Dict[str, pd.DataFrame] = {}
+        market_cap: Dict[str, float] = {}
         for sym in candidates:
             df = self._get_data_upto(context, sym, bar)
             if df is None or len(df) < self._min_factor_bars:
@@ -441,6 +477,9 @@ class MultiFactorStrategy(StrategyBase):
             series = self._calc_factor_series(sym, df)
             if series is not None:
                 factor_series[sym] = series
+                mc = self._calc_market_cap(df)
+                if mc is not None:
+                    market_cap[sym] = mc
 
         if len(factor_series) < 2:
             logger.warning(
@@ -448,8 +487,9 @@ class MultiFactorStrategy(StrategyBase):
             )
             return signals
 
-        # ── 2. 标准化基础因子 ──
-        base_scores, active_base = self._standardize_base_factors(factor_series)
+        # ── 2. 标准化基础因子（F-03：可选去极值/中性化预处理前置）──
+        base_scores, active_base = self._standardize_base_factors(
+            factor_series, market_cap)
         if not active_base or len(base_scores) < 2:
             logger.warning(
                 f"[多因子调仓#{self._rebalance_count}] 标准化后有效标的{len(base_scores)}<2，跳过"
@@ -603,10 +643,38 @@ class MultiFactorStrategy(StrategyBase):
 
         return result
 
+    def _calc_market_cap(self, df: pd.DataFrame) -> Optional[float]:
+        """计算标的截至最新bar的流通市值（trailing，防未来）。
+
+        流通市值 = 最新收盘价 × 最新流通股本（processed 列，t 时刻可得）。
+
+        Args:
+            df: 该标的截至当前bar的数据（含 收盘价/流通股本 列）。
+
+        Returns:
+            流通市值（元），数据缺失返回 None。
+        """
+        if df is None or df.empty:
+            return None
+        close = df['收盘价'].astype(float).dropna()
+        if len(close) == 0:
+            return None
+        if '流通股本' not in df.columns:
+            return None
+        float_share = df['流通股本'].astype(float).dropna()
+        if len(float_share) == 0:
+            return None
+        price = float(close.iloc[-1])
+        shares = float(float_share.iloc[-1])
+        if price <= 0 or shares <= 0:
+            return None
+        return price * shares
+
     def _standardize_base_factors(
         self, factor_series: Dict[str, pd.DataFrame],
+        market_cap: Optional[Dict[str, float]] = None,
     ) -> Tuple[Dict[str, Dict[str, float]], List[str]]:
-        """标准化基础因子
+        """标准化基础因子（F-03：可先去极值/中性化预处理，再 z-score）
 
         返回 (factor_scores: {symbol: {factor: z}}, active_factors: List[str])
         只包含权重>0的基础因子。
@@ -616,10 +684,11 @@ class MultiFactorStrategy(StrategyBase):
             return {}, []
         if self.zscore_mode == "ts_rolling":
             return self._zscore_ts_rolling(factor_series, factors)
-        return self._zscore_cross_sectional(factor_series, factors)
+        return self._zscore_cross_sectional(factor_series, factors, market_cap)
 
     def _zscore_cross_sectional(
         self, factor_series: Dict[str, pd.DataFrame], factors: List[str],
+        market_cap: Optional[Dict[str, float]] = None,
     ) -> Tuple[Dict[str, Dict[str, float]], List[str]]:
         """横截面z-score：调仓日对全池标的标准化（trailing值，无未来）"""
         rows: Dict[str, Dict[str, float]] = {}
@@ -641,6 +710,36 @@ class MultiFactorStrategy(StrategyBase):
             return {}, []
 
         raw = pd.DataFrame(rows).T  # index=symbol, columns=factor
+
+        # ── F-03：因子预处理（去极值/中性化/残差检验），默认 none=零变化 ──
+        if self.preprocess_mode != "none":
+            do_neutralize = self.preprocess_mode in ("neutralize", "full")
+            mc_series: Optional[pd.Series] = None
+            if do_neutralize and market_cap:
+                mc_series = pd.Series(
+                    {sym: float(mc) for sym, mc in market_cap.items() if mc > 0},
+                    dtype=float,
+                )
+            clean, reports = preprocess_panel(
+                raw,
+                market_cap=mc_series if do_neutralize else None,
+                industry_map=self.industry_map if do_neutralize else None,
+                do_neutralize=do_neutralize,
+            )
+            self._last_preprocess_report = {
+                "mode": self.preprocess_mode,
+                "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "factors": [r.to_dict() for r in reports],
+                "industry_map_size": len(self.industry_map),
+                "note": "行业分类为当前快照近似历史（低频变动），报告披露口径",
+            }
+            if self.preprocess_report_sink:
+                try:
+                    self._save_preprocess_report(self._last_preprocess_report)
+                except Exception as e:  # 报告落盘失败不阻断调仓（记录告警）
+                    logger.warning(f"[多因子] 预处理报告落盘失败: {e}")
+            raw = clean
+
         z = raw.copy()
         for f in factors:
             std = raw[f].std(ddof=0)
@@ -967,10 +1066,42 @@ class MultiFactorStrategy(StrategyBase):
     #  状态查询
     # ═══════════════════════════════════════════════
 
+    def _save_preprocess_report(self, report: Dict[str, Any]) -> None:
+        """将预处理检验报告落盘为 JSON（可选，失败不阻断调仓）。
+
+        Args:
+            report: 预处理报告 dict（_last_preprocess_report）。
+        """
+        if not self.preprocess_report_sink:
+            return
+        sink = os.path.abspath(self.preprocess_report_sink)
+        os.makedirs(os.path.dirname(sink), exist_ok=True)
+        with open(sink, "w", encoding="utf-8") as fh:
+            json.dump(report, fh, ensure_ascii=False, indent=2)
+
     def get_multi_factor_status(
         self, context: Optional[StrategyContext] = None,
     ) -> Dict[str, Any]:
         """获取多因子策略状态（供实盘监控/Web看板使用）"""
+        last_report = self._last_preprocess_report
+        preprocess_summary: Optional[Dict[str, Any]] = None
+        if last_report:
+            preprocess_summary = {
+                "mode": last_report.get("mode"),
+                "generated_at": last_report.get("generated_at"),
+                "industry_map_size": last_report.get("industry_map_size"),
+                "note": last_report.get("note"),
+                "factors": [
+                    {
+                        "factor_name": r.get("factor_name"),
+                        "method": r.get("method"),
+                        "n_winsorized": r.get("n_winsorized"),
+                        "exposure_t": r.get("exposure_t"),
+                        "flags": r.get("flags"),
+                    }
+                    for r in last_report.get("factors", [])
+                ],
+            }
         return {
             "strategy": self.name,
             "momentum_period": self.momentum_period,
@@ -997,6 +1128,9 @@ class MultiFactorStrategy(StrategyBase):
                 else "manual"
             ),
             "factor_profile_names": sorted(self._factor_profiles.keys()),
+            "preprocess_mode": self.preprocess_mode,
+            "industry_map_size": len(self.industry_map),
+            "last_preprocess_report": preprocess_summary,
             "current_pool": self.current_pool,
             "composite_scores": dict(self._composite_scores),
             "factor_snapshot": {
