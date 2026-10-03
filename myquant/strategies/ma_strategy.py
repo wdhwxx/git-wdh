@@ -172,11 +172,9 @@ class RSRSStrategy(StrategyBase):
 
         logger.info(f"RSRS预计算完成: {len(self._rsrs_cache)} 只股票")
 
-        # 构建初始股票池
-        if context.data:
-            all_symbols = list(context.data.keys())
-            self.stock_pool = self.pool_builder.build(all_symbols, context.data)
-            logger.info(f"初始股票池构建完成: {len(self.stock_pool)} 只")
+        # P0-05修复：初始股票池不在 on_init 构建（on_init 拿不到任何 bar 时点，
+        # 用全量数据构建=直接用回测末日数据，未来函数+调仓空转）；
+        # 改为在 on_bar 首根可交易 bar 按当时数据截断构建（见 on_bar 惰性初始化）。
 
         self._initialized = True
 
@@ -199,10 +197,17 @@ class RSRSStrategy(StrategyBase):
         signals: List[Signal] = []
 
         # 1. 定期调仓（重建股票池）
-        self._days_since_rebalance += 1
-        if self._days_since_rebalance >= self.pool_rebalance_days:
-            self._rebalance_pool(context)
+        # P0-05修复：股票池必须按当前 bar 时点截断数据构建（as_of=bar.timestamp），
+        # 禁止用回测全量末日数据——否则因子永远取自末日、池恒定、调仓退化为空转。
+        if not self.stock_pool:
+            # 首根可交易bar：按当时已发生数据构建初始池（历史不足61日时池为空，属正常预热）
+            self._rebalance_pool(bar, context)
             self._days_since_rebalance = 0
+        else:
+            self._days_since_rebalance += 1
+            if self._days_since_rebalance >= self.pool_rebalance_days:
+                self._rebalance_pool(bar, context)
+                self._days_since_rebalance = 0
 
         # 2. 检查持仓：目标止盈 + RSRS卖出
         sell_signals = self._check_sell_signals(bar, context)
@@ -364,12 +369,12 @@ class RSRSStrategy(StrategyBase):
     # 股票池调仓
     # ------------------------------------------------------------------
 
-    def _rebalance_pool(self, context: StrategyContext) -> None:
-        """重新构建股票池"""
+    def _rebalance_pool(self, bar: Bar, context: StrategyContext) -> None:
+        """重新构建股票池（P0-05修复：按 bar 时点截断历史数据，禁止用回测末日数据）"""
         if not context.data:
             return
         all_symbols = list(context.data.keys())
-        new_pool = self.pool_builder.build(all_symbols, context.data)
+        new_pool = self.pool_builder.build(all_symbols, context.data, as_of=bar.timestamp)
         old_count = len(self.stock_pool)
         self.stock_pool = new_pool
         logger.info(

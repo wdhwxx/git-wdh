@@ -146,8 +146,10 @@ def compute_b_class_metrics(
             每个交易日取 <= trade_date 最近变更的真实股本，无记录回退 circ_mv 反推近似。
 
     计算口径（近似说明）:
-        - 流通股本 = 最新一期 circ_mv / 最新一期 close（近似，忽略历史股本变化）
-        - 总股本 = 最新一期 total_mv / 最新一期 close（近似）
+        - 流通股本 = 该日已披露（报告截止日<=trade_date）的 circ_mv / 该日自身收盘价
+          （P0-03修复：原用"最新市值÷整段最后一行收盘价"反推后套用全部历史bar=未来函数；
+          当日无已披露市值快照则置 None——宁可缺失，不可穿越）
+        - 总股本 = 该日已披露 total_mv / 该日自身收盘价（同上口径）
         - 换手率 = volume(股) / 流通股本(股) × 100
         - 市盈(动) = close × 总股本 / 年化净利润
             年化净利润按 report_date 月份推断报告期类型:
@@ -165,33 +167,6 @@ def compute_b_class_metrics(
 
     fin_sorted = sorted(financial_records, key=lambda r: r.get("report_date", ""))
 
-    # 找最新一期有 circ_mv/total_mv 的记录
-    latest_circ_mv: Optional[float] = None
-    latest_total_mv: Optional[float] = None
-    for fin in reversed(fin_sorted):
-        if latest_circ_mv is None:
-            latest_circ_mv = _to_float(fin.get("circ_mv"))
-        if latest_total_mv is None:
-            latest_total_mv = _to_float(fin.get("total_mv"))
-        if latest_circ_mv and latest_total_mv:
-            break
-
-    # 最新收盘价
-    latest_close: Optional[float] = None
-    for rec in reversed(records):
-        c = _to_float(rec.get("close"))
-        if c:
-            latest_close = c
-            break
-
-    # 反推流通股本/总股本（股）（真实股本缺失时的兜底近似）
-    float_share: Optional[float] = None
-    total_share: Optional[float] = None
-    if latest_circ_mv and latest_close:
-        float_share = latest_circ_mv / latest_close
-    if latest_total_mv and latest_close:
-        total_share = latest_total_mv / latest_close
-
     # P1-②(#83)：真实股本事件（按 change_date 升序），每交易日取 <= trade_date 最近变更
     share_sorted = sorted(
         (share_records or []), key=lambda r: str(r.get("change_date", ""))
@@ -202,7 +177,31 @@ def compute_b_class_metrics(
         close = _to_float(rec.get("close"))
         volume = _to_float(rec.get("volume"))
 
-        # P1-②(#83)：真实股本优先（<= trade_date 最近变更），否则反推近似
+        # 市盈(动)：找该交易日之前最近一期财务数据
+        # P1-①(#83)：按披露截止日（发布日推算）而非报告期判定，
+        #   消除 报告期~披露日 窗口（如 Q1: 4/1~4/29）的未来函数
+        fin_idx = -1
+        for i, fin in enumerate(fin_sorted):
+            if _report_deadline(str(fin.get("report_date", ""))) <= trade_date:
+                fin_idx = i
+            else:
+                break
+
+        # P0-03修复：兜底反推股本不得用"整段最后一行收盘价"反推后套用全部历史bar（未来函数）。
+        # 改为：仅用"该交易日已披露的市值快照（报告截止日<=trade_date）÷ 该日自身收盘价"；
+        # 当日无已披露市值快照则置 None（宁可缺失，不可穿越）。
+        fb_float: Optional[float] = None
+        fb_total: Optional[float] = None
+        if fin_idx >= 0 and close and close > 0:
+            fin_avail = fin_sorted[fin_idx]
+            circ_mv = _to_float(fin_avail.get("circ_mv"))
+            total_mv = _to_float(fin_avail.get("total_mv"))
+            if circ_mv and circ_mv > 0:
+                fb_float = circ_mv / close
+            if total_mv and total_mv > 0:
+                fb_total = total_mv / close
+
+        # P1-②(#83)：真实股本优先（<= trade_date 最近变更），否则当日市值/当日收盘反推近似
         eff_float: Optional[float] = None
         eff_total: Optional[float] = None
         for sh in share_sorted:
@@ -215,8 +214,8 @@ def compute_b_class_metrics(
                     eff_total = t_sh
             else:
                 break  # 升序事件，后续变更日 > 该交易日（防未来）
-        cur_float = eff_float if eff_float else float_share
-        cur_total = eff_total if eff_total else total_share
+        cur_float = eff_float if eff_float else fb_float
+        cur_total = eff_total if eff_total else fb_total
 
         # 换手率
         if cur_float and volume and cur_float > 0:

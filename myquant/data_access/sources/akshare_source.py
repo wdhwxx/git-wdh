@@ -783,8 +783,10 @@ class AkshareDataSource(DataSourceBase):
                 logger.warning(
                     f"丢弃东财实时估值快照 [{symbol}]（无真实报告期，防未来函数 P2-② #83）"
                 )
-                return []
-                return result
+                # P0-02修复：丢弃无报告期快照后必须返回 None（原 return [] 被 composite
+                # 误判为"成功"并短路全部降级源，通道②/新浪/百度兜底全部不可达）；
+                # 删除永不可达的 return result 死代码。
+                return None
             except Exception as e:
                 logger.warning(
                     f"东方财富push2财务接口失败 [{symbol}]: {type(e).__name__}: {e}"

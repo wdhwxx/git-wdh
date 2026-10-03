@@ -48,7 +48,9 @@ class TestP2FinanceNoFakeReportDate:
         ak = types.SimpleNamespace(stock_individual_info_em=fake_em)
         src = AkshareDataSource()
         res = src._try_eastmoney_finance(ak, "600519.SH", "600519", None)
-        assert res == []  # push2 丢弃 → 返回空列表（无 report_date=今天 记录），链继续走新浪报表
+        # P0-02修复：push2快照丢弃后必须返回 None（原 return [] 被 composite 误判为"成功"，
+        # 短路掉 datacenter-web/新浪/百度全部降级源）；None 才会让链路继续尝试备源。
+        assert res is None
 
 
 class TestP2ExcludeRulesConfig:

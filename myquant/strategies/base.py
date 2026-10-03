@@ -672,9 +672,32 @@ class StockPoolBuilder:
         )
         return sorted(pool)
 
-    def build(self, symbols: List[str], data_dict: Dict[str, pd.DataFrame]) -> List[str]:
-        """完整构建股票池：代码过滤 → 三因子计算 → 交集筛选"""
+    def build(
+        self,
+        symbols: List[str],
+        data_dict: Dict[str, pd.DataFrame],
+        as_of: Optional[Any] = None,
+    ) -> List[str]:
+        """完整构建股票池：代码过滤 → 三因子计算 → 交集筛选
+
+        Args:
+            symbols: 全部候选标的代码列表。
+            data_dict: {symbol: 行情DataFrame}（**可能含整个回测区间的全量数据**）。
+            as_of: 时点截断（P0-05修复）——仅使用 index <= as_of 的历史数据计算因子，
+                防止选股用到回测末日的收盘价/波动率/动量（未来函数）。
+                不传则不截断（向后兼容；生产 on_bar 路径必须传当前 bar.timestamp）。
+        """
         filtered = self.filter_by_code(symbols)
-        valid_data = {s: data_dict[s] for s in filtered if s in data_dict and data_dict[s] is not None}
+        valid_data: Dict[str, pd.DataFrame] = {}
+        for s in filtered:
+            df = data_dict.get(s)
+            if df is None:
+                continue
+            if as_of is not None:
+                # P0-05：截断到当日及之前（严格防未来，数据截至 as_of 时刻）；
+                # bar.timestamp 为 epoch 秒(float)，需先归一化为 Timestamp 才能与 DatetimeIndex 比较
+                as_of_ts = pd.Timestamp.fromtimestamp(as_of) if isinstance(as_of, (int, float)) else as_of
+                df = df[df.index <= as_of_ts]
+            valid_data[s] = df
         factor_df = self.calculate_factors(valid_data)
         return self.select_by_intersection(factor_df)

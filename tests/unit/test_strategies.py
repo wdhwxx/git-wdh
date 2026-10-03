@@ -52,6 +52,7 @@ from myquant.strategies import (
     RSRSStrategy,
     Signal,
     SignalType,
+    StockPoolBuilder,
     StrategyBase,
     StrategyContext,
     create_strategy,
@@ -961,3 +962,87 @@ class TestAllStrategiesParametrized:
         assert isinstance(signals, list)
         for sig in signals:
             assert isinstance(sig, Signal)
+
+
+# ═══════════════════════════════════════════
+#  P0-06回归：策略只产信号，不得在 on_bar 内直下订单
+# ═══════════════════════════════════════════
+
+class _RecordingExecutor:
+    """记录 submit_order 调用的假执行器（P0-06 回归用）"""
+
+    def __init__(self) -> None:
+        self.submitted: List[Any] = []
+
+    def submit_order(self, order: Any) -> Any:
+        """记录并原样返回订单，不下发券商"""
+        self.submitted.append(order)
+        return order
+
+
+class TestP006StrategyNoDirectOrder:
+    """P0-06：on_bar 只返回信号；策略不得自行 executor.submit_order。
+
+    依据审核报告 P0-06：4 个策略既直下订单又 return 信号 → 引擎再下一次 →
+    双重报单，且直下那笔绕过 RiskManager / LookaheadGuard / signal_id 幂等。
+    """
+
+    def test_grid_emits_signals_but_submits_nothing(self) -> None:
+        """网格跨档产生买卖信号，但执行器零调用（订单由引擎统一执行）"""
+        # 9.6→10.4→9.6→10.4 在 9~11、5 格（步长0.4）间反复跨档，必然产生信号
+        df = _make_df([9.6, 10.4, 9.6, 10.4])
+        executor = _RecordingExecutor()
+        ctx = StrategyContext(
+            data={"000001.SZ": df}, portfolio=None, executor=executor,
+            config={"initial_capital": 1_000_000.0},
+        )
+        grid = GridStrategy(grid_lower=9.0, grid_upper=11.0, grid_num=5,
+                            position_per_grid=0.1)
+        grid.on_init(ctx)
+        non_hold = 0
+        for i in range(len(df)):
+            bar = _make_bar("000001.SZ", df["收盘价"].iloc[i],
+                            df.index[i].timestamp())
+            sigs = grid.on_bar(bar, ctx)
+            non_hold += len([s for s in sigs if not s.is_hold])
+        assert non_hold > 0, "网格跨档本应产生信号，测试数据失效"
+        assert executor.submitted == [], "P0-06：策略不得在 on_bar 内直下订单"
+
+
+# ═══════════════════════════════════════════
+#  P0-05回归：StockPoolBuilder.build(as_of=) 时点截断
+# ═══════════════════════════════════════════
+
+class _SpyPoolBuilder(StockPoolBuilder):
+    """记录实际进入三因子计算的数据快照（P0-05 断言截断生效）"""
+
+    def calculate_factors(self, data_dict: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        self.seen = {s: df.copy() for s, df in data_dict.items()}
+        return super().calculate_factors(data_dict)
+
+
+class TestP005PoolBuilderAsOf:
+    """P0-05：选股池必须按 bar 时点截断，禁止用回测末日数据（未来函数+调仓空转）"""
+
+    def test_as_of_truncates_factors_to_bar_ts(self):
+        """as_of=第100根bar时，三因子计算只能看到 index<=第100根 的数据（非第200根）"""
+        closes_a = [10.0 + (i % 7) * 0.1 for i in range(200)]
+        closes_b = [20.0 - (i % 5) * 0.1 for i in range(200)]
+        df_a, df_b = _make_df(closes_a, "AAA.SZ"), _make_df(closes_b, "BBB.SZ")
+        data = {"AAA.SZ": df_a, "BBB.SZ": df_b}
+
+        builder = _SpyPoolBuilder(volatility_period=5, momentum_period=10, top_ratio=1.0)
+        as_of = df_a.index[100]  # 数据截至第101根bar时刻（严格防未来）
+        builder.build(["AAA.SZ", "BBB.SZ"], data, as_of=as_of)
+
+        assert hasattr(builder, "seen")
+        for sym, df in builder.seen.items():
+            assert len(df) == 101, f"{sym} 因子数据应为前101根，实际{len(df)}根"
+            assert df.index.max() <= as_of, f"{sym} 因子数据泄露了 as_of 之后的未来行"
+
+    def test_no_as_of_keeps_full_data(self):
+        """不传 as_of 不截断（向后兼容；生产 on_bar 路径必须传）"""
+        df_a = _make_df([10.0 + (i % 7) * 0.1 for i in range(200)], "AAA.SZ")
+        builder = _SpyPoolBuilder(volatility_period=5, momentum_period=10, top_ratio=1.0)
+        builder.build(["AAA.SZ"], {"AAA.SZ": df_a}, as_of=None)
+        assert len(builder.seen["AAA.SZ"]) == 200
