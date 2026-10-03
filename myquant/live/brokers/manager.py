@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import threading
 import time
+import copy
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
@@ -551,7 +552,7 @@ class BrokerManager:
             status=OrderStatus.PENDING,
             filled_qty=0.0,
             filled_price=0.0,
-            extra=dict(order.extra or {}),
+            extra=copy.deepcopy(order.extra or {}),  # P1-18：真深拷贝，嵌套对象不与原单共享
         )
 
     def _in_failover_cooldown(self) -> bool:

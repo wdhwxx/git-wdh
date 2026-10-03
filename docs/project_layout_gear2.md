@@ -2414,3 +2414,17 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 说明：myquant内部hfq均为因子表现算语义（hfq价=raw价×factor），属正确保留。
 
 【验证】py_compile 6脚本 PASS；grep确认目标处无hfq默认值；pytest全量2060 passed/0 failed（215s）。
+
+123. ✨【回写记录·2026-10-04·P1-18 子项2 补发extra深拷贝（P1批次第10项）】
+
+【P1-18｜补单连带（本项含15子项，本轮先修边界最清晰的深拷贝）】
+- 已修（子项2）：_clone_order_for_retry 的 extra=dict(...) 是浅拷贝，注释却称深拷贝，
+  嵌套对象与原单共享。改为 copy.deepcopy(order.extra)。
+- 单测：test_broker_resend_pending 新增 test_clone_order_deep_copies_extra_nested——
+  改副本 extra["nested"]["a"] 不污染原单。
+- 未修（其余14子项，需专项设计决策，单列待办）：补发绕过风控/统计、巡检只记录、
+  强平假成功、snapshot损坏静默降级、check_positions无调用者、T+1结算无调用者、
+  LIVE账本不权威、在途买入资金不冻结、未知规则名静默、涨跌停空转、黑名单禁卖、
+  预热重放绕过时间校验、工厂层无confirm门、ML报告期守卫误伤。
+
+【验证】py_compile PASS；broker相关39 passed；新断言17 passed；pytest全量2061 passed/0 failed（215s）。

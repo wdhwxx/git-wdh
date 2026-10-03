@@ -443,3 +443,16 @@ def test_引擎无broker_manager_返回错误码(tmp_path) -> None:
     result = engine.resend_pending_orders()
 
     assert result == {"error": "no_broker_manager"}
+
+
+def test_clone_order_deep_copies_extra_nested() -> None:
+    """P1-18：补发副本 extra 必须真深拷贝，改嵌套对象不得污染原单。"""
+    original = Order(
+        order_id="X1", symbol="600519.SH", side=OrderSide.BUY,
+        order_type=OrderType.LIMIT, quantity=100, price=1500.0,
+        strategy_id="s", extra={"nested": {"a": 1}},
+    )
+    retry = BrokerManager._clone_order_for_retry(original)
+    retry.extra["nested"]["a"] = 999
+    assert original.extra["nested"]["a"] == 1, "副本嵌套对象污染了原单"
+    assert retry.status == OrderStatus.PENDING
