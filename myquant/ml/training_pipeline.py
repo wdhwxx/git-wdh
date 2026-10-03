@@ -700,6 +700,197 @@ def panel_time_series_split(
 
 
 # ═══════════════════════════════════════════════
+#  滚动/扩展窗口时序 CV 切分（F-12）
+# ═══════════════════════════════════════════════
+
+@dataclass
+class CvSplitConfig:
+    """
+    时序 CV 切分配置（F-12）
+
+    mode="expanding"：扩展窗口——每折训练集自数据起点累积（随折推进单调扩展）
+    mode="rolling" ：滚动窗口——训练集固定 rolling_window_days 个交易日滑移
+
+    折布局（两模式一致）：
+      首个验证段起点 = 第 int(总交易日数 × initial_train_ratio) 个交易日位置；
+      验证段连续推进、互不重叠（每折 valid_days 个交易日）；
+      训练/验证之间保留 horizon+1 个交易日日历缓冲（口径对齐 F-08/F-06：
+      训练末样本标签时点 train_end+horizon 交易日严格早于验证集首样本
+      → 未来 horizon 收益 0% 落入验证段，铁律11）。
+    """
+
+    mode: str = "expanding"
+    n_folds: int = 4
+    initial_train_ratio: float = 0.3
+    valid_days: int = 20
+    horizon: int = 5
+    min_train: int = 20
+    min_valid: int = 5
+    rolling_window_days: int = 120
+
+    def __post_init__(self) -> None:
+        """防御式校验：非法配置显式报错（不静默兜底）"""
+        if self.mode not in ("expanding", "rolling"):
+            raise ValueError(
+                f"mode 必须为 'expanding'/'rolling'，实际 {self.mode!r}")
+        if self.n_folds < 1:
+            raise ValueError(f"n_folds 必须 >= 1，实际 {self.n_folds}")
+        if not (0.0 < self.initial_train_ratio < 1.0):
+            raise ValueError(
+                f"initial_train_ratio 必须在 (0,1) 区间，"
+                f"实际 {self.initial_train_ratio}")
+        if self.valid_days < 1:
+            raise ValueError(f"valid_days 必须 >= 1，实际 {self.valid_days}")
+        if self.horizon < 0:
+            raise ValueError(f"horizon 不能为负，实际 {self.horizon}")
+        if self.min_train < 1:
+            raise ValueError(f"min_train 必须 >= 1，实际 {self.min_train}")
+        if self.min_valid < 1:
+            raise ValueError(f"min_valid 必须 >= 1，实际 {self.min_valid}")
+        if self.mode == "rolling" and self.rolling_window_days < 1:
+            raise ValueError(
+                f"rolling_window_days 必须 >= 1，实际 {self.rolling_window_days}")
+
+    @classmethod
+    def from_dict(cls, data: Optional[Dict[str, Any]]) -> "CvSplitConfig":
+        """从字典构造（忽略未知键，向后兼容配置演进）"""
+        if not data:
+            return cls()
+        known = set(cls.__dataclass_fields__.keys())
+        return cls(**{k: v for k, v in data.items() if k in known})
+
+
+@dataclass
+class CvFold:
+    """
+    单折：训练/验证索引 + 时间范围 + 评估指标（F-12）
+
+    train_idx/valid_idx 指向原始 timestamps 数组的位置索引；
+    时间范围全部为训练/验证时已得事实（防未来），供报告入档。
+    """
+
+    fold_index: int
+    train_idx: np.ndarray
+    valid_idx: np.ndarray
+    train_start_ts: float
+    train_end_ts: float
+    valid_start_ts: float
+    valid_end_ts: float
+    n_train: int
+    n_val: int
+    metrics: Dict[str, float]
+
+
+def time_series_cv_split(
+    timestamps: Any,
+    group_ids: Any = None,
+    config: Optional[CvSplitConfig] = None,
+) -> List[CvFold]:
+    """
+    滚动/扩展窗口时序 CV 切分（F-12）
+
+    以数据自身唯一时间戳为交易日刻度（升序，无外部日历依赖防未来）；
+    验证段 [起点, 起点+valid_days) 连续推进、互不重叠；
+    训练集（expanding）= 时间戳 <= train_end_level 的全部样本（起点累积）；
+    （rolling）= 最近 rolling_window_days 个交易日（<= train_end_level）；
+    train_end_level = 验证段起点前第 (horizon+1) 个交易日（日历缓冲
+    对齐 F-08/F-06）；
+    group_ids 提供时按时间阈值整组归属（同一时间戳全部样本永不切开）。
+
+    【防未来函数（铁律11）】切分只消费数据自身时间戳（训练时已得信息），
+    本行使用的数据截至 t 时刻；训练末样本的标签时刻（train_end + horizon
+    个交易日）严格早于验证集首样本 → 0% 标签重叠。
+
+    Parameters
+    ----------
+    timestamps : array-like
+        面板/单标的全部样本时间戳（float epoch 秒，与样本一一对应）
+    group_ids : array-like | None
+        每个样本的标的归属 id（与样本一一对应；None 时行级切分；
+        提供时整组确定性归属，长度不匹配显式报错）
+    config : CvSplitConfig | None
+        切分配置（None → 默认 expanding/4 折）
+
+    Returns
+    -------
+    List[CvFold] : 各折（fold_index 从 1 起；按验证段时间升序排列）
+
+    Raises
+    ------
+    ValueError : 时间戳为空/组 id 不匹配/配置非法/数据不足（某折训练或
+    验证样本低于下限/验证段越界）
+    """
+    cfg = config if config is not None else CvSplitConfig()
+    ts = np.asarray(timestamps, dtype=float)
+    n = len(ts)
+    if n == 0:
+        raise ValueError("时间戳为空，无法切分")
+    if group_ids is not None:
+        gids = np.asarray(group_ids)
+        if len(gids) != n:
+            raise ValueError(
+                f"group_ids 长度 {len(gids)} 与样本数 {n} 不一致")
+    # 交易日刻度 = 数据自身唯一时间戳（升序；本行使用的数据截至 t 时刻）
+    t_levels = np.unique(ts)
+    n_levels = len(t_levels)
+    initial_pos = int(n_levels * cfg.initial_train_ratio)
+    if initial_pos < 1:
+        raise ValueError(
+            f"首个验证段起点过早：initial_train_ratio={cfg.initial_train_ratio} "
+            f"仅分出 {initial_pos} 个交易日前段，请调低比例或增大数据")
+    folds: List[CvFold] = []
+    for i in range(cfg.n_folds):
+        v_start_pos = initial_pos + i * cfg.valid_days
+        v_end_pos = v_start_pos + cfg.valid_days
+        if v_end_pos > n_levels:
+            raise ValueError(
+                f"第 {i + 1} 折验证段越界：数据仅 {n_levels} 个交易日刻度，"
+                f"该折验证段需覆盖到第 {v_end_pos} 个刻度（请减少 n_folds/"
+                f"valid_days 或增大数据量）")
+        # 训练截止 = 验证段起点前第 (horizon+1) 个交易日（日历缓冲）
+        train_end_pos = v_start_pos - (cfg.horizon + 1)
+        if train_end_pos < 1:
+            raise ValueError(
+                f"第 {i + 1} 折训练集为空（horizon={cfg.horizon} 日历缓冲过大），"
+                f"请降低 initial_train_ratio 或增大数据量")
+        train_end_level = float(t_levels[train_end_pos - 1])
+        if cfg.mode == "expanding":
+            train_idx = np.flatnonzero(ts <= train_end_level)
+            train_start_ts = float(t_levels[0])
+        else:  # rolling：固定窗滑移
+            roll_start_pos = max(0, train_end_pos - cfg.rolling_window_days)
+            roll_start_level = float(t_levels[roll_start_pos])
+            train_idx = np.flatnonzero(
+                (ts >= roll_start_level) & (ts <= train_end_level))
+            train_start_ts = roll_start_level
+        valid_start_ts = float(t_levels[v_start_pos])
+        valid_end_ts = float(t_levels[v_end_pos - 1])
+        valid_idx = np.flatnonzero(
+            (ts >= valid_start_ts) & (ts <= valid_end_ts))
+        if len(train_idx) < cfg.min_train:
+            raise ValueError(
+                f"第 {i + 1} 折训练样本过少: {len(train_idx)} < "
+                f"{cfg.min_train}")
+        if len(valid_idx) < cfg.min_valid:
+            raise ValueError(
+                f"第 {i + 1} 折验证样本过少: {len(valid_idx)} < "
+                f"{cfg.min_valid}")
+        folds.append(CvFold(
+            fold_index=i + 1,
+            train_idx=train_idx,
+            valid_idx=valid_idx,
+            train_start_ts=train_start_ts,
+            train_end_ts=train_end_level,
+            valid_start_ts=valid_start_ts,
+            valid_end_ts=valid_end_ts,
+            n_train=int(len(train_idx)),
+            n_val=int(len(valid_idx)),
+            metrics={},
+        ))
+    return folds
+
+
+# ═══════════════════════════════════════════════
 #  TrainingResult 训练结果
 # ═══════════════════════════════════════════════
 
@@ -783,6 +974,218 @@ class TrainingResult:
 def _ts_to_str(ts: float) -> str:
     """epoch 秒 → "YYYY-MM-DD HH:MM:SS"（训练时间范围记录，防未来基准）"""
     return datetime.fromtimestamp(float(ts)).strftime("%Y-%m-%d %H:%M:%S")
+
+
+# ═══════════════════════════════════════════════
+#  CV / walk-forward 报告结构（F-12）
+# ═══════════════════════════════════════════════
+
+def _fold_wins(folds: List[CvFold], win_metric: str) -> List[float]:
+    """提取各折 win 指标值（缺失显式报错，不静默兜底）"""
+    wins: List[float] = []
+    for fold in folds:
+        if win_metric not in fold.metrics:
+            raise ValueError(
+                f"第 {fold.fold_index} 折缺少 win_metric={win_metric!r}，"
+                f"可选指标 {sorted(fold.metrics)}")
+        wins.append(float(fold.metrics[win_metric]))
+    return wins
+
+
+def _series_stats(values: List[float]) -> Tuple[float, float, float]:
+    """均值/标准差（样本 ddof=1，n<2 记 0 防御）/ICIR（均值÷标准差）"""
+    arr = np.asarray(values, dtype=float)
+    mean = float(arr.mean())
+    std = float(arr.std(ddof=1)) if len(arr) > 1 else 0.0
+    icir = float(mean / std) if std > 0 else 0.0
+    return mean, std, icir
+
+
+def _series_max_drawdown(values: List[float]) -> float:
+    """累计序列最大回撤：peak−value 的最大值（全正序列记 0）"""
+    equity = np.cumsum(np.asarray(values, dtype=float))
+    if len(equity) == 0:
+        return 0.0
+    peak = np.maximum.accumulate(equity)
+    return float(max(0.0, float((peak - equity).max())))
+
+
+@dataclass
+class CvReport:
+    """
+    滚动/扩展窗口 CV 报告（F-12，选型证据入档）
+
+    win_metric 默认 "ic"：报告各折 win 值 + 折间均值/标准差/ICIR；
+    超参选择必须基于本报告（CV 证据），禁止单次留出定参。
+    """
+
+    folds: List[CvFold]
+    win_metric: str = "ic"
+    fold_wins: List[float] = field(default_factory=list)
+    win_mean: float = 0.0
+    win_std: float = 0.0
+    win_icir: float = 0.0
+    best_fold: Optional[int] = None
+    worst_fold: Optional[int] = None
+
+    @classmethod
+    def from_folds(cls, folds: List[CvFold],
+                   win_metric: str = "ic") -> "CvReport":
+        """由已评估折构建（逐折 win 提取 + 统计汇总）"""
+        wins = _fold_wins(folds, win_metric)
+        mean, std, icir = _series_stats(wins)
+        best_fold = None
+        worst_fold = None
+        if wins:
+            best_fold = int(folds[int(np.argmax(wins))].fold_index)
+            worst_fold = int(folds[int(np.argmin(wins))].fold_index)
+        return cls(
+            folds=folds,
+            win_metric=win_metric,
+            fold_wins=wins,
+            win_mean=mean,
+            win_std=std,
+            win_icir=icir,
+            best_fold=best_fold,
+            worst_fold=worst_fold,
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """JSON 安全序列化（入档用）"""
+        return {
+            "win_metric": self.win_metric,
+            "fold_wins": list(self.fold_wins),
+            "win_mean": self.win_mean,
+            "win_std": self.win_std,
+            "win_icir": self.win_icir,
+            "best_fold": self.best_fold,
+            "worst_fold": self.worst_fold,
+            "folds": [
+                {
+                    "fold_index": fold.fold_index,
+                    "train_start_time": _ts_to_str(fold.train_start_ts),
+                    "train_end_time": _ts_to_str(fold.train_end_ts),
+                    "valid_start_time": _ts_to_str(fold.valid_start_ts),
+                    "valid_end_time": _ts_to_str(fold.valid_end_ts),
+                    "n_train": fold.n_train,
+                    "n_val": fold.n_val,
+                    "metrics": dict(fold.metrics),
+                }
+                for fold in self.folds
+            ],
+        }
+
+    def __repr__(self) -> str:
+        return (
+            f"CvReport(folds={len(self.folds)}, win_metric={self.win_metric}, "
+            f"fold_wins={self.fold_wins}, mean={self.win_mean:.4f}, "
+            f"std={self.win_std:.4f}, icir={self.win_icir:.4f})"
+        )
+
+
+@dataclass
+class WalkForwardPeriod:
+    """walk-forward 单期（F-12）：逐期重训 + 下段验证，时间升序"""
+
+    period_index: int
+    train_start_ts: float
+    train_end_ts: float
+    valid_start_ts: float
+    valid_end_ts: float
+    n_train: int
+    n_val: int
+    metrics: Dict[str, float]
+
+
+@dataclass
+class WalkForwardResult:
+    """
+    walk-forward 逐期重训评估结果（F-12）
+
+    periods 按时间升序：每期用此前（expanding）全部可训数据重训，验证下一段；
+    cum_net = 逐期净收益累计曲线（稳定性曲线数据，供绘图/入档）；
+    ic_values + ic_mean/ic_std/icir + positive_ic_ratio（正 IC 期占比）
+    + max_drawdown（累计净收益曲线回撤）→ 策略时序稳定性画像。
+    """
+
+    periods: List[WalkForwardPeriod] = field(default_factory=list)
+    cum_net: List[float] = field(default_factory=list)
+    ic_values: List[float] = field(default_factory=list)
+    ic_mean: float = 0.0
+    ic_std: float = 0.0
+    ic_icir: float = 0.0
+    net_total: float = 0.0
+    positive_ic_ratio: float = 0.0
+    max_drawdown: float = 0.0
+
+    @classmethod
+    def from_periods(
+        cls, periods: List[WalkForwardPeriod],
+        win_metric: str = "net_return",
+    ) -> "WalkForwardResult":
+        """由逐期评估结果构建（累计曲线 + 统计汇总）"""
+        ic_values = [
+            float(p.metrics["ic"]) if "ic" in p.metrics else 0.0
+            for p in periods
+        ]
+        period_nets: List[float] = []
+        for p in periods:
+            if win_metric not in p.metrics:
+                raise ValueError(
+                    f"第 {p.period_index} 期缺少 win_metric={win_metric!r}，"
+                    f"可选指标 {sorted(p.metrics)}")
+            period_nets.append(float(p.metrics[win_metric]))
+        ic_mean, ic_std, ic_icir = _series_stats(ic_values)
+        cum_net = list(np.cumsum(np.asarray(period_nets, dtype=float)))
+        net_total = float(cum_net[-1]) if cum_net else 0.0
+        positive_ratio = (
+            float(np.mean([v > 0 for v in ic_values])) if ic_values else 0.0
+        )
+        return cls(
+            periods=periods,
+            cum_net=cum_net,
+            ic_values=ic_values,
+            ic_mean=ic_mean,
+            ic_std=ic_std,
+            ic_icir=ic_icir,
+            net_total=net_total,
+            positive_ic_ratio=positive_ratio,
+            max_drawdown=_series_max_drawdown(period_nets),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """JSON 安全序列化（稳定性曲线入档用）"""
+        return {
+            "cum_net": list(self.cum_net),
+            "ic_values": list(self.ic_values),
+            "ic_mean": self.ic_mean,
+            "ic_std": self.ic_std,
+            "ic_icir": self.ic_icir,
+            "net_total": self.net_total,
+            "positive_ic_ratio": self.positive_ic_ratio,
+            "max_drawdown": self.max_drawdown,
+            "periods": [
+                {
+                    "period_index": p.period_index,
+                    "train_start_time": _ts_to_str(p.train_start_ts),
+                    "train_end_time": _ts_to_str(p.train_end_ts),
+                    "valid_start_time": _ts_to_str(p.valid_start_ts),
+                    "valid_end_time": _ts_to_str(p.valid_end_ts),
+                    "n_train": p.n_train,
+                    "n_val": p.n_val,
+                    "metrics": dict(p.metrics),
+                }
+                for p in self.periods
+            ],
+        }
+
+    def __repr__(self) -> str:
+        return (
+            f"WalkForwardResult(periods={len(self.periods)}, "
+            f"ic_mean={self.ic_mean:.4f}, ic_std={self.ic_std:.4f}, "
+            f"net_total={self.net_total:.4f}, "
+            f"positive_ic_ratio={self.positive_ic_ratio:.2%})"
+        )
 
 
 class TrainingPipeline:
@@ -1065,6 +1468,163 @@ class TrainingPipeline:
         kwargs.setdefault("parent_version", parent)
         return self.run(data, model_name, **kwargs)
 
+    # ─────────────────────────────────────────────
+    #  滚动/扩展窗口 CV + walk-forward（F-12）
+    # ─────────────────────────────────────────────
+
+    def run_cv(
+        self,
+        data: Any,
+        *,
+        cv_config: Optional[Dict[str, Any]] = None,
+        model: Any = None,
+        label_type: Optional[str] = None,
+        win_metric: str = "ic",
+        **model_params: Any,
+    ) -> CvReport:
+        """
+        滚动/扩展窗口时序 CV（F-12，选型证据）
+
+        复用 build_dataset 的 dict→面板 dispatch（PanelDataset 走整组归属）；
+        每折用新模型实例 fit(train) → evaluate(valid)（compute_ic=True +
+        max_drawdown 常驻；FeatureConfig.cost 开启时追加 turnover/net_return）；
+        不注册 ModelRegistry（CV 是超参/模型选择的证据，非部署产物）。
+        win_metric 默认 "ic"：报告折间 IC 均值/标准差/ICIR——
+        任何超参调整都须附本报告 CV 证据，禁止单次留出定参（验收）。
+
+        Parameters
+        ----------
+        data : Bar 列表 / DataFrame / dict[str, 数据]
+            与 run() 相同输入形态（dict 走面板路径）
+        cv_config : dict | None
+            CvSplitConfig 字段（None → expanding/4 折默认）
+        model : Any | None
+            自定义模型（可插拔，需 fit/predict）
+        label_type : str | None
+            覆盖特征配置标签类型
+        win_metric : str
+            折间汇总指标（默认 "ic"；成本化开启时可选 "net_return"）
+        **model_params
+            内置模型超参数（透传 model_factory）
+
+        Returns
+        -------
+        CvReport : 各折评估 + 折间均值/波动/ICIR（to_dict 入档）
+        """
+        eff_label = label_type if label_type is not None else self.feature_config.label_type
+        eff_config = self._effective_config(eff_label)
+        if isinstance(data, dict):
+            dataset = FeatureEngine(eff_config).build_panel_dataset(data)
+        else:
+            dataset = self.build_dataset(data, label_type=eff_label)
+        if dataset.n_samples == 0:
+            raise TrainingError(
+                "特征数据集为空，无法 CV（请检查输入数据量 / 特征窗口是否足够）")
+        cfg = CvSplitConfig.from_dict(cv_config)
+        group_ids = dataset.group_ids if isinstance(dataset, PanelDataset) else None
+        folds = time_series_cv_split(
+            dataset.timestamps, group_ids=group_ids, config=cfg)
+        roundtrip = (
+            eff_config.cost.roundtrip_rate()
+            if eff_config.cost is not None else 0.0
+        )
+        X = dataset.X.values
+        y = dataset.y.values
+        for fold in folds:
+            model_obj = model_factory(eff_label, model=model, **model_params)
+            model_obj.fit(X[fold.train_idx], y[fold.train_idx])
+            fold.metrics = evaluate_model(
+                model_obj, X[fold.valid_idx], y[fold.valid_idx], eff_label,
+                compute_ic=True,
+                compute_drawdown=True,
+                compute_net=eff_config.cost is not None,
+                roundtrip_rate=roundtrip)
+        report = CvReport.from_folds(folds, win_metric=win_metric)
+        logger.info(
+            f"[ml] 时序 CV 完成 {len(folds)} 折: win_metric={win_metric} "
+            f"mean={report.win_mean:.4f} std={report.win_std:.4f} "
+            f"icir={report.win_icir:.4f}")
+        return report
+
+    def walk_forward(
+        self,
+        data: Any,
+        *,
+        cv_config: Optional[Dict[str, Any]] = None,
+        model: Any = None,
+        label_type: Optional[str] = None,
+        win_metric: str = "net_return",
+        **model_params: Any,
+    ) -> WalkForwardResult:
+        """
+        walk-forward 逐期重训评估（F-12，时序稳定性曲线）
+
+        与 run_cv 共享同一折生成器（口径一致：同布局/同缓冲）；
+        每期用此前（expanding）全部可训数据重训，验证下一段；
+        逐期输出 IC/换手/毛净收益 + 累计净收益曲线（稳定性曲线数据）。
+
+        注意：本方法统一 compute_net=True——roundtrip_rate 按 FeatureConfig.cost
+        取（无 cost 时 0.0 → net_return=毛策略累计收益），保证稳定性曲线
+        在任何配置下都可输出；成本化开启时自动扣费。
+
+        Parameters
+        ----------
+        data / cv_config / model / label_type / **model_params
+            与 run_cv 相同
+        win_metric : str
+            逐期累计指标（默认 "net_return"；也可 "ic" 等 evaluate 指标）
+
+        Returns
+        -------
+        WalkForwardResult : 逐期记录 + 累计曲线 + 稳定性统计（to_dict 入档）
+        """
+        eff_label = label_type if label_type is not None else self.feature_config.label_type
+        eff_config = self._effective_config(eff_label)
+        if isinstance(data, dict):
+            dataset = FeatureEngine(eff_config).build_panel_dataset(data)
+        else:
+            dataset = self.build_dataset(data, label_type=eff_label)
+        if dataset.n_samples == 0:
+            raise TrainingError(
+                "特征数据集为空，无法 walk-forward（请检查输入数据量 / 特征窗口）")
+        cfg = CvSplitConfig.from_dict(cv_config)
+        group_ids = dataset.group_ids if isinstance(dataset, PanelDataset) else None
+        folds = time_series_cv_split(
+            dataset.timestamps, group_ids=group_ids, config=cfg)
+        roundtrip = (
+            eff_config.cost.roundtrip_rate()
+            if eff_config.cost is not None else 0.0
+        )
+        X = dataset.X.values
+        y = dataset.y.values
+        periods: List[WalkForwardPeriod] = []
+        for fold in folds:
+            model_obj = model_factory(eff_label, model=model, **model_params)
+            model_obj.fit(X[fold.train_idx], y[fold.train_idx])
+            metrics = evaluate_model(
+                model_obj, X[fold.valid_idx], y[fold.valid_idx], eff_label,
+                compute_ic=True,
+                compute_drawdown=True,
+                compute_net=True,  # 稳定性曲线恒可输出（roundtrip=0 即毛收益）
+                roundtrip_rate=roundtrip)
+            periods.append(WalkForwardPeriod(
+                period_index=fold.fold_index,
+                train_start_ts=fold.train_start_ts,
+                train_end_ts=fold.train_end_ts,
+                valid_start_ts=fold.valid_start_ts,
+                valid_end_ts=fold.valid_end_ts,
+                n_train=fold.n_train,
+                n_val=fold.n_val,
+                metrics=metrics,
+            ))
+        result = WalkForwardResult.from_periods(periods, win_metric=win_metric)
+        logger.info(
+            f"[ml] walk-forward 完成 {len(periods)} 期: "
+            f"ic_mean={result.ic_mean:.4f} ic_std={result.ic_std:.4f} "
+            f"net_total={result.net_total:.4f} "
+            f"positive_ic_ratio={result.positive_ic_ratio:.2%}")
+        return result
+
 
 __all__ = [
     # 训练流水线
@@ -1077,7 +1637,15 @@ __all__ = [
     # 工厂 / 切分 / 评估
     "model_factory",
     "time_series_split",
+    "panel_time_series_split",
     "evaluate_model",
     "regression_metrics",
     "classification_metrics",
+    # F-12 滚动/扩展窗口 CV + walk-forward
+    "CvSplitConfig",
+    "CvFold",
+    "CvReport",
+    "WalkForwardPeriod",
+    "WalkForwardResult",
+    "time_series_cv_split",
 ]
