@@ -2289,3 +2289,19 @@ pytest 全量 2033 passed / 2 skipped / 0 failed（216s），较基线2032 +1新
 
 【验证】py_compile PASS；test_database.py 67 passed；
 pytest 全量 2033 passed/2 skipped/0 failed（222s）。
+
+114. ✨【回写记录·2026-10-04·P1-07 风控fail-open修复（P1批次第1项）】
+
+【P1-07｜风控可被配置整体关闭（fail-open，真钱安全）】
+- 根因：live/engine.py _risk_manager_check 在 self._risk_manager is None 时恒返回 True；
+  build_live_engine 又按 risk_cfg.enabled 决定是否构建规则库——配置 enabled:false 单键即无保护。
+- 修复：myquant/live/engine.py
+  * LiveEngine.__init__ 新增 trade_mode 参数并存 self._trade_mode；
+  * _risk_manager_check：trade_mode=live 且未接入 RiskManager → CRITICAL + errors++ + 拒单(fail-closed)；
+    paper/sim/monitor 维持回退内置检查放行；
+  * build_live_engine：trade_mode=live 时忽略 risk.enabled=false，强制构建规则库并 CRITICAL 告警。
+- 回归：tests/unit/test_live_risk.py::TestP107RiskFailClosed——
+  live+无风控拒单 / paper+无风控放行，两条断言。
+
+【验证】py_compile PASS；test_live_risk 87 passed（+2新）；
+pytest 全量 2035 passed/2 skipped/0 failed（214s），零回归。

@@ -214,6 +214,7 @@ class LiveEngine(BaseEngine):
         monitor_only: bool = False,
         snapshot_interval: float = 300.0,
         patrol_interval: float = 60.0,
+        trade_mode: str = "paper",
     ):
         """
         初始化实盘引擎
@@ -358,6 +359,10 @@ class LiveEngine(BaseEngine):
                 risk_manager if risk_manager is not None
                 else self._create_default_risk_manager()
             )
+
+        # P1-07：运行模式（monitor/paper/sim/live）。真钱(live)下风控 fail-closed：
+        # 缺 RiskManager 一律拒单，配置 enabled:false 被强制忽略（见 build_live_engine）。
+        self._trade_mode = str(trade_mode).lower()
 
         # 2) RiskGuardian：健康监控 + 熔断决策（依赖RiskManager）
         self._guardian = None
@@ -1617,10 +1622,19 @@ class LiveEngine(BaseEngine):
         """
         RiskManager 完整规则库检查（H2修复，订单提交券商前强制）
 
-        - 未接入 RiskManager 时返回 True（回退内置风控）
+        - 未接入 RiskManager 时：paper/sim/monitor 回退内置风控返回 True；
+          真钱(live) fail-closed：返回 False 并 CRITICAL（P1-07，禁止单键 fail-open）
         - 检查过程异常时按拒绝处理（真钱安全第一），记录 CRITICAL
         """
         if self._risk_manager is None:
+            if self._trade_mode == "live":
+                logger.critical(
+                    "[engine] 真钱(live)模式未接入 RiskManager，订单拒绝（fail-closed，P1-07）"
+                )
+                self._stats["errors"] += 1
+                if self._guardian is not None:
+                    self._guardian.record_rejection()
+                return False
             return True
         try:
             context = self._build_risk_context(bar)
@@ -2527,8 +2541,16 @@ def create_live_engine(
     strategy = create_strategy(strategy_name, **strategy_params)
 
     # 5) RiskManager（真钱实盘启用交易时段规则；模拟盘不启用）
+    # P1-07：真钱(live)模式忽略 enabled:false——配置错=无保护是 fail-open，
+    # 强制启用完整规则库并 CRITICAL 告警；paper/sim/monitor 尊重配置。
     risk_manager = None
-    if bool(risk_cfg.get("enabled", True)):
+    risk_enabled = bool(risk_cfg.get("enabled", True))
+    if trade_mode == "live" and not risk_enabled:
+        logger.critical(
+            "[build] trade_mode=live 但 risk.enabled=false 被忽略：真钱模式强制启用风控（P1-07）"
+        )
+        risk_enabled = True
+    if risk_enabled:
         risk_manager = build_risk_manager_from_config(
             risk_cfg, position_cfg, strategy_cfg,
             enable_trading_hours=(trade_mode != "paper"),
@@ -2561,6 +2583,7 @@ def create_live_engine(
         auto_recover=bool(state_cfg.get("auto_recover_on_start", False)),
         monitor_only=monitor_only,
         snapshot_interval=float(state_cfg.get("backup_interval", 300)),
+        trade_mode=trade_mode,
     )
     engine.set_data_feed(feed)
     engine.set_broker(broker)

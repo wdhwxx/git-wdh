@@ -851,3 +851,27 @@ class TestRealTimePreparation:
         )
         result = rule.check(order, ctx)
         assert isinstance(result, RiskCheckResult)
+
+
+# ═══════════════════════════════════════════
+#  P1-07回归：真钱模式风控 fail-closed
+# ═══════════════════════════════════════════
+
+class TestP107RiskFailClosed:
+    """P1-07：live 模式下缺 RiskManager 必须拒单（禁止单键 fail-open）。"""
+
+    def test_live_without_risk_manager_rejects(self) -> None:
+        """live + 未接入 RiskManager → 订单拒绝（原缺陷恒 True 放行）"""
+        from myquant.live.engine import LiveEngine
+        eng = LiveEngine(
+            risk_manager=None, enable_risk_manager=False, trade_mode="live"
+        )
+        assert eng._risk_manager_check(_make_order(), bar=None) is False
+
+    def test_paper_without_risk_manager_allowed(self) -> None:
+        """paper 仿真模式未接入 RiskManager → 回退内置检查，仍放行"""
+        from myquant.live.engine import LiveEngine
+        eng = LiveEngine(
+            risk_manager=None, enable_risk_manager=False, trade_mode="paper"
+        )
+        assert eng._risk_manager_check(_make_order(), bar=None) is True
