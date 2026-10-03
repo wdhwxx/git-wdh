@@ -1062,6 +1062,8 @@ Pythonwdhmm/
 
         ├── data_fingerprint.py       # ✨【V5·P0】数据指纹：按标的+日期范围+版本生成哈希级指纹（数据差异即指纹变化），仓库cache/fingerprint，批量回测同指纹跳过复用
 
+        ├── data_versioner.py         # ✨【#104】数据集口径版本登记（F-07拆出/F-15配套）：DATASET_SCHEMA_REVISIONS 登记 market_data=2/financial_data=2(F-15 ann_date)/factor_data=1；DatasetVersion 值对象+snapshot 现算（行数/日期范围/列结构hash）；write_result_version_sidecar 在结果旁写 .version.json 标注口径+git短哈希；assert_versions_compatible 跨口径比较守卫（rev不一致抛 DataVersionMismatchError）
+
         ├── memory_watcher.py         # ✨【V5·P0】内存水位监控：跟踪进程内存（psutil），OOM防护——超阈值自动触发预取降级/缓存收缩/策略上下文切换，回测批量运行关键防线
 
         ├── cache_sync.py             # ✨【V5·P0】缓存同步：L1内存↔L2磁盘缓存写回与失效广播（缓存管理.py/数据下载/数据清洗 --no-cache-sync 跳过）
@@ -2114,3 +2116,12 @@ Pythonwdhmm/
    e. **负向测试（验收铁律）**：tests/unit/test_f15_ann_date_pointin.py 7 项——Q2 报告期 6/30、公告日 8/28 在 7/15 信号日不可见（应回退看到 4/15 披露的年报 PE=15 而非中报 PE=25）；公告日之后可见；ann_date=NULL 存量行回退 report_date；最早公告日前信号日无任何基本面行；多信号日 vintage 不串味；CSV ann_date 列解析与缺失为 None
    f. **验证结果**：py_compile 3 文件（schema.py/financial_service.py/test_f15_ann_date_pointin.py）PASS；新测试 7 passed（0.08s）；真实 quant.db 迁移验证 ann_date 列存在 + idx_fin_ann_date 就位；全量 pytest tests/ = 2017 passed / 2 skipped（基线 2010 + 7，零回归）；warnings 26 为存量
    g. **纪律遵守**：先更新蓝图再动代码（#103）；防未来函数铁律 11 显式注释「本行使用的数据截至 t 时刻——仅引用 t 日开盘前已披露财报」；全量类型注解 + Google docstring + 防御式校验（ann_date 缺失回退 report_date 向后兼容存量）；默认零变化纪律（CSV 无 ann_date 列时行为不破坏、存量 NULL 行回退 report_date 与旧版一致）；git 提交待用户拍板
+
+104. ✨【回写记录·2026-10-03·附-A data_versioner 数据集口径版本登记（F-07 拆出补落地）】报告风险表点名「ann_date 切换改变历史数据分布，须登记每个数据集指纹，历史结论标注口径版本，不做跨口径直接比较」。F-07 时用户确认 data_versioner 拆出与 F-15 排期关联，本次 P2 收官补落地。落点=myquant/utils/data_versioner.py（新模块，纯新增零改动既有调用链）。事实来源：本次落地 + 报告风险表 650 行 + data_fingerprint.py 既有底座；代码级核验：py_compile 3 文件 + 新增 9 项单测 + 全量 pytest tests/ = 2026 passed / 2 skipped（基线 2017 + 9，零回归）：
+   a. **DATASET_SCHEMA_REVISIONS 口径修订号常量**：market_data=2（派生列加入见蓝图#33）、financial_data=2（F-15 ann_date 时点语义变更）、factor_data=1；破坏性结构变更手动 bump，跨修订号结论不可直比
+   b. **DatasetVersion 值对象 + snapshot 现算**：get_dataset_version(conn, dataset) 从 SQLite 现算 schema_revision + row_count + MIN/MAX 日期 + 列名集合 sha256 前 12 位结构指纹；get_all_dataset_versions 批量；未知 dataset KeyError 防御
+   c. **结果 sidecar 标注**：write_result_version_sidecar(result_path, versions, extra) 在结果文件旁写 .version.json（数据集版本 + code_git_short + 时间戳 + run_id 等 extra）；load_result_version_sidecar 读取，损坏/缺失返回 None
+   d. **跨口径比较守卫**：assert_versions_compatible(stored, current) 任一已登记 dataset schema_revision 不一致抛 DataVersionMismatchError，阻止把 ann_date 时点化前的 IC 与时点化后 IC 放在一起排名；同 rev 不同 row_count 不抛（数据更新口径未变）
+   e. **新增 tests/unit/test_data_versioner.py（9 项）**：financial_data rev=2 锁定；snapshot 字段/行数/日期范围/列hash；未知 dataset KeyError；sidecar 往返（run_id/git短哈希/datasets）；缺失 sidecar None；同 rev 兼容通过；rev 1→2 抛错
+   f. **配套归档**：新建 docs/因子与机器学习档案/P2整改任务清单.md（仿 P1 清单格式，F-13/F-14/F-15/附-A 四项全勾，Gate 3 状态）
+   g. **纪律遵守**：先更新蓝图再动代码（#104 目录树登记先行：utils/ 段 data_versioner.py + tests/unit 段 test_data_versioner.py，测试数实施后回填 9 项）；本模块不做任何时间序列计算无未来函数风险；全量类型注解 + Google docstring + 防御式校验；零变化纪律（纯新增模块不改动既有调用链，sidecar 写入 opt-in 调用方显式调用才生成）；git 提交待用户拍板

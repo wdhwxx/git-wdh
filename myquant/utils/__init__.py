@@ -53,6 +53,16 @@ from .data_fingerprint import (
     save_fingerprint,
     load_fingerprint,
 )
+from .data_versioner import (
+    DATASET_SCHEMA_REVISIONS,
+    DatasetVersion,
+    DataVersionMismatchError,
+    get_dataset_version,
+    get_all_dataset_versions,
+    write_result_version_sidecar,
+    load_result_version_sidecar,
+    assert_versions_compatible,
+)
 from .memory_watcher import (
     MemoryWatcher,
     MemoryLevel,
@@ -132,6 +142,14 @@ __all__ = [
     "fingerprints_equal",
     "save_fingerprint",
     "load_fingerprint",
+    "DATASET_SCHEMA_REVISIONS",
+    "DatasetVersion",
+    "DataVersionMismatchError",
+    "get_dataset_version",
+    "get_all_dataset_versions",
+    "write_result_version_sidecar",
+    "load_result_version_sidecar",
+    "assert_versions_compatible",
     "MemoryWatcher",
     "MemoryLevel",
     "get_memory_watcher",
