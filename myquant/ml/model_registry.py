@@ -6,7 +6,7 @@ model_registry.py - 模型注册版本管理
 
 核心能力:
   - register_model()    注册模型（版本自动递增 + 工件落盘 + 元数据 + checksum + 索引双写）
-  - load_model()        加载模型对象（checksum 完整性校验）
+  - load_model()        加载模型对象（F-07：先验 HMAC 签名再验 checksum 完整性）
   - activate_version()  实盘热切换 active 版本
   - rollback()          回滚到前一版本（记录 last_rollback）
   - list/get/delete/verify 版本管理全能力
@@ -16,7 +16,7 @@ model_registry.py - 模型注册版本管理
   ├── index.json            # 版本索引（head/active/last_rollback/versions 摘要）
   └── v{n}/
       ├── model.pkl         # 模型工件（pickle 标准库序列化，不绑定 ML 框架）
-      └── metadata.json     # 版本元数据（ModelVersion）
+      └── metadata.json     # 版本元数据（ModelVersion，F-07 含 HMAC 签名）
 
 数据来源（铁律）:
   - 本模块只管理模型工件文件，不读取行情数据（天然满足 ml/ 禁读 raw 约束）
@@ -25,9 +25,17 @@ model_registry.py - 模型注册版本管理
 
 防未来函数（铁律4）:
   - train_end_time 记录训练数据截止（推理侧只使用 <= 截止数据）
+  - data_snapshot 只登记训练时已得数据事实（指纹/行数/起止时间），无未来引用
   - 本模块无任何预测方法/属性
   - 无硬编码未来日期
-  - load_model/verify_model 做 checksum 完整性校验（工件篡改可检出）
+  - load_model/verify_model 做签名+checksum 双重完整性校验（工件与元数据篡改均可检出）
+
+F-07 元数据补全与签名（回写#94）:
+  - ModelVersion 新增 data_snapshot/runtime_env/model_params_count 补全字段
+  - 元数据 HMAC-SHA256 签名（密钥=环境变量 MYQUANT_MODEL_SIG_KEY，不入库/入 git；
+    无密钥时降级跳过签名并告警=默认零变化）
+  - load_model 校验顺序 = 签名校验 → checksum 校验（杜绝"连带重算"式篡改）
+  - 新增 ModelSignatureError（元数据签名被篡改）
 
 为实盘无缝对接（任务21-23 实盘增强前置）:
   - active 版本热切换（activate_version）：实盘模型不停机切换
@@ -36,17 +44,21 @@ model_registry.py - 模型注册版本管理
   - 线程锁 + 跨进程文件锁（实盘多进程预留）
   - 模型与训练特征绑定（feature_config_hash + feature_columns，与任务18 对齐）
 
-依赖: myquant.utils.file_utils, 标准库（pickle/json/threading/hashlib）
+依赖: myquant.utils.file_utils, 标准库（pickle/json/threading/hashlib/hmac/os/platform）
 """
 
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
+import os
 import pickle
+import platform
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -69,6 +81,18 @@ logger = get_logger("ml.model_registry")
 
 
 # ═══════════════════════════════════════════════
+#  F-07 签名相关常量（回写#94）
+# ═══════════════════════════════════════════════
+
+# 签名密钥环境变量名（密钥不得入库/入 git；无密钥时降级跳过签名并告警）
+ENV_SIG_KEY: str = "MYQUANT_MODEL_SIG_KEY"
+# 签名算法标识（元数据签名，与 F-01 特征列契约签名区分：F-07 是 HMAC 完整性签名）
+SIGNATURE_ALGORITHM: str = "hmac-sha256"
+# 签名自身字段（不参与被签名内容，避免自指）
+SIGNATURE_FIELDS: Tuple[str, ...] = ("signature", "signature_algorithm", "signed_at")
+
+
+# ═══════════════════════════════════════════════
 #  异常类
 # ═══════════════════════════════════════════════
 
@@ -86,6 +110,10 @@ class ModelVersionNotFoundError(ModelRegistryError):
 
 class ModelIntegrityError(ModelRegistryError):
     """模型工件完整性校验失败（checksum 不匹配）"""
+
+
+class ModelSignatureError(ModelRegistryError):
+    """模型元数据签名校验失败（HMAC 不匹配，元数据被篡改）"""
 
 
 class ModelRetiredError(ModelRegistryError):
@@ -138,6 +166,21 @@ class ModelVersion:
         派生链：从哪个版本训练而来
     description : str
         描述
+    data_snapshot : Optional[Dict[str, Any]]
+        F-07 训练数据快照引用：fingerprint（训练数据 X/y 内容 sha256）/ 行数 /
+        起止时间 / data_version（预留，独立 data_versioner 接入后回填）；
+        只登记训练时已得数据事实（防未来）
+    runtime_env : Optional[Dict[str, Any]]
+        F-07 运行环境依赖：注册时点 python/numpy/pandas 版本（可追溯环境版本）
+    model_params_count : Optional[int]
+        F-07 模型参数量（防御式计算；不可计算记 None 并告警，不阻断注册）
+    signature : Optional[str]
+        F-07 元数据 HMAC-SHA256 签名（密钥=环境变量 MYQUANT_MODEL_SIG_KEY；
+        无密钥时为 None=未签名）
+    signature_algorithm : Optional[str]
+        F-07 签名算法标识（hmac-sha256）
+    signed_at : Optional[str]
+        F-07 签名时间戳（YYYY-MM-DD HH:MM:SS，系统当前时间）
     """
     model_name: str
     version: int
@@ -157,6 +200,12 @@ class ModelVersion:
     status: str = "active"
     parent_version: Optional[int] = None
     description: str = ""
+    data_snapshot: Optional[Dict[str, Any]] = None
+    runtime_env: Optional[Dict[str, Any]] = None
+    model_params_count: Optional[int] = None
+    signature: Optional[str] = None
+    signature_algorithm: Optional[str] = None
+    signed_at: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -178,6 +227,12 @@ class ModelVersion:
             "status": self.status,
             "parent_version": self.parent_version,
             "description": self.description,
+            "data_snapshot": self.data_snapshot,
+            "runtime_env": self.runtime_env,
+            "model_params_count": self.model_params_count,
+            "signature": self.signature,
+            "signature_algorithm": self.signature_algorithm,
+            "signed_at": self.signed_at,
         }
 
     @classmethod
@@ -278,6 +333,152 @@ class ModelRegistry:
         else:
             payload = str(feature_config)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    # ─────────────────────────────────────────────
+    #  F-07 元数据签名 / 补全（回写#94）
+    # ─────────────────────────────────────────────
+
+    @staticmethod
+    def _sig_key() -> Optional[str]:
+        """
+        读取签名密钥（环境变量 ENV_SIG_KEY）。
+
+        密钥来源为环境变量（不入库/入 git）；缺失返回 None=未启用签名（降级模式）。
+        """
+        key = os.environ.get(ENV_SIG_KEY, "").strip()
+        return key if key else None
+
+    @staticmethod
+    def _canonical_json(payload: Dict[str, Any]) -> str:
+        """元数据 canonical JSON（sort_keys + ensure_ascii=False，字段顺序无关、稳定可复算）。"""
+        return json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+
+    @classmethod
+    def _sign_metadata(cls, meta_dict: Dict[str, Any]) -> Tuple[str, str, str]:
+        """
+        对元数据计算 HMAC-SHA256 签名（剔除签名自字段，避免自指）。
+
+        Returns
+        -------
+        (signature_hex, algorithm, signed_at) : 签名值 / 算法标识 / 签名时间戳
+        """
+        key = cls._sig_key()
+        if not key:
+            raise ModelRegistryError("签名密钥缺失，无法计算元数据签名")
+        payload = {k: v for k, v in meta_dict.items() if k not in SIGNATURE_FIELDS}
+        canonical = cls._canonical_json(payload)
+        signature = hmac.new(
+            key.encode("utf-8"), canonical.encode("utf-8"), hashlib.sha256
+        ).hexdigest()
+        signed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return signature, SIGNATURE_ALGORITHM, signed_at
+
+    @classmethod
+    def _verify_metadata_signature(cls, raw_meta: Dict[str, Any]) -> None:
+        """
+        校验元数据 HMAC 签名（读取侧，本行数据全部来自磁盘 metadata.json，截至加载时刻）。
+
+        校验规则（防御式降级）：
+          - 元数据无签名（旧版本/未签名注册）→ 跳过签名校验（兼容存量）；
+          - 有签名但密钥缺失 → 无法校验，告警并跳过（默认零变化降级）；
+          - 有签名且密钥可用 → 签名不匹配抛 ModelSignatureError（元数据被篡改）。
+
+        Raises
+        ------
+        ModelSignatureError : 签名不匹配（元数据被篡改）
+        """
+        signature = raw_meta.get("signature") if isinstance(raw_meta, dict) else None
+        if not signature:
+            return  # 未签名元数据：跳过（存量/无密钥注册兼容）
+        key = cls._sig_key()
+        if not key:
+            logger.warning(
+                "[ml] 元数据已签名但密钥缺失（未设置 %s），跳过签名校验（降级）",
+                ENV_SIG_KEY,
+            )
+            return
+        payload = {k: v for k, v in raw_meta.items() if k not in SIGNATURE_FIELDS}
+        canonical = cls._canonical_json(payload)
+        expect = hmac.new(
+            key.encode("utf-8"), canonical.encode("utf-8"), hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(expect, str(signature)):
+            raise ModelSignatureError(
+                f"模型元数据签名校验失败（元数据可能被篡改，拒绝加载）"
+            )
+
+    @staticmethod
+    def _capture_runtime_env() -> Dict[str, str]:
+        """
+        采集注册时点运行环境版本（python/numpy/pandas）。
+
+        版本来自注册发生时刻的真实环境（importlib.metadata 查询，不导入第三方模块），
+        无未来信息；单个包查询失败记为 "unknown" 不阻断。
+        """
+        def _pkg_version_safe(name: str) -> str:
+            try:
+                return str(_pkg_version(name))
+            except Exception:  # pragma: no cover - 包未安装/元数据异常
+                return "unknown"
+
+        return {
+            "python": platform.python_version(),
+            "numpy": _pkg_version_safe("numpy"),
+            "pandas": _pkg_version_safe("pandas"),
+        }
+
+    @staticmethod
+    def _count_model_params(model: Any) -> Optional[int]:
+        """
+        防御式计算模型参数量（常见数值参数属性求和）。
+
+        统计 coef_/feature_importances_/weights/estimators_/support_vectors_
+        等常见属性的元素个数；算不出（属性缺失/类型不可计数）返回 None 并告警，
+        不阻断注册（防御式：元数据补全尽力而为，缺省不阻断训练闭环）。
+
+        Returns
+        -------
+        Optional[int] : 参数量；不可计算返回 None
+        """
+        attr_candidates: Tuple[str, ...] = (
+            "coef_", "feature_importances_", "weights",
+            "estimators_", "support_vectors_", "intercept_",
+        )
+        total: int = 0
+        found: bool = False
+        for attr in attr_candidates:
+            obj = getattr(model, attr, None)
+            if obj is None:
+                continue
+            try:
+                size = getattr(obj, "size", None)
+                if isinstance(size, int) and size > 0:
+                    total += size
+                    found = True
+                    continue
+                # 非数组类（如 list/tuple）按 len 计
+                if isinstance(obj, (list, tuple)):
+                    total += len(obj)
+                    found = True
+            except Exception:  # pragma: no cover - 属性计数异常防御
+                continue
+        if not found:
+            # dict 模型兜底（如 {"coef": [...]}）
+            if isinstance(model, dict):
+                for key, val in model.items():
+                    if not isinstance(key, str):
+                        continue
+                    try:
+                        size = getattr(val, "size", None)
+                        if isinstance(size, int) and size > 0:
+                            total += size
+                            found = True
+                    except Exception:  # pragma: no cover
+                        continue
+        if not found:
+            logger.warning("[ml] 模型参数量不可计算，登记 None（不阻断注册）")
+            return None
+        return total
 
     def _resolve_feature_columns(self, metadata: Optional[Dict], feature_config: Any) -> List[str]:
         """
@@ -464,6 +665,25 @@ class ModelRegistry:
                 status="active",
                 parent_version=metadata.get("parent_version"),
                 description=description,
+                # F-07 元数据补全（回写#94）：
+                # data_snapshot 只登记训练时已得数据事实（训练管线计算后传入；
+                # 直接调 registry 时缺省 None 不阻断）
+                data_snapshot=(
+                    metadata.get("data_snapshot")
+                    if isinstance(metadata.get("data_snapshot"), dict) else None
+                ),
+                # runtime_env：调用方显式传入优先，缺省自动采集注册时点环境版本
+                runtime_env=(
+                    metadata.get("runtime_env")
+                    if isinstance(metadata.get("runtime_env"), dict)
+                    else self._capture_runtime_env()
+                ),
+                # model_params_count：显式传入优先，缺省防御式计算（不可计算 None+告警）
+                model_params_count=(
+                    metadata.get("model_params_count")
+                    if isinstance(metadata.get("model_params_count"), int)
+                    else self._count_model_params(model)
+                ),
             )
             # F-05：注册门控（require_win_gate 时新版本必须跑赢 active 方可激活）
             gate_passed = True
@@ -471,6 +691,20 @@ class ModelRegistry:
                 gate_passed = self._win_gate_passes(index, ver, metadata, win_metric)
             if not gate_passed:
                 meta.status = "archived"
+            # F-07 元数据签名（回写#94）：密钥可用时对完整元数据（剔除签名自字段）
+            # 计算 HMAC-SHA256 并落盘；无密钥时降级=不签名+告警（默认零变化）。
+            # 签名覆盖 checksum/status 等全部字段——篡改任意字段（含 checksum 字段）
+            # 都会在加载时被签名层拦截，杜绝"连带重算"式篡改。
+            if self._sig_key():
+                signature, algo, signed_at = self._sign_metadata(meta.to_dict())
+                meta.signature = signature
+                meta.signature_algorithm = algo
+                meta.signed_at = signed_at
+            else:
+                logger.warning(
+                    "[ml] 未设置 %s，元数据不签名（降级模式；加载时跳过签名校验）",
+                    ENV_SIG_KEY,
+                )
             # metadata.json 落盘
             write_json(str(self._metadata_path(model_name, ver)), meta.to_dict())
             # 索引双写（新增版本 + 该版本为最新；门控通过才激活）
@@ -638,7 +872,11 @@ class ModelRegistry:
         allow_retired: bool = False,
     ) -> Any:
         """
-        加载模型对象（checksum 完整性校验）
+        加载模型对象（F-07：先验 HMAC 签名再验 checksum 完整性）
+
+        【F-07】校验顺序 = 元数据签名校验 → 工件 checksum 校验（报告要求）；
+        签名校验覆盖元数据全部字段（含 checksum 字段），篡改任意元数据字段
+        均被签名层拦截（ModelSignatureError）；工件被篡改由 checksum 拦截。
 
         【F-05】失效（retired）版本默认拒绝加载（失效版本 0 次被调用）；
         allow_retired=True 供评估/审计显式加载历史失效版本。
@@ -649,6 +887,7 @@ class ModelRegistry:
         Raises
         ------
         ModelRetiredError : 加载的版本已失效（且未显式 allow_retired）
+        ModelSignatureError : 元数据签名校验失败（元数据被篡改）
         ModelIntegrityError : 工件 checksum 校验失败（被篡改/损坏）
         """
         meta = self.get_model_info(model_name, version)
@@ -656,6 +895,10 @@ class ModelRegistry:
             raise ModelRetiredError(
                 f"模型已失效禁止调用: {meta.tag}（如需评估请 allow_retired=True）"
             )
+        # F-07 签名校验（先于 checksum）：用磁盘 metadata.json 原始 dict 验签，
+        # 与注册时签名对象同源，不受索引 status 修正影响。
+        raw_meta = read_json(self._metadata_path(meta.model_name, meta.version))
+        self._verify_metadata_signature(raw_meta)
         apath = self._artifact_path(meta.model_name, meta.version, meta.artifact)
         if not apath.exists():
             raise ModelVersionNotFoundError(f"模型工件缺失: {apath}")
@@ -670,14 +913,18 @@ class ModelRegistry:
         return model
 
     def verify_model(self, model_name: str, version: Optional[int] = None) -> bool:
-        """校验模型工件完整性（checksum 匹配返回 True）"""
+        """校验模型完整性（F-07：元数据签名 + 工件 checksum 均匹配返回 True）"""
         try:
             meta = self.get_model_info(model_name, version)
+            # F-07 签名校验（元数据被篡改 → False）
+            raw_meta = read_json(self._metadata_path(meta.model_name, meta.version))
+            self._verify_metadata_signature(raw_meta)
             apath = self._artifact_path(meta.model_name, meta.version, meta.artifact)
             if not apath.exists():
                 return False
             return self._file_sha256(apath) == meta.checksum
-        except (ModelNotFoundError, ModelVersionNotFoundError):
+        except (ModelNotFoundError, ModelVersionNotFoundError,
+                ModelSignatureError, ModelIntegrityError):
             return False
 
     # ─────────────────────────────────────────────
@@ -882,5 +1129,6 @@ __all__ = [
     "ModelNotFoundError",
     "ModelVersionNotFoundError",
     "ModelIntegrityError",
+    "ModelSignatureError",
     "ModelRetiredError",
 ]

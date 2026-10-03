@@ -393,9 +393,48 @@ def _rank_ic(continuous_pred: Any, y_true: Any) -> Optional[float]:
     return float(np.corrcoef(rp, ry)[0, 1])
 
 
+def _max_drawdown(continuous_pred: Any, y_true: Any, label_type: str) -> float:
+    """验证集策略最大回撤（F-07 常驻绩效）。
+
+    策略收益 = 方向信号 × 真实标签：回归用预测收益符号（>0 做多）、
+    分类用正类概率阈值 0.5（>0.5 做多）——方向信号仅由模型预测决定，
+    真实标签为训练后已观测的验证集数据。
+
+    本行使用的数据截至 t 时刻：全部来自验证集评估时点已得数据，无未来信息
+    （铁律11）。
+
+    Args:
+        continuous_pred: 连续预测（回归=预测收益；分类=正类概率）。
+        y_true: 真实标签（1D，回归=收益；分类=0/1）。
+        label_type: 标签类型（direction 用 0.5 阈值，其余用 0 阈值）。
+
+    Returns:
+        累计净值最大回撤（净值峰值到谷值的最大跌幅，非负值）；
+        样本<2 或不可计算返回 0.0（防御式）。
+    """
+    pred = np.asarray(continuous_pred, dtype=float).ravel()
+    y = np.asarray(y_true, dtype=float).ravel()
+    if pred.shape != y.shape or len(pred) < 2:
+        return 0.0
+    mask = np.isfinite(pred) & np.isfinite(y)
+    pred, y = pred[mask], y[mask]
+    if len(pred) < 2:
+        return 0.0
+    if label_type == "direction":
+        direction = np.where(pred > 0.5, 1.0, -1.0)
+    else:
+        direction = np.where(pred > 0.0, 1.0, -1.0)
+    # 策略累计收益净值与峰值（本行使用的数据截至验证集评估时刻）
+    equity = np.cumsum(direction * y)
+    peak = np.maximum.accumulate(equity)
+    drawdown = peak - equity
+    return float(np.max(drawdown))
+
+
 def evaluate_model(
     model: Any, X: Any, y: Any, label_type: str = "return",
     positive_label: int = 1, compute_ic: bool = False,
+    compute_drawdown: bool = False,
 ) -> Dict[str, float]:
     """
     通用评估：按标签类型分发回归 / 分类指标
@@ -404,6 +443,10 @@ def evaluate_model(
 
     compute_ic=True（F-05）时追加 "ic"：分类用正类概率（若模型支持
     predict_proba）否则用 0/1 预测，回归用预测值，与 y_true 的秩相关。
+
+    compute_drawdown=True（F-07）时追加 "max_drawdown"：基于方向信号
+    （回归=预测收益符号 / 分类=正类概率 0.5 阈值）× 真实标签的策略累计
+    净值最大回撤——常驻绩效字段，仅用验证集已得数据（防未来）。
     """
     X = np.asarray(X, dtype=float)
     y = np.asarray(y, dtype=float).ravel()
@@ -427,6 +470,8 @@ def evaluate_model(
             metrics["ic"] = float(ic)
         else:
             metrics["ic"] = 0.0  # 不可计算（方差为0等）记 0，避免缺失键
+    if compute_drawdown:
+        metrics["max_drawdown"] = _max_drawdown(cont, y, label_type)
     return metrics
 
 
@@ -731,20 +776,38 @@ class TrainingPipeline:
         # 4. 训练（仅用训练集）
         model_obj.fit(dataset.X.values[train_idx], dataset.y.values[train_idx])
 
-        # 5. 验证集评估（只用训练之后的数据；enable_win_gate 时追加 IC）
+        # 5. 验证集评估（只用训练之后的数据；enable_win_gate 时追加 IC；
+        #    F-07：compute_drawdown=True 常驻绩效 max_drawdown 总在验证集上计算）
         metrics = evaluate_model(
             model_obj, dataset.X.values[valid_idx],
             dataset.y.values[valid_idx], eff_label,
-            compute_ic=enable_win_gate)
+            compute_ic=enable_win_gate,
+            compute_drawdown=True)
 
         # 6. 训练时间范围（防未来：train_end_time 记录训练数据截止）
         train_ts = [dataset.timestamps[int(i)] for i in train_idx]
         train_start = _ts_to_str(float(min(train_ts)))
         train_end = _ts_to_str(float(max(train_ts)))
 
-        # 7. 注册闭环（绑定特征 + 截止时间 + 指标 + 超参 + 特征签名 + source）
-        # F-01：注册 feature_signature（有序列名 + dtype），
-        # 推理侧据此做训练-推理特征一致性硬校验。
+        # 7. F-07 data_snapshot：训练数据快照引用（指纹+行数+起止时间）。
+        #    指纹 = 训练实际 X/y 内容的 sha256（np 数组字节布局确定）。
+        #    只登记训练时已得数据事实（铁律11 防未来）；data_version 预留由
+        #    独立 data_versioner（F-15 报告期≠可得时点时点化）接入后回填。
+        fp_hasher = hashlib.sha256()
+        for arr in (dataset.X.values[train_idx], dataset.y.values[train_idx]):
+            fp_hasher.update(np.ascontiguousarray(arr).tobytes())
+        data_snapshot: Dict[str, Any] = {
+            "fingerprint": fp_hasher.hexdigest(),
+            "n_train": int(len(train_idx)),
+            "n_val": int(len(valid_idx)),
+            "train_start_time": train_start,
+            "train_end_time": train_end,
+            "data_version": None,
+        }
+
+        # 8. 注册闭环（绑定特征 + 截止时间 + 指标 + 超参 + 特征签名 + source
+        #    + F-07 data_snapshot；runtime_env/model_params_count 由 registry
+        #    侧补全兜底）
         config_hash = (
             hashlib.sha256(eff_config.to_json().encode("utf-8")).hexdigest()
             if hasattr(eff_config, "to_json") else None
@@ -761,6 +824,7 @@ class TrainingPipeline:
             "train_start_time": train_start,
             "train_end_time": train_end,
             "parent_version": parent_version,
+            "data_snapshot": data_snapshot,
         }
         version_meta = self.registry.register_model(
             model_name, model_obj,
