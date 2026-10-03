@@ -1,0 +1,34 @@
+{
+  "generated_at": "2026-10-03 10:00:32",
+  "environment": {
+    "python": "3.14.6",
+    "platform": "Windows-11-10.0.26200-SP0"
+  },
+  "model_name": "benchmark_model",
+  "train_rows": 2000,
+  "hard_limit_ms": 500.0,
+  "target_ms": 200.0,
+  "repeat": 3,
+  "lengths": [
+    {
+      "length": 100,
+      "p50_ms": 30.376,
+      "p95_ms": 30.405,
+      "p99_ms": 30.408,
+      "mean_ms": 29.923,
+      "max_ms": 30.408,
+      "passed": true
+    },
+    {
+      "length": 500,
+      "p50_ms": 33.854,
+      "p95_ms": 33.887,
+      "p99_ms": 33.889,
+      "mean_ms": 33.558,
+      "max_ms": 33.89,
+      "passed": true
+    }
+  ],
+  "overall_passed": true,
+  "note": "口径：predict_realtime 全链路（compute_incremental+模型predict）耗时，每长度重复 3 次取百分位；硬阈值 P99<500.0ms，初始目标 P99<200.0ms；合成随机游走数据，独立临时 registry，不连实盘。"
+}

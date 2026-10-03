@@ -430,6 +430,12 @@ class InferenceService:
         missing = [c for c in train_cols if c not in features]
         if missing:
             raise FeatureMisalignmentError(f"推理特征缺失列: {missing}")
+        # ✨【回写#93】F-06 推理兜底：窗口不足时增量特征可能为 None，
+        # 先于 X 构造检出并抛明确错误（原实现 float(None) 抛 TypeError 不明确）
+        none_feat = [c for c in train_cols if features.get(c) is None]
+        if none_feat:
+            raise ModelNotReadyError(
+                f"最新 bar 特征缺失（窗口不足），无法预测: {none_feat}")
         X = np.array([[float(features[c]) for c in train_cols]])
         if np.isnan(X).any():
             raise ModelNotReadyError("最新 bar 特征含 NaN（窗口不足），无法预测")

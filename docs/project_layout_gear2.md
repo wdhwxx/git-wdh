@@ -380,6 +380,8 @@ Pythonwdhmm/
 
 │   ├── 性能基准测试.py                # ✨【第5项】性能基准与优化验证入口：运行benchmarks指标基准 + A-E五项164项统一验证；V5新增--engine-benchmark-only直跑三模式引擎基准；支持--benchmark-only/--verify-only/--quick
 
+│   ├── 推理延迟基准.py                # ✨【回写#93】F-06 推理延迟基准薄入口：argparse（--lengths/--out/--model-name/--repeat）+ find_project_root + 调 myquant/ml/inference_benchmark.py InferenceBenchmark，报告 JSON+Markdown 入档 docs/因子与机器学习档案/；只读合成数据，不连实盘
+
 │   ├── 数据库迁移.py                  # ✨【第6项】Alembic迁移中文入口：upgrade/downgrade/current/history/stamp/check/init，支持--db指定数据库路径
 
 │   ├── 数据库初始化.py                # 数据库初始化：调用database.schema与migrations创建表结构
@@ -504,6 +506,7 @@ Pythonwdhmm/
 │   │   ├── test_factor_preprocessor.py # ✨【回写#90】F-03 因子预处理测试（对称/偏态分布判定、MAD截断、分位数截断、自适应方法选择、中性化后市值相关≈0、行业哑变量后行业均值差≈0、暴露t值、残差诊断告警、报告序列化往返、策略默认none零变化+neutralize集成+非法mode报错，25项）✅已完成
 │   │   ├── test_survivorship_bias.py # ✨【回写#91】F-04 幸存者偏差测试（审计字段齐全、折价数值合成数据对拍、逐期池as_of过滤、报告口径声明注入零变化、非法参数防御，15项）✅已完成
 │   │   ├── test_model_monitor.py     # ✨【回写#92】F-05 模型失效监控测试（低IC连续3月检出/回升不失效/回撤超限判定/HealthReport序列化/from_config非法防御/降级切换/无候选清空/retired加载拒绝/win gate激活与拒绝/缺指标跳过/默认零变化回归/防未来序列，27项）✅已完成
+│   │   ├── test_ml_e2e.py            # ✨【回写#93】F-06 ML 端到端与负向测试（特征一致性全链路/时序切分日历化缓冲负向/标签无泄露+未来突变/registry读写+checksum篡改/推理兜底/未来函数负向：样本内预测strict拦截，23项）✅已完成
 
 │   │   ├── test_data_fingerprint.py  # ✨【V5·P0】数据指纹测试（哈希级差异检测：指纹生成/查询/缓存失效/旧数据替换，20项）
 
@@ -1031,7 +1034,9 @@ Pythonwdhmm/
 
     │   ├── inference_service.py      # 批量/实时预测服务；✨【回写#88】_build_engine 校验升级为注册签名（列集合+顺序双向硬校验），无签名旧模型回退静态列比对
 
-    │   └── model_monitor.py          # ✨【回写#92】F-05 模型失效监控器：HealthReport（frozen dataclass：healthy/degraded/retired + 最新IC/连续低IC月数/回撤超限/失效原因/降级目标）+ ModelMonitor（失效判定①滚动IC序列连续N月|IC|<阈值（默认N=3/阈值0.02）；②绩效最大回撤超限（默认20%）；run() 一次调用内 检出→mark_retired→自动降级→告警，<1监控周期；只消费已观测历史序列防未来；参数全可注入+from_config(dict/JSON路径)，默认值常量集中）
+    │   ├── model_monitor.py          # ✨【回写#92】F-05 模型失效监控器：HealthReport（frozen dataclass：healthy/degraded/retired + 最新IC/连续低IC月数/回撤超限/失效原因/降级目标）+ ModelMonitor（失效判定①滚动IC序列连续N月|IC|<阈值（默认N=3/阈值0.02）；②绩效最大回撤超限（默认20%）；run() 一次调用内 检出→mark_retired→自动降级→告警，<1监控周期；只消费已观测历史序列防未来；参数全可注入+from_config(dict/JSON路径)，默认值常量集中）
+
+    │   └── inference_benchmark.py    # ✨【回写#93】F-06 推理延迟基准：InferenceBenchmark（合成随机游走数据防未来/独立临时registry不碰实盘模型，长度递增 100/250/500/1000/2000 压测 predict_realtime 全链路（compute_incremental+模型predict）→ P50/P95/P99/均值/最大 + 达标判定：hard_limit 500ms passed / target 200ms 初始目标；报告 dict JSON 可序列化）；供 scripts/推理延迟基准.py 薄入口调用
 
     │
 
@@ -2007,3 +2012,11 @@ Pythonwdhmm/
    d. **新增 tests/unit/test_model_monitor.py（27 项）**：IC 连续3月低 retired/序列不足2低 degraded/回升中断不失效/阈值边界==0.02 不算低/回撤超限 retired/阈值内 healthy/非法序列 ModelMonitorError；HealthReport 往返+非法输入；参数非法 ModelMonitorConfigError（阈值0/月数0/回撤负/周期0）；from_config dict+JSON 路径/缺文件/非法类型/非法参数；run 集成降级（active v3 失效→v2 active+last_retire 记录）/无候选 active 置空/健康不降级；retired 加载拒绝 ModelRetiredError/allow_retired=True 通过/mark_retired 状态反映；win gate（新 IC 低→archived 不激活+active 保持/新 IC 高→激活/缺指标跳过/默认 False 无条件激活零变化）；evaluate_model 回归完美预测 IC≈1/分类正类概率 IC>0.8 且保留分类指标/compute_ic=False 无 ic 键零变化/_rank_ic 样本不足常数防御；防未来（同一已给序列判定确定，无时间推进依赖）
    e. **验证结果**：py_compile 4 文件（1 新+3 改）PASS；新测试 27 passed（0.39s）；全量 pytest tests/ = 1856 passed / 2 skipped（基线 1829 + 27，零回归）；warnings 24 为存量；降级演练验收（test_run_retire_and_degrade：单次 run() 内检出+降级完成 <1 监控周期；test_load_retired_rejected：失效版本加载抛错 0 次调用）
    f. **纪律遵守**：业务逻辑归 myquant/ml/model_monitor.py + model_registry.py + training_pipeline.py（新增文件已登记蓝图 ml/ 段 + tests/unit 段，ml/ 段既有文件注释已同步 #92）；先更新蓝图再创建新文件（目录树登记先行）；防未来函数铁律 11 显式标注（监控只消费已观测历史 IC 序列与训练时绩效，无预测性未来信息）；全量类型注解 + Google docstring + 防御式校验（配置非法/序列非法/指标缺失/版本不存在全部显式报错）；inference_service.py 未改（默认取 active 天然不触 retired，load_model 拦截在 registry 层兜底）；无临时文件入库；git 提交待用户拍板
+
+93. ✨【回写记录·2026-10-03·F-06 ML 端到端测试与延迟基准】《因子与机器学习层优化实施报告》P0 整改第六项（最后一项）落地。问题链（审查确认）：ML 层测试覆盖缺口——features 时序切分（含日历化缓冲负向）、标签无泄露、registry 读写（checksum 篡改等）、推理兜底（异常输入明确错误）、未来函数负向用例均无独立覆盖（既有仅 test_ml_feature_contract 12 项 + test_model_monitor 27 项）；推理延迟无量化证明（分钟级策略无 P99 阈值依据）。任务卡验收：pytest 全量回归通过；延迟基准报告入档；未来函数负向用例通过。事实来源：本次落地 + 既有测试盘点；代码级核验：py_compile 3 文件 PASS + 新增 23 项单测 + 全量 pytest tests/ = 1879 passed / 2 skipped（基线 1856 + 23，零回归）：
+   a. **新增 tests/unit/test_ml_e2e.py（23 项，六类覆盖）**：①特征一致性端到端（合成数据→FeatureEngine→TrainingPipeline.run→predict_realtime 全链路，签名/预测有限/train_end_time 绑定）；②时序切分（时间升序无重叠、strict_split+horizon 缓冲验证集起点=80+5、日历化缓冲负向——strict=True 验证集首样本与训练集末样本日历间隔 >= horizon 根 bar、strict=False 重叠可检出、参数防御 train_ratio 越界/horizon 负/样本不足）；③标签无泄露（标签=close.shift(-horizon)/close-1 全样本向量断言、未来突变负向——t+horizon 收盘 ×10 前 N-horizon 行特征纹丝不动、推理路径不含标签列）；④registry 读写（注册自增/降序列表/指定版本回滚/checksum 篡改→ModelIntegrityError+verify False/删除版本与模型）；⑤推理兜底（空输入→ModelNotReadyError、缺失列→契约错误、窗口不足 NaN/None→明确错误、模型不存在→ModelNotFoundError）；⑥未来函数负向（输入最新时间<训练截止 strict 抛 InferenceError、非 strict 告警放行、无 train_end_time 守卫跳过）
+   b. **新增 myquant/ml/inference_benchmark.py（推理延迟基准）**：InferenceBenchmark.measure——确定性随机游走合成数据（防未来，压测序列 timestamp 晚于训练截止）+ 独立临时 registry（不碰 datasets/models）+ 长度递增 100/250/500/1000/2000 压测 predict_realtime 全链路（compute_incremental+模型 predict）→ 各长度 P50/P95/P99/均值/最大 + 达标判定；阈值双档 hard_limit_ms=500.0（passed 判定）/ target_ms=200.0（初始目标）；LengthResult frozen dataclass + 报告 dict JSON 可序列化；参数防御（阈值<=0/repeat<1/lengths 空/非升序/非正整数 → ValueError）；新增文件已登记蓝图 ml/ 段
+   c. **新增 scripts/推理延迟基准.py（薄入口）**：顶部 sys.path 注入（CLI 直跑免设 PYTHONPATH，与同步股本变动.py 对齐）+ argparse（--lengths/--repeat/--model-name/--out）+ find 项目根 + 调 InferenceBenchmark → 报告 JSON+Markdown 双份入档 docs/因子与机器学习档案/推理延迟基准_<时间戳>.json/.md；业务逻辑零写入脚本；已登记蓝图 scripts/ 段
+   d. **inference_service.py 实施中发现并修复**（推理兜底驱动）：predict_realtime 窗口不足时 compute_incremental 特征可能为 None，原实现 float(None) 抛 TypeError（不明确错误）——新增 none_feat 检出先于 X 构造抛 ModelNotReadyError("窗口不足")，保留 np.isnan 双保险；test_predict_realtime_nan_features 断言明确错误非 TypeError
+   e. **验证结果**：py_compile 3 文件（2 新+1 改）PASS；新测试 23 passed（0.73s）；全量 pytest tests/ = 1879 passed / 2 skipped（基线 1856 + 23，零回归）；warnings 24 为存量；延迟基准实测（2026-10-03 10:00，5 次重复）：len=100/250/500/1000/2000 P99=33.904/32.179/31.173/30.064/31.121ms，全部 < 500ms 硬阈值且 < 200ms 初始目标——**总体达标，分钟级策略延迟余量充足**；报告 JSON+MD 已入档 docs/因子与机器学习档案/
+   f. **纪律遵守**：先更新蓝图再创建新文件（#93 目录树登记先行：ml/ 段 inference_benchmark.py + scripts/ 段 推理延迟基准.py + tests/unit 段 test_ml_e2e.py，测试数实施后回填 23 项）；防未来函数铁律 11 显式标注（合成随机游走数据、压测序列晚于训练截止、基准不连实盘）；全量类型注解 + Google docstring + 防御式校验（时间序列参数/基准参数/registry 读写/推理输入全部显式报错）；无临时文件入库（探查脚本已删）；git 提交待用户拍板

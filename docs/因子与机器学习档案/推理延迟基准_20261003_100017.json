@@ -1,0 +1,61 @@
+{
+  "generated_at": "2026-10-03 10:00:17",
+  "environment": {
+    "python": "3.14.6",
+    "platform": "Windows-11-10.0.26200-SP0"
+  },
+  "model_name": "benchmark_model",
+  "train_rows": 2000,
+  "hard_limit_ms": 500.0,
+  "target_ms": 200.0,
+  "repeat": 5,
+  "lengths": [
+    {
+      "length": 100,
+      "p50_ms": 32.336,
+      "p95_ms": 33.813,
+      "p99_ms": 33.904,
+      "mean_ms": 32.54,
+      "max_ms": 33.926,
+      "passed": true
+    },
+    {
+      "length": 250,
+      "p50_ms": 29.43,
+      "p95_ms": 31.827,
+      "p99_ms": 32.179,
+      "mean_ms": 29.871,
+      "max_ms": 32.267,
+      "passed": true
+    },
+    {
+      "length": 500,
+      "p50_ms": 29.841,
+      "p95_ms": 31.159,
+      "p99_ms": 31.173,
+      "mean_ms": 30.106,
+      "max_ms": 31.177,
+      "passed": true
+    },
+    {
+      "length": 1000,
+      "p50_ms": 28.772,
+      "p95_ms": 30.034,
+      "p99_ms": 30.064,
+      "mean_ms": 29.033,
+      "max_ms": 30.072,
+      "passed": true
+    },
+    {
+      "length": 2000,
+      "p50_ms": 30.694,
+      "p95_ms": 31.063,
+      "p99_ms": 31.121,
+      "mean_ms": 30.492,
+      "max_ms": 31.135,
+      "passed": true
+    }
+  ],
+  "overall_passed": true,
+  "note": "口径：predict_realtime 全链路（compute_incremental+模型predict）耗时，每长度重复 5 次取百分位；硬阈值 P99<500.0ms，初始目标 P99<200.0ms；合成随机游走数据，独立临时 registry，不连实盘。"
+}
