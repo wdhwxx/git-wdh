@@ -131,6 +131,7 @@ class BatchSummaryReportGenerator:
         meta: BatchReportMeta,
         output_dir: Path,
         ts: Optional[str] = None,
+        data_coverage: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, str]:
         """一次生成 HTML + PDF 汇总报告（与汇总 CSV 同时间戳一套）。
 
@@ -139,6 +140,9 @@ class BatchSummaryReportGenerator:
             meta: 报告元信息。
             output_dir: 输出目录（策略子目录）。
             ts: 时间戳字符串；None 时按当前时间生成。
+            data_coverage: 数据口径声明 dict（F-04：退市股覆盖/池构建口径/
+                偏差折价系数，来自 survivorship_bias.audit_data_coverage）；
+                None 时报告不渲染声明节（默认零变化）。
 
         Returns:
             {"html": HTML 路径, "pdf": PDF 路径}。
@@ -154,6 +158,7 @@ class BatchSummaryReportGenerator:
 
         html_path = self.generate_html(
             rows, meta, output_dir / f"批量回测汇总_{ts}.html",
+            data_coverage=data_coverage,
         )
         pdf_path = self.generate_pdf(
             rows, meta, output_dir / f"批量回测汇总_{ts}.pdf",
@@ -259,6 +264,7 @@ class BatchSummaryReportGenerator:
         rows: Sequence[Dict[str, Any]],
         meta: BatchReportMeta,
         output_path: Path,
+        data_coverage: Optional[Dict[str, Any]] = None,
     ) -> str:
         """生成 HTML 汇总报告（Chart.js 分布图 + Top N 榜）。
 
@@ -266,6 +272,7 @@ class BatchSummaryReportGenerator:
             rows: 批量汇总行列表。
             meta: 报告元信息。
             output_path: 输出路径。
+            data_coverage: 数据口径声明 dict（F-04）；None 不渲染声明节。
 
         Returns:
             str: 报告文件路径。
@@ -279,6 +286,42 @@ class BatchSummaryReportGenerator:
         ret_labels, ret_counts = self._histogram_data(returns)
         sharpe_labels, sharpe_counts = self._histogram_data(sharpes)
         schedule = "强制全量" if meta.force_full else "增量"
+
+        # ── F-04：数据口径声明节（data_coverage 非 None 时渲染）──
+        coverage_html = ""
+        if data_coverage:
+            from html import escape
+
+            statement = escape(str(data_coverage.get("statement", "")), quote=True)
+            db_n = escape(str(data_coverage.get("db_symbol_count", "—")), quote=True)
+            proc_n = escape(str(data_coverage.get("processed_symbol_count", "—")), quote=True)
+            susp_n = escape(str(data_coverage.get("suspended_count", "—")), quote=True)
+            delisted = data_coverage.get("delisted_coverage")
+            delisted_txt = "含历史退市股" if delisted else "不含历史退市股（覆盖=0）"
+            # 偏差折价（可选字段）
+            discount_html = ""
+            if "discount" in data_coverage and data_coverage.get("discount") is not None:
+                d = float(data_coverage["discount"])
+                d_ann = data_coverage.get("discount_annualized")
+                ann_txt = f"{float(d_ann):.2%}" if isinstance(d_ann, (int, float)) else "—"
+                discount_html = (
+                    f'<div class="metric-item"><div class="label">偏差折价（区间）</div>'
+                    f'<div class="value {"negative" if d > 0 else ""}">{d:+.2%}</div></div>'
+                    f'<div class="metric-item"><div class="label">偏差折价（年化）</div>'
+                    f'<div class="value">{ann_txt}</div></div>'
+                )
+            coverage_html = f"""
+        <div class="card">
+            <h2>数据口径声明（F-04 幸存者偏差审计）</h2>
+            <div class="metrics-grid">
+                <div class="metric-item"><div class="label">DB 标的总数</div><div class="value">{db_n}</div></div>
+                <div class="metric-item"><div class="label">processed 标的数</div><div class="value">{proc_n}</div></div>
+                <div class="metric-item"><div class="label">停牌近似池</div><div class="value">{susp_n}</div></div>
+                <div class="metric-item"><div class="label">退市股覆盖</div><div class="value">{delisted_txt}</div></div>
+                {discount_html}
+            </div>
+            <p style="margin-top: 12px; font-size: 13px; color: #555; line-height: 1.7;">{statement}</p>
+        </div>"""
 
         # Top N 表行（html 转义标的值，防注入）
         top_rows_html = ""
@@ -373,6 +416,8 @@ class BatchSummaryReportGenerator:
                 <tbody>{top_rows_html}</tbody>
             </table>
         </div>
+
+        {coverage_html}
 
         <div class="footer">
             生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 鲲鹏量化交易系统 Pythonwdhmm

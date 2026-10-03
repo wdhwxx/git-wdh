@@ -502,6 +502,7 @@ Pythonwdhmm/
 │   │   ├── test_ml_feature_contract.py # ✨【回写#88】F-01 训练-推理特征一致性测试（中文列契约/price_col默认收盘价/英文列显式拒绝/指标不再静默跳过/指标失败fail-fast/签名构建往返与双向校验/训练→注册→推理端到端/签名不一致拦截，12项）✅已完成
 │   │   ├── test_factor_validator.py # ✨【回写#89】F-02 因子有效性校验测试（RankIC/PearsonIC双口径、ICIR/t/胜率手算对拍、衰减曲线1/5/10/20、5层分层收益+换手、active/observe/eliminated三态、IC加权方向校正+下限约束+归一化、经济逻辑缺省拒绝、FactorProfile序列化往返、策略IC加权集成+默认零变化+extra因子缺逻辑拒绝，22项）✅已完成
 │   │   ├── test_factor_preprocessor.py # ✨【回写#90】F-03 因子预处理测试（对称/偏态分布判定、MAD截断、分位数截断、自适应方法选择、中性化后市值相关≈0、行业哑变量后行业均值差≈0、暴露t值、残差诊断告警、报告序列化往返、策略默认none零变化+neutralize集成+非法mode报错，25项）✅已完成
+│   │   ├── test_survivorship_bias.py # ✨【回写#91】F-04 幸存者偏差测试（审计字段齐全、折价数值合成数据对拍、逐期池as_of过滤、报告口径声明注入零变化、非法参数防御，15项）✅已完成
 
 │   │   ├── test_data_fingerprint.py  # ✨【V5·P0】数据指纹测试（哈希级差异检测：指纹生成/查询/缓存失效/旧数据替换，20项）
 
@@ -823,7 +824,7 @@ Pythonwdhmm/
 
     │   ├── async_monte_carlo.py      # ✨【V5·P2】异步蒙特卡洛：asyncio并发模拟（asyncio.to_thread多进程池），大幅缩短置信区间计算耗时
 
-    │   ├── batch_report.py           # ✨【2026-09-12】批量回测汇总报告生成器：BatchSummaryReportGenerator+BatchReportMeta，输入批量汇总行（与CSV同构），输出HTML（统计卡+收益/夏普分布直方图+Top30榜）+PDF（同内容fpdf2离线）；与批量回测汇总_<时间戳>.csv同目录同前缀一套；被batch_backtest_tab.py Worker调用（失败不阻断）
+    │   ├── batch_report.py           # ✨【2026-09-12】批量回测汇总报告生成器：BatchSummaryReportGenerator+BatchReportMeta，输入批量汇总行（与CSV同构），输出HTML（统计卡+收益/夏普分布直方图+Top30榜）+PDF（同内容fpdf2离线）；与批量回测汇总_<时间戳>.csv同目录同前缀一套；被batch_backtest_tab.py Worker调用（失败不阻断）；✨【回写#91】F-04 新增可选 data_coverage 参数（默认 None 零变化），HTML 渲染「数据口径声明」节（退市股覆盖/池构建口径/偏差折价系数）
 
     │   ├── candidate_report.py       # ✨【2026-09-12】候选池报告生成器：CandidatePoolReportGenerator+CandidateReportMeta，输入候选池DataFrame（英文列），输出HTML（统计卡+综合夏普分布+TopN榜+全量绩效表）+PDF（精简8列自动分页）；与双强候选池_<时间戳>.csv同前缀一套；被scripts/候选池交叉验证.py调用（失败仅告警）
 
@@ -836,6 +837,8 @@ Pythonwdhmm/
     │   ├── dashboard_serializer.py   # ✨【2026-09-13】看板数据序列化器（V1瘦身版）：引擎输出→看板格式，含equity_curve/trades构建+commission拆分+timestamp规范化；✨【2026-09-14】新增 build_ohlcv()/ohlcv 注入通道（processed 清洗日线→看板 K线四窗格数据源，HistoricalDataProvider 读取 + end_date 严格过滤防未来）+ render_dashboard() 承担 §DATA 注入（占位符 __DASHBOARD_DATA_JSON__ 替换，仅替换代码行不动注释）
 
     │   └── dashboard_injector.py     # ✨【2026-09-13】看板数据注入器核心逻辑：§DATA区块精确定位+JS数据块构建+HTML注入+注入后验证；# 已废弃（未落盘），见回写记录·2026-09-14（磁盘无此文件，功能由 dashboard_serializer.render_dashboard 承担）
+
+    │   ├── survivorship_bias.py      # ✨【回写#91】F-04 幸存者偏差评估器：audit_data_coverage（数据覆盖审计：DB/processed标的数、最后交易日分布、停牌近似池、退市覆盖声明）、estimate_survivorship_discount（偏差折价估计：区间等权收益对比「存续池 vs 存续池∪停牌近似池」，输出折价系数+披露口径，停牌风险下界）、build_point_in_time_pool（逐期存续池构建：as_of 时点最后交易日过滤，防未来=只用该时点已可得数据）；DB 只读查询+纯函数，供批量报告口径声明注入
 
 
 
@@ -1984,3 +1987,12 @@ Pythonwdhmm/
    d. **新增 tests/unit/test_factor_preprocessor.py（25 项）**：分布判定（对称/偏态/样本不足默认对称）；MAD 截断（极端值裁剪+常量序列不变）；分位数截断（P1/P99 边界）；自适应方法选择（对称→mad/偏态→quantile）；市值中性化（因子=3×log市值+噪声→残差后相关≈0 且暴露 t 显著识别）；行业中性化（两行业哑变量→残差后行业组均值差≈0）；无暴露数据/样本不足降级仅中心化；残差诊断（正态无告警/异方差告警/样本不足说明）；PreprocessReport 往返+非法输入；preprocess_panel（仅去极值/全流程报告含暴露与诊断/空面板报错）；策略集成（默认 none 与手工 z-score 对拍零变化/winsorize 仅去极值报告/neutralize 全流程报告含暴露/非法 mode 报错/流通市值现算）
    e. **验证结果**：py_compile 3 文件（1 新+1 改+1 新测试）PASS；新测试 25 passed（0.22s）；全量 pytest tests/ = 1814 passed / 2 skipped（基线 1789 + 25，零回归）；warnings 24 为存量（event_bus DeprecationWarning 与改动无关）
    f. **纪律遵守**：业务逻辑归 myquant/indicators/factor_preprocessor.py + myquant/strategies/multi_factor_strategy.py（新增文件已登记蓝图 indicators/ 段 + tests/unit 段，strategies/ multi_factor 注释已同步）；先更新蓝图再创建新文件（目录树登记先行）；防未来函数铁律 11 显式标注；全量类型注解 + Google docstring + 防御式校验（NaN 防御/阈值常量集中定义）；factor_validator.py 未改（预处理独立于有效性校验层）；无临时文件入库；git 提交待用户拍板
+
+91. ✨【回写记录·2026-10-03·F-04 消除幸存者偏差】《因子与机器学习层优化实施报告》P0 整改第四项落地。问题链（审查确认）：数据源头=当前存续 A 股列表（akshare/通达信 get_stock_list 快照），退市/已摘牌股票从未入库（DB 5589 标的无一只最后交易日早于 2025-01-01，退市覆盖=0）；回测池=processed=清洗后存续池（排除规则/ST/长期停牌>60天剔除，其中 19 只停牌标的被剔、31 只保留）→ 回测收益系统性偏乐观（幸存者偏差）。任务卡验收"含偏差折价或完整退市数据二者必居其一"→ 走偏差折价披露路径（完整退市数据接入需 akshare 沪深退市名单+历史行情约 200-300 只、联网依赖接口稳定性未验证，预留逐期池接口未来无缝接入）。事实来源：本次落地（DB 只读探查实证）；代码级核验：py_compile 3 文件全 PASS + 新增 15 项单测 + 全量 pytest tests/ = 1829 passed / 2 skipped（基线 1814 + 15，零回归）：
+   a. **新增 myquant/backtest/survivorship_bias.py（幸存者偏差评估器）**：audit_data_coverage（数据覆盖审计：DB/processed 标的数、最新交易日、停牌近似池=最后交易日<ref_date-阈值、退市覆盖声明；CoverageAudit frozen dataclass to_dict/from_dict 序列化往返+必填字段防御）；estimate_survivorship_discount（偏差折价：区间等权买入持有收益对比「存续池 vs 存续池∪停牌近似池」，停牌标的收益按数据截至停牌前收盘计算；折价=全样本近似池收益-存续池收益，正=存续池虚高，年化折算（252 交易日基数）；区间非法/样本不足<3 抛 ValueError）；build_point_in_time_pool（逐期存续池构建：as_of 时点最后交易日>=as_of 过滤，任务卡整改内容 1 逻辑显式化，未来退市数据接入无缝生效）
+   b. **防未来合规**：停牌/存续判定均基于"该时点已可得数据"（最后交易日为数据事实，ref_date/as_of 可注入测试固定）；严禁"今日是否存续"回溯历史池（逐期池构建天然规避）；模块只读 quant.db（sqlite3 mode=ro），绝不写库
+   c. **batch_report.py 口径声明**：generate_full_report/generate_html 新增可选 data_coverage 参数（默认 None 零变化）；HTML 渲染「数据口径声明」节（退市股覆盖/DB 与 processed 标的数/停牌近似池/偏差折价区间+年化/statement 文本），statement 与数值 html 转义防注入；PDF 路径不渲染（范围控制，声明以 HTML 为准）
+   d. **新增 tests/unit/test_survivorship_bias.py（15 项）**：审计字段齐全/退市覆盖=0/口径声明含"幸存者偏差"/停牌近似池成员判定（合成 DB 最后交易日差值）/processed 计数（隐藏文件不计）/DB 缺失抛错；折价数值对拍（存续+50% vs 停牌-20% 等权→全样本+40%，合成 DB 精确断言）/无停牌折价=0/区间非法抛错/样本不足抛错；逐期池 as_of 过滤/非法日期抛错；CoverageAudit 序列化往返+非法输入；报告声明（None 不含声明节零变化/注入渲染含折价/statement 转义防注入）
+   e. **真实数据冒烟（实证）**：audit（DB 5589/processed 3195/最新交易日 2026-09-30/停牌近似池 17 只/退市覆盖=False）；折价估计 2025-01-01~2026-09-30：存续池等权 +27.12%，全样本近似 +26.76%，折价 **-0.366%（年化 -0.145%）**——停牌近似池拖累有限（17/5584 占比小），数值合理；口径声明注明"停牌风险下界，真退市股损失通常更极端"
+   f. **验证结果**：py_compile 3 文件（1 新+1 改+1 新测试）PASS；新测试 15 passed（0.23s）；全量 pytest tests/ = 1829 passed / 2 skipped（基线 1814 + 15，零回归）；warnings 24 为存量
+   g. **纪律遵守**：业务逻辑归 myquant/backtest/survivorship_bias.py + myquant/backtest/batch_report.py（新增文件已登记蓝图 backtest/ 段 + tests/unit 段，batch_report 注释已同步）；先更新蓝图再创建新文件（目录树登记先行）；防未来函数铁律 11 显式标注；全量类型注解 + Google docstring + 防御式校验（DB 缺失/区间非法/样本不足/HTML 注入全部拦截）；无临时文件入库（探查脚本已删）；git 提交待用户拍板
