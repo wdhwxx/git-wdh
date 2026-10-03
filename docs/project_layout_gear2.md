@@ -2448,3 +2448,17 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 以上均与真钱下单/资金/主备切换直接相关，列待真机开通后逐项验证与接线。
 
 【验证】py_compile PASS；risk/ml相关278 passed；新断言3 passed；pytest全量2064 passed/0 failed（216s）。
+
+125. ✨【回写记录·2026-10-04·P1-13 Webhook阻塞交易线程修复（P1批次第12项）】
+
+【P1-13｜Webhook同步发送可阻塞行情/风控交易线程】
+- 根因：event_bus.publish 同步内联执行 handler，WebhookAlertChannel.send 同步
+  3次重试×10s超时+退避≈36s，会卡住发布者（行情/风控线程）。
+- 修复：WebhookAlertChannel 启动 daemon 后台线程消费有界队列(256)；
+  send() 仅入队立即返回，真正 HTTP POST+重试移到 _webhook_worker/_post_with_retry；
+  队列满则丢弃告警并记 failure，绝不阻塞。
+- 单测：test_p113_webhook_nonblock——send 1s内返回且已入队。
+- 备注：生产仅注册 console/log、email/webhook 未配置不外发的问题，
+  属配置层（live_config.yaml 驱动注册），留待部署时配置，不阻塞代码正确性。
+
+【验证】py_compile PASS；monitor/alert 140 passed；新断言1 passed；pytest全量2065 passed/0 failed（216s）。

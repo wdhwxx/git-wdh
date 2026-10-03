@@ -774,6 +774,50 @@ class WebhookAlertChannel(AlertChannel):
         self.timeout = timeout
         self.retries = max(1, retries)
         self.retry_delay = retry_delay
+        # P1-13：webhook 发送改为后台线程队列，避免同步重试阻塞行情/风控交易线程
+        self._send_q: "queue.Queue[bytes]" = queue.Queue(maxsize=256)
+        self._worker = threading.Thread(
+            target=self._webhook_worker, name="webhook-alert", daemon=True,
+        )
+        self._worker.start()
+
+    def _webhook_worker(self) -> None:
+        """后台线程：消费发送队列，真正执行阻塞式 HTTP POST + 重试。"""
+        while True:
+            try:
+                data, summary = self._send_q.get()
+            except Exception:
+                return
+            try:
+                self._post_with_retry(data, summary)
+            finally:
+                self._send_q.task_done()
+
+    def _post_with_retry(self, data: bytes, summary: str) -> bool:
+        for attempt in range(1, self.retries + 1):
+            try:
+                req = urlrequest.Request(
+                    self.webhook_url, data=data, headers=self.headers, method="POST",
+                )
+                with urlrequest.urlopen(req, timeout=self.timeout) as response:
+                    status = response.getcode()
+                    if 200 <= status < 300:
+                        self._record_success()
+                        logger.debug(f"Webhook告警发送成功 (attempt {attempt}): {summary}")
+                        return True
+                    error_msg = f"HTTP {status}"
+                    logger.warning(f"Webhook告警发送失败 (attempt {attempt}/{self.retries}): {error_msg}")
+            except URLError as e:
+                error_msg = str(e)
+                logger.warning(f"Webhook告警网络错误 (attempt {attempt}/{self.retries}): {e}")
+            except Exception as e:
+                error_msg = str(e)
+                logger.warning(f"Webhook告警发送异常 (attempt {attempt}/{self.retries}): {e}", exc_info=True)
+            if attempt < self.retries:
+                time.sleep(self.retry_delay * attempt)
+        self._record_failure(error_msg if "error_msg" in dir() else "max retries exceeded")
+        logger.error(f"Webhook告警发送最终失败 ({self.retries}次重试): {summary}")
+        return False
 
     def _build_feishu_payload(self, alert: Alert) -> Dict[str, Any]:
         """构建飞书Webhook payload"""
@@ -863,52 +907,20 @@ class WebhookAlertChannel(AlertChannel):
             return self._build_generic_payload(alert)
 
     def send(self, alert: Alert) -> bool:
-        """
-        发送Webhook告警（带重试）
-
-        Returns
-        -------
-        bool : 是否发送成功
-        """
+        """发送Webhook告警——P1-13：入队后台线程发送，立即返回，不阻塞调用方交易线程。"""
         if not self.webhook_url:
             logger.warning(f"Webhook通道未配置URL，跳过发送: {alert.summary()}")
             self._record_failure("Webhook URL not configured")
             return False
-
         payload = self._build_payload(alert)
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-
-        for attempt in range(1, self.retries + 1):
-            try:
-                req = urlrequest.Request(
-                    self.webhook_url,
-                    data=data,
-                    headers=self.headers,
-                    method="POST",
-                )
-                with urlrequest.urlopen(req, timeout=self.timeout) as response:
-                    status = response.getcode()
-                    if 200 <= status < 300:
-                        self._record_success()
-                        logger.debug(f"Webhook告警发送成功 (attempt {attempt}): {alert.summary()}")
-                        return True
-                    else:
-                        error_msg = f"HTTP {status}"
-                        logger.warning(f"Webhook告警发送失败 (attempt {attempt}/{self.retries}): {error_msg}")
-
-            except URLError as e:
-                error_msg = str(e)
-                logger.warning(f"Webhook告警网络错误 (attempt {attempt}/{self.retries}): {e}")
-            except Exception as e:
-                error_msg = str(e)
-                logger.warning(f"Webhook告警发送异常 (attempt {attempt}/{self.retries}): {e}", exc_info=True)
-
-            if attempt < self.retries:
-                time.sleep(self.retry_delay * attempt)  # 指数退避
-
-        self._record_failure(error_msg if 'error_msg' in dir() else "max retries exceeded")
-        logger.error(f"Webhook告警发送最终失败 ({self.retries}次重试): {alert.summary()}")
-        return False
+        try:
+            self._send_q.put_nowait((data, alert.summary()))
+            return True
+        except queue.Full:
+            logger.warning("Webhook发送队列已满，丢弃告警: %s", alert.summary())
+            self._record_failure("send queue full")
+            return False
 
 
 # ═══════════════════════════════════════════════
