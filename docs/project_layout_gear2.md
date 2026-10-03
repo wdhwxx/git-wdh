@@ -2266,3 +2266,26 @@ pytest 全量 2033 passed / 2 skipped / 0 failed（216s），较基线2032 +1新
 
 【验证】py_compile PASS；ML+DB目标测试89 passed；pytest全量2033 passed/2 skipped/0 failed（214s）。
 【Git】本项随蓝图#112一并提交（含此前6批补交：3f157ea→7f0bcf7，已与#107-#111对应）。
+
+113. ✨【回写记录·2026-10-04·P0-07遗留：双建库入口stamp收敛 + P0-11真机验证备注】
+
+【P0-07(b)｜双权威收敛为 Alembic 单一权威】
+- 原问题：自研 MigrationManager（版本表 schema_migrations, CURRENT_VERSION=2）
+  与 Alembic（alembic_version）互不感知，库结构取决于先跑哪个脚本；
+  自研建库后 Alembic 误判 version=0 会重跑全部 DDL。
+- 修复：myquant/database/migrations/__init__.py
+  * 新增常量 ALEMBIC_HEAD="0003"（新增Alembic迁移时同步更新）；
+  * MigrationManager.upgrade() 收尾统一 _stamp_alembic_head()：
+    事务内建 alembic_version 表并写入 head，打 WARNING 指引后续走 Alembic。
+  * 自研路径（数据库初始化.py/数据下载.py/full_clean_service/gui下载弹窗）
+    建库后自动 stamp，Alembic 链随即认知该库已最新。
+- 冒烟（logs/smoke_p007_conv.py）：自研路径建库后 alembic_version=('0003',)，
+  再跑 alembic upgrade head 不重跑任何迁移（PASS）。
+
+【P0-11｜真机验证预留】
+- 新增 docs/待验证_P0-11_QMT真机补单行为验证清单.md：
+  含前置条件 + 3 用例（正常查询/SDK返回None核心/断连）+ 通过标准，
+  待券商终端开通后逐条勾选闭环。
+
+【验证】py_compile PASS；test_database.py 67 passed；
+pytest 全量 2033 passed/2 skipped/0 failed（222s）。

@@ -19,9 +19,12 @@ migrations - 数据库迁移框架
 
 from __future__ import annotations
 
+import logging
 from typing import Callable, Dict, List, Optional, Tuple
 
 from ..connection import DatabaseConnection
+
+logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────
@@ -30,6 +33,12 @@ from ..connection import DatabaseConnection
 
 # 当前最新版本号
 CURRENT_VERSION = 2
+
+# Alembic head（单一权威，P0-07 双权威收敛）。
+# 自研路径仅作 stamp 兼容层：升级/建库后把 alembic_version 标记为该值，
+# 使两条建库入口（scripts/数据库初始化.py 自研 / scripts/数据库迁移.py Alembic）
+# 对版本表达成一致。新增 Alembic 迁移版本时同步更新此常量。
+ALEMBIC_HEAD = "0003"
 
 # 迁移注册表：{版本号: (upgrade函数, downgrade函数, 描述)}
 _migration_registry: Dict[int, Tuple[Callable, Callable, str]] = {}
@@ -139,6 +148,29 @@ class MigrationManager:
         """)
         self.conn.commit()
 
+    def _stamp_alembic_head(self) -> None:
+        """
+        Stamp 兼容层（P0-07 双权威收敛）：自研路径升级后，把 alembic_version
+        标记为 ALEMBIC_HEAD，使 Alembic 链认知该库已是最新——避免"自研建库后
+        Alembic 误判 version=0 重跑全部 DDL"。新结构变更统一走 Alembic，
+        本类不再新增版本（仅保留 v1/v2 兼容老库升级）。
+        """
+        logger.warning(
+            "[migrations] 自研 MigrationManager 已将库 stamp 为 Alembic head=%s；"
+            "后续结构变更请走 scripts/数据库迁移.py（Alembic 为单一权威）",
+            ALEMBIC_HEAD,
+        )
+        with self.conn.transaction():
+            self.conn.execute_update(
+                "CREATE TABLE IF NOT EXISTS alembic_version ("
+                "version_num VARCHAR(32) NOT NULL PRIMARY KEY)"
+            )
+            self.conn.execute_update("DELETE FROM alembic_version")
+            self.conn.execute_update(
+                "INSERT INTO alembic_version (version_num) VALUES (?)",
+                (ALEMBIC_HEAD,),
+            )
+
     def current_version(self) -> int:
         """获取当前数据库版本号"""
         row = self.conn.execute_one(
@@ -188,6 +220,9 @@ class MigrationManager:
                 )
             applied.append(version)
 
+        # P0-07 收敛：无论是否有版本被应用，收尾统一 stamp Alembic head，
+        # 使老库（仅 schema_migrations=2、无 alembic_version）也能被 Alembic 认知。
+        self._stamp_alembic_head()
         return applied
 
     def downgrade(self, target_version: int) -> List[int]:
