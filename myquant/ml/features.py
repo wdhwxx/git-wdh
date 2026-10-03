@@ -14,9 +14,11 @@ features.py - 特征工程（因子计算 + 标签生成）
       compute_features()    批量特征计算（严格因果，trailing 滚动窗口）
       generate_labels()     标签生成（未来 N 期收益，仅训练集使用）
       build_dataset()       特征+标签对齐为 FeatureDataset（丢弃无标签尾部）
+      build_panel_dataset() 面板构建（F-08）：dict[symbol→数据] 逐标的合并
+                            为 PanelDataset（group_ids 记录归属，供日历化切分）
       compute_incremental() 实盘增量特征（逐 bar，与训练特征逐列一致）
       lookahead_guard()     防未来断言（截断重算一致性验证）
-  - FeatureDataset 特征数据集（X/y/timestamps，JSON 可序列化供训练/推理）
+  - FeatureDataset / PanelDataset 特征数据集（X/y/timestamps，JSON 可序列化供训练/推理）
 
 防未来函数（铁律4，本任务核心）:
   - 【特征】全部 trailing 窗口：pandas rolling/pct_change/shift(n) 只使用
@@ -237,6 +239,50 @@ class FeatureDataset:
         return (
             f"FeatureDataset(n_samples={self.n_samples}, features={len(self.feature_columns)}, "
             f"label={self.label_column})"
+        )
+
+
+@dataclass
+class PanelDataset:
+    """
+    面板特征数据集（F-08 多标的 build_panel_dataset 产物）
+
+    Attributes
+    ----------
+    X : pd.DataFrame
+        特征矩阵（面板合并：行 = 全部标的样本，列 = feature_columns）
+    y : pd.Series
+        标签（未来 horizon 期收益或涨跌方向）
+    timestamps : List[float]
+        样本对应时间戳（与 X 行一一对应，按各标的合并顺序排列）
+    group_ids : List[str]
+        每个样本的标的归属 id（与 X 行一一对应；同时间戳跨标样本并列保留）
+    feature_columns : List[str]
+        特征列名（各标的必须一致，否则构建报错）
+    label_column : str
+        标签列名
+    """
+    X: pd.DataFrame
+    y: pd.Series
+    timestamps: List[float]
+    group_ids: List[str]
+    feature_columns: List[str]
+    label_column: str
+
+    @property
+    def n_samples(self) -> int:
+        """面板总样本数（X 行数）"""
+        return len(self.X)
+
+    @property
+    def symbols(self) -> List[str]:
+        """面板标的列表（排序去重，可追溯面板构成）"""
+        return sorted(set(self.group_ids))
+
+    def __repr__(self) -> str:
+        return (
+            f"PanelDataset(n_samples={self.n_samples}, symbols={len(self.symbols)}, "
+            f"features={len(self.feature_columns)}, label={self.label_column})"
         )
 
 
@@ -525,6 +571,67 @@ class FeatureEngine:
         return FeatureDataset(
             X=X, y=y, timestamps=timestamps,
             feature_columns=fcols, label_column=self.label_column,
+        )
+
+    def build_panel_dataset(self, data: Dict[str, Any]) -> PanelDataset:
+        """
+        构建面板特征数据集（F-08 多标的训练入口配套）。
+
+        面板 = dict[symbol → 单标的 processed 数据（DataFrame / Bar 列表）]：
+        逐标的调用 build_dataset（特征+标签对齐，各标的口径与单标的完全一致），
+        合并为面板 X/y/timestamps，group_ids 记录每个样本的标的归属。
+
+        同时间戳跨标样本并列保留（不做时间对齐裁剪）——时序切分阶段以
+        "整组"（同一时间戳全部标的样本）为单位确定性归属，保证同时间戳
+        样本永不跨训练/验证边界（防未来）。
+
+        【防未来函数】只消费各标的训练时已得数据：逐标的丢弃窗口不足与
+        无标签尾部行，与单标的 build_dataset 同口径，无未来引用。
+
+        Parameters
+        ----------
+        data : dict[str, DataFrame | Bar 列表]
+            面板数据：symbol → 单标的 processed 数据（与单标的 build_dataset
+            同输入格式）
+
+        Returns
+        -------
+        PanelDataset : 面板特征数据集（X/y/timestamps/group_ids 行级对齐）
+
+        Raises
+        ------
+        ValueError : data 非 dict / 空 / 无任何有效样本 / 各标的特征列不一致
+        """
+        if not isinstance(data, dict) or not data:
+            raise ValueError(
+                f"面板数据必须是非空 dict[symbol→数据]，实际 {type(data).__name__}")
+        frames_x: List[pd.DataFrame] = []
+        frames_y: List[pd.Series] = []
+        all_ts: List[float] = []
+        all_gids: List[str] = []
+        fcols: Optional[List[str]] = None
+        for sym, sub in data.items():
+            sym_id = str(sym)
+            ds = self.build_dataset(sub)
+            if ds.n_samples == 0:
+                logger.warning("[ml] 面板标的 %s 样本不足被全部丢弃，跳过", sym_id)
+                continue
+            if fcols is None:
+                fcols = list(ds.feature_columns)
+            elif list(ds.feature_columns) != fcols:
+                raise ValueError(
+                    f"面板特征列不一致: 标 {sym_id} {list(ds.feature_columns)} != {fcols}")
+            frames_x.append(ds.X)
+            frames_y.append(ds.y)
+            all_ts.extend(float(t) for t in ds.timestamps)
+            all_gids.extend([sym_id] * ds.n_samples)
+        if not frames_x:
+            raise ValueError("面板数据无任何有效样本（全部标的样本不足被丢弃）")
+        panel_x = pd.concat(frames_x, axis=0, ignore_index=True)
+        panel_y = pd.concat(frames_y, axis=0, ignore_index=True)
+        return PanelDataset(
+            X=panel_x, y=panel_y, timestamps=all_ts, group_ids=all_gids,
+            feature_columns=list(fcols or []), label_column=self.label_column,
         )
 
     # ─────────────────────────────────────────────

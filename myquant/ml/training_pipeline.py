@@ -56,7 +56,12 @@ import numpy as np
 
 from myquant.core.logger import get_logger
 from myquant.ml.feature_contract import build_signature_from_frame
-from myquant.ml.features import FeatureConfig, FeatureDataset, FeatureEngine
+from myquant.ml.features import (
+    FeatureConfig,
+    FeatureDataset,
+    FeatureEngine,
+    PanelDataset,
+)
 from myquant.ml.model_registry import ModelRegistry
 
 logger = get_logger("ml.training_pipeline")
@@ -539,6 +544,107 @@ def time_series_split(
     return train_idx, valid_idx
 
 
+def panel_time_series_split(
+    timestamps: Any,
+    group_ids: Any,
+    train_ratio: float = 0.8,
+    horizon: int = 5,
+    min_train: int = 2,
+    min_valid: int = 1,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    面板时间序列切分（F-08：日历化缓冲 + 整组确定性归属）
+
+    适配多标的面板数据（与单标的 time_series_split 语义区分）：
+      1. 日历化缓冲：验证集起点 = 训练集最后时间戳之后第 (horizon+1) 个交易日
+         （交易日刻度 = 面板数据自身唯一时间戳升序；间隔口径对齐 F-06
+         单标的实测缓冲——strict 跳 horizon 行产生 horizon+1 根时点间隔）
+      2. 整组归属：同一时间戳的全部标的样本永不切开——确定性规则：
+         同时间戳样本整体归入 train 或 valid 一侧
+
+    【防未来函数（铁律11）】切分只消费面板数据自身的时间戳（训练时已得
+    信息），本行使用的数据截至 t 时刻；训练集末尾样本的标签时刻
+    （train_end + horizon 个交易日）不落入验证集时段 → 0% 标签重叠。
+
+    Parameters
+    ----------
+    timestamps : array-like
+        面板全部样本时间戳（float epoch 秒，与样本一一对应）
+    group_ids : array-like
+        每个样本的标的归属 id（与样本一一对应；长度不匹配显式报错）
+    train_ratio : float
+        训练集样本占比（0~1，按样本数累计、跨越比例点的整组归 train）
+    horizon : int
+        标签未来期数（日历化缓冲 = 跳 horizon 个交易日）
+    min_train / min_valid : int
+        训练/验证集最小样本数（不足抛错）
+
+    Returns
+    -------
+    (train_idx, valid_idx) : 两个 np.ndarray（位置索引，指向原始输入数组）
+
+    Raises
+    ------
+    ValueError : 时间戳/组 id 为空或不匹配、比例越界、horizon 负、样本不足
+    """
+    ts = np.asarray(timestamps, dtype=float)
+    gids = np.asarray(group_ids)
+    n = len(ts)
+    if n == 0:
+        raise ValueError("时间戳为空，无法切分")
+    if len(gids) != n:
+        raise ValueError(f"group_ids 长度 {len(gids)} 与样本数 {n} 不一致")
+    if not (0.0 < train_ratio < 1.0):
+        raise ValueError(f"train_ratio 必须在 (0,1) 区间，实际 {train_ratio}")
+    if horizon < 0:
+        raise ValueError(f"horizon 不能为负，实际 {horizon}")
+    if n < min_train + min_valid:
+        raise ValueError(
+            f"面板样本过少: n={n} < min_train+min_valid={min_train + min_valid}")
+
+    # 交易日刻度 = 数据自身唯一时间戳（升序；本行使用的数据截至 t 时刻）
+    t_levels = np.unique(ts)
+    # 稳定排序：同时间戳样本相邻（整组归属的基础）
+    order = np.argsort(ts, kind="stable")
+    sorted_ts = ts[order]
+    # 按时间戳分组累计样本数，跨越 train_ratio 的整组时刻 = train_end_ts
+    train_end_ts: Optional[float] = None
+    cum: int = 0
+    i: int = 0
+    while i < len(sorted_ts):
+        t = sorted_ts[i]
+        j = i
+        while j + 1 < len(sorted_ts) and sorted_ts[j + 1] == t:
+            j += 1
+        cum += j - i + 1
+        if cum >= n * train_ratio:
+            train_end_ts = float(t)
+            break
+        i = j + 1
+    if train_end_ts is None:
+        train_end_ts = float(sorted_ts[-1])
+    # valid_start_ts = train_end_ts 之后第 (horizon+1) 个交易日。
+    # 口径对齐 F-06 单标的实测缓冲（strict 跳 horizon 行产生 horizon+1 根
+    # 时点间隔：valid 首=85 / train 末=79 / horizon=5），保证训练末样本的
+    # 标签时点（train_end + horizon 个交易日收盘价）严格早于验证集首个
+    # 样本时点 → 未来 horizon 收益 0% 落入验证集（报告验收）。
+    pos = int(np.searchsorted(t_levels, train_end_ts, side="right"))
+    if pos + horizon >= len(t_levels):
+        raise ValueError(
+            f"验证集为空（日历化缓冲：train_end={train_end_ts} 后不足 "
+            f"{horizon + 1} 个交易日），请降低 train_ratio 或增大数据量")
+    valid_start_ts = float(t_levels[pos + horizon])
+    # 整组归属：train = 时间戳 <= train_end_ts 的全部样本；
+    # valid = 时间戳 >= valid_start_ts 的全部样本（缓冲期内样本被排除）
+    train_idx = np.flatnonzero(ts <= train_end_ts)
+    valid_idx = np.flatnonzero(ts >= valid_start_ts)
+    if len(train_idx) < min_train:
+        raise ValueError(f"训练样本过少: {len(train_idx)} < {min_train}")
+    if len(valid_idx) < min_valid:
+        raise ValueError(f"验证集样本过少: {len(valid_idx)} < {min_valid}")
+    return train_idx, valid_idx
+
+
 # ═══════════════════════════════════════════════
 #  TrainingResult 训练结果
 # ═══════════════════════════════════════════════
@@ -680,13 +786,25 @@ class TrainingPipeline:
 
     def split(
         self,
-        dataset: FeatureDataset,
+        dataset: Any,
         train_ratio: float = 0.8,
         strict_split: bool = True,
         horizon: Optional[int] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """按时间序列切分数据集（默认 strict_split=True 防标签重叠）"""
+        """按时间序列切分数据集（默认 strict_split=True 防标签重叠）。
+
+        F-08：数据集为 PanelDataset（多标的面板）时走面板日历化切分
+        （panel_time_series_split：整组确定性归属 + 日历缓冲）；
+        FeatureDataset（单标的）保持 time_series_split 原语义零变化。
+        """
         eff_horizon = horizon if horizon is not None else self.feature_config.horizon
+        if isinstance(dataset, PanelDataset):
+            return panel_time_series_split(
+                dataset.timestamps,
+                dataset.group_ids,
+                train_ratio=train_ratio,
+                horizon=eff_horizon,
+            )
         return time_series_split(
             dataset.timestamps,
             train_ratio=train_ratio,
@@ -720,8 +838,10 @@ class TrainingPipeline:
 
         Parameters
         ----------
-        data : Bar 列表 / DataFrame
-            已清洗 processed 行情数据（FeatureEngine 输入）
+        data : Bar 列表 / DataFrame / dict[str, 数据]
+            已清洗 processed 行情数据（FeatureEngine 输入）；
+            F-08：dict[symbol→数据] 为多标的面板输入，走面板日历化切分
+            （PanelDataset + panel_time_series_split），单标的输入零变化
         model_name : str
             模型名称（注册到 ModelRegistry）
         model : Any | None
@@ -760,7 +880,13 @@ class TrainingPipeline:
         eff_config = self._effective_config(eff_label)
 
         # 1. 特征数据集（复用任务18，与推理共用配置）
-        dataset = self.build_dataset(data, label_type=eff_label)
+        # F-08：data 为 dict[symbol→数据] 时走面板路径（PanelDataset），
+        # 单标的 DataFrame/Bar 列表保持 build_dataset 原路径零变化。
+        if isinstance(data, dict):
+            panel_cfg = self._effective_config(eff_label)
+            dataset = FeatureEngine(panel_cfg).build_panel_dataset(data)
+        else:
+            dataset = self.build_dataset(data, label_type=eff_label)
         if dataset.n_samples == 0:
             raise TrainingError(
                 "特征数据集为空，无法训练（请检查输入数据量 / 特征窗口是否足够）")
@@ -804,6 +930,9 @@ class TrainingPipeline:
             "train_end_time": train_end,
             "data_version": None,
         }
+        # F-08：面板训练时登记标的构成（可追溯面板范围）；单标的省略该键
+        if isinstance(dataset, PanelDataset):
+            data_snapshot["symbols"] = dataset.symbols
 
         # 8. 注册闭环（绑定特征 + 截止时间 + 指标 + 超参 + 特征签名 + source
         #    + F-07 data_snapshot；runtime_env/model_params_count 由 registry
