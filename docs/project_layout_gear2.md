@@ -2346,3 +2346,17 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
   validate_no_lookahead 返回 True + calculate 输出 rsrs_raw 冒烟，2 用例。
 
 【验证】py_compile PASS；新测试 2 passed；pytest 全量 2054 passed/2 skipped/0 failed（218s）。
+
+118. ✨【回写记录·2026-10-04·P1-17 中文列残留恒假判定修复（P1批次第5项）】
+
+【P1-17｜策略层中文列改造残留：恒假英文列判定→取价/ATR错误】
+- 根因：
+  * multi_factor_strategy 跨标的取价判定 'close' in df.columns 恒False（实际列是「收盘价」），
+    调仓数量一直退回 default_price（当前bar标的价），跨标的仓位错配；
+  * grid_strategy auto_grid 判定 'high'/'low' 恒False，docstring 的 ATR=(high-low)均值
+    从未生效，一直走 close.std()。
+- 修复：两处置判定改中文列「收盘价」/「最高价」「最低价」。
+- 单测：test_p117_cn_column_residue——close恒定(std=0)、高低差恒4的数据，
+  断言 auto_grid upper=108/lower=92（走high-low ATR分支，旧错会得到102）。
+
+【验证】py_compile PASS；新测试 1 passed；pytest 全量 2055 passed/2 skipped/0 failed（220s）。

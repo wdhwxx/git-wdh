@@ -1028,7 +1028,8 @@ class MultiFactorStrategy(StrategyBase):
         且用 _get_data_upto 截断，回测中不读取未来bar的收盘价。
         """
         df = self._get_data_upto(context, symbol, bar)
-        if df is not None and not df.empty and 'close' in df.columns:
+        # P1-17修复：判定改中文列「收盘价」（此前 'close' 恒False，跨标的取价失效）
+        if df is not None and not df.empty and '收盘价' in df.columns:
             close = df['收盘价'].astype(float).dropna()
             if len(close) > 0:
                 return float(close.iloc[-1])

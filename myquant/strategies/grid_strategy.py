@@ -215,7 +215,8 @@ class GridStrategy(StrategyBase):
         mid = close.mean()
 
         # ATR 近似（high-low 均值，简化版）
-        if 'high' in lookback.columns and 'low' in lookback.columns:
+        # P1-17修复：判定改中文列（此前 'high'/'low' 恒False，ATR≈(high-low)均值从未生效）
+        if '最高价' in lookback.columns and '最低价' in lookback.columns:
             atr = (lookback['最高价'].astype(float) - lookback['最低价'].astype(float)).mean()
         else:
             atr = close.std()
