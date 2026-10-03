@@ -197,6 +197,8 @@ class VectorizedBacktestEngine:
         self._lookahead_guard: Optional[LookaheadGuard] = (
             lookahead_guard or (LookaheadGuard() if enable_lookahead_guard else None)
         )
+        # P1-03：轻量防未来防线（第二道）时间线缓存，供收尾时钟单调校验
+        self._bar_timestamps: List[float] = []
 
         logger.info(
             "向量化引擎初始化: 标的数=%d, lot=%d, 资金模式=%s, 初始资金=%.0f",
@@ -559,6 +561,8 @@ class VectorizedBacktestEngine:
         # 日期与时间戳
         dates = [str(idx)[:10] for idx in df.index]
         timestamps = [self._idx_to_timestamp(idx) for idx in df.index]
+        # P1-03：缓存时间线供轻量防线收尾校验
+        self._bar_timestamps = timestamps
 
         # #H2修复：记录信号/成交到防未来函数校验器（铁律3：position[t]=target[t-1]）
         #    成交发生在 T 日开盘，信号在 T-1 日收盘 → trade_date > signal_date
@@ -715,6 +719,8 @@ class VectorizedBacktestEngine:
             )
             self._lookahead_guard.assert_pass()
             logger.info("✅ 防未来函数校验通过：未发现未来函数违规")
+            # P1-03：第二道防线——轻量校验时间线单调推进（时钟倒退即违规）
+            self._run_light_guard_check()
             return True
         except Exception as exc:
             # P0-01修复：违规回测必须标记为失败，禁止以 completed / is_success=True 收尾
@@ -727,6 +733,33 @@ class VectorizedBacktestEngine:
                     self.result.extra["lookahead_guard_passed"] = False
                 if hasattr(self.result, "mark_failed"):
                     self.result.mark_failed(f"防未来函数校验未通过: {exc}")
+            return False
+
+    def _run_light_guard_check(self) -> bool:
+        """P1-03：第二道防未来防线（轻量）——沿已处理时间线逐 bar 推进时钟，
+        检测时间线倒退（乱序数据）；收尾 assert_pass。
+
+        Returns:
+            True 通过；False 已 mark_failed。
+        """
+        from myquant.core.exceptions import LookaheadError as _LightErr
+        from myquant.core.light_lookahead_guard import get_light_lookahead_guard
+
+        lg = get_light_lookahead_guard()
+        if not lg.enabled:
+            return True
+        try:
+            lg.reset()
+            for ts in self._bar_timestamps:
+                lg.on_bar_close(ts)
+            lg.assert_pass()
+            if self.result is not None and hasattr(self.result, "extra"):
+                self.result.extra["light_lookahead_passed"] = True
+            return True
+        except _LightErr as exc:
+            logger.error("❌ 轻量防未来防线校验未通过: %s", exc)
+            if self.result is not None and hasattr(self.result, "mark_failed"):
+                self.result.mark_failed(f"轻量防未来防线校验未通过: {exc}")
             return False
 
     # ─────────────────────────────────────────

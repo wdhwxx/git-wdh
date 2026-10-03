@@ -2319,3 +2319,19 @@ pytest 全量 2035 passed/2 skipped/0 failed（214s），零回归。
   × BUY/SELL，live broker 费用 == FeeCalculator 费用逐点 16 用例。
 
 【验证】py_compile PASS；对拍 16 passed；pytest 全量 2051 passed/2 skipped/0 failed（219s）。
+
+116. ✨【回写记录·2026-10-04·P1-03 轻量防未来防线接入（P1批次第3项）】
+
+【P1-03｜light_lookahead_guard 引擎侧零接入】
+- 根因：第二道防未来防线仅在配置层赋开关，backtest/live 引擎 0 调用。
+- 修复（接入而非移除开关）：
+  * vectorized_engine / mixed_engine：__init__ 缓存 _bar_timestamps；
+    run() 构建时间线后写入；
+  * 两引擎收尾 _run_lookahead_assert 重型校验通过后，新增 _run_light_guard_check()：
+    reset→逐 ts on_bar_close→assert_pass（时间线倒退即违规）；
+    违规 mark_failed，extra["light_lookahead_passed"]=True。
+- 回归：test_backtest_engines_v5 新增 TestP103LightGuardWired——
+  回测结果 extra 含 light_lookahead_passed=True。
+
+【验证】py_compile PASS；引擎/lookahead 32 passed；新增接线断言 24 passed；
+pytest 全量 2052 passed/2 skipped/0 failed（220s）。

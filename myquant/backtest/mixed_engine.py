@@ -194,6 +194,8 @@ class MixedBacktestEngine:
         self._lookahead_guard: Optional[LookaheadGuard] = (
             lookahead_guard or (LookaheadGuard() if enable_lookahead_guard else None)
         )
+        # P1-03：轻量防未来防线时间线缓存
+        self._bar_timestamps: List[float] = []
         # 订单ID -> 信号日期（T日）映射，成交时校验 T+1
         self._order_signal_dates: Dict[str, str] = {}
         # 当前处理中的 bar（submit_order 无 bar 参数，信号日期经由此处传递）
@@ -949,6 +951,8 @@ class MixedBacktestEngine:
                     )
                 )
         all_bars.sort(key=lambda b: (b.timestamp, b.symbol))
+        # P1-03：缓存时间线供轻量防线收尾时钟单调校验
+        self._bar_timestamps = [b.timestamp for b in all_bars]
         logger.info("统一时间序列构建完成: %d 根K线", len(all_bars))
         return all_bars
 
@@ -1005,6 +1009,8 @@ class MixedBacktestEngine:
             )
             self._lookahead_guard.assert_pass()
             logger.info("✅ 防未来函数校验通过：未发现未来函数违规")
+            # P1-03：第二道防线——轻量时间线单调校验
+            self._run_light_guard_check()
             return True
         except Exception as exc:
             # P0-01修复：违规回测必须标记为失败，禁止以 completed / is_success=True 收尾
@@ -1017,6 +1023,29 @@ class MixedBacktestEngine:
                     self.result.extra["lookahead_guard_passed"] = False
                 if hasattr(self.result, "mark_failed"):
                     self.result.mark_failed(f"防未来函数校验未通过: {exc}")
+            return False
+
+    def _run_light_guard_check(self) -> bool:
+        """P1-03：第二道防未来防线（轻量）——沿时间线逐 bar 推进时钟，
+        检测时间线倒退（乱序数据）；收尾 assert_pass。"""
+        from myquant.core.exceptions import LookaheadError as _LightErr
+        from myquant.core.light_lookahead_guard import get_light_lookahead_guard
+
+        lg = get_light_lookahead_guard()
+        if not lg.enabled:
+            return True
+        try:
+            lg.reset()
+            for ts in self._bar_timestamps:
+                lg.on_bar_close(ts)
+            lg.assert_pass()
+            if self.result is not None and hasattr(self.result, "extra"):
+                self.result.extra["light_lookahead_passed"] = True
+            return True
+        except _LightErr as exc:
+            logger.error("❌ 轻量防未来防线校验未通过: %s", exc)
+            if self.result is not None and hasattr(self.result, "mark_failed"):
+                self.result.mark_failed(f"轻量防未来防线校验未通过: {exc}")
             return False
 
     def on_stop(self) -> None:

@@ -640,3 +640,17 @@ class TestP010GhostPosition:
             assert pt.position_value == pytest.approx(0.0, abs=1e-6), (
                 f"P0-10：{pt.date} 出现幽灵持仓市值 {pt.position_value}"
             )
+
+
+class TestP103LightGuardWired:
+    """P1-03回归：轻量防未来防线（第二道）已接入引擎收尾校验。"""
+
+    def test_vectorized_marks_light_guard_passed(self) -> None:
+        from myquant.backtest.vectorized_engine import VectorizedBacktestEngine
+        engine = VectorizedBacktestEngine(
+            config=_make_config(), strategy=_TargetVecStrategy(TARGETS),
+            data={"000001.SZ": _make_ohlcv(10)},
+        )
+        result = engine.run()
+        assert result.is_success
+        assert result.extra.get("light_lookahead_passed") is True
