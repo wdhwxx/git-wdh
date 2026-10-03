@@ -2305,3 +2305,17 @@ pytest 全量 2033 passed/2 skipped/0 failed（222s）。
 
 【验证】py_compile PASS；test_live_risk 87 passed（+2新）；
 pytest 全量 2035 passed/2 skipped/0 failed（214s），零回归。
+
+115. ✨【回写记录·2026-10-04·P1-04 live费用口径统一（P1批次第2项）】
+
+【P1-04｜最低佣金口径回测与实盘分歧（破坏回测实盘同构）】
+- 根因：paper_broker/qmt_broker 各自手写 _calc_commission，与回测三引擎共用的
+  fee_common.FeeCalculator 是两份平行实现，费用口径随参数漂移。
+- 修复：
+  * paper_broker.py / qmt_broker.py：新增 _build_fee_calculator()（按自身
+    commission_rate/min_commission/stamp_tax_rate/transfer_fee_rate 构造 CommissionModel）；
+  * _calc_commission 改为 FeeCalculator.calc_commission_breakdown 求和返回，与回测同一入口。
+- 对拍：tests/unit/test_p104_fee_parity.py——8 档 notional（含最低佣金临界带 24k/25k/26k）
+  × BUY/SELL，live broker 费用 == FeeCalculator 费用逐点 16 用例。
+
+【验证】py_compile PASS；对拍 16 passed；pytest 全量 2051 passed/2 skipped/0 failed（219s）。

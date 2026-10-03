@@ -1292,14 +1292,27 @@ class QmtBroker(BaseBroker):
         # 更新市场价
         pos.update_market_price(trade.price)
 
+    def _build_fee_calculator(self) -> "FeeCalculator":
+        """P1-04：live 费用口径统一走回测 FeeCalculator（同一模型同一参数），
+        杜绝 live/backtest 各写一份导致口径漂移。"""
+        from myquant.backtest.fee_common import FeeCalculator
+        from myquant.models.backtest import CommissionModel
+        model = CommissionModel(
+            buy_rate=self.commission_rate,
+            sell_rate=self.commission_rate,
+            min_commission=self.min_commission,
+            stamp_tax=self.stamp_tax_rate,
+            transfer_fee=self.transfer_fee_rate,
+        )
+        return FeeCalculator(commission_model=model)
+
     def _calc_commission(self, trade: Trade) -> float:
-        """计算手续费（A股写实标准：佣金+过户费+印花税）"""
+        """计算手续费（委托 FeeCalculator：佣金+过户费+印花税，与回测同构）"""
         amount = trade.notional
-        commission = max(amount * self.commission_rate, self.min_commission)
-        commission += amount * self.transfer_fee_rate
-        if trade.side == OrderSide.SELL:
-            commission += amount * self.stamp_tax_rate
-        return round(commission, 2)
+        commission, stamp_tax, transfer_fee = (
+            self._build_fee_calculator().calc_commission_breakdown(trade.side, amount)
+        )
+        return round(commission + stamp_tax + transfer_fee, 2)
 
     def _calc_slippage_amount(self, price: float, quantity: float) -> float:
         """计算滑点金额（仅 SIM 模式统计用）"""

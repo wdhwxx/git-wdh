@@ -714,26 +714,32 @@ class PaperBroker(BaseBroker):
         else:
             return self.slippage_value * quantity
 
+    def _build_fee_calculator(self) -> "FeeCalculator":
+        """P1-04：live 费用口径统一走回测 FeeCalculator（同一模型同一参数），
+        杜绝 live/backtest 各写一份导致口径漂移。"""
+        from myquant.backtest.fee_common import FeeCalculator
+        from myquant.models.backtest import CommissionModel
+        model = CommissionModel(
+            buy_rate=self.commission_rate,
+            sell_rate=self.commission_rate,
+            min_commission=self.min_commission,
+            stamp_tax=self.stamp_tax_rate,
+            transfer_fee=self.transfer_fee_rate,
+        )
+        return FeeCalculator(commission_model=model)
+
     def _calc_commission(self, trade: Trade) -> float:
         """
-        计算手续费（A股写实标准）
+        计算手续费（委托 FeeCalculator，与回测三引擎同一入口）
 
-        买入: 佣金(万2,最低5元) + 过户费(万0.1)
-        卖出: 佣金(万2,最低5元) + 印花税(千1) + 过户费(万0.1)
+        买入: 佣金(最低5元) + 过户费
+        卖出: 佣金(最低5元) + 印花税 + 过户费
         """
         amount = trade.notional  # 成交金额 = quantity * price
-
-        # 佣金（买卖双向，最低5元）
-        commission = max(amount * self.commission_rate, self.min_commission)
-
-        # 过户费（买卖双向）
-        commission += amount * self.transfer_fee_rate
-
-        # 印花税（仅卖出）
-        if trade.side == OrderSide.SELL:
-            commission += amount * self.stamp_tax_rate
-
-        return round(commission, 2)
+        commission, stamp_tax, transfer_fee = (
+            self._build_fee_calculator().calc_commission_breakdown(trade.side, amount)
+        )
+        return round(commission + stamp_tax + transfer_fee, 2)
 
     # ═══════════════════════════════════════════
     #  涨跌停检查
