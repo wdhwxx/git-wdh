@@ -390,10 +390,8 @@ class MixedBacktestEngine:
             )
             self._process_bar(event)
 
-        # 停止并生成结果
+        # 停止并生成结果（P0-01：防未来校验已在 on_stop 内、mark_complete 之前执行）
         self.on_stop()
-        # #H2修复：回测结束统一校验防未来函数（失败记日志不中断结果，与 event 引擎一致）
-        self._run_lookahead_assert()
         self._running = False
         logger.info("=" * 60)
         logger.info("混合回测主循环结束")
@@ -986,10 +984,17 @@ class MixedBacktestEngine:
         except (OSError, ValueError, OverflowError):
             return ""
 
-    def _run_lookahead_assert(self) -> None:
-        """回测结束统一校验防未来函数（失败记日志并附加到结果，不中断回测）。"""
+    def _run_lookahead_assert(self) -> bool:
+        """回测结束统一校验防未来函数（P0-01修复）。
+
+        本方法不读取任何行情数据，仅消费回测过程中按 t 时刻记录的 guard 快照。
+
+        Returns:
+            True 表示通过（或 guard 被显式关闭），调用方可标记 completed；
+            False 表示发现违规，本方法已将结果 mark_failed，调用方不得再标记 completed。
+        """
         if not self._lookahead_guard:
-            return
+            return True
         try:
             guard_stats = self._lookahead_guard.stats
             logger.info(
@@ -1000,13 +1005,19 @@ class MixedBacktestEngine:
             )
             self._lookahead_guard.assert_pass()
             logger.info("✅ 防未来函数校验通过：未发现未来函数违规")
+            return True
         except Exception as exc:
+            # P0-01修复：违规回测必须标记为失败，禁止以 completed / is_success=True 收尾
             logger.error("❌ 防未来函数校验未通过：%s", exc)
-            if self.result is not None and hasattr(self.result, "extra"):
-                self.result.extra["lookahead_guard_violations"] = (
-                    self._lookahead_guard.violations
-                )
-                self.result.extra["lookahead_guard_passed"] = False
+            if self.result is not None:
+                if hasattr(self.result, "extra"):
+                    self.result.extra["lookahead_guard_violations"] = (
+                        self._lookahead_guard.violations
+                    )
+                    self.result.extra["lookahead_guard_passed"] = False
+                if hasattr(self.result, "mark_failed"):
+                    self.result.mark_failed(f"防未来函数校验未通过: {exc}")
+            return False
 
     def on_stop(self) -> None:
         """停止引擎：取消活跃订单、计算绩效指标、生成回测结果。"""
@@ -1047,7 +1058,9 @@ class MixedBacktestEngine:
         self.result.extra["engine_mode"] = "mixed"
         self.result.extra["signal_mode"] = self._signal_mode
         self.result.extra["stop_loss_pct"] = self.stop_loss_pct
-        self.result.mark_complete()
+        # P0-01修复：先防未来校验，通过才标记 completed；失败已 mark_failed，不得覆盖
+        if self._run_lookahead_assert():
+            self.result.mark_complete()
 
         self._stopped = True
         logger.info(

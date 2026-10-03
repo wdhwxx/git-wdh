@@ -85,9 +85,14 @@ class TestMixedWiring:
             symbol="000001.SZ", trade_date="2023-01-02",
             signal_date="2023-01-02", price_type="OPEN", side="BUY",
         )
-        eng._run_lookahead_assert()
+        passed = eng._run_lookahead_assert()
+        assert passed is False
         assert result.extra.get("lookahead_guard_passed") is False
         assert result.extra.get("lookahead_guard_violations")
+        # P0-01回归：违规回测必须标记失败，禁止 status=completed / is_success=True
+        assert result.status == "failed"
+        assert result.is_success is False
+        assert "防未来函数校验未通过" in result.error_message
 
 
 @pytest.mark.lookahead

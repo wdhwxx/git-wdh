@@ -515,15 +515,18 @@ class BacktestEngine(BaseEngine):
             # timestamp异常时返回空字符串，LookaheadGuard会跳过日期校验
             return ""
 
-    def _run_lookahead_assert(self) -> None:
-        """
-        运行防未来函数统一校验（#S3修复）
+    def _run_lookahead_assert(self) -> bool:
+        """运行防未来函数统一校验（#S3修复，P0-01修复）。
 
-        在回测结束时调用，校验所有记录的指标/信号/成交是否违反未来函数规则。
-        校验失败时记录错误日志，但不中断回测结果（回测已完成，结果仍有效）。
+        在回测结束时调用，校验 guard 已记录的信号/成交是否违反未来函数规则。
+        本方法不读取任何行情数据，仅消费回测过程中按 t 时刻记录的 guard 快照。
+
+        Returns:
+            True 表示校验通过（或 guard 被显式关闭），调用方可标记 completed；
+            False 表示发现违规，本方法已将结果 mark_failed，调用方不得再标记 completed。
         """
         if not self._lookahead_guard:
-            return
+            return True
 
         try:
             guard_stats = self._lookahead_guard.stats
@@ -535,13 +538,17 @@ class BacktestEngine(BaseEngine):
             )
             self._lookahead_guard.assert_pass()
             logger.info("✅ 防未来函数校验通过：未发现未来函数违规")
+            return True
         except Exception as e:
-            # 校验失败时记录详细错误，但不中断回测结果
+            # P0-01修复：违规回测必须标记为失败，禁止以 completed / is_success=True 收尾
             logger.error(f"❌ 防未来函数校验未通过：{e}")
-            # 将违规信息附加到回测结果（如果结果对象支持）
-            if self.result is not None and hasattr(self.result, 'extra'):
-                self.result.extra['lookahead_guard_violations'] = self._lookahead_guard.violations
-                self.result.extra['lookahead_guard_passed'] = False
+            if self.result is not None:
+                if hasattr(self.result, 'extra'):
+                    self.result.extra['lookahead_guard_violations'] = self._lookahead_guard.violations
+                    self.result.extra['lookahead_guard_passed'] = False
+                if hasattr(self.result, 'mark_failed'):
+                    self.result.mark_failed(f"防未来函数校验未通过: {e}")
+            return False
 
     # ------------------------------------------------------------------
     # 生命周期：停止
@@ -585,10 +592,10 @@ class BacktestEngine(BaseEngine):
         self.result.metrics = metrics
         self.result.equity_curve = self.recorder.get_equity_curve() if self.recorder else []
         self.result.trades = self.recorder.get_trades() if self.recorder else []
-        self.result.mark_complete()
-
         # #S3修复：回测结束时运行防未来函数统一校验（引擎内置能力，不再仅依赖入口脚本）
-        self._run_lookahead_assert()
+        # P0-01修复：先校验，通过才标记 completed；失败已在方法内 mark_failed，不得覆盖
+        if self._run_lookahead_assert():
+            self.result.mark_complete()
 
         self._stopped = True
         logger.info(
