@@ -27,6 +27,7 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -63,6 +64,11 @@ CACHE_HIT_L3: str = "l3"  # 未命中，执行计算
 
 # 无数据指纹时的占位符
 NO_FINGERPRINT_PLACEHOLDER: str = "nofp"
+
+# nofp（无指纹）场景 L2 兜底 TTL（秒）：
+# 数据指纹缺失时无法感知数据更新，永久占位会导致脏读；
+# 此处封顶为 1 小时，到期自动重算，并打 WARNING 提示调用方传入指纹。
+NOFP_FINGERPRINT_TTL: int = 3600
 
 # 文件名中指纹截断长度（避免文件名过长）
 FINGERPRINT_TRUNCATE_LEN: int = 16
@@ -154,16 +160,33 @@ def _build_cache_key(
     return f"{factor_name}:{symbol}:{params_hash}:{fp_hash}"
 
 
-def _build_disk_filename(
+def _sanitize_path_segment(s: str) -> str:
+    """将字符串转为安全的文件路径段。
+
+    保留字母数字与 ``._-``，其余字符替换为下划线；用于 factor_name / symbol
+    在 L2 目录分层中的段名。
+
+    Args:
+        s: 原始字符串（因子名或标的代码）。
+
+    Returns:
+        安全的路径段字符串。
+    """
+    return "".join(c if c.isalnum() or c in "._-" else "_" for c in s)
+
+
+def _build_l2_relpath(
     factor_name: str,
     symbol: str,
     params: Dict[str, Any],
     data_fingerprint: Optional[DataFingerprint],
-) -> str:
-    """构建 L2 磁盘缓存文件名。
+) -> Path:
+    """构建 L2 磁盘缓存的相对路径（目录分层）。
 
-    文件名格式: {factor_name}_{symbol}_{params_hash}_{fp_short}.parquet
-    symbol 中的特殊字符（/ \\ : * ? " < > |）替换为下划线。
+    目录结构: ``{factor_name}/{safe_symbol}/{params_hash}_{fp_short}.parquet``
+
+    因子名作为一级目录天然支持下划线等字符（不再需要从文件名反向切分），
+    invalidate 按目录删除即可，从根上消灭 F-13 的解析歧义 bug。
 
     Args:
         factor_name: 因子名称。
@@ -172,16 +195,17 @@ def _build_disk_filename(
         data_fingerprint: 数据指纹。
 
     Returns:
-        安全的文件名（不含目录路径）。
+        相对于 cache_dir 的 Path（不含 .parquet 以外的目录名）。
     """
-    safe_symbol = "".join(c if c.isalnum() or c in "._-" else "_" for c in symbol)
+    safe_factor = _sanitize_path_segment(factor_name)
+    safe_symbol = _sanitize_path_segment(symbol)
     params_hash = _hash_params(params)
     fp_short = (
         data_fingerprint.hash_value[:FINGERPRINT_TRUNCATE_LEN]
         if data_fingerprint is not None
         else NO_FINGERPRINT_PLACEHOLDER
     )
-    return f"{factor_name}_{safe_symbol}_{params_hash}_{fp_short}{L2_FILE_EXTENSION}"
+    return Path(safe_factor) / safe_symbol / f"{params_hash}_{fp_short}{L2_FILE_EXTENSION}"
 
 
 # ─────────────────────────────────────────────
@@ -259,6 +283,9 @@ class FactorCache:
         self._l2_locks: Dict[str, threading.Lock] = {}
         self._l2_locks_lock = threading.Lock()
 
+        # nofp 告警去重：同一 (factor, symbol) 只 WARNING 一次，避免刷屏
+        self._nofp_warned: set[Tuple[str, str]] = set()
+
         # 统计计数器
         self._stats: Dict[str, int] = {
             "l1_hits": 0,
@@ -323,22 +350,46 @@ class FactorCache:
                 self._l2_locks[filename] = threading.Lock()
             return self._l2_locks[filename]
 
-    def _l2_is_expired(self, filepath: Path) -> bool:
+    def _l2_is_expired(self, filepath: Path, ttl: Optional[int] = None) -> bool:
         """检查 L2 缓存文件是否过期。
 
         Args:
             filepath: 缓存文件路径。
+            ttl: 覆盖 TTL（秒）；None 时使用实例 l2_ttl。nofp 场景由调用方
+                传入 min(l2_ttl, NOFP_FINGERPRINT_TTL) 以缩短兜底有效期。
 
         Returns:
             True 表示已过期（应删除并重新计算）。
         """
-        if self._l2_ttl <= 0:
+        effective_ttl = self._l2_ttl if ttl is None else ttl
+        if effective_ttl <= 0:
             return False  # 永不过期
         try:
             mtime = filepath.stat().st_mtime
-            return (time.time() - mtime) > self._l2_ttl
+            return (time.time() - mtime) > effective_ttl
         except OSError:
             return True  # 无法获取修改时间，视为过期
+
+    def _warn_nofp(self, factor_name: str, symbol: str) -> None:
+        """无数据指纹时打一次 WARNING（同一 factor/symbol 去重）。
+
+        nofp 场景无法感知数据更新，缓存文件名固定为 *_nofp.parquet；
+        已通过 NOFP_FINGERPRINT_TTL 缩短兜底有效期，但仍显式告警提示
+        调用方传入 data_fingerprint。
+
+        Args:
+            factor_name: 因子名称。
+            symbol: 标的代码。
+        """
+        key = (factor_name, symbol)
+        if key not in self._nofp_warned:
+            self._nofp_warned.add(key)
+            logger.warning(
+                "无数据指纹（nofp）访问 L2 缓存: factor=%s, symbol=%s；"
+                "无法感知数据更新，已启用短 TTL=%ds 兜底，"
+                "请显式传入 data_fingerprint 以获得精确失效",
+                factor_name, symbol, NOFP_FINGERPRINT_TTL,
+            )
 
     def _l2_get(
         self,
@@ -347,37 +398,46 @@ class FactorCache:
         params: Dict[str, Any],
         data_fingerprint: Optional[DataFingerprint],
     ) -> Optional[pd.DataFrame]:
-        """从 L2 磁盘缓存读取。
+        """从 L2 磁盘缓存读取（目录分层: factor/symbol/params_fp.parquet）。
 
-        过期文件会被自动删除。
+        过期文件会被自动删除；nofp（指纹缺失）场景使用短 TTL 兜底。
         """
         if not self._l2_enabled:
             return None
 
-        filename = _build_disk_filename(factor_name, symbol, params, data_fingerprint)
-        filepath = self._cache_dir / filename
+        rel_path = _build_l2_relpath(factor_name, symbol, params, data_fingerprint)
+        filepath = self._cache_dir / rel_path
 
         if not filepath.exists():
             return None
 
-        if self._l2_is_expired(filepath):
+        # nofp 场景短 TTL + 告警
+        # 注意：nofp 直接使用 NOFP_FINGERPRINT_TTL，不与 l2_ttl 取 min——
+        # l2_ttl=0（永不过期）是用户对「有指纹、数据完整性可信」缓存的信任，
+        # nofp 无指纹则必须强制短 TTL 兜底，不能被 0 豁免。
+        effective_ttl = self._l2_ttl
+        if data_fingerprint is None:
+            effective_ttl = NOFP_FINGERPRINT_TTL
+            self._warn_nofp(factor_name, symbol)
+
+        if self._l2_is_expired(filepath, effective_ttl):
             try:
                 filepath.unlink()
-                logger.debug("L2 缓存已过期并删除: %s", filename)
+                logger.debug("L2 缓存已过期并删除: %s", filepath.name)
             except OSError as e:
                 logger.warning("删除过期 L2 缓存失败: %s, 错误: %s", filepath, e)
             return None
 
-        lock = self._get_l2_lock(filename)
+        lock = self._get_l2_lock(str(rel_path))
         with lock:
             try:
                 df = pd.read_parquet(filepath)
                 self._stats["l2_hits"] += 1
-                logger.debug("L2 缓存命中: %s (%d 行)", filename, len(df))
+                logger.debug("L2 缓存命中: %s (%d 行)", rel_path, len(df))
                 return df
             except Exception as e:
                 # 文件损坏等异常，删除并返回 None
-                logger.warning("L2 缓存读取失败，将删除: %s, 错误: %s", filename, e)
+                logger.warning("L2 缓存读取失败，将删除: %s, 错误: %s", filepath, e)
                 try:
                     filepath.unlink()
                 except OSError:
@@ -392,13 +452,19 @@ class FactorCache:
         data_fingerprint: Optional[DataFingerprint],
         result: pd.DataFrame,
     ) -> None:
-        """写入 L2 磁盘缓存（Parquet 格式）。"""
+        """写入 L2 磁盘缓存（Parquet 格式，目录分层: factor/symbol/）。"""
         if not self._l2_enabled:
             return
 
-        filename = _build_disk_filename(factor_name, symbol, params, data_fingerprint)
-        filepath = self._cache_dir / filename
-        lock = self._get_l2_lock(filename)
+        rel_path = _build_l2_relpath(factor_name, symbol, params, data_fingerprint)
+        filepath = self._cache_dir / rel_path
+        # 确保父目录存在（因子/symbol 分层）
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        lock = self._get_l2_lock(str(rel_path))
+
+        # nofp 场景写入时也告警（首次访问该 factor/symbol）
+        if data_fingerprint is None:
+            self._warn_nofp(factor_name, symbol)
 
         with lock:
             try:
@@ -407,9 +473,9 @@ class FactorCache:
                 result.to_parquet(tmp_path, index=True)
                 os.replace(tmp_path, filepath)
                 self._stats["l2_writes"] += 1
-                logger.debug("L2 缓存写入: %s (%d 行)", filename, len(result))
+                logger.debug("L2 缓存写入: %s (%d 行)", rel_path, len(result))
             except Exception as e:
-                logger.warning("L2 缓存写入失败: %s, 错误: %s", filename, e)
+                logger.warning("L2 缓存写入失败: %s, 错误: %s", rel_path, e)
                 # 清理可能残留的临时文件
                 try:
                     tmp_path = filepath.with_suffix(".tmp")
@@ -550,6 +616,13 @@ class FactorCache:
 
     # ── 公开接口：失效 / 清理 ──
 
+    @staticmethod
+    def _count_parquet_files(d: Path) -> int:
+        """递归统计目录下 .parquet 文件数。"""
+        if not d.is_dir():
+            return 0
+        return sum(1 for _ in d.rglob(f"*{L2_FILE_EXTENSION}"))
+
     def invalidate(
         self,
         factor_name: Optional[str] = None,
@@ -568,7 +641,7 @@ class FactorCache:
         """
         removed = 0
 
-        # L1 失效
+        # L1 失效（key 用 ":" 分隔，factor_name 不含 ":"，解析无歧义）
         if self._l1_cache is not None:
             keys_to_delete = []
             for key in self._l1_cache.keys():
@@ -585,23 +658,46 @@ class FactorCache:
                 if self._l1_cache.delete(key):
                     removed += 1
 
-        # L2 失效
+        # L2 失效：目录分层存储（{factor_name}/{symbol}/），按目录删除，
+        # 不再从文件名反向切分（F-13：消灭下划线因子名解析歧义）
         if self._l2_enabled and self._cache_dir.exists():
-            for filepath in self._cache_dir.glob(f"*{L2_FILE_EXTENSION}"):
-                filename = filepath.stem  # 去掉 .parquet
-                parts = filename.split("_", 3)
-                if len(parts) < 4:
-                    continue
-                file_factor, file_symbol = parts[0], parts[1]
-                if factor_name is not None and file_factor != factor_name:
-                    continue
-                if symbol is not None and file_symbol != symbol:
-                    continue
-                try:
-                    filepath.unlink()
-                    removed += 1
-                except OSError as e:
-                    logger.warning("删除 L2 缓存文件失败: %s, 错误: %s", filepath, e)
+            if factor_name is not None:
+                safe_factor = _sanitize_path_segment(factor_name)
+                factor_dir = self._cache_dir / safe_factor
+                if symbol is not None:
+                    # 仅删指定 symbol 子目录
+                    safe_symbol = _sanitize_path_segment(symbol)
+                    target = factor_dir / safe_symbol
+                    if target.is_dir():
+                        removed += self._count_parquet_files(target)
+                        shutil.rmtree(target, ignore_errors=True)
+                else:
+                    # 删整个因子目录
+                    if factor_dir.is_dir():
+                        removed += self._count_parquet_files(factor_dir)
+                        shutil.rmtree(factor_dir, ignore_errors=True)
+            elif symbol is not None:
+                # 遍历所有因子目录，删同名 symbol 子目录
+                safe_symbol = _sanitize_path_segment(symbol)
+                for factor_dir in self._cache_dir.iterdir():
+                    if factor_dir.is_dir():
+                        target = factor_dir / safe_symbol
+                        if target.is_dir():
+                            removed += self._count_parquet_files(target)
+                            shutil.rmtree(target, ignore_errors=True)
+            else:
+                # 清空全部：删所有因子子目录 + 兼容旧版扁平散文件（根目录 .parquet）
+                for child in self._cache_dir.iterdir():
+                    if child.is_dir():
+                        removed += self._count_parquet_files(child)
+                        shutil.rmtree(child, ignore_errors=True)
+                    elif child.suffix == L2_FILE_EXTENSION:
+                        # 旧版扁平布局残留文件（F-13 升级前），一并清理
+                        try:
+                            child.unlink()
+                            removed += 1
+                        except OSError as e:
+                            logger.warning("删除旧扁平 L2 文件失败: %s, 错误: %s", child, e)
 
         self._stats["invalidate_count"] += removed
         logger.info(
@@ -615,15 +711,21 @@ class FactorCache:
         if self._l1_cache is not None:
             self._l1_cache.clear()
         if self._l2_enabled and self._cache_dir.exists():
-            for filepath in self._cache_dir.glob(f"*{L2_FILE_EXTENSION}"):
-                try:
-                    filepath.unlink()
-                except OSError as e:
-                    logger.warning("清空 L2 缓存时删除失败: %s, 错误: %s", filepath, e)
+            for child in self._cache_dir.iterdir():
+                if child.is_dir():
+                    shutil.rmtree(child, ignore_errors=True)
+                else:
+                    # 兼容旧版扁平散文件
+                    try:
+                        child.unlink()
+                    except OSError as e:
+                        logger.warning("清空 L2 缓存时删除失败: %s, 错误: %s", child, e)
         logger.info("FactorCache 已清空全部缓存")
 
     def cleanup_expired(self) -> int:
-        """清理 L2 中已过期的缓存文件。
+        """清理 L2 中已过期的缓存文件（递归遍历因子/symbol 分层目录）。
+
+        nofp 文件名含 "nofp" 段，使用短 TTL（NOFP_FINGERPRINT_TTL）判断过期。
 
         Returns:
             清理的过期文件数量。
@@ -631,8 +733,12 @@ class FactorCache:
         if not self._l2_enabled or not self._cache_dir.exists():
             return 0
         cleaned = 0
-        for filepath in self._cache_dir.glob(f"*{L2_FILE_EXTENSION}"):
-            if self._l2_is_expired(filepath):
+        for filepath in self._cache_dir.rglob(f"*{L2_FILE_EXTENSION}"):
+            # nofp 文件用短 TTL 兜底（不随 l2_ttl=0 永不过期）
+            effective_ttl = self._l2_ttl
+            if NO_FINGERPRINT_PLACEHOLDER in filepath.stem:
+                effective_ttl = NOFP_FINGERPRINT_TTL
+            if self._l2_is_expired(filepath, effective_ttl):
                 try:
                     filepath.unlink()
                     cleaned += 1
@@ -652,7 +758,7 @@ class FactorCache:
         """
         l1_size = len(self._l1_cache) if self._l1_cache is not None else 0
         l2_files = (
-            len(list(self._cache_dir.glob(f"*{L2_FILE_EXTENSION}")))
+            len(list(self._cache_dir.rglob(f"*{L2_FILE_EXTENSION}")))
             if self._l2_enabled and self._cache_dir.exists()
             else 0
         )
