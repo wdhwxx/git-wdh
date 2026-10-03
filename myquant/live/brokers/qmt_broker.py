@@ -1739,7 +1739,16 @@ class QmtBroker(BaseBroker):
             return None
         try:
             result = trader.query_stock_orders(account, symbol)
-            return list(result or [])
+            # P0-11修复：SDK 因限流/瞬时故障返回 None 时必须保守透传 None
+            # （调用方见 None 即跳过补发，不判"丢失"）。原 list(result or []) 把 None→[]，
+            # 被对账层误判"券商端无此单"→ 对本地已终态单重复真实报单→重复仓位。
+            if result is None:
+                logger.warning(
+                    "[qmt_broker] query_stock_orders 返回 None（查询失败/无法确认），"
+                    "保守返回 None，调用方不补发"
+                )
+                return None
+            return list(result)
         except Exception as e:  # noqa: BLE001 - 查询异常按"无法确认"处理
             logger.error(f"[qmt_broker] 当日委托查询异常: {e}")
             self._stats["last_error"] = f"query_stock_orders: {e}"

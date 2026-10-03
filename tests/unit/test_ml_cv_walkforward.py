@@ -20,6 +20,7 @@ test_ml_cv_walkforward.py - F-12 滚动/扩展窗口 CV + walk-forward 测试
 from __future__ import annotations
 
 import json
+import tempfile
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -265,9 +266,13 @@ def test_cv_split_insufficient_data() -> None:
 # ═══════════════════════════════════════════════
 
 def _pipeline(cost: Optional[TradeCost] = None) -> TrainingPipeline:
+    # P1-08修复：模型产物写入独立 tmp 目录，不再落盘默认 datasets/models。
+    # （原 ModelRegistry() 默认根目录=项目 datasets/models，测试残留模型单副本、
+    #  .gitignore 忽略、不在备份清单 → 磁盘损坏即永久丢失。改测tmp比"给残留做备份"更正确。）
+    tmp_root = tempfile.mkdtemp(prefix="ml_test_models_")
     return TrainingPipeline(
         FeatureConfig(horizon=5, cost=cost),
-        registry=ModelRegistry(),
+        registry=ModelRegistry(models_root=tmp_root),
     )
 
 

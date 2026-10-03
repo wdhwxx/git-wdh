@@ -2237,3 +2237,32 @@ test_api_middleware.py 在本地全量套件中通过（2032 passed）；CI 行�
 
 【验证】py_compile PASS；引擎测试文件 23/23 通过（含一致性对拍）；
 pytest 全量 2033 passed / 2 skipped / 0 failed（216s），较基线2032 +1新用例，零回归。
+
+112. ✨【回写记录·2026-10-04·P0-07 Alembic0003 + P1-08 模型产物 + P0-11 QMT补单（推荐C收官）】
+
+【P0-11｜QMT补单把"查询失败"变成"券商端无此单"→重复真实报单（真钱）】
+- 根因：qmt_broker.query_broker_orders 契约=异常/未连接返回None（调用方不补发）；
+  实现却 `list(result or [])`——SDK限流/瞬时故障返回None时被吞成[]，
+  对账层 manager 见[]非None → 本地已终态单全判"丢失"→ resubmit_order 重复真实报单。
+- 修复：myquant/live/brokers/qmt_broker.py——result is None 时透传None并WARNING日志；
+  仅真结果 list(result)。真机验证待券商终端（xtquant未装），代码层防御已就位。
+
+【P1-08｜ML模型产物单副本丢失风险】
+- 修法（轻量正确路径）：tests/unit/test_ml_cv_walkforward.py 的 _pipeline()
+  由默认 ModelRegistry()（落盘 datasets/models，.gitignore忽略、不在备份清单）
+  改为每次 tempfile.mkdtemp 独立tmp目录——测试残留不再污染生产模型目录。
+
+【P0-07｜Alembic迁移链与schema.py结构性分叉（官方建库入口不可用）】
+- 根因：0001自称"与schema.py完全一致"与实测不符：缺adjust_factor/share_change两表、
+  market_data缺amplitude/volume_ratio/float_share/pe_dynamic四列、
+  financial_data缺ann_date列、缺5索引（idx_fin_ann_date等）。
+  走官方入口 scripts/数据库迁移.py upgrade 建库后 bulk_insert 直接 no such column/table。
+- 修复：新增 myquant/database/migrations/versions/0003_align_schema_divergence.py
+  （down_revision=0002）——建两表IF NOT EXISTS + PRAGMA幂等补5列 + 补5索引；
+  修 schema.py:81 失实注释（"双主一致22索引"→27索引由0003补齐）。
+- 冒烟（logs/smoke_p007.py）：临时空库走0001→0002→0003全链后——
+  10业务表齐、索引计数27与schema.py逐一对齐、新列/新表INSERT通过。
+- 遗留（下一轮）：(b)双权威收敛（自研MigrationManager vs Alembic）降为stamp兼容层，未做。
+
+【验证】py_compile PASS；ML+DB目标测试89 passed；pytest全量2033 passed/2 skipped/0 failed（214s）。
+【Git】本项随蓝图#112一并提交（含此前6批补交：3f157ea→7f0bcf7，已与#107-#111对应）。

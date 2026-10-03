@@ -78,7 +78,9 @@ CREATE TABLE IF NOT EXISTS market_data (
 """
 
 # 行情表索引（加速查询）
-# P2-D10-001 整改：补 idx_market_symbol_period_date（与 Alembic 0002 迁移对齐，双主一致为 22 索引）
+# P0-07 修正：本索引经 Alembic 0002 对齐；Alembic 链与 schema.py 的其余分叉
+# （adjust_factor/share_change 两表 + 5 列 + 5 索引）由 Alembic 0003 补齐，
+# 双主最终一致为 27 索引（原注释"双主一致为22索引"与事实不符）。
 CREATE_MARKET_DATA_INDEX_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_market_symbol ON market_data(symbol);",
     "CREATE INDEX IF NOT EXISTS idx_market_date ON market_data(trade_date);",
