@@ -444,8 +444,9 @@ class RSRS(IndicatorBase):
             True=通过校验，False=存在未来函数
         """
         result = self.calculate(data)
-        high = data["high"].astype(float).values
-        low = data["low"].astype(float).values
+        # P1-16修复：calculate 已改中文列（最高价/最低价），此处同步，否则 KeyError
+        high = data["最高价"].astype(float).values
+        low = data["最低价"].astype(float).values
 
         for i in range(self.period, len(data)):
             expected_beta = result["rsrs_raw"].iloc[i]

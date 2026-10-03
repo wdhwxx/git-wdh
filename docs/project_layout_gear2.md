@@ -2335,3 +2335,14 @@ pytest 全量 2035 passed/2 skipped/0 failed（214s），零回归。
 
 【验证】py_compile PASS；引擎/lookahead 32 passed；新增接线断言 24 passed；
 pytest 全量 2052 passed/2 skipped/0 failed（220s）。
+
+117. ✨【回写记录·2026-10-04·P1-16 RSRS自校验必抛异常修复（P1批次第4项）】
+
+【P1-16｜RSRS.validate_no_lookahead 任何输入都失败（防未来证据链断裂）】
+- 根因：calculate() 已切中文列（最高价/最低价），自校验方法仍取英文列 data["high"/"low"]，
+  中文输入 KeyError、英文输入 calculate 先 ValueError，方法恒不可用。
+- 修复：rsrs.py:447-448 改中文列 最高价/最低价，与 calculate 对齐。
+- CI：新建 tests/unit/test_p116_rsrs_validate.py——中文列(开/高/低/收)数据下
+  validate_no_lookahead 返回 True + calculate 输出 rsrs_raw 冒烟，2 用例。
+
+【验证】py_compile PASS；新测试 2 passed；pytest 全量 2054 passed/2 skipped/0 failed（218s）。
