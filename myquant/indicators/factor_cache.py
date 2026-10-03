@@ -469,7 +469,10 @@ class FactorCache:
         with lock:
             try:
                 # 原子写入：先写临时文件再 rename
-                tmp_path = filepath.with_suffix(".tmp")
+                # P1-19修复：tmp 名加 pid+随机段，避免多进程并行写同名 tmp 相互覆盖
+                tmp_path = filepath.with_name(
+                    f".{filepath.name}.{os.getpid()}.{os.urandom(4).hex()}.tmp"
+                )
                 result.to_parquet(tmp_path, index=True)
                 os.replace(tmp_path, filepath)
                 self._stats["l2_writes"] += 1
@@ -478,7 +481,6 @@ class FactorCache:
                 logger.warning("L2 缓存写入失败: %s, 错误: %s", rel_path, e)
                 # 清理可能残留的临时文件
                 try:
-                    tmp_path = filepath.with_suffix(".tmp")
                     if tmp_path.exists():
                         tmp_path.unlink()
                 except OSError:

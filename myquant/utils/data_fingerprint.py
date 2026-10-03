@@ -314,6 +314,18 @@ def _compute_content_hash(
     h.update(str(len(df_sorted)).encode("utf-8"))
     h.update(_COL_SEPARATOR)
 
+    # 3b. P1-19修复：哈希 index 值（此前仅 sort_index 不哈希索引，
+    #     数值相同但日期区间不同的数据得同指纹→因子与行情错位）。
+    if not df_sorted.empty:
+        idx = df_sorted.index
+        if pd.api.types.is_datetime64_any_dtype(idx):
+            h.update(idx.astype("int64").to_numpy().tobytes())
+        elif pd.api.types.is_numeric_dtype(idx):
+            h.update(idx.to_numpy().tobytes())
+        else:
+            h.update(idx.astype(str).str.cat(sep=_STR_VALUE_SEPARATOR).encode("utf-8"))
+    h.update(_COL_SEPARATOR)
+
     # 4. 逐列哈希数据内容
     for col in sorted(df_sorted.columns):
         series = df_sorted[col]

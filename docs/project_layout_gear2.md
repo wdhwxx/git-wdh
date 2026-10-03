@@ -2372,3 +2372,18 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
   '2024-03-31'归一为20240331且未超期返回；'2024-09-30'超期None；非法列名'最新'拒绝。
 
 【验证】py_compile PASS；新测试 3 passed；pytest 全量 2058 passed/2 skipped/0 failed（217s）。
+
+120. ✨【回写记录·2026-10-04·P1-19 因子缓存指纹纳入index（P1批次第7项）】
+
+【P1-19｜因子缓存/指纹正确性缺口（因子与行情错位）】
+- 根因：_compute_content_hash 仅 sort_index 从不哈希 index 值；同数值不同日期区间
+  → 同指纹/同 Key/同 L2 文件，命中后按旧索引对齐 → 因子与行情错位。
+- 修复：
+  * data_fingerprint.py 哈希行数后追加哈希 index 值（datetime→int64纳秒，
+    数值→原始字节，其余→字符串拼接）；
+  * factor_cache L2 写 tmp 名加 pid+随机段（.name.pid.rand.tmp），
+    避免多进程并行写同名 tmp 相互覆盖导致 os.replace 被吞。
+- 单测：test_p119_fingerprint_index——同OHLCV数值不同日期区间指纹必须不同；
+  同帧哈希稳定，2 用例。
+
+【验证】py_compile PASS；新测试 2 passed；pytest 全量 2060 passed/2 skipped/0 failed（219s）。
