@@ -251,7 +251,7 @@ Pythonwdhmm/
 
     │
 
-├── docs/                             # 项目文档目录（共71个文件：顶层28 + mockups 5 + archive_20260905 29 + design 4 + 审计档案 5（P2-D1-002 补录 13 顶层 + design/ 4，P3-4 速查卡归位计入））
+├── docs/                             # 项目文档目录（共97个文件：顶层30 + mockups 5 + archive_20260905 29 + design 4 + 审计档案 5 + 数据层档案 13 + 因子与机器学习档案 11（2026-10-03 实测，回写#106）（P2-D1-002 补录 13 顶层 + design/ 4，P3-4 速查卡归位计入））
 
 │   ├── architecture.md               # 架构设计图、模块依赖关系、数据流与同步/异步边界说明
 
@@ -2134,3 +2134,106 @@ Pythonwdhmm/
    c. **myquant/data_access/loader.py 改同包 import**：第43行 from myquant.backtest.data_loader import HistoricalDataProvider -> from myquant.data_access.provider import HistoricalDataProvider；docstring 依赖说明同步更新；OptimizedDataLoader 包装逻辑零改动
    d. **循环依赖打断验证**：AST 全量扫描 myquant/data_access/ 内任何 .py 均无 from myquant.backtest / import myquant.backtest（NONE clean）；import myquant.backtest 完整包（触发 backtest/__init__.py -> batch_backtest -> data_loader 链路）不再 ImportError；薄壳 re-export 对象与 data_access.provider 是同一对象（is 断言通过）；HistoricalDataProvider MRO/默认 default_adjust='raw'/get_bars/load_multiple/refresh 接口签名零变化
    e. **纪律遵守**：先更新蓝图目录树再动代码（#105 登记：data_access/ 段新增 provider.py 条目 + loader.py 注释追加 #105 + backtest/ 段 data_loader.py 标注薄壳）；防未来函数红线 11 一行未动（get_bars end_date 过滤/复权 as_of 截断/merge_asof backward 全部保留）；全量类型注解 + Google docstring（新文件完整保留原 docstring）；零变化纪律（18 处调用方零改动/HistoricalDataProvider 对外签名零变化/薄壳仅 re-export 无业务逻辑）；废弃文件未物理删除（backtest/data_loader.py 保留为兼容薄壳，按治理规则 3.3 在蓝图标注薄壳而非消失）；git 提交待用户拍板
+
+106. ✨【回写记录·2026-10-03·完整性独立审核复验（运行时实测）】对《鲲鹏量化交易系统_完整性独立审核报告_20261004.md》（本条同步登记）执行 A 方案复验（用户确认），只读实测结论：
+   a. **测试基线获解（P2-02 修正）**：pytest tests/ 全量 = 2026 passed / 2 skipped（200.3s）；tests/unit/ = 2006 passed / 2 skipped（15.9s）——2026 与 2006 均为真实口径（全量 vs unit），差异 20 = unit 之外测试；唯一过期的是数据层 1730 硬判据
+   b. **P0-01 运行时复现成功**：注入未来函数违规 → 校验仅记日志不抛异常 → is_success=True / status=completed / lookahead_guard_passed=False；该标记零生产读取方（仅 3 引擎写入 + 测试读取）
+   c. **数据库实测（6.0GB quant.db）**：alembic_version 不存在、schema_migrations 2 条 → 自研 MigrationManager 建库（P0-07 双权威证实）；market_data 22 列 / financial_data 22 列；仅 raw 16,891,155 行（P1-02 闭环）；financial_data 329,735 行非空（P0-02 下游修正）；派生量覆盖率 pe_dynamic 65.8% / float_share 76.9%
+   d. **P0-03 暴露面=0**：processed 3195 标的全有 share_change、北交所不在 processed、DB 北交所 float_share=NULL、120 文件抽样 0 常量 → 潜在缺陷
+   e. **P0-07 数字微调**：0001 = 8 表 / 21 索引 / 18 列；schema.py = 10 表 / 27 索引；缺 2 表 + 4 列 + 5 索引（原报 6）
+   f. **其余证实**：P0-02 代码级（本次 push2 网络阻断未触发短路）、P0-05 / P0-06 / P0-10 / P0-11 / P1-01 / P1-02 全部代码级证实、P1-08 实测 11 版本（原 9）、P3-02 .index.lock 陈旧锁存在
+   g. **登记与纪律**：新增 docs/鲲鹏量化交易系统_完整性独立审核_复验报告_20261003.md；同步登记审核报告（此前未登记）；docs/ 段计数更新为 97（顶层 30）；本次未修改任何业务代码 / 配置 / 数据
+
+107. ✨【回写记录·2026-10-03·P0-01 修复：防未来校验吞异常（三引擎最终防线收敛为可阻断结论）】按《完整性独立审核报告》P0-01 第 1 优先项落地（复验报告 §4 推荐 C 方案第一项）：
+   a. **根因**：三引擎 `_run_lookahead_assert()` 的 `except Exception` 只记 error 日志并写 extra 标记，结果仍 `mark_complete()` → `is_success=True`，全项目零生产读取方
+   b. **修复（myquant/backtest/engine.py · mixed_engine.py · vectorized_engine.py）**：`_run_lookahead_assert()` 返回类型 `None→bool`——通过（或 guard 显式关闭）返回 True；违规时记日志 + 写 extra（violations/passed=False）+ **`result.mark_failed("防未来函数校验未通过: ...")`** + 返回 False，不再静默吞掉
+   c. **标记顺序反转（审核要求"mark_complete 移到校验之后"）**：event on_stop / vectorized run 改为 `if self._run_lookahead_assert(): self.result.mark_complete()`；mixed on_stop 同改，run() 内原 on_stop 之后的冗余 assert 调用移除（校验已在 on_stop 内、mark_complete 之前执行）
+   d. **回归测试（tests/unit/test_lookahead_wiring.py）**：`test_违规写入结果extra` 强化断言——`passed is False` + `result.status=="failed"` + `result.is_success is False` + error_message 含"防未来函数校验未通过"，把 P0-01 锁成永久回归
+   e. **验证**：py_compile 4 文件 PASS；lookahead 专项 9/9 passed（0.27s）；**pytest 全量 2026 passed / 2 skipped / 0 failed（218.76s）**，与修复前基线一致，零回归
+   f. **纪律遵守**：未新增/删除文件（目录树无变更）；全量类型注解 + Google docstring；方法注释注明"仅消费 t 时刻 guard 快照、不读行情数据"（防未来红线 11）；live 引擎语义不同（记录模式留痕告警）未动；批量回测阶段一已有整体 except 兜底，违规 result 不再以 completed 流出
+
+
+108. ✨【回写记录·2026-10-04·P0-06 策略双重下单 + P1-01 日计数不复位】
+
+【P0-06｜4 策略 on_bar 内既直下又返回信号 → 双重报单并绕过风控（真钱红线）】
+- 根因：混合/回测引擎对 on_bar 返回的信号会经 signal.to_order() 再下一次；
+  而 grid/momentum/multi_factor/mean_reversion 四策略又在 on_bar 内 create_order+context.submit_order 直下。
+  直下那笔 order_id 为随机 uuid（引擎单用 signal_id），幂等去重失效，且绕过 RiskManager/LookaheadGuard。
+- 修复（统一契约=策略只产信号）：
+  * myquant/strategies/grid_strategy.py on_bar：删 3 处直下块，简化为 return [signal]；
+  * momentum_strategy.py / multi_factor_strategy.py：删 on_bar 内 _submit_signal_order 调用循环，并整段删除 _submit_signal_order 方法；
+  * mean_reversion_strategy.py：删 sell/buy 两处直下块，简化为 return [signal]。
+- 回归证据：tests/unit/test_strategies.py::TestP006StrategyNoDirectOrder——
+  网格跨档产生信号（non_hold>0）但 executor.submit_order 调用 0 次。
+
+【P1-01｜live 引擎日下单计数跨日不复位 + RateLimitRule 不区分方向 → 20 笔后连止损卖单都被拒】
+- 修复：
+  * myquant/live/engine.py _build_risk_context 跨日分支：新增 self._order_count_today = 0；
+  * myquant/risk/rules.py RateLimitRule.check：日下单数上限只约束 BUY，SELL（平仓/止损）放行；min_interval 仍对全方向生效。
+- 回归证据：test_live_risk.py 新增 test_sell_bypasses_daily_limit_p101 / test_buy_still_rejected_at_limit_p101。
+
+【验证】py_compile 6 文件 PASS；Grep 确认 myquant/strategies/ 无 context.submit_order 调用残留（仅注释）；
+pytest 全量 2029 passed / 2 skipped / 0 failed（217.29s），较基线 2026 +3 新用例，零回归。
+
+109. ✨【回写记录·2026-10-04·P0-05 RSRS选池未来函数 + P0-02 财务链短路 + P0-03 股本反推】
+
+【P0-05｜RSRS 三因子选股池用回测末日数据（未来函数+调仓空转，核心策略可信度最大单点）】
+- 根因：StockPoolBuilder.build 对引擎注入的全量 context.data 直接算 tail(20日)波动率/iloc[-1]价/末日动量；
+  on_init 与 _rebalance_pool 两处都传全量 → 因子永远取自回测末日、股票池恒定、20日调仓退化为空转。
+- 修复：
+  * myquant/strategies/base.py StockPoolBuilder.build 新增 as_of 时点参数（epoch秒/Timestamp归一化），
+    仅用 index<=as_of 的数据计算三因子（数据截至 as_of 时刻）；
+  * myquant/strategies/ma_strategy.py：on_init 不再构建初始池（拿不到时点=必然穿越）；
+    on_bar 首根可交易 bar 按 bar.timestamp 惰性构建，后续每 pool_rebalance_days 调仓同样传 as_of=bar.timestamp。
+- 回归：tests/unit/test_strategies.py::TestP005PoolBuilderAsOf（as_of=第100根时因子数据恰为前101行、不泄露未来）。
+
+【P0-02｜东财 push2 快照丢弃后 return [] 被 composite 误判成功，短路全部降级源】
+- 修复：akshare_source.py _try_eastmoney_finance 丢弃无报告期快照后 return [] → return None，删死代码 return result。
+- 复验（审核处方命令）：600519.SH push2 被墙后正确降级 datacenter-web，返回含真实
+  report_date=2026-09-30/eps=35.57 的记录（修复前为 1 [[]]）。
+
+【P0-03｜兜底反推股本用"整段最后一行收盘价"反推后套用全部历史bar（穿越未来）】
+- 修复：derived_metrics.compute_b_class_metrics 删除"全局最新市值÷末日收盘"，改为每根 bar 用
+  "该日已披露(报告截止日<=trade_date)的 circ_mv/total_mv ÷ 该日自身 close"；无快照则置 None（宁可缺失不可穿越）。
+- 回归：test_share_change.py 更新固化旧行为的5条断言 + 新增 TestP003NoLookaheadShareReconstruct
+  （2020-01-02行 float_share != 1000/100=10）。
+
+【连带测试修正】test_p2_anti_future_config.py 原断言 push2 丢弃后 ==[]，按 P0-02 新契约改 is None。
+【验证】py_compile 全过；pytest 全量 2032 passed / 2 skipped / 0 failed（216s），较基线2029 +3新用例，零回归。
+【遗留】审核建议"每次池快照落盘供审计"未做（仅 logger.info），可后续补。
+
+110. ✨【回写记录·2026-10-04·P0-08 CI缺web extras + P0-09 compose非法mode枚举】
+
+【P0-08｜CI test job 永久红：缺 web extras，连带阻塞4个job】
+- 根因：.github/workflows/ci.yml test job 只装 .[dev,benchmark,gui]；而
+  tests/unit/test_api_middleware.py 顶层 import myquant.api.routes → fastapi 仅在 pyproject web extras。
+- 修复：ci.yml:110 pip install -e ".[dev,benchmark,gui]" → ".[dev,benchmark,gui,web]"。
+  （历史教训 P2-D12-001 当时只补 gui 漏 web；本次按"extras组覆盖被测入口"补齐。）
+
+【P0-09｜docker live 容器启动即崩：--mode simulate 非法枚举】
+- 根因：docker/docker-compose.yml live 服务 command --mode "simulate"，而 run_实盘入口.py
+  argparse choices=[monitor,paper,sim,live] 无 simulate → 退出码2。CI docker-build 只 build 不 run，故长期漏网。
+- 修复：compose command --mode "simulate" → "sim"。
+- 复验实测：--mode simulate → argparse 报 invalid choice(simulate)；--mode sim → 正常进入帮助/装配。
+
+【验证】py_compile 无源码改动；grep 全仓 yml 无 simulate 残留（仅注释）；
+test_api_middleware.py 在本地全量套件中通过（2032 passed）；CI 行为待下次 workflow 实跑确认。
+
+111. ✨【回写记录·2026-10-04·P0-10 vectorized 引擎幽灵持仓】
+
+【P0-10｜持仓不按实际成交量回写（污染参数扫描与生产阶段一筛选）】
+- 根因：vectorized_engine 中 position 全程由 target_arr 递推（position[t]=target[t-1]），
+  而现金流/费用只对 traded（fill_qty>0）生效。停牌(volume=0)/涨跌停拦截导致买单未成交时，
+  cashflow=0（未支出）但 position 仍记为已持有 → 幽灵持仓、净值虚高。
+- 修复：myquant/backtest/vectorized_engine.py
+  * 订单量仍由 target 递推（exec_shares）供撮合；
+  * 撮合后实际持仓改为 position = cumsum(signed_fill)，
+    signed_fill = where(exec_shares>0, fill_qty, -fill_qty)。
+    全部成交时 signed_fill=exec_shares，cumsum 与原 target 递推逐点一致（mixed↔vectorized 一致性不破）。
+- 回归：tests/unit/test_backtest_engines_v5.py::TestP010GhostPosition——
+  第3根停牌，T+1买1000股无法成交 → 无BUY成交、其后持仓市值恒为0。
+- 排障记录：首版误把 position 多移一位（concatenate([0],cumsum[:-1])），
+  被 mixed↔vectorized 逐点一致性测试当场抓出（index3/7 equity 偏离），修正为 cumsum(signed_fill) 本身。
+
+【验证】py_compile PASS；引擎测试文件 23/23 通过（含一致性对拍）；
+pytest 全量 2033 passed / 2 skipped / 0 failed（216s），较基线2032 +1新用例，零回归。
