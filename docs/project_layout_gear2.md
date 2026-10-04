@@ -542,6 +542,7 @@ Pythonwdhmm/
 │   │   ├── test_live_guard_failover.py # ✨【回写#31】实盘保障组件故障注入（审计H2降级：事件总线断连/订阅失败/挂载失败/风控异常拒单/调度失败/巡检异常/快照失败/全组件关闭，10项）✅已完成
 
 │   │   ├── test_qmt_broker_live.py  # ✨【回写#41】QMT实盘通道测试（fake SDK不连真实QMT：模式隔离/连接流程/委托撤单/成交回调/资金持仓/状态映射，23项）✅已完成
+│   │   ├── test_live_fee.py          # ✨【回写#143】LIVE费用计提测试（KP-P4-03：10万买单fee>0/卖单含印花税/佣金最低5元兜底/本地账本现金守恒/卖单回笼扣费/与回测FeeCalculator同构，6项）✅已完成
 
 │   │   ├── test_live_lookahead.py   # ✨【回写#42】实盘LookaheadGuard防未来校验测试（接线/信号记录/HOLD与风控拒绝不记录/T+1成交/同日跳过/早于信号日真违规/停止校验/工厂配置消费，19项）✅已完成
 
@@ -994,7 +995,7 @@ Pythonwdhmm/
 
     │       ├── paper_broker.py       # 本地模拟券商（Paper Trading，模拟撮合）
 
-    │       ├── qmt_broker.py         # 迅投QMT适配器（SIM模拟撮合+LIVE SDK占位，第1项实盘对接）
+    │       ├── qmt_broker.py         # 迅投QMT适配器（SIM模拟撮合+LIVE SDK占位，第1项实盘对接）；✨【回写#143】LIVE 成交走 fee_common 唯一入口计提费用（KP-P4-03：佣金+过户费+印花税，与 SIM/回测同构，本地账本现金守恒）
 
     │       ├── ptrade_broker.py      # 恒生Ptrade适配器（SIM模拟撮合+LIVE API占位，第1项实盘对接）
 
@@ -2685,3 +2686,11 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：落库/查询仅消费已发生订单与成交事实，不使用未来行情。
 - 验证结果：py_compile 5 文件 PASS；tests/unit/test_trade_ledger.py 10 项全绿（alembic upgrade head 真实跑通建三表/逐笔订单查询一致/逐笔成交与 broker 一致/重复上报幂等/按状态过滤/删除当前快照不影响历史查询/same-day 覆盖不堆积/create_all_tables 含三表/engine on_order_update 与 on_trade 落库）；database+live 广回归 328 passed + 1 skipped 无回归；ruff：trade_log.py/0004/测试文件通过（schema.py/engine.py 顶层 import 排序为既有 I001，非本次引入）。
 - 纪律遵守：仅改蓝图已标注文件（database/schema.py、migrations/versions/0004、live/engine.py）+ 蓝图新增 database/trade_log.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+143. ✨【回写记录·2026-10-04·T-09 KP-P4-03 LIVE 本地账本不记费用（commission/slippage 恒 0）】
+
+【发现】`qmt_broker.py:1203-1205` LIVE 成交 `trade.commission=0.0`/`slippage=0.0`，本地账本（LivePortfolio.apply_trade）按 0 费扣现金 → 本地现金高于券商实际。
+- 修复（myquant/live/brokers/qmt_broker.py）：_execute_fill LIVE 分支由「佣金/滑点以 QMT 实际扣费为准，本地不估算（恒 0）」改为走 fee_common 唯一入口计提——`trade.commission = self._calc_commission(trade)`（佣金+过户费+印花税，与 SIM/回测同一 FeeCalculator 同一参数）、`trade.slippage = self._calc_slippage_amount(fill_price, fill_quantity)`；真实现金仍以 QMT 查询为准（get_account LIVE 走 SDK），本地账本/成交关系账如实扣费、现金守恒。
+- 防未来：费用按已发生成交事实计提，不使用未来行情。
+- 验证结果：py_compile 2 文件 PASS；tests/unit/test_live_fee.py 6 项全绿（10万买单 fee=26>0 且滑点=20/卖单含印花税=126/佣金最低5元兜底=5.01/本地账本现金守恒（初始−成交额−累计费用）/卖单回笼扣费/与回测 FeeCalculator 口径同构）；qmt/live 回归 82 passed 无回归；ruff：测试文件通过（qmt_broker.py 4 处 F541 为既有，非本次引入）。
+- 纪律遵守：仅改蓝图已标注文件（live/brokers/qmt_broker.py）+ tests/unit 新增 test_live_fee.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。

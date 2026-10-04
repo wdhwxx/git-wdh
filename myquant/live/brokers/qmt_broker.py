@@ -1177,7 +1177,8 @@ class QmtBroker(BaseBroker):
         流程:
           1. 涨跌停检查（仅 SIM；LIVE 由券商撮合决定）
           2. 创建成交记录
-          3. 计算手续费（仅 SIM 估算；LIVE 以 QMT 实际扣费为准）
+          3. 计算手续费（fee_common 唯一入口计提：佣金+过户费+印花税；LIVE 亦计提
+             使本地账本/成交关系账如实记录，真实现金仍以 QMT 查询为准）
           4. 更新订单状态
           5. 更新持仓与资金（仅 SIM；LIVE 本地不维护账本）
           6. 触发回调
@@ -1200,9 +1201,10 @@ class QmtBroker(BaseBroker):
                 timestamp=timestamp,
                 strategy_id=order.strategy_id,
             )
-            # 佣金/滑点以 QMT 实际扣费为准，本地不估算
-            trade.commission = 0.0
-            trade.slippage = 0.0
+            # KP-P4-03：LIVE 成交也走 fee_common 唯一入口计提费用（佣金+过户费+印花税），
+            # 使本地账本/成交关系账如实记录费用、现金守恒；真实现金仍以 QMT 查询为准。
+            trade.commission = self._calc_commission(trade)
+            trade.slippage = self._calc_slippage_amount(fill_price, fill_quantity)
             # 更新订单状态（支持分批）
             order.fill(fill_quantity, fill_price)
             if order.is_filled:
@@ -1213,7 +1215,7 @@ class QmtBroker(BaseBroker):
             logger.info(
                 f"[qmt_broker] 成交(LIVE): {order.symbol} {order.side.value} "
                 f"{fill_quantity:.0f}@{fill_price:.2f} "
-                f"（费用以QMT结算为准）"
+                f"手续费={trade.commission:.2f}（fee_common 计提，QMT 结算为准）"
             )
             self._notify_order_update(order)
             self._notify_trade(trade)
