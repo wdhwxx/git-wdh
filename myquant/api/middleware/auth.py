@@ -40,7 +40,7 @@ from __future__ import annotations
 import hashlib
 import os
 import secrets
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, Optional, Set, Tuple
 
 from myquant.core.logger import get_logger
 
@@ -268,3 +268,164 @@ def create_auth(
     APIKeyAuth : 认证实例
     """
     return APIKeyAuth(api_keys=api_keys, enabled=enabled)
+
+
+# ════════════════════════════════════════════════════════════════════════════════════════
+#  KP-M04（T-30）写操作准入守卫（方案B：仅高危写操作审批，复核人可配置）
+#  三道防线/职责分离代码载体：高危写操作（强平/资金调拨/实盘切换）启用后
+#  须经审批放行，未审批拒绝；普通写操作仅审计留痕。审计写 JSONL 文件。
+# ════════════════════════════════════════════════════════════════════════════════════════════
+
+HIGH_RISK_SCOPES: frozenset = frozenset({
+    "force_close",       # 强制平仓（guardian.force_close_all / force_close_symbol）
+    "transfer_cash",     # 资金调拨（portfolio.transfer_cash）
+    "mode_switch_live",  # 实盘模式切换（run_mode.apply_mode_to_config -> LIVE）
+})
+
+SCOPE_DESCRIPTIONS = {
+    "force_close": "强制平仓",
+    "transfer_cash": "资金调拨",
+    "mode_switch_live": "实盘模式切换",
+}
+
+
+class OperationGuard:
+    """
+    写操作准入守卫（KP-M04 方案B 落地）
+
+    配置（config/live_admission.yaml）：
+      admission:
+        enabled: false            # 是否启用准入审批（默认 false 仅审计留痕，不阻断）
+        require_reviewer: false   # 是否要求外部复核人（职责分离第二人）
+        reviewer: ""              # 复核人标识（require_reviewer=true 时必填）
+        audit_dir: logs/audit     # 审计落盘目录
+        high_risk_scopes: []      # 自定义高危操作域（缺省=HIGH_RISK_SCOPES）
+
+    防未来：只审查当前操作的审批状态，不预测未来；配置缺失/加载失败一律
+    fail-safe 回退 enabled=false（仅审计留痕），绝不阻断正常流程。
+    """
+
+    def __init__(self, config_path: Optional[str] = None):
+        self._enabled = False
+        self._require_reviewer = False
+        self._reviewer = ""
+        self._audit_dir = "logs/audit"
+        self._high_risk_scopes: Set[str] = set(HIGH_RISK_SCOPES)
+        if config_path:
+            self._load(config_path)
+
+    def _load(self, config_path: str) -> None:
+        """加载 live_admission.yaml；任何异常 fail-safe 保持默认（enabled=False）。"""
+        try:
+            from myquant.core.config_loader import ConfigLoader
+            cfg = ConfigLoader().load(config_path)
+            adm = cfg.get("admission") or {}
+            self._enabled = bool(adm.get("enabled", False))
+            self._require_reviewer = bool(adm.get("require_reviewer", False))
+            self._reviewer = str(adm.get("reviewer", "") or "")
+            audit_dir = adm.get("audit_dir")
+            if isinstance(audit_dir, str) and audit_dir.strip():
+                self._audit_dir = audit_dir.strip()
+            scopes = adm.get("high_risk_scopes")
+            if isinstance(scopes, list):
+                self._high_risk_scopes = {str(s) for s in scopes if str(s)}
+        except Exception as e:
+            logger.warning(f"[admission] 准入配置加载失败，回退仅审计模式: {e}")
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    @property
+    def high_risk_scopes(self) -> Set[str]:
+        return set(self._high_risk_scopes)
+
+    def check(
+        self,
+        scope: str,
+        operator: str,
+        reviewer: Optional[str] = None,
+        action: str = "",
+    ) -> Tuple[bool, str]:
+        """
+        高危写操作准入检查。
+
+        Returns
+        -------
+        (ok, reason) : ok=False 表示应拒绝执行，reason 为拒绝原因。
+        """
+        if scope not in self._high_risk_scopes:
+            # 非高危写操作：仅审计留痕，不阻断
+            self.audit(scope, operator, action, "allowed", reviewer, "非高危写操作（仅审计）")
+            return True, ""
+        if not self._enabled:
+            self.audit(scope, operator, action, "allowed", reviewer, "准入未启用（仅审计留痕）")
+            return True, ""
+        if self._require_reviewer:
+            if not reviewer or reviewer != self._reviewer:
+                desc = SCOPE_DESCRIPTIONS.get(scope, scope)
+                reason = f"高危写操作[{desc}]需配置复核人审批：reviewer 缺失或不匹配"
+                self.audit(scope, operator, action, "denied", reviewer, reason)
+                return False, reason
+        self.audit(scope, operator, action, "approved", reviewer, "审批通过")
+        return True, ""
+
+    def audit(
+        self,
+        scope: str,
+        operator: str,
+        action: str,
+        result: str,
+        reviewer: Optional[str] = None,
+        reason: str = "",
+    ) -> None:
+        """审计留痕：logger + JSONL 落盘 audit_dir/write_audit.jsonl（异常仅告警不阻断）。"""
+        from datetime import datetime
+        ts = datetime.now().isoformat(timespec="seconds")
+        record = {
+            "ts": ts,
+            "scope": scope,
+            "operator": operator,
+            "action": action,
+            "result": result,
+            "reviewer": reviewer or "",
+            "reason": reason,
+        }
+        logger.info(
+            f"[admission] {result} scope={scope} operator={operator} "
+            f"action={action} reviewer={reviewer or ''} {reason}"
+        )
+        try:
+            import json
+            from pathlib import Path
+            d = Path(self._audit_dir)
+            d.mkdir(parents=True, exist_ok=True)
+            with (d / "write_audit.jsonl").open("a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except Exception as e:
+            logger.warning(f"[admission] 审计落盘失败（仅告警不阻断）: {e}")
+
+
+_default_guard: Optional[OperationGuard] = None
+
+
+def get_operation_guard(config_path: Optional[str] = None) -> OperationGuard:
+    """获取准入守卫：默认单例（不加载配置 -> 仅审计留痕）；显式传配置路径则新建。"""
+    global _default_guard
+    if config_path is None:
+        if _default_guard is None:
+            _default_guard = OperationGuard()
+        return _default_guard
+    return OperationGuard(config_path)
+
+
+def require_scope(
+    subject: str,
+    scope: str,
+    reviewer: Optional[str] = None,
+    action: str = "",
+    guard: Optional[OperationGuard] = None,
+) -> Tuple[bool, str]:
+    """subject 为主体标识，scope 为写操作域。返回 (ok, reason)。"""
+    g = guard if guard is not None else get_operation_guard()
+    return g.check(scope, operator=subject, reviewer=reviewer, action=action)

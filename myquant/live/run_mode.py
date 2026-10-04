@@ -158,6 +158,13 @@ def apply_mode_to_config(config: Dict[str, Any], mode: RunMode) -> Dict[str, Any
         broker_cfg["mode"] = "SIM"
         return config
     # LIVE（真钱实盘）
+    # KP-M04（T-30）：实盘模式切换属高危写操作——准入拒绝则显式抛错（默认仅审计留痕）
+    from myquant.api.middleware.auth import get_operation_guard
+    ok, why = get_operation_guard().check(
+        "mode_switch_live", operator="run_mode",
+        action="apply_mode_to_config -> LIVE")
+    if not ok:
+        raise ValueError(f"实盘模式切换被准入拒绝: {why}")
     live_cfg["trade_mode"] = "live"
     broker_cfg["mode"] = "LIVE"
     return config

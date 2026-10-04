@@ -493,6 +493,14 @@ class RiskGuardian:
             reason=reason,
             executed=False,  # v1不实际执行
         )
+        # KP-M04（T-30）：高危写操作准入——未审批拒绝（默认仅审计留痕，不阻断）
+        from myquant.api.middleware.auth import get_operation_guard
+        ok, why = get_operation_guard().check(
+            "force_close", operator="guardian",
+            action=f"force_close_all reason={reason}")
+        if not ok:
+            logger.error(f"[guardian] 强制平仓所有被准入拒绝: {why}")
+            return False
         self._record_decision(decision)
         self.alert(AlertLevel.CRITICAL, f"[强制平仓所有] {reason}")
 
@@ -537,6 +545,14 @@ class RiskGuardian:
             details={"symbol": symbol},
             executed=False,
         )
+        # KP-M04（T-30）：高危写操作准入——未审批拒绝（默认仅审计留痕，不阻断）
+        from myquant.api.middleware.auth import get_operation_guard
+        ok, why = get_operation_guard().check(
+            "force_close", operator="guardian",
+            action=f"force_close_symbol {symbol} reason={reason}")
+        if not ok:
+            logger.error(f"[guardian] 强制平仓 {symbol} 被准入拒绝: {why}")
+            return False
         self._record_decision(decision)
         self.alert(AlertLevel.CRITICAL, f"[强制平仓 {symbol}] {reason}")
 

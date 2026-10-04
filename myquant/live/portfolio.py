@@ -794,6 +794,14 @@ class LivePortfolio:
         -------
         bool : True=成功
         """
+        # KP-M04（T-30）：高危写操作准入——未审批拒绝（默认仅审计留痕，不阻断）
+        from myquant.api.middleware.auth import get_operation_guard
+        ok, why = get_operation_guard().check(
+            "transfer_cash", operator="portfolio",
+            action=f"transfer_cash {amount} -> {target_account}")
+        if not ok:
+            logger.error(f"[portfolio] 资金调拨被准入拒绝: {why}")
+            return False
         logger.warning(f"[portfolio] 资金调拨未实现（v1单账户）: {amount} -> {target_account}")
         return False
 
