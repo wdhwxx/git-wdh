@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+import argparse  # P2-07：print_banner 注解引用，需显式导入
 import sys
 from pathlib import Path
 

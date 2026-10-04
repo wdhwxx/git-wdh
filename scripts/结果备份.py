@@ -41,9 +41,8 @@
     - 备份机制同时服务于回测和实盘（规则2：实盘无缝对接）
     - 实盘状态备份通过 myquant.live.state_store 实现
 
-阶段说明：
-    当前阶段0，myquant.utils 包尚未实现。本脚本作为入口框架保留，
-    阶段1（基础设施层）实现 utils 后即可直接调用。
+阶段说明（P2-06更新）：
+    已接入 myquant.utils.file_utils.backup_files，本脚本为可用入口；删除了 return 后不可达死代码。
 """
 
 from __future__ import annotations
@@ -313,22 +312,6 @@ def run_backup(args: argparse.Namespace) -> int:
     print(f"备份完成：{result['path']}（{result['size'] / 1024:.1f} KB，模式={result['mode']}）")
     if logger is not None:
         logger.info(f"备份完成：{result}")
-    return 0
-    log_level = "DEBUG" if args.verbose else "INFO"
-    logger = setup_logger(level=log_level, log_dir=project_root / "logs")
-
-    backup_dir.mkdir(parents=True, exist_ok=True)
-    result = backup_files(
-        sources=sources,
-        output_dir=backup_dir,
-        backup_name=backup_name,
-        compress=args.zip,
-    )
-
-    if args.keep:
-        cleanup_old_backups(backup_dir, args.keep)
-
-    logger.info(f"备份完成：{result}")
     return 0
 
 

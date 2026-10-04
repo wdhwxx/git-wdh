@@ -2487,3 +2487,13 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 单测：test_p212_factor_annualize——mean=0.01/h=5→0.504（旧错2.52的1/5）；h=1退化为日频年化。
 
 【验证】py_compile PASS；factor/validat 201 passed；pytest全量2067 passed/0 failed（216s）。
+
+128. ✨【回写记录·2026-10-04·P2-06/07 scripts小修（P2批次第2项）】
+
+【P2-07｜运行API.py 类型注解引用未导入argparse】
+- 修复：scripts/运行API.py 顶部加 import argparse。
+【P2-06｜结果备份.py return后死代码+过时注释】
+- 修复：删除 return 0 后16行不可达代码（引用未导入setup_logger，可达即NameError）；
+  更新文件头"阶段0 utils未实现"过时docstring为已接入说明。
+
+【验证】py_compile两脚本PASS；pytest全量2067 passed/0 failed（218s）。
