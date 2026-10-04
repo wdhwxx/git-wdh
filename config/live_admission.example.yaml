@@ -1,0 +1,20 @@
+# 文件名：config/live_admission.yaml
+# 实盘写操作准入配置（KP-M04 / T-30，方案B：仅高危写操作审批，复核人可配置）
+# ---------------------------------------------------------------------------
+# 语义：
+#   - enabled: false（默认）→ 高危写操作仅审计留痕（logger + logs/audit/write_audit.jsonl），不阻断；
+#   - enabled: true          → 高危写操作须经审批放行，未审批拒绝执行（fail-closed）；
+#   - require_reviewer: true → 需配置复核人（职责分离第二人）；reviewer 缺失/不匹配 → 拒绝；
+#   - require_reviewer: false→ 单人审批（操作者本人）+ 审计留痕（"视复核人有无再定"的开关位）。
+# 高危写操作域（与 myquant/api/middleware/auth.py HIGH_RISK_SCOPES 对应）：
+#   force_close（guardian 强制平仓）、transfer_cash（资金调拨）、
+#   mode_switch_live（实盘模式切换 run_mode.apply_mode_to_config -> LIVE）。
+admission:
+  enabled: false
+  require_reviewer: false
+  reviewer: ""
+  audit_dir: logs/audit
+  # high_risk_scopes:  # 缺省=内置 HIGH_RISK_SCOPES；如需自定义取消注释
+  #   - force_close
+  #   - transfer_cash
+  #   - mode_switch_live
