@@ -1,5 +1,6 @@
 # 文件名：docs/architecture.md
-# Pythonwdhmm 鲲鹏量化交易系统 — 架构设计文档
+# 鲲鹏量化交易系统 Pythonwdhmm 
+— 架构设计文档
 
 ## 1. 系统架构总览
 

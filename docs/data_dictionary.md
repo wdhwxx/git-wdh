@@ -1,5 +1,5 @@
 # 文件名：docs/data_dictionary.md
-# Pythonwdhmm 鲲鹏量化交易系统 — 数据字典
+# 鲲鹏量化交易系统 Pythonwdhmm — 数据字典
 
 ## 1. 数据存储架构
 

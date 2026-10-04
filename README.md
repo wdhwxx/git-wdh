@@ -1,6 +1,6 @@
-# Pythonwdhmm
+# <span style="color:red">鲲鹏量化交易系统
 
-## 鲲鹏量化交易系统
+## <span style="color:red">Pythonwdhmm
 
 面向沪深A股日线级别的量化回测与实盘交易系统。
 
