@@ -49,6 +49,8 @@ _DEFAULT_TICK_INTERVAL = 1.0      # 默认调度 tick（秒）
 _DEFAULT_TASK_TIMEOUT = 60.0      # 默认单任务超时（秒）
 _DEFAULT_PATROL_INTERVAL = 60     # 默认巡检间隔（秒）
 _DEFAULT_DAILY_REPORT_CRON = "30 15 * * 1-5"  # 默认日报时间：周一~周五 15:30
+# KP-P3-01：默认日终 T+1 结算时间（日报后执行，周一~周五 15:30 释放当日买入冻结）
+_DEFAULT_T1_SETTLE_CRON = "30 15 * * 1-5"
 
 # cron 扫描上限：覆盖 5 年（含 2 月 29 日等罕见组合）
 _MAX_SCAN_MINUTES = 5 * 366 * 24 * 60
@@ -1557,6 +1559,8 @@ def attach_engine(
     report_output_dir: Optional[Path] = None,
     enable_patrol: bool = True,
     enable_daily_report: bool = True,
+    enable_t1_settle: bool = True,
+    t1_settle_cron: str = _DEFAULT_T1_SETTLE_CRON,
     enable_resend_pending: bool = False,
     resend_pending_interval: float = 60.0,
 ) -> Dict[str, str]:
@@ -1580,6 +1584,11 @@ def attach_engine(
         是否注册巡检任务
     enable_daily_report : bool
         是否注册日报任务
+    enable_t1_settle : bool
+        KP-P3-01：是否注册日终 T+1 日切结算任务（broker 为 BrokerManager 时
+        调用 settle_t1_all()，为单券商时调用 settle_t1()；两者皆无则跳过）
+    t1_settle_cron : str
+        日终 T+1 结算 cron 表达式，默认 "30 15 * * 1-5"
     enable_resend_pending : bool
         P3-D11-001 整改：是否注册断线补单对账周期任务（默认关闭，保守；
         需 engine 非空且有 broker_manager 时生效），对账调用 engine.resend_pending_orders()
@@ -1588,7 +1597,8 @@ def attach_engine(
 
     Returns
     -------
-    Dict[str, str] : {"patrol": task_id, "daily_report": task_id, "resend_pending": task_id}
+    Dict[str, str] : {"patrol": task_id, "daily_report": task_id, "t1_settle": task_id,
+                      "resend_pending": task_id}
     """
     task_ids: Dict[str, str] = {}
 
@@ -1635,6 +1645,27 @@ def attach_engine(
             cron_expr=daily_report_cron,
         )
 
+    if enable_t1_settle and broker is not None:
+        # KP-P3-01：日终 T+1 日切结算（日报后执行，释放当日买入冻结）。
+        # broker 为 BrokerManager → settle_t1_all()（遍历各券商）；为单券商 → settle_t1()；
+        # 两者皆无（券商无日切实现）→ 不注册该任务。
+        if hasattr(broker, "settle_t1_all"):
+            _settle = broker.settle_t1_all
+        elif hasattr(broker, "settle_t1"):
+            _settle = broker.settle_t1
+        else:
+            _settle = None
+        if _settle is not None:
+            def _t1_settle_job(**kw) -> None:  # noqa: ARG001
+                result = _settle()
+                logger.info(f"[attach] T+1日切结算完成: {result}")
+
+            task_ids["t1_settle"] = scheduler.add_cron_task(
+                _t1_settle_job,
+                name="T+1日切结算",
+                cron_expr=t1_settle_cron,
+            )
+
     if enable_resend_pending and engine is not None:
         # P3-D11-001 整改：断线补单对账自动接线（默认关闭，开启后按周期调用
         # engine.resend_pending_orders()；引擎无 broker_manager 时该方法安全返回 error，不抛异常）
@@ -1654,6 +1685,7 @@ def attach_engine(
     logger.info(
         f"[attach] 实盘引擎已挂载: patrol={task_ids.get('patrol')}, "
         f"daily_report={task_ids.get('daily_report')}, "
+        f"t1_settle={task_ids.get('t1_settle')}, "
         f"resend_pending={task_ids.get('resend_pending')}"
     )
     return task_ids

@@ -983,6 +983,48 @@ class BrokerManager:
             reg.broker.register_account_callback(callback)
 
     # ─────────────────────────────────────────────
+    #  T+1 日终结算（KP-P3-01）
+    # ─────────────────────────────────────────────
+
+    def settle_t1_all(self) -> Dict[str, Any]:
+        """
+        T+1 日终结算（遍历全部注册券商逐个调用 settle_t1，释放当日买入冻结）
+
+        每个券商只结算自己账上的当日买入冻结（PaperBroker/QmtBroker 的
+        _t1_holdings）；无 settle_t1 实现的券商（如真实 QMT 由券商自动结算）
+        标记为 skipped，不报错。单券商结算异常不阻断其余券商。
+
+        防未来：只释放【已发生】的当日买入冻结，不生成任何预测数据。
+
+        Returns
+        -------
+        Dict[str, Any] :
+            {
+              "settled": [已结算券商别名],
+              "skipped": [无 settle_t1 的券商别名],
+              "errors": {alias: 错误信息},
+            }
+        """
+        settled: List[str] = []
+        skipped: List[str] = []
+        errors: Dict[str, str] = {}
+        with self._lock:
+            for alias, reg in self._registrations.items():
+                broker = reg.broker
+                if not hasattr(broker, "settle_t1"):
+                    skipped.append(alias)
+                    logger.info(f"[broker] T+1日切跳过({alias}): 券商无 settle_t1 实现")
+                    continue
+                try:
+                    broker.settle_t1()
+                    settled.append(alias)
+                    logger.info(f"[broker] T+1日切结算完成: {alias}")
+                except Exception as e:  # noqa: BLE001 - 单券商结算失败不阻断其余
+                    errors[alias] = f"{type(e).__name__}: {e}"
+                    logger.error(f"[broker] T+1日切结算失败({alias}): {e}")
+        return {"settled": settled, "skipped": skipped, "errors": errors}
+
+    # ─────────────────────────────────────────────
     #  状态持久化衔接（StateStore）
     # ─────────────────────────────────────────────
 

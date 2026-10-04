@@ -655,6 +655,16 @@ class LiveEngine(BaseEngine):
             if self._broker_manager and hasattr(self._broker_manager, 'register_order_callback'):
                 self._broker_manager.register_order_callback(self.on_order_update)
 
+            # ── KP-P3-01/T-01：启动时对存量持仓做一次 T+1 解冻初始化 ──
+            # 释放重启前残留的内存冻结（当日买入冻结在内存 _t1_holdings，重启后本应清零），
+            # 确保已持有仓位在会话开始时即可卖出；日终解冻由调度器 15:30 日切任务负责。
+            # 防未来：只操作【已发生】的持仓状态，不生成任何预测数据。
+            if self._broker_manager and hasattr(self._broker_manager, 'settle_t1_all'):
+                try:
+                    self._broker_manager.settle_t1_all()
+                except Exception as e:  # noqa: BLE001 - 解冻失败不阻断引擎启动
+                    logger.warning(f"[engine] 启动 T+1 解冻失败（不阻断启动）: {e}")
+
             # 连接data_feed
             if hasattr(self._data_feed, 'connect'):
                 self._data_feed.connect()

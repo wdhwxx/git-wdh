@@ -468,6 +468,8 @@ Pythonwdhmm/
 
 │   │   ├── test_live_risk.py         # 风控规则拦截、仓位限制、流控（83项）✅已完成
 
+│   │   ├── test_t1_settle.py     # ✨【回写#135】T+1日终结算接线测试（KP-P3-01：settle_t1_all遍历结算/日切闭环买冻结算可卖/attach_engine日终cron/engine启动解冻/双交易日无拒单，12项）✅已完成
+
 │   │   ├── test_models.py            # 数据模型校验、序列化（88项）✅已完成
 
 │   │   ├── test_execution.py         # 执行层接口与订单状态机（66项）✅已完成
@@ -952,11 +954,15 @@ Pythonwdhmm/
 
     │   │                             #           合并持仓watch；统一health schema；context.data增量同步（策略数据源与回测同构，防未来）
 
+    │   │                             # 【回写#135】启动时对存量持仓做一次 T+1 解冻初始化（start() 调 broker_manager.settle_t1_all()，释放重启前残留内存冻结）
+
     │   ├── data_feed.py              # 实时行情接入订阅重连分发；流式清洗(单条校验+跳变检测) + attach_event_bus事件总线联动 + 脏数据钩子；✨【回写#83】S2 live复权口径统一：_fetch_from_akshare 改拉不复权raw（adjust=""，与腾讯快照/本地历史同口径）/新增 adjust_out 参数（"qfq"按最新因子现算÷因子）+_stream_clean 除权跳变因子豁免（_live_jump_change_with_factor）+_clean_bars 注入 factor_lookup（config副本不污染共享配置）
 
     │   ├── portfolio.py              # 实时持仓、市值、可用冻结资金
 
     │   ├── scheduler.py              # 定时任务、巡检、日报
+
+    │   │                             # 【回写#135】attach_engine 注册日终 T+1 日切结算 cron（enable_t1_settle 默认 True，15:30 调 broker.settle_t1_all()/settle_t1()）
 
     │   ├── state_store.py            # 状态持久化，崩溃恢复
 
@@ -979,6 +985,8 @@ Pythonwdhmm/
     │       ├── ptrade_broker.py      # 恒生Ptrade适配器（SIM模拟撮合+LIVE API占位，第1项实盘对接）
 
     │       └── manager.py            # 多券商管理器（双券商并行：路由/主备切换/合并视图/健康监控）
+
+    │                                 # 【回写#135】BrokerManager.settle_t1_all()：遍历各券商逐个调用 settle_t1()（T+1 日终结算，无实现 skipped，异常不阻断）
 
     │
 
@@ -2569,3 +2577,14 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 修复：取样从预热后半段(start=len//2)开始，并要求至少一次有效(非全NaN)比较，否则return False。
 
 【验证】py_compile三文件PASS；导入冒烟OK；pytest全量2067 passed/0 failed（217s）。
+
+135. ✨【回写记录·2026-10-04·T-01 KP-P3-01 T+1日终结算接线】
+
+【发现】T+1 冻结只增不减，日终结算无生产调用：settle_t1() 已实现（paper_broker.py:825、qmt_broker.py:1384，清空 _t1_holdings 释放当日买入冻结），但调用点仅 scripts/双券商模拟实盘.py 与 scripts/实盘模拟回测.py 两个演示脚本；engine/scheduler 无日切调用点，manager.py 无 settle_t1_all()。
+- 修复：
+  a. myquant/live/brokers/manager.py BrokerManager 新增 settle_t1_all()：遍历全部注册券商逐个调用 settle_t1()（有实现→settled，无实现→skipped，单券商异常→errors 且不阻断其余），返回 {"settled","skipped","errors"}。
+  b. myquant/live/scheduler.py attach_engine 新增 enable_t1_settle（默认 True）+ t1_settle_cron（默认 "30 15 * * 1-5"）：broker 为 BrokerManager 时调 settle_t1_all()、为单券商时调 settle_t1()、两者皆无则不注册；任务名 "T+1日切结算"。
+  c. myquant/live/engine.py start() 券商回调注册后新增启动 T+1 解冻初始化：调 broker_manager.settle_t1_all() 释放重启前残留内存冻结，确保存量持仓会话开始时即可卖出；解冻失败仅 warning 不阻断启动。
+- 防未来：日切只释放【已发生】的当日买入冻结，不生成任何预测数据。
+- 验证结果：py_compile 四文件 PASS；tests/unit/test_t1_settle.py 12 项全绿（settle_t1_all settled/skipped/空管理器、T日买入冻结→卖单被拒→结算后可卖、禁用T1当日可卖、attach_engine 注册/单券商/无实现/显式关闭、engine启动解冻/无manager不报错、双交易日无可卖不足拒单）；broker/live/scheduler 相关回归 226 passed 无回归；ruff 测试文件通过。
+- 纪律遵守：仅改蓝图已标注文件（manager.py/scheduler.py/engine.py）+ tests/unit 新增 test_t1_settle.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
