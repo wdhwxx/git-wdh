@@ -249,6 +249,11 @@ class RSRSStrategy(StrategyBase):
         symbol = bar.symbol
         rsrs_value = self._calc_rsrs_value(symbol, bar, context)
 
+        # #T-06(KP-P2-08)：指标点挂载防未来守卫（铁律1，data_end 因果口径取前一 bar）
+        self.record_indicator_guard(
+            symbol, self._indicator_calc_date(bar), "RSRS", context,
+        )
+
         if np.isnan(rsrs_value):
             return Signal(symbol=symbol, signal_type=SignalType.HOLD, reason="数据不足")
 
@@ -297,6 +302,11 @@ class RSRSStrategy(StrategyBase):
         if self.stop_loss_pct > 0 and self.check_stop_loss(
             position, bar.close, self.stop_loss_pct,
         ):
+            # #T-06(KP-P2-08)：止损点挂载防未来守卫（铁律2，CHECK 先于触发）
+            self.record_stop_loss_guard(
+                symbol, self._indicator_calc_date(bar), "CHECK",
+                context=context, stop_price=bar.close,
+            )
             logger.warning(
                 f"[RSRS止损] {symbol} 现价{bar.close:.2f} "
                 f"成本{position.avg_cost:.2f} "
@@ -634,6 +644,11 @@ class MACrossStrategy(StrategyBase):
         close = df['收盘价'].astype(float)
         fast_ma = close.rolling(self.fast_period).mean()
         slow_ma = close.rolling(self.slow_period).mean()
+
+        # #T-06(KP-P2-08)：指标点挂载防未来守卫（铁律1，data_end 因果口径取前一 bar）
+        self.record_indicator_guard(
+            symbol, self._indicator_calc_date(bar), "MA", context,
+        )
 
         if len(fast_ma) < 2 or np.isnan(fast_ma.iloc[-1]) or np.isnan(slow_ma.iloc[-1]):
             return Signal(symbol=symbol, signal_type=SignalType.HOLD)

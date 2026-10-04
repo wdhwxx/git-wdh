@@ -38,7 +38,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -522,6 +522,138 @@ class StrategyBase(ABC):
         if avg_vol <= 0 or np.isnan(avg_vol):
             return None
         return float(current_vol / avg_vol)
+
+    # ═══════════════════════════════════════════════
+    #  防未来守卫钩子（KP-P2-08：铁律1/2 由结构保障，运行时真实上报数据截止日）
+    #  - record_indicator_guard  : 指标计算点上报（铁律1，data_end 默认取 calc_date 前一 bar，
+    #                              因果口径，决策日只用已完成先前 bar；读取了未来数据的桩策略
+    #                              必须传 data_end=实际截止日（如 T+1），guard.assert_pass 拦截）
+    #  - record_stop_loss_guard  : 止损点上报（铁律2，CHECK/UPDATE 顺序）
+    #  - record_data_access_guard: 数据访问点上报（通用校验，data_date <= access_date）
+    #  - get_signal_data_end     : 供引擎 record_signal 取策略信号实际数据截止日（禁自证式常量）
+    #  引擎把 guard 注入 context.extra["lookahead_guard"]；未注入时钩子退化为无操作（实盘兼容）。
+    # ═══════════════════════════════════════════════
+
+    def _guard_from_context(self, context: StrategyContext) -> Optional[Any]:
+        """从上下文取防未来守卫（未注入返回 None，钩子退化为无操作）。"""
+        if context is None or not getattr(context, "extra", None):
+            return None
+        return context.extra.get("lookahead_guard")
+
+    def _indicator_calc_date(self, bar: Bar) -> str:
+        """指标计算日（bar 周期归属日期，YYYY-MM-DD）。"""
+        return get_date_part(getattr(bar, "timestamp", None)) or ""
+
+    def _causal_data_end(
+        self, context: StrategyContext, symbol: str, calc_date: str,
+    ) -> str:
+        """因果数据截止日：context.data[symbol] 中严格早于 calc_date 的最后一根 bar 日期。
+
+        用于铁律1（指标计算不含当日）上报——决策日只用已完成的先前 bar，
+        不把当日（乃至未来）数据计入指标。
+        """
+        df = context.get_data(symbol)
+        if df is None or df.empty or not calc_date:
+            return ""
+        try:
+            cutoff = pd.Timestamp(calc_date)
+            past = df.index[df.index < cutoff]
+        except Exception:
+            return ""
+        if len(past) == 0:
+            return ""
+        return get_date_part(past[-1])
+
+    def _data_start(self, context: StrategyContext, symbol: str) -> str:
+        """数据起始日：context.data[symbol] 第一根 bar 日期。"""
+        df = context.get_data(symbol)
+        if df is None or df.empty:
+            return ""
+        return get_date_part(df.index[0])
+
+    def record_indicator_guard(
+        self,
+        symbol: str,
+        calc_date: str,
+        indicator_name: str,
+        context: StrategyContext,
+        data_end: str = "",
+        data_start: str = "",
+    ) -> None:
+        """记录指标计算（铁律1：指标计算不含当日）。
+
+        data_end 默认取 calc_date 前一 bar（因果口径，恒满足 data_end < calc_date）。
+        读取了未来数据的桩策略必须传 data_end=实际截止日（如 T+1 日期），
+        guard.assert_pass() 将在回测结束时拦截。
+        """
+        guard = self._guard_from_context(context)
+        if guard is None:
+            return
+        guard.record_indicator(
+            indicator_name=indicator_name,
+            symbol=symbol,
+            calc_date=calc_date,
+            data_start=data_start or self._data_start(context, symbol),
+            data_end=data_end or self._causal_data_end(context, symbol, calc_date),
+        )
+
+    def record_stop_loss_guard(
+        self,
+        symbol: str,
+        date: str,
+        action: str,
+        context: Optional[StrategyContext] = None,
+        stop_price: float = 0.0,
+    ) -> None:
+        """记录止损操作（铁律2：先检查后更新）。"""
+        guard = self._guard_from_context(context) if context is not None else None
+        if guard is None:
+            return
+        guard.record_stop_loss(symbol=symbol, date=date, action=action, stop_price=stop_price)
+
+    def record_data_access_guard(
+        self,
+        symbol: str,
+        access_date: str,
+        data_date: str,
+        context: Optional[StrategyContext] = None,
+        source: str = "",
+    ) -> None:
+        """记录数据访问（通用校验：访问日不用访问日之后的数据）。"""
+        guard = self._guard_from_context(context) if context is not None else None
+        if guard is None:
+            return
+        guard.record_data_access(
+            symbol=symbol, access_date=access_date, data_date=data_date, source=source,
+        )
+
+    def get_signal_data_end(
+        self, symbol: str, signal_date: str, context: StrategyContext,
+    ) -> str:
+        """策略信号实际使用的数据截止日（供引擎 record_signal 上报，禁止自证式常量）。
+
+        默认取 context.data[symbol] 中 <= signal_date 的最后一根 bar 日期（诚实口径）。
+        读取了未来数据的策略必须覆盖本方法并如实上报更大日期，否则 assert_pass 拦截。
+
+        Args:
+            symbol: 标的代码。
+            signal_date: 信号日（T日）。
+            context: 策略上下文。
+
+        Returns:
+            str : 数据截止日（YYYY-MM-DD）。
+        """
+        df = context.get_data(symbol)
+        if df is None or df.empty or not signal_date:
+            return signal_date
+        try:
+            cutoff = pd.Timestamp(signal_date)
+            upto = df.index[df.index <= cutoff]
+        except Exception:
+            return signal_date
+        if len(upto) == 0:
+            return signal_date
+        return get_date_part(upto[-1])
 
     def _apply_signal_filters(
         self, signal: Signal, bar: Bar, context: StrategyContext,

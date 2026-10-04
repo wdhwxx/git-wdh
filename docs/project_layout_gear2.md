@@ -549,6 +549,7 @@ Pythonwdhmm/
 │   │   ├── test_live_bar_dedup.py    # ✨【回写#139】日线bar去重测试（KP-P3-02：bar_date_to_epoch往返/解析失败0.0/make_bar时间戳确定性且还原日期/引擎同根bar二次推送丢弃且不达撮合/不同日期正常/不同标的同日不误删，7项）✅已完成
 
 │   │   ├── test_signal_idempotency.py # ✨【回写#43】幂等去重测试（Signal确定性ID/to_order映射/引擎去重/分钟线粒度/start重置/QMT端按订单ID去重/统计双计修复验证，19项）✅已完成
+│   │   ├── test_guard_mounting.py    # ✨【回写#140】防未来铁律1/2/4挂载测试（KP-P2-08：indicators_recorded>0/钩子因果口径/T+1指标桩抛错/T+1信号桩引擎标记失败/止损UPDATE早于CHECK抛错/数据访问未来抛错/无guard注入退化为无操作，10项）✅已完成
 
 │   │   ├── test_broker_manager_failover.py # ✨【回写#44】failover盲目重试约束化测试（业务拒单不failover/通道故障副本重试/冷却熔断/健康恢复/手动切换清除恢复记忆/统计摘要，27项）✅已完成
 
@@ -789,13 +790,13 @@ Pythonwdhmm/
 
     │   ├── registry.py               # 策略注册器：装饰器注册、动态发现、外部插件入口点
 
-    │   ├── base.py                   # 策略抽象基类：信号生成、参数接口、生命周期钩子、通用工具
+    │   ├── base.py                   # 策略抽象基类：信号生成、参数接口、生命周期钩子、通用工具；✨【回写#140】防未来守卫钩子（KP-P2-08：record_indicator_guard/record_stop_loss_guard/record_data_access_guard，data_end 因果口径；get_signal_data_end 供引擎 record_signal 上报真实数据截止日，禁自证常量）
 
     │   │                             # ✨【V5·P1】三接口：on_bar(逐bar事件接口，event引擎用)/generate_signals_vectorized(向量化批量信号，vectorized引擎用)/generate_mixed_loop(混合模式混合循环，mixed引擎用)；6策略均实现双接口（on_bar+generate_signals_vectorized），混合引擎自动适配
 
     │   │                             # （check_stop_loss/check_take_profit/_should_rebalance/_get_close_series）
 
-    │   ├── ma_strategy.py            # RSRS三因子择时策略 + 均线交叉示例
+    │   ├── ma_strategy.py            # RSRS三因子择时策略 + 均线交叉示例；✨【回写#140】指标点挂载 record_indicator_guard（KP-P2-08：RSRS/MA 指标计算、止损点 CHECK，铁律1/2 运行时真实上报）
 
     │   ├── grid_strategy.py          # 网格交易策略（震荡市，固定区间/auto_grid自适应）
 
@@ -813,7 +814,7 @@ Pythonwdhmm/
 
     │   ├── __init__.py
 
-    │   ├── engine.py                 # ✨【V5·P1】回测引擎升级为三模式调度器：BacktestScheduler（按config engine.mode切换event/vectorized/mixed，统一数据加载+防未来函数校验+结果封装）+ run_backtest()便捷函数；原Engine保留为event真值基准（时间序列事件循环+内置LookaheadGuard：on_market_event记录成交铁律3、_execute_signal记录信号铁律4、on_stop assert_pass()；_bar_date_str/_order_signal_dates映射）
+    │   ├── engine.py                 # ✨【V5·P1】回测引擎升级为三模式调度器：BacktestScheduler（按config engine.mode切换event/vectorized/mixed，统一数据加载+防未来函数校验+结果封装）+ run_backtest()便捷函数；原Engine保留为event真值基准（时间序列事件循环+内置LookaheadGuard：on_market_event记录成交铁律3、_execute_signal记录信号铁律4、on_stop assert_pass()；_bar_date_str/_order_signal_dates映射）；✨【回写#140】context 注入 lookahead_guard 到 extra（KP-P2-08：策略守卫钩子可达 guard）+ record_signal 的 data_end 改用策略 get_signal_data_end 真实上报（去 self-proving 常量）
 
     │   ├── data_loader.py            # ✨【回写#105】已迁移为兼容薄壳（re-export）：DataProviderBase + HistoricalDataProvider + require_ohlcv + EN_TO_CN_COLUMN_MAP 真实实现已于 2026-10-03 下沉至 myquant/data_access/provider.py，本文件仅做 from myquant.data_access.provider import ... 向后兼容，18 处历史调用方（run_*.py/scripts/gui/backtest 内部/tests）零改动；新代码应直接 from myquant.data_access.provider import；原注释「从processed加载，严格end_date过滤防未来」逻辑全部在 provider.py；✨【回写#72】EN_TO_CN_COLUMN_MAP 加 turnover→换手率；✨【回写#83】S1 派生量复权现算 _recompute_price_derived_metrics
 
@@ -2644,3 +2645,14 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：去重键基于 bar 周期归属日期（已发生行情），不依赖未来数据；不改变信号/成交的时点语义。
 - 验证结果：py_compile 3 文件 PASS；tests/unit/test_live_bar_dedup.py 7 项全绿（bar_date_to_epoch 往返还原/解析失败 0.0 防御/make_bar 时间戳确定性且还原日期/不同日期时间戳递增/引擎同根 bar 二次推送丢弃且不达 broker 撮合/不同日期均正常处理/不同标的同日不误删）；live 相关回归 151 + 7 passed 无新增失败；ruff：date_utils.py 与测试文件通过，data_feed.py/engine.py 顶层 import 排序为既有 I001（未改顶层块，非本次引入）。
 - 纪律遵守：仅改蓝图已标注文件（date_utils.py/data_feed.py/live engine.py）+ tests/unit 新增 test_live_bar_dedup.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+140. ✨【回写记录·2026-10-04·T-06 KP-P2-08 防未来铁律 1/2/4 无有效调用（record_indicator 零挂载）】
+
+【发现】`myquant/backtest/engine.py:450` `record_signal` 的 `data_end=signal_date` 为自证常量（恒等于信号日 → 铁律4 恒假）；`record_indicator/record_stop_loss/record_data_access` 无生产调用 → `indicators_recorded` 恒 0，铁律1/2 运行时空转。
+- 修复（myquant/strategies/base.py + backtest/engine.py + strategies/ma_strategy.py）：
+  a. base.py 新增防未来守卫钩子：`_guard_from_context`（引擎把 guard 注入 context.extra["lookahead_guard"]，未注入退化为无操作，实盘兼容）、`record_indicator_guard`（铁律1，data_end 默认取 calc_date 前一 bar 的因果口径，读取未来数据的桩策略可传 data_end 如实上报）、`record_stop_loss_guard`（铁律2）、`record_data_access_guard`（通用校验）、`get_signal_data_end`（供引擎取策略信号真实数据截止日）。
+  b. ma_strategy.py 两策略指标点挂载：MACrossStrategy.generate_signal（MA）、RSRSStrategy.generate_signal（RSRS）调 `record_indicator_guard`；RSRSStrategy 止损点 `_check_sell_signals` 调 `record_stop_loss_guard(action=CHECK)`。
+  c. backtest/engine.py：`__init__` 构造 StrategyContext 时注入 `extra={"lookahead_guard": self._lookahead_guard}`；`record_signal` 的 `data_end` 改由 `self.strategy.get_signal_data_end(...)` 真实上报（去自证常量）——策略读取未来数据（覆盖该方法如实上报更大日期）时，铁律4 拦截且引擎按 P0-01 标记回测失败。
+- 防未来：钩子 data_end 默认因果口径（决策日只用已完成先前 bar，data_end < calc_date）；真实数据截止日来自策略实际访问的数据（context.data ≤ 当前 bar），不依赖未来。
+- 验证结果：py_compile 3 文件 PASS；tests/unit/test_guard_mounting.py 10 项全绿（真实回测 indicators_recorded>0/钩子因果口径不误伤/T+1指标桩 assert_pass 抛错/T+1信号桩引擎标记失败且 assert_pass 抛错/正常策略 data_end=信号日不误伤/止损钩子记录/UPDATE早于CHECK抛错/数据访问钩子记录/访问未来数据抛错/无guard注入退化为无操作）；回测+防未来+策略回归 389 passed + 1 skipped 无回归；ruff：base.py/test_guard_mounting.py 通过（清理既有 unused typing.Set），ma_strategy/engine 顶层 import 排序为既有 I001（非本次引入）。
+- 纪律遵守：仅改蓝图已标注文件（strategies/base.py、backtest/engine.py、strategies/ma_strategy.py）+ tests/unit 新增 test_guard_mounting.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。

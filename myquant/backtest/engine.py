@@ -231,11 +231,17 @@ class BacktestEngine(BaseEngine):
         self.metrics_calc = MetricsCalculator(risk_free_rate=self.config.risk_free_rate)
 
         # 4. 创建策略上下文（此时 self.data 已加载完成）
+        # #T-06(KP-P2-08)：把防未来守卫注入 context.extra，供策略守卫钩子上报指标/止损/数据访问
         self.context = StrategyContext(
             data=self.data,
             portfolio=self.broker,
             executor=self.broker,
             config=self.config.to_dict(),
+            extra=(
+                {"lookahead_guard": self._lookahead_guard}
+                if self._lookahead_guard is not None
+                else {}
+            ),
         )
 
         # 5. 初始化策略
@@ -443,11 +449,21 @@ class BacktestEngine(BaseEngine):
             if self._lookahead_guard:
                 signal_date = self._bar_date_str(bar)
                 signal_type = "BUY" if signal.is_buy else ("SELL" if signal.is_sell else "CLOSE")
+                # #T-06(KP-P2-08)：data_end 用策略真实上报的数据截止日（禁自证式常量——
+                # 不再恒填 signal_date，若策略读取未来数据（覆盖 get_signal_data_end 如实上报更大日期），
+                # 铁律4 将拦截）
+                _data_end = (
+                    self.strategy.get_signal_data_end(
+                        signal.symbol, signal_date, self.context,
+                    )
+                    if self.strategy is not None
+                    else signal_date
+                )
                 self._lookahead_guard.record_signal(
                     symbol=signal.symbol,
                     signal_date=signal_date,
                     signal_type=signal_type,
-                    data_end=signal_date,  # 信号基于T日收盘价，数据截止日=T日
+                    data_end=_data_end,
                     factor_names=[self.strategy.name] if self.strategy else None,
                 )
                 # 保存订单ID -> 信号日期映射，用于成交时校验T+1规则
