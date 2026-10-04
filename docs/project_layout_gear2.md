@@ -444,7 +444,8 @@ Pythonwdhmm/
 
 │   │   ├── test_kunpeng_strategy.py  # ✨【回写#24】鲲鹏壹号策略单元测试（表9六组用例+出场规则+参数校验，9类56项）✅已完成
 
-│   │   ├── test_api_middleware.py   # ✨【回写#25】API认证/限流中间件接线回归（审计C1：create_app挂载/关闭/CORS互斥/401/429逻辑）✅已完成
+│   │   ├── test_api_middleware.py   # ✨【回写#25】API认证/限流中间件接线回归（审计C1：create_app挂载
+│   │   ├── test_api_not_implemented.py # ✨【回写#154】占位接口伪造成功测试(KP-P1-01：order/live start-stop/risk pause-resume 六端点 501 + cli --host 默认 127.0.0.1，7项)✅已完成/关闭/CORS互斥/401/429逻辑）✅已完成
 
 │   │   ├── test_broker_platform_check.py # ✨【回写#25】券商适配器平台校验（审计疑点3：qmt/ptrade非Windows拦截、paper/sim放行、大小写不敏感）✅已完成
 
@@ -1036,11 +1037,11 @@ Pythonwdhmm/
 
     │   ├── __init__.py                 # API包统一导出：create_app/run_api/FASTAPI_AVAILABLE + 11个响应/请求模型 + APIKeyAuth + FixedWindowLimiter/TokenBucketLimiter/RateLimitResult + ServiceContainer（__all__全量导出，供运行API.py与外部导入）
 
-    │   ├── routes.py                 # 路由聚合
+    │   ├── routes.py                 # 路由聚合；✨【回写#154】占位写端点改真 501（KP-P1-01：live start/stop、risk pause/resume、order/cancel 未接线返回 HTTP 501 不伪造成功）
 
     │   │                             # ✅已实现：6个数据质量端点(/api/data/quality, /overview, /runs, /runs/{id}, /dirty, /metrics) + 告警管理端点
 
-    │   ├── cli.py                  # ✨【P3-7】API 服务命令行参数解析（自 scripts/运行API.py 下沉）：build_api_parser()/parse_api_args(argv=None)，纯解析无业务；消除 tests/unit/test_api_middleware.py 反向导入 scripts 分层违规；scripts/运行API.py 改为薄入口调用
+    │   ├── cli.py                  # ✨【P3-7】API 服务命令行参数解析（自 scripts/运行API.py 下沉）：bu；✨【回写#154】--host 默认收紧 127.0.0.1（KP-P1-01）ild_api_parser()/parse_api_args(argv=None)，纯解析无业务；消除 tests/unit/test_api_middleware.py 反向导入 scripts 分层违规；scripts/运行API.py 改为薄入口调用
 
     │   ├── middleware/
 
@@ -2814,6 +2815,16 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：三条规则仅用当前已存在未成交单、已发生撤单/下单计数、当前已可得现价与本次申报价，不引用未来数据。
 - 验证结果：py_compile 通过；新增 tests/unit/test_abnormal_trade_rules.py 13 项全绿（自成交互斥/撤单率超阈/胖手指金额与偏离/注册表/撤单计数+事件+日报+重置）；risk 广回归通过无回归；ruff 干净。
 - 纪律遵守：仅改蓝图已标注文件（risk/rules.py、risk/risk_manager.py）+ tests/unit 新增 test_abnormal_trade_rules.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+154. ✨【回写记录·2026-10-04·T-20 KP-P1-01 占位接口伪造成功】
+
+【发现】`routes.py` 六个写端点（order / live start-stop / risk pause-resume）为 v1 占位：`ApiResponse.success` 恒返回 HTTP 200，对外表现为操作已成功（伪造成功），实际未接线任何真实引擎/券商/风控。
+- 修复：
+  a. **routes.py 六个占位端点改返回真 HTTP 501**（Not Implemented）：`POST /api/live/start`、`POST /api/live/stop`、`POST /api/risk/pause`、`POST /api/risk/resume`、`POST /api/order`、`POST /api/order/{order_id}/cancel`——均 `return JSONResponse(status_code=501, content={success:False, code:501, ...})`，不再沿用『ApiResponse.error 但 HTTP 仍 200』的坑。
+  b. **cli.py `--host` 默认收紧为 127.0.0.1**（原 0.0.0.0 允许外部访问，改为仅回环，外部访问需显式指定）。
+- 防未来：占位端点不再伪造成功，未接线时明确失败（501），杜绝『看似已执行』的假成功语义。
+- 验证结果：py_compile 通过；新增 tests/unit/test_api_not_implemented.py 7 项全绿（六端点 501 + cli host 默认 127.0.0.1，环境无 httpx 故直接调 route endpoint 断言 JSONResponse.status_code==501）；api 广回归 20 passed 无回归；ruff 干净。
+- 纪律遵守：仅改蓝图已标注文件（api/routes.py、api/cli.py）+ tests/unit 新增 test_api_not_implemented.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】

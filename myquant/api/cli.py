@@ -34,8 +34,8 @@ def build_api_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--host",
         type=str,
-        default="0.0.0.0",
-        help="监听地址（默认: 0.0.0.0，允许外部访问）",
+        default="127.0.0.1",
+        help="监听地址（KP-P1-01：默认仅回环 127.0.0.1，外部访问需显式指定）",
     )
     parser.add_argument(
         "--port",

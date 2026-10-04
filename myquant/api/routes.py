@@ -53,40 +53,38 @@ TODO(后续迭代):
 from __future__ import annotations
 
 import os
-
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Set
 
-from myquant.core.logger import get_logger
 from myquant.api.models.schemas import (
+    AlertAckData,
+    AlertListData,
+    AlertResolveData,
     ApiResponse,
-    ErrorResponse,
-    HealthResponse,
-    StrategyInfo,
-    StrategyListResponse,
+    BacktestMetrics,
     BacktestRequest,
     BacktestResponse,
-    BacktestMetrics,
-    LiveStatusResponse,
-    RiskStatusResponse,
-    DataQualityResponse,
-    OrderRequest,
-    OrderResponse,
-    QualityMetricsInfo,
     CleanRunInfo,
     CleanRunsData,
+    DataQualityResponse,
     DirtyData,
+    ErrorResponse,
+    HealthResponse,
+    LiveStatusResponse,
+    OrderRequest,
+    QualityMetricsInfo,
     QualityOverviewData,
-    AlertListData,
-    AlertAckData,
-    AlertResolveData,
+    RiskStatusResponse,
+    StrategyInfo,
+    StrategyListResponse,
 )
+from myquant.core.logger import get_logger
 
 logger = get_logger("api.routes")
 
 # 检查fastapi是否安装
 try:
-    from fastapi import FastAPI, HTTPException, Depends, Header, Query
+    from fastapi import Depends, FastAPI, Header, HTTPException, Query
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse, PlainTextResponse
     from starlette.middleware.base import BaseHTTPMiddleware
@@ -275,8 +273,14 @@ def create_app(
     # 6个数据质量端点+1个指标端点+3个告警端点自动切换为依赖注入驱动。
     from myquant.api.dependencies.get_services import (
         get_alert_manager as _di_get_alert_manager,
+    )
+    from myquant.api.dependencies.get_services import (
         get_data_quality_explorer as _di_get_explorer,
+    )
+    from myquant.api.dependencies.get_services import (
         get_metrics_collector as _di_get_collector,
+    )
+    from myquant.api.dependencies.get_services import (
         get_service_container,
     )
     _container = get_service_container()
@@ -510,15 +514,19 @@ def create_app(
 
     @app.post("/api/live/start", response_model=ApiResponse, tags=["实盘"])
     async def start_live():
-        """启动实盘"""
-        # v1占位：后续迭代调用实盘引擎
-        return ApiResponse.success(data={"status": "starting"}, message="实盘启动指令已发送（v1占位）")
+        """启动实盘（KP-P1-01：未接真实引擎 → 501，不伪造成功）"""
+        return JSONResponse(
+            status_code=501,
+            content={"success": False, "code": 501, "message": "实盘启动未接线：需接入真实引擎后可用", "data": {}},
+        )
 
     @app.post("/api/live/stop", response_model=ApiResponse, tags=["实盘"])
     async def stop_live():
-        """停止实盘"""
-        # v1占位
-        return ApiResponse.success(data={"status": "stopping"}, message="实盘停止指令已发送（v1占位）")
+        """停止实盘（KP-P1-01：未接真实引擎 → 501，不伪造成功）"""
+        return JSONResponse(
+            status_code=501,
+            content={"success": False, "code": 501, "message": "实盘停止未接线：需接入真实引擎后可用", "data": {}},
+        )
 
     @app.get("/api/live/positions", response_model=ApiResponse, tags=["实盘"])
     async def get_positions():
@@ -548,15 +556,19 @@ def create_app(
 
     @app.post("/api/risk/pause", response_model=ApiResponse, tags=["风控"])
     async def pause_trading(reason: str = "API手动暂停"):
-        """暂停交易"""
-        # v1占位：后续迭代调用风控管理器
-        return ApiResponse.success(data={"status": "PAUSED", "reason": reason}, message="交易已暂停（v1占位）")
+        """暂停交易（KP-P1-01：未接真实风控 → 501，不伪造成功）"""
+        return JSONResponse(
+            status_code=501,
+            content={"success": False, "code": 501, "message": "交易暂停未接线：需接入风控管理器后可用", "data": {}},
+        )
 
     @app.post("/api/risk/resume", response_model=ApiResponse, tags=["风控"])
     async def resume_trading():
-        """恢复交易"""
-        # v1占位
-        return ApiResponse.success(data={"status": "NORMAL"}, message="交易已恢复（v1占位）")
+        """恢复交易（KP-P1-01：未接真实风控 → 501，不伪造成功）"""
+        return JSONResponse(
+            status_code=501,
+            content={"success": False, "code": 501, "message": "交易恢复未接线：需接入风控管理器后可用", "data": {}},
+        )
 
     # ═══════════════════════════════════════════
     #  数据
@@ -621,25 +633,19 @@ def create_app(
 
     @app.post("/api/order", response_model=ApiResponse, tags=["订单"])
     async def place_order(request: OrderRequest):
-        """下单（TODO占位，后续迭代对接券商）"""
-        # v1占位：后续迭代调用实盘引擎/券商
-        order_id = f"ord_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        result = OrderResponse(
-            order_id=order_id,
-            status="submitted",
-            symbol=request.symbol,
-            side=request.side,
-            quantity=request.quantity,
-            price=request.price,
-            filled_quantity=0,
-            message="订单已提交（v1占位，未实际对接券商）",
+        """下单（KP-P1-01：未接真实券商 → 501，不伪造成功）"""
+        return JSONResponse(
+            status_code=501,
+            content={"success": False, "code": 501, "message": "下单未接线：需接入券商后可用", "data": {}},
         )
-        return ApiResponse.success(data=result.model_dump())
 
     @app.post("/api/order/{order_id}/cancel", response_model=ApiResponse, tags=["订单"])
     async def cancel_order(order_id: str):
-        """撤单（TODO占位）"""
-        return ApiResponse.success(data={"order_id": order_id, "status": "cancelled"}, message="撤单指令已发送（v1占位）")
+        """撤单（KP-P1-01：未接真实券商 → 501，不伪造成功）"""
+        return JSONResponse(
+            status_code=501,
+            content={"success": False, "code": 501, "message": "撤单未接线：需接入券商后可用", "data": {}},
+        )
 
     # ═══════════════════════════════════════════
     #  资金分配
