@@ -508,6 +508,7 @@ Pythonwdhmm/
 │   │   ├── test_data_loader_factor_adjust.py # ✨【回写#82】data_loader复权现算单测（raw原样/hfq=raw×factor/qfq÷最新因子/end_date透传防未来/无因子降级，合成parquet+stub因子，6项）✅已完成；✨【回写#83】S1 派生量复权现算测试（+3项：hfq除权日无假跳变/qfq与hfq比例一致/raw派生量保持原值首行None，现共9项）✅已完成
 │   │   ├── test_bar_cleaner_factor_exempt.py # ✨【回写#82】除权跳变豁免单测（函数版/类版豁免/非除权日仍检测/无因子回退，合成数据零网络，8项）✅已完成（前缀过滤/ST串联/json缺失回退/防焊死反例——规则增删范围跟随/空池/统计字段/exclude_st无名单，7项）；✨【回写#79】+长期停牌/退市规则5项（60天启用剔除/边界==阈值保留/DB无记录保留/未配置不启用/DB缺失不报错，sqlite临时库替身）✅已完成，现共12项
 │   │   ├── test_cleanup_service.py # ✨【回写#77】清理pattern保护语义测试（生产报告/真实备份不匹配、测试前缀匹配，4项）✅已完成
+│   │   ├── test_cleanup_dryrun.py   # ✨【回写#163】清理dry-run约束测试(KP-M05：dry-run不删除/execute删除，2项)✅已完成
 │   │   ├── test_financial_sync_service.py # ✨【回写#74】财务CSV增量同步测试（定位缺失标的14条排除/新旧合并去重17列头/无新记录None/增量流程/自动入库monkeypatch/无可拉取跳过，6项）✅已完成
 │   │   ├── test_data_download_finance_sync.py # ✨【回写#75】GUI财务CSV增量更新选项测试（选项注册完整/执行顺序在入库前/_entry_finance_sync调用服务返回同构汇总，3项）✅已完成
 │   │   ├── test_data_download_cli_incremental.py # ✨【回写#86】CLI数据下载增量链路测试（池过滤只进清洗池/写回走清洗链路复用records无二次拉取/写回失败逐只计数不阻断，3项）✅已完成
@@ -2911,6 +2912,14 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：告警通道按配置装配 + 未投递落盘留痕，杜绝『通道从未装配』『失败静默丢失』。
 - 验证结果：py_compile 通过；新增 tests/unit/test_channel_assembly.py 3 项全绿（按channels装配3通道/未启用不装配/未投递回退写日志）；P5 组回归 9 passed 无回归；ruff：test 干净（alerting.py 2 处既有 import/未用变量非本次引入）。
 - 纪律遵守：仅改蓝图已标注文件（monitoring/alerting.py）+ tests/unit 新增 test_channel_assembly.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+163. ✨【回写记录·2026-10-04·T-29 KP-M05 日志清理可绕过 dry-run】
+
+【发现】`execute_plan`（cleanup_service.py:895）不检查 `options.execute`，即使 `execute=False`（dry-run 预览）也实际删除文件——删除动作不受 dry-run 约束，GUI/CLI 调用方可绕过预览直接删除。
+- 修复：`execute_plan` 开头服务层强制 dry-run——`not plan.options.execute` 时跳过实际删除并返回 (0,0,0)（logger 提示待清理项数），删除动作严格受 dry-run 约束。
+- 防未来：删除以 dry-run 为默认约束，杜绝绕过预览直接删除的删除行为。
+- 验证结果：py_compile 通过；新增 tests/unit/test_cleanup_dryrun.py 2 项全绿（dry-run 不删除/execute 删除）；ruff：test 干净（cleanup_service.py 1 处既有 f-string 非本次引入）。
+- 纪律遵守：仅改蓝图已标注文件（utils/cleanup_service.py）+ tests/unit 新增 test_cleanup_dryrun.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】

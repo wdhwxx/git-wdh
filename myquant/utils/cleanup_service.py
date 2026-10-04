@@ -901,6 +901,15 @@ def execute_plan(plan: CleanupPlan) -> Tuple[int, int, int]:
     Returns:
         (成功数, 失败数, 释放字节数) 元组。
     """
+    # KP-M05: 服务层强制 dry-run——execute=False（dry-run 预览）时禁止实际删除，
+    # 杜绝调用方绕过 dry-run 直接删除（删除动作受 dry-run 约束）。
+    if not plan.options.execute:
+        logger.info(
+            "DRY-RUN 模式：跳过实际删除（%d 项待清理），如需删除请以 execute=True 调用",
+            len(plan.delete_candidates()),
+        )
+        return 0, 0, 0
+
     deleted = 0
     failed = 0
     freed = 0
