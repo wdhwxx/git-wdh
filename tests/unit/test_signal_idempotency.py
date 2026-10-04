@@ -350,7 +350,7 @@ class TestQmtBrokerIdempotency:
                       order_type=OrderType.MARKET, quantity=100)
         first = broker.submit_order(order)
         # 行情驱动成交
-        broker.update_market_price("600000.SH", 10.0)
+        broker.update_market_price("600000.SH", 10.0, prev_close=9.5)
         assert first.is_filled
         second = broker.submit_order(order)
         assert second is first

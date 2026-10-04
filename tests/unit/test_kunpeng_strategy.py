@@ -644,6 +644,21 @@ class TestKunpengValidation:
 #  TestKunpengThreeInterfaces - 三接口一致性（表9 第5组）
 # ═══════════════════════════════════════════════
 
+class _LenientRiskConfig(BacktestConfig):
+    """三模式等价性/出场测试用：放开回测风控阈值。
+
+    KP-P3-07 后回测装配实盘同源风控（单笔上限默认 20 万/仓位 20%），
+    会干扰"三引擎信号日一致"的等价性校验；本配置仅放开风控阈值以聚焦引擎等价，
+    不改变回测装配实盘风控的行为。
+    """
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = super().to_dict()
+        d["risk_control"] = {"max_order_value": 2_000_000.0}
+        d["position"] = {"max_single_position": 1.0, "max_total_positions": 10}
+        return d
+
+
 class TestKunpengThreeInterfaces:
     """同一数据上 event/mixed/vectorized 产生相同 BUY/SELL 信号日集合。"""
 
@@ -665,7 +680,7 @@ class TestKunpengThreeInterfaces:
         """三模式成交信号日集合一致（含入场与出场）。"""
         df = _signal_data()
         data = {SYMBOL: df}
-        config = BacktestConfig(
+        config = _LenientRiskConfig(
             symbols=[SYMBOL],
             start_date=str(df.index[0].date()),
             end_date=str(df.index[-1].date()),
@@ -697,7 +712,7 @@ class TestKunpengThreeInterfaces:
         """
         df = _signal_data()
         data = {SYMBOL: df}
-        config = BacktestConfig(
+        config = _LenientRiskConfig(
             symbols=[SYMBOL],
             start_date=str(df.index[0].date()),
             end_date=str(df.index[-1].date()),

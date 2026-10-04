@@ -232,6 +232,9 @@ def test_配置工厂缺省默认百分之一() -> None:
 def test_端到端_亏损超限拒买放行卖(tmp_path) -> None:
     """RiskManager 全链路：当日亏损 2%（>1%）→ BUY 拒绝、SELL 放行"""
     engine = _make_engine(tmp_path)
+    # KP-P3-04 fail-closed：注入昨收与现价，使 PriceLimitRule 放行（本测聚焦 DailyLossLimitRule）
+    engine._prev_close_map["600519.SH"] = 1500.0
+    engine._last_prices["600519.SH"] = 1500.0
     # 第一步：建立日初快照（当日首见资产 100 万）
     with mock.patch.object(
         engine._portfolio, "get_total_assets", return_value=1_000_000.0
