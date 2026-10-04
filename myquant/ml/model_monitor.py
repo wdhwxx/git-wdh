@@ -46,7 +46,6 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from myquant.ml.model_registry import (
     ModelRegistry,
-    ModelRegistryError,
     ModelVersion,
 )
 
@@ -228,6 +227,53 @@ class ModelMonitor:
         if not isinstance(monitor_interval_days, int) or monitor_interval_days < 1:
             raise ModelMonitorConfigError(
                 f"monitor_interval_days 必须 >=1 的整数，got: {monitor_interval_days!r}")
+
+    # ─────────────────────────────────────────────
+    #  分布漂移度量（KP-P6-05）
+    # ─────────────────────────────────────────────
+
+    @staticmethod
+    def psi_score(actual: Sequence[float], expected: Sequence[float], bins: int = 10) -> float:
+        """PSI（群体稳定性指标）：衡量实际 vs 期望特征/预测分布漂移。
+
+        期望分布分位分桶后比实际落入比例；PSI>0.25 视为显著漂移（经验阈值，调用方判定）。
+        防未来：仅用已观测历史分布，无预测性未来信息。
+        """
+        import numpy as np
+        a = np.asarray(actual, dtype=float)
+        e = np.asarray(expected, dtype=float)
+        if a.size == 0 or e.size == 0:
+            return 0.0
+        if bins < 2:
+            bins = 2
+        edges = np.quantile(e, np.linspace(0.0, 1.0, bins + 1))
+        edges[0], edges[-1] = -np.inf, np.inf
+        ea = np.histogram(a, bins=edges)[0]
+        ee = np.histogram(e, bins=edges)[0]
+        ea_p = ea / max(float(ea.sum()), 1e-9)
+        ee_p = ee / max(float(ee.sum()), 1e-9)
+        ratio = np.where(ea_p > 0, ea_p / np.maximum(ee_p, 1e-9), 1.0)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            terms = (ea_p - ee_p) * np.log(np.where(ratio > 0, ratio, 1.0))
+        return float(np.sum(np.nan_to_num(terms)))
+
+    @staticmethod
+    def ks_statistic(sample_actual: Sequence[float], sample_expected: Sequence[float]) -> float:
+        """KS 统计量（两样本累计分布最大差）衡量分布漂移。
+
+        防未来：仅用已观测历史样本，无预测性未来信息。
+        """
+        import numpy as np
+        a = np.sort(np.asarray(sample_actual, dtype=float))
+        e = np.sort(np.asarray(sample_expected, dtype=float))
+        if a.size == 0 or e.size == 0:
+            return 0.0
+        all_vals = np.unique(np.concatenate([a, e]))
+        if all_vals.size == 0:
+            return 0.0
+        cdf_a = np.searchsorted(a, all_vals, side="right") / a.size
+        cdf_e = np.searchsorted(e, all_vals, side="right") / e.size
+        return float(np.max(np.abs(cdf_a - cdf_e)))
 
     # ─────────────────────────────────────────────
     #  配置注入（外置 config 通道）

@@ -1569,6 +1569,8 @@ def attach_engine(
     resend_pending_interval: float = 60.0,
     enable_escalation: bool = True,
     escalation_interval: float = 300.0,
+    enable_monthly_governance: bool = True,
+    monthly_governance_cron: str = "0 0 1 * *",
     pause_on_critical: bool = False,
 ) -> Dict[str, str]:
     """
@@ -1770,11 +1772,93 @@ def attach_engine(
             interval_seconds=resend_pending_interval,
         )
 
+        if enable_monthly_governance:
+            def _monthly_governance_job(**kw) -> None:  # noqa: ARG001
+                """KP-P6-05: 月频模型治理：未批准不 active + 漂移告警（回写 registry 现状）。"""
+                try:
+                    from myquant.ml.model_monitor import ModelMonitor
+                    from myquant.ml.model_registry import ModelRegistry
+                    summary = run_monthly_model_governance(ModelRegistry(), ModelMonitor())
+                    logger.info(f"[attach] 月频模型治理完成: {summary}")
+                except Exception as exc:
+                    logger.error(f"[attach] 月频模型治理异常: {exc}")
+            task_ids["monthly_governance"] = scheduler.add_cron_task(
+                _monthly_governance_job,
+                name="月频模型治理",
+                cron_expr=monthly_governance_cron,
+            )
+
     logger.info(
         f"[attach] 实盘引擎已挂载: patrol={task_ids.get('patrol')}, "
         f"daily_report={task_ids.get('daily_report')}, "
         f"t1_settle={task_ids.get('t1_settle')}, "
         f"reconcile={task_ids.get('reconcile')}, "
-        f"resend_pending={task_ids.get('resend_pending')}"
+        f"resend_pending={task_ids.get('resend_pending')}, "
+        f"monthly_governance={task_ids.get('monthly_governance')}"
     )
     return task_ids
+
+
+def run_monthly_model_governance(
+    registry: Any,
+    monitor: Any,
+    model_names: Optional[List[str]] = None,
+    drift_checks: Optional[Dict[str, tuple]] = None,
+    psi_threshold: float = 0.25,
+    ks_threshold: float = 0.3,
+) -> Dict[str, Any]:
+    """KP-P6-05 月频模型治理：未批准不 active 核查 + 分布漂移告警。
+
+    - 未批准不 active：active 版本必须带 approval（approve_version 审批写入）；
+      违规（无 approval 却 active）时告警并回写 pending_review。
+    - 漂移告警：对 drift_checks 提供的 (实际分布, 期望分布) 对计算 PSI/KS，超阈值告警。
+    - 防未来：仅用已观测历史分布与 registry 现状，无预测性未来信息。
+    返回治理摘要 {model: {active, approved, drift_alert, drift_psi, drift_ks}}。
+    """
+    if model_names is None:
+        model_names = list(getattr(registry, "list_models", lambda: [])() or [])
+    drift_checks = drift_checks or {}
+    summary: Dict[str, Any] = {}
+    for name in model_names:
+        entry: Dict[str, Any] = {
+            "active_version": None, "approved": False, "drift_alert": False,
+            "drift_psi": None, "drift_ks": None,
+        }
+        # 1) 未批准不 active 核查
+        try:
+            get_meta = getattr(registry, "get_model_metadata", None)
+            if get_meta is not None:
+                meta = get_meta(name, None)
+                entry["active_version"] = getattr(meta, "version", None)
+                approval = getattr(meta, "approval", None)
+                entry["approved"] = bool(approval and isinstance(approval, dict))
+                if getattr(meta, "status", None) == "active" and not entry["approved"]:
+                    logger.warning(
+                        f"[governance] 模型 {name} 状态 active 但无审批记录（未批准不 active 违规），回写 pending_review"
+                    )
+                    rollback = getattr(registry, "mark_pending_review", None)
+                    if rollback is not None:
+                        try:
+                            rollback(name, getattr(meta, "version", None))
+                        except Exception as exc:  # noqa: BLE001
+                            logger.error(f"[governance] 回写 pending_review 失败 {name}: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"[governance] 模型 {name} 审批核查异常: {exc}")
+        # 2) 漂移检测
+        pair = drift_checks.get(name)
+        if pair and isinstance(pair, (tuple, list)) and len(pair) == 2:
+            actual, expected = pair[0], pair[1]
+            try:
+                psi = monitor.psi_score(actual, expected)
+                ks = monitor.ks_statistic(actual, expected)
+                entry["drift_psi"] = round(float(psi), 4)
+                entry["drift_ks"] = round(float(ks), 4)
+                if float(psi) > psi_threshold or float(ks) > ks_threshold:
+                    entry["drift_alert"] = True
+                    logger.warning(
+                        f"[governance] 模型 {name} 分布漂移告警: PSI={psi:.4f} KS={ks:.4f}"
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.error(f"[governance] 模型 {name} 漂移计算异常: {exc}")
+        summary[name] = entry
+    return summary

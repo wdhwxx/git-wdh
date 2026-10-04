@@ -197,7 +197,7 @@ class ModelVersion:
     train_end_time: Optional[str] = None
     metrics: Dict[str, Any] = field(default_factory=dict)
     hyperparameters: Dict[str, Any] = field(default_factory=dict)
-    status: str = "active"
+    status: str = "pending_review"  # KP-P6-05: 未批准不 active
     parent_version: Optional[int] = None
     description: str = ""
     data_snapshot: Optional[Dict[str, Any]] = None
@@ -206,6 +206,11 @@ class ModelVersion:
     signature: Optional[str] = None
     signature_algorithm: Optional[str] = None
     signed_at: Optional[str] = None
+    # KP-P6-05: 模型治理字段
+    tier: str = "dev"                      # 模型分级（dev/staging/prod）
+    model_card: Optional[Dict[str, Any]] = None  # 模型卡（用途/限制/数据口径）
+    frozen: bool = False                    # 冻结（批准后禁止训练覆盖，防漂移篡改）
+    approval: Optional[Dict[str, Any]] = None   # 审批记录 {approver, at, note}
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -233,6 +238,10 @@ class ModelVersion:
             "signature": self.signature,
             "signature_algorithm": self.signature_algorithm,
             "signed_at": self.signed_at,
+            "tier": self.tier,
+            "model_card": self.model_card,
+            "frozen": self.frozen,
+            "approval": self.approval,
         }
 
     @classmethod
@@ -404,7 +413,7 @@ class ModelRegistry:
         ).hexdigest()
         if not hmac.compare_digest(expect, str(signature)):
             raise ModelSignatureError(
-                f"模型元数据签名校验失败（元数据可能被篡改，拒绝加载）"
+                "模型元数据签名校验失败（元数据可能被篡改，拒绝加载）"
             )
 
     @staticmethod
@@ -662,7 +671,11 @@ class ModelRegistry:
                 train_end_time=metadata.get("train_end_time"),
                 metrics=metadata.get("metrics") or {},
                 hyperparameters=metadata.get("hyperparameters") or {},
-                status="active",
+                status="pending_review",  # KP-P6-05: 未批准不 active，需 approve_version 审批
+                tier=str(metadata.get("tier") or "dev"),
+                model_card=(metadata.get("model_card") if isinstance(metadata.get("model_card"), dict) else None),
+                frozen=bool(metadata.get("frozen", False)),
+                approval=(metadata.get("approval") if isinstance(metadata.get("approval"), dict) else None),
                 parent_version=metadata.get("parent_version"),
                 description=description,
                 # F-07 元数据补全（回写#94）：
@@ -930,6 +943,38 @@ class ModelRegistry:
     # ─────────────────────────────────────────────
     #  active 热切换 / 回滚
     # ─────────────────────────────────────────────
+
+    def approve_version(self, model_name: str, version: int, approver: str, note: str = "") -> ModelVersion:
+        """KP-P6-05: 审批模型版本（pending_review → active）。未批准不 active。
+
+        需非空 approver；已 active 版本不可重复审批；审批写入 approval 记录。
+        """
+        with self._lock:
+            index = self._read_index(model_name)
+            versions = index.get("versions", {})
+            if not versions:
+                raise ModelNotFoundError(f"模型不存在: {model_name}")
+            key = str(version)
+            if key not in versions:
+                raise ModelVersionNotFoundError(f"模型 {model_name} 版本 {version} 不存在")
+            current = versions[key].get("status", "pending_review")
+            if current == "active":
+                raise ModelRegistryError(f"模型 {model_name} v{version} 已 active，无需重复审批")
+            if not approver or not str(approver).strip():
+                raise ModelRegistryError("approve_version 需要非空 approver")
+            versions[key]["status"] = "active"
+            versions[key]["approval"] = {"approver": str(approver), "at": self._now(), "note": note}
+            head = index.setdefault("head", {})
+            old_active = head.get("active")
+            if old_active and str(old_active) != key:
+                old = versions.get(str(old_active))
+                if old:
+                    old["status"] = "archived"
+            head["active"] = int(version)
+            head["approved_at"] = versions[key]["approval"]["at"]
+            self._write_index(model_name, index)
+            logger.info(f"[ml] 审批激活: {model_name} v{version} by {approver}")
+            return self.get_model_metadata(model_name, version)
 
     def activate_version(self, model_name: str, version: int) -> ModelVersion:
         """
