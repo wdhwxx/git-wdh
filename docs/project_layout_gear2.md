@@ -550,6 +550,7 @@ Pythonwdhmm/
 
 │   │   ├── test_signal_idempotency.py # ✨【回写#43】幂等去重测试（Signal确定性ID/to_order映射/引擎去重/分钟线粒度/start重置/QMT端按订单ID去重/统计双计修复验证，19项）✅已完成
 │   │   ├── test_guard_mounting.py    # ✨【回写#140】防未来铁律1/2/4挂载测试（KP-P2-08：indicators_recorded>0/钩子因果口径/T+1指标桩抛错/T+1信号桩引擎标记失败/止损UPDATE早于CHECK抛错/数据访问未来抛错/无guard注入退化为无操作，10项）✅已完成
+│   │   ├── test_portfolio_reconciliation.py # ✨【回写#141】账实对账测试（KP-P4-01：一致快照exceeds_false/现金容差内不误报/现金超容差告警+回调/持仓数量不一致差异清单/券商多仓本地缺失计入差异/reconcile只读/sync先diff后重建且记录stats/to_dict序列化/attach_engine注册盘后cron/显式关闭不注册/缺组件不注册/对账job不重建，12项）✅已完成
 
 │   │   ├── test_broker_manager_failover.py # ✨【回写#44】failover盲目重试约束化测试（业务拒单不failover/通道故障副本重试/冷却熔断/健康恢复/手动切换清除恢复记忆/统计摘要，27项）✅已完成
 
@@ -966,9 +967,9 @@ Pythonwdhmm/
 
     │   ├── data_feed.py              # 实时行情接入订阅重连分发；流式清洗(单条校验+跳变检测) + attach_event_bus事件总线联动 + 脏数据钩子；✨【回写#83】S2 live复权口径统一：_fetch_from_akshare 改拉不复权raw（adjust=""，与腾讯快照/本地历史同口径）/新增 adjust_out 参数（"qfq"按最新因子现算÷因子）+_stream_clean 除权跳变因子豁免（_live_jump_change_with_factor）+_clean_bars 注入 factor_lookup（config副本不污染共享配置）；✨【回写#139】_make_bar 的 timestamp 改 bar 周期归属时间 bar_date_to_epoch(formatted_date)（KP-P3-02，弃用墙钟 time.time()，避免同根bar因墙钟时刻不同被误判不同bar）
 
-    │   ├── portfolio.py              # 实时持仓、市值、可用冻结资金
+    │   ├── portfolio.py              # 实时持仓、市值、可用冻结资金；✨【回写#141】账实对账 ReconciliationDiff + reconcile_vs_broker（KP-P4-01：本地 vs 券商只读 diff，现金容差0.01+持仓数量差）+ sync_from_broker 改先 diff 后重建，超阈值 critical 告警+__reconciliation_diff__ 回调，禁静默 clear 覆盖
 
-    │   ├── scheduler.py              # 定时任务、巡检、日报
+    │   ├── scheduler.py              # 定时任务、巡检、日报；✨【回写#141】attach_engine 增 enable_reconcile/reconcile_cron 盘后账实对账 cron（KP-P4-01：只对账不重建，超阈值 critical 告警）
 
     │   │                             # 【回写#135】attach_engine 注册日终 T+1 日切结算 cron（enable_t1_settle 默认 True，15:30 调 broker.settle_t1_all()/settle_t1()）
 
@@ -2656,3 +2657,14 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：钩子 data_end 默认因果口径（决策日只用已完成先前 bar，data_end < calc_date）；真实数据截止日来自策略实际访问的数据（context.data ≤ 当前 bar），不依赖未来。
 - 验证结果：py_compile 3 文件 PASS；tests/unit/test_guard_mounting.py 10 项全绿（真实回测 indicators_recorded>0/钩子因果口径不误伤/T+1指标桩 assert_pass 抛错/T+1信号桩引擎标记失败且 assert_pass 抛错/正常策略 data_end=信号日不误伤/止损钩子记录/UPDATE早于CHECK抛错/数据访问钩子记录/访问未来数据抛错/无guard注入退化为无操作）；回测+防未来+策略回归 389 passed + 1 skipped 无回归；ruff：base.py/test_guard_mounting.py 通过（清理既有 unused typing.Set），ma_strategy/engine 顶层 import 排序为既有 I001（非本次引入）。
 - 纪律遵守：仅改蓝图已标注文件（strategies/base.py、backtest/engine.py、strategies/ma_strategy.py）+ tests/unit 新增 test_guard_mounting.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+141. ✨【回写记录·2026-10-04·T-07 KP-P4-01 组合账本与券商无实际对账（sync_from_broker 无差异比对）】
+
+【发现】`myquant/live/portfolio.py:477` `sync_from_broker` 先 `_positions.clear()` 后按 broker 整体重建，无差异比对、无告警——券商返回空/异常快照会静默覆盖本地持仓账本。
+- 修复（myquant/live/portfolio.py + scheduler.py）：
+  a. portfolio.py 新增 `ReconciliationDiff` 数据类（cash_diff/position_diffs/cash_tolerance/exceeds_threshold/to_dict 序列化）与 `reconcile_vs_broker(broker, cash_tolerance=0.01)`——本地账本 vs 券商权威账本只读 diff（现金绝对差 + 各持仓数量差，含本地缺失/券商多仓），不修改任何本地状态（先检查后同步）。
+  b. portfolio.py `sync_from_broker` 改先 diff 后重建：超阈值时 `logger.critical` 告警、通知 `__reconciliation_diff__` 回调、`_stats["last_reconciliation_diff"]` 留痕，再按券商权威账本重建（禁止静默 clear 覆盖），返回 diff 供调用方/测试核查。
+  c. scheduler.py `attach_engine` 增 `enable_reconcile`（默认 True）/`reconcile_cron`（默认 "50 15 * * 1-5"，盘后日报/T+1 结算之后）注册账实对账 cron 任务：只对账不重建，超阈值 critical 告警。
+- 防未来：对账仅比较已成交持仓与当前资金，不使用未来行情。
+- 验证结果：py_compile 3 文件 PASS；tests/unit/test_portfolio_reconciliation.py 12 项全绿（一致快照/容差内不误报/超容差告警+回调/持仓差异清单/券商多仓计入差异/reconcile 只读/sync 先 diff 后重建+stats 留痕/to_dict 可落库/attach_engine 注册盘后 cron/显式关闭不注册/缺组件不注册/对账 job 不重建）；live 相关回归 65 passed 无回归；ruff：portfolio.py/scheduler.py/测试文件通过。
+- 纪律遵守：仅改蓝图已标注文件（live/portfolio.py、live/scheduler.py）+ tests/unit 新增 test_portfolio_reconciliation.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。

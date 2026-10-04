@@ -50,12 +50,59 @@ from __future__ import annotations
 import functools
 import threading
 import time
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from myquant.core.logger import get_logger
 from myquant.models.trade import OrderSide, Position, Trade
 
 logger = get_logger("live.portfolio")
+
+# 账实对账默认现金容差（元）：现金绝对差超过该值即视为账实不一致
+_DEFAULT_CASH_TOLERANCE = 0.01
+
+
+@dataclass
+class ReconciliationDiff:
+    """账实差异快照（本地账本 vs 券商权威账本）。
+
+    Attributes:
+        cash_diff: 本地现金 - 券商现金（元）。
+        position_diffs: symbol -> {local_quantity, broker_quantity, diff} 的持仓差异表。
+        cash_tolerance: 现金容差（元），超过即视为不一致。
+    """
+
+    cash_diff: float = 0.0
+    position_diffs: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    cash_tolerance: float = _DEFAULT_CASH_TOLERANCE
+
+    @property
+    def exceeds_threshold(self) -> bool:
+        """是否超过对账容差（现金差超容差，或任一持仓数量不一致）。"""
+        if abs(self.cash_diff) > self.cash_tolerance:
+            return True
+        return any(
+            (d.get("diff", 0.0) or 0.0) != 0.0 for d in self.position_diffs.values()
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """序列化（供对账日报落库/查询）。"""
+        return {
+            "cash_diff": self.cash_diff,
+            "cash_tolerance": self.cash_tolerance,
+            "position_diffs": self.position_diffs,
+            "exceeds_threshold": self.exceeds_threshold,
+        }
+
+    def __str__(self) -> str:
+        parts = [f"现金差={self.cash_diff:.2f}"]
+        for symbol, d in self.position_diffs.items():
+            parts.append(
+                f"{symbol}: 本地={d.get('local_quantity', 0.0):g} "
+                f"券商={d.get('broker_quantity', 0.0):g} 差={d.get('diff', 0.0):g}"
+            )
+        return "账实差异[" + "; ".join(parts) + "]"
+
 
 def _locked(method: Callable[..., Any]) -> Callable[..., Any]:
     """线程锁装饰器：调用时获取 self._lock（RLock，可重入，支持嵌套调用）"""
@@ -475,15 +522,82 @@ class LivePortfolio:
     # ═══════════════════════════════════════════
 
     @_locked
-    def sync_from_broker(self, broker) -> None:
-        """
-        从broker同步持仓和资金
+    def reconcile_vs_broker(
+        self, broker: Any, cash_tolerance: float = _DEFAULT_CASH_TOLERANCE,
+    ) -> ReconciliationDiff:
+        """账实对账：本地账本 vs 券商权威账本，只 diff 不重建（先检查后同步）。
+
+        KP-P4-01：sync_from_broker 原实现 clear() 后整体重建、无差异比对，
+        券商返回空快照会静默覆盖本地持仓。本方法先产出差异清单供告警/落库，
+        不修改任何本地状态。
 
         Parameters
         ----------
         broker : BaseBroker
-            券商实例（PaperBroker或真实券商）
+            券商实例（PaperBroker 或真实券商）。
+        cash_tolerance : float
+            现金容差（元），超过即视为不一致，默认 0.01。
+
+        Returns
+        -------
+        ReconciliationDiff : 账实差异快照（现金差 + 各持仓数量差 + 是否超阈值）。
         """
+        account = broker.get_account()
+        broker_cash = float(account.get("cash", 0.0))
+        cash_diff = self._cash - broker_cash
+
+        broker_positions = {p.symbol: p for p in broker.get_positions()}
+        pos_diffs: Dict[str, Dict[str, float]] = {}
+        all_symbols = set(broker_positions) | set(self._positions.keys())
+        for symbol in sorted(all_symbols):
+            local_pos = self._positions.get(symbol)
+            broker_pos = broker_positions.get(symbol)
+            local_qty = float(local_pos.quantity) if local_pos is not None else 0.0
+            broker_qty = float(broker_pos.quantity) if broker_pos is not None else 0.0
+            if local_qty != broker_qty:
+                pos_diffs[symbol] = {
+                    "local_quantity": local_qty,
+                    "broker_quantity": broker_qty,
+                    "diff": local_qty - broker_qty,
+                }
+
+        return ReconciliationDiff(
+            cash_diff=cash_diff,
+            position_diffs=pos_diffs,
+            cash_tolerance=cash_tolerance,
+        )
+
+    @_locked
+    def sync_from_broker(
+        self, broker: Any, cash_tolerance: float = _DEFAULT_CASH_TOLERANCE,
+    ) -> ReconciliationDiff:
+        """
+        从broker同步持仓和资金（先 diff 后重建，禁止静默覆盖）。
+
+        KP-P4-01：同步前先与券商对账——若账实不一致（现金差超容差或任一持仓
+        数量不同），记录 critical 日志并通知 __reconciliation_diff__ 回调，
+        不静默 clear 覆盖本地账本。
+
+        Parameters
+        ----------
+        broker : BaseBroker
+            券商实例（PaperBroker或真实券商）。
+        cash_tolerance : float
+            现金容差（元）。
+
+        Returns
+        -------
+        ReconciliationDiff : 本次同步前的账实差异快照。
+        """
+        # #T-07(KP-P4-01)：先 diff 后重建
+        diff = self.reconcile_vs_broker(broker, cash_tolerance=cash_tolerance)
+        if diff.exceeds_threshold:
+            self._stats["last_reconciliation_diff"] = str(diff)
+            logger.critical(
+                f"[portfolio] 账实差异 {diff}，禁止静默覆盖（仍按券商权威账本重建）"
+            )
+            self._notify_callbacks("__reconciliation_diff__")
+
         # 同步资金
         account = broker.get_account()
         self._cash = account.get("cash", self._cash)
@@ -509,6 +623,7 @@ class LivePortfolio:
             f"资金={self._cash:,.2f}, 总资产={self.get_total_assets():,.2f}"
         )
         self._notify_callbacks("__sync__")
+        return diff
 
     @_locked
     def apply_trade(self, trade: Trade) -> None:

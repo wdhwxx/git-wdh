@@ -51,6 +51,8 @@ _DEFAULT_PATROL_INTERVAL = 60     # 默认巡检间隔（秒）
 _DEFAULT_DAILY_REPORT_CRON = "30 15 * * 1-5"  # 默认日报时间：周一~周五 15:30
 # KP-P3-01：默认日终 T+1 结算时间（日报后执行，周一~周五 15:30 释放当日买入冻结）
 _DEFAULT_T1_SETTLE_CRON = "30 15 * * 1-5"
+# KP-P4-01：默认盘后账实对账时间（日报/T+1 结算之后，周一~周五 15:50）
+_DEFAULT_RECONCILE_CRON = "50 15 * * 1-5"
 
 # cron 扫描上限：覆盖 5 年（含 2 月 29 日等罕见组合）
 _MAX_SCAN_MINUTES = 5 * 366 * 24 * 60
@@ -1561,6 +1563,8 @@ def attach_engine(
     enable_daily_report: bool = True,
     enable_t1_settle: bool = True,
     t1_settle_cron: str = _DEFAULT_T1_SETTLE_CRON,
+    enable_reconcile: bool = True,
+    reconcile_cron: str = _DEFAULT_RECONCILE_CRON,
     enable_resend_pending: bool = False,
     resend_pending_interval: float = 60.0,
 ) -> Dict[str, str]:
@@ -1589,6 +1593,11 @@ def attach_engine(
         调用 settle_t1_all()，为单券商时调用 settle_t1()；两者皆无则跳过）
     t1_settle_cron : str
         日终 T+1 结算 cron 表达式，默认 "30 15 * * 1-5"
+    enable_reconcile : bool
+        KP-P4-01：是否注册盘后账实对账任务（portfolio 与 broker 均存在时生效），
+        对账差异超阈值时 critical 告警（禁止静默覆盖）
+    reconcile_cron : str
+        盘后账实对账 cron 表达式，默认 "50 15 * * 1-5"
     enable_resend_pending : bool
         P3-D11-001 整改：是否注册断线补单对账周期任务（默认关闭，保守；
         需 engine 非空且有 broker_manager 时生效），对账调用 engine.resend_pending_orders()
@@ -1598,7 +1607,7 @@ def attach_engine(
     Returns
     -------
     Dict[str, str] : {"patrol": task_id, "daily_report": task_id, "t1_settle": task_id,
-                      "resend_pending": task_id}
+                      "reconcile": task_id, "resend_pending": task_id}
     """
     task_ids: Dict[str, str] = {}
 
@@ -1666,6 +1675,26 @@ def attach_engine(
                 cron_expr=t1_settle_cron,
             )
 
+    if enable_reconcile and portfolio is not None and broker is not None:
+        # KP-P4-01：盘后账实对账（日报/T+1 结算后执行）。只对账不重建：
+        # 调 portfolio.reconcile_vs_broker 产出差异，超阈值 critical 告警（禁止静默覆盖）。
+        if hasattr(portfolio, "reconcile_vs_broker"):
+            def _reconcile_job(**kw) -> None:  # noqa: ARG001
+                diff = portfolio.reconcile_vs_broker(broker)
+                if diff.exceeds_threshold:
+                    logger.critical(f"[attach] 账实对账差异: {diff}")
+                else:
+                    logger.info(
+                        f"[attach] 账实对账一致: 现金差={diff.cash_diff:.2f} "
+                        f"持仓差异数={len(diff.position_diffs)}"
+                    )
+
+            task_ids["reconcile"] = scheduler.add_cron_task(
+                _reconcile_job,
+                name="账实对账",
+                cron_expr=reconcile_cron,
+            )
+
     if enable_resend_pending and engine is not None:
         # P3-D11-001 整改：断线补单对账自动接线（默认关闭，开启后按周期调用
         # engine.resend_pending_orders()；引擎无 broker_manager 时该方法安全返回 error，不抛异常）
@@ -1686,6 +1715,7 @@ def attach_engine(
         f"[attach] 实盘引擎已挂载: patrol={task_ids.get('patrol')}, "
         f"daily_report={task_ids.get('daily_report')}, "
         f"t1_settle={task_ids.get('t1_settle')}, "
+        f"reconcile={task_ids.get('reconcile')}, "
         f"resend_pending={task_ids.get('resend_pending')}"
     )
     return task_ids
