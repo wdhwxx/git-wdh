@@ -339,6 +339,7 @@ Pythonwdhmm/
 │   ├── backtest_config.example.yaml  # 回测参数模板：初始资金、手续费、滑点、时间范围等；✨【V5】新增engine.mode（event/vectorized/mixed三模式选择）+ performance段（workers/chunk_size/memory_pool/预取开关），由BatchBacktest与run_批量回测.py读取；✨【回写#174】增 benchmark_required（KP-P2-04）；✨【回写#178】type 默认 preset_filtered/three_factor 标预留（KP-P1-08）
 
 │   ├── live_config.example.yaml     # 实盘参数模板：券商连接、风控阈值、订阅合约等；✨【回写#144】增 compliance 报备段（enabled+filing六字段，口径待律师确认）；✨【回写#178】broker.mode 默认 SIM 与 trade_mode 一致（KP-P1-08）
+│   ├── live_admission.example.yaml # ✨【回写#186】KP-M04(T-30) 写操作准入示例配置（admission: enabled=false 默认仅审计留痕/require_reviewer/reviewer/audit_dir）
 
 │   ├── strategy_params.example.yaml # 策略参数模板：全部7策略参数块（ma_cross/rsrs/grid/momentum/mean_reversion/multi_factor/kunpeng）
 
@@ -618,6 +619,7 @@ Pythonwdhmm/
 
 │   │   ├── test_acceptance.py     # ✨【回写#52】仿真绩效准入评估测试(全达标/回测比较/未达标/数据缺失NA/阈值覆盖/非法输入/序列化，11项)✅已完成
 │   │   ├── test_compliance_gate.py # ✨【回写#144】报备合规门禁测试(KP-P6-01：缺字段拦截exit2/放行exit0/开关未开/状态非approved/日期非法/自定义字段/validate_live联动/engine拦截/快照落盘，12项)✅已完成
+│   │   ├── test_admission_guard.py # ✨【回写#186】KP-M04(T-30) 写操作准入守卫测试（默认仅审计fail-safe/启用拒绝无复核人/复核人匹配放行/单人审批/非高危不阻断/审计JSONL落盘/require_scope/配置缺失回退，11项）✅已完成
 │   │   ├── test_paper_run_dialog.py  # ✨【回写#65】仿真运行弹窗 GUI 测试（offscreen）
 │   │   ├── test_data_incremental_clean_dual.py  # ✨【回写#59】增量清洗双通道测试
 │   │   └── test_update_symbol_incremental_start.py  # ✨【回写#67】增量起点以 processed 为准（M5）+ save 失败统计（11项）✅已完成
@@ -1088,7 +1090,7 @@ Pythonwdhmm/
 
     │   │   ├── __init__.py             # 中间件包统一导出：APIKeyAuth/create_auth + RateLimiter/FixedWindowLimiter/TokenBucketLimiter/RateLimitResult + 工厂create_fixed_window_limiter/create_token_bucket_limiter
 
-    │   │   ├── auth.py                 # API Key认证中间件（v1基础骨架）：APIKeyAuth认证类（Header/Query；✨【回写#156】密钥加载经 settings 兜底 .env/config（KP-P1-04）取Key+恒时比较secrets.compare_digest）+ verify_api_key()/get_current_user()（FastAPI依赖注入）；多Key配置（环境变量/配置）；JWT/OAuth2/RBAC预留TODO；防未来函数：只验证当前凭证，不预测未来
+    │   │   ├── auth.py                 # API Key认证中间件（v1基础骨架）：APIKeyAuth认证类（Header/Query；✨【回写#156】密钥加载经 settings 兜底 .env/config（KP-P1-04）取Key+恒时比较secrets.compare_digest；✨【回写#186】KP-M04(T-30) OperationGuard 高危写操作准入(force_close/transfer_cash/mode_switch_live,复核人可配置)+审计JSONL+require_scope）+ verify_api_key()/get_current_user()（FastAPI依赖注入）；多Key配置（环境变量/配置）；JWT/OAuth2/RBAC预留TODO；防未来函数：只验证当前凭证，不预测未来
 
     │   │   └── rate_limit.py           # 限流中间件（v1基础骨架）：RateLimiter基类 + FixedWindowLimiter固定窗口 + TokenBucketLimiter令牌桶 + RedisFixedWindowLimiter分布式后端（INCR+EXPIRE）；按IP/APIKey/用户维度限流+状态查询；create_rate_limiter 按 QUANT_RATE_LIMIT_BACKEND 切换；✨【回写#177】Redis 后端落地（KP-P1-05）；防未来函数：仅基于当前时间与历史请求计数
 
@@ -3147,6 +3149,8 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 
 - **T-50（KP-P6-06 单一整改台账）✅**【回写#183 树，记录补#184】新建 docs/系统性审核/整改台账_2026Q4.md（27 项编号/动作/文件/commit c9173ce/可复现验证命令/复核人/日期/状态）+ 审计档案两旧文档（落地记录/总览）文首加"历史快照·已被取代"警示；台账 📦 9a5faa5、台账提交 f755a7e。
 - **全量回归与 50 项验收（2026-10-04）✅**【回写#184】：首次全量 pytest 暴露 21 项失败→四类根因修复（提交 6acc9e3）：① model_registry.py win_gate 门控通过→active+approval(win_gate) 留痕、head.active 仅 active 设置、默认注册保持 pending_review（T-49 语义）；② T-34 显式必填回归：4 测试文件 fixture 补 auto_recover_on_start=False；③ T-44 CORS：test_api_middleware 断言改"缺省不挂中间件"；④ rabbitmq_bus.py publish/_handle_message 改函数内局部 import pika（规避模块级绑定被锁死）+ test_rabbitmq_reliability 注入改运行期 module fixture 恢复重载。最终基线 **2342 passed / 2 skipped**；新建 docs/系统性审核/鲲鹏量化交易系统_50项验收汇总报告_20261004.md。
+
+- **T-30 落地 + T-10 口径确认（2026-10-04，律师确认单）✅**【回写#186】：① T-10 报备六字段口径律师确认维持现状A（fail-closed，字段/状态/日期不变），台账备注更新；② T-30 KP-M04 律师确认方案B（仅高危写操作审批+复核人可配置）：auth.py 新增 HIGH_RISK_SCOPES(force_close/transfer_cash/mode_switch_live)/OperationGuard（enabled=false 默认仅审计JSONL留痕不阻断；require_reviewer=true 时 reviewer 缺失/不匹配拒绝；false 单人审批）/get_operation_guard/require_scope；config/live_admission.example.yaml 示例；入口标注 guardian.force_close_all/symbol、portfolio.transfer_cash、run_mode.apply_mode_to_config->LIVE（拒绝显式抛 ValueError）。新增 tests/unit/test_admission_guard.py 11 项全绿；相关模块回归 188 passed；py_compile + ruff 干净。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】
