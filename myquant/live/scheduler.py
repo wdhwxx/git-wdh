@@ -1567,6 +1567,8 @@ def attach_engine(
     reconcile_cron: str = _DEFAULT_RECONCILE_CRON,
     enable_resend_pending: bool = False,
     resend_pending_interval: float = 60.0,
+    enable_escalation: bool = True,
+    escalation_interval: float = 300.0,
 ) -> Dict[str, str]:
     """
     将实盘引擎一键挂载到调度器：自动注册巡检任务 + 收盘日报任务 + 断线补单对账任务。
@@ -1724,6 +1726,23 @@ def attach_engine(
                 name="账实对账",
                 cron_expr=reconcile_cron,
             )
+
+    if enable_escalation:
+        # KP-P5-04: 告警升级检查接入周期任务（check_escalations 原无调用方）
+        def _escalation_job(**kw) -> None:  # noqa: ARG001
+            try:
+                from myquant.monitoring.alerting import get_alert_manager
+                n = get_alert_manager().check_escalations()
+                if n:
+                    logger.info(f"[attach] 告警升级检查: 升级 {n} 条")
+            except Exception as e:
+                logger.warning(f"[attach] 告警升级检查异常: {e}")
+
+        task_ids["escalation"] = scheduler.add_interval_task(
+            _escalation_job,
+            name="告警升级检查",
+            interval_seconds=escalation_interval,
+        )
 
     if enable_resend_pending and engine is not None:
         # P3-D11-001 整改：断线补单对账自动接线（默认关闭，开启后按周期调用
