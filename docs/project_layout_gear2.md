@@ -474,6 +474,8 @@ Pythonwdhmm/
 
 │   │   ├── test_p211_terminal_state.py # ✨【回写#137】防未来失败终态保护测试（KP-P2-11：mark_complete终态保护/mixed_engine保留light guard返回值/light guard违规on_stop以failed收尾，6项）✅已完成
 
+│   │   ├── test_param_split_in_out.py # ✨【回写#138】参数寻优样本内外分割测试（KP-P2-05：无分割兼容/in_sample_end校验/双区段in-out指标/best样本内选参样本外结论/三套排序/summary双列与试验次数/walk_forward两折与折数校验/split字段透传，10项）✅已完成
+
 │   │   ├── test_models.py            # 数据模型校验、序列化（88项）✅已完成
 
 │   │   ├── test_execution.py         # 执行层接口与订单状态机（66项）✅已完成
@@ -838,7 +840,7 @@ Pythonwdhmm/
 
     │   ├── incremental_backtest.py   # ✨【V5·P2】增量回测：基期分段+新增段增量计算+结果拼接（历史结果复用，只重算新增交易日），供scripts/增量回测.py调用
 
-    │   ├── param_optimizer.py        # ✨【V5·P2】参数优化器：网格/随机/坐标下降三策略搜索最优参数，输出参数热度图，供scripts/参数优化.py调用
+    │   ├── param_optimizer.py        # ✨【V5·P2】参数优化器：网格/随机/坐标下降三策略搜索最优参数，输出参数热度图，供scripts/参数优化.py调用；✨【回写#138】in_sample_end 样本内→样本外分割（KP-P2-05）：ranked_in_sample寻优/ranked_out_sample确认/best样本内选参样本外结论/报告in-out双列/试验次数/WalkForwardResult滚动walk-forward
 
     │   ├── consistency_check.py      # ✨【V5·P3】三模式一致性校验器：engine/vectorized/mixed同参数同数据比对收益曲线与成交明细，差异超阈值即判定失败，供scripts/一致性校验.py调用
 
@@ -2616,3 +2618,17 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：仅保留并返回【已发生】的 guard 校验结果，不生成任何预测数据；mark_complete 的 raise 属编程错误显式化，不改变正常成功路径。
 - 验证结果：py_compile 3 文件 PASS；tests/unit/test_p211_terminal_state.py 6 项全绿（mark_complete pending可直接标记/mark_failed后mark_complete抛错/mark_complete后mark_failed失败态生效/light guard通过返回True且completed/light guard违规返回False且结果failed/light guard违规on_stop以failed收尾）；防未来+回测v5+序列化相关回归 166 passed + 批回测/调度/参数/优化器回测级 199 passed 无回归；ruff 新测试文件通过。
 - 纪律遵守：仅改蓝图已标注文件（mixed_engine.py/models/backtest.py）+ tests/unit 新增 test_p211_terminal_state.py（本回写同步更新目录树）；engine.py 核验无需改动；无蓝图外文件；严格防未来。
+
+138. ✨【回写记录·2026-10-04·T-05 KP-P2-05 参数寻优无样本外（台账编号 T-05；用户指令标 T-04）】
+
+【发现】`param_optimizer.py` 的 `ranked()/best()` 全样本取顶，无 in/out-sample 分割——参数在整段数据上选优，属样本内过拟合，仿真/回测绩效为废证据。
+- 修复（myquant/backtest/param_optimizer.py，台账 T-05 改动文件）：
+  a. ParamTrial 增 split 字段（'in'/'out'）+ evaluate_params 透传 split。
+  b. ParamOptimizer 增 `in_sample_end`（YYYY-MM-DD，防御校验须落于 [start,end] 开区间）：_build_trials 对每个参数组合 x 标的拆为样本内[·,in_sample_end]与样本外[in_sample_end,·]两个区段任务。
+  c. 新增模块级 `_coalesce_outcomes`：按 (params,symbol) 聚合 in/out 双区段为单条记录（含 in_*/out_* 双列），结论字段（sharpe_ratio 等）以样本外为准（无分割时回退样本内，兼容原行为）；非分割模式仅 in 段即视为成功。
+  d. ParamOptimizationResult：新增 split_mode/evaluation_count（试验次数=组合数×区段数）、ranked_in_sample（寻优）/ranked_out_sample（确认）；`ranked()` 结论排序（分割=样本外）；`best()` 样本内选参、结论字段=样本外（DoD：样本内选中后样本外复算）；summary 输出 in/out 双列 + 试验次数；to_dict/to_dataframe 含双区段列。
+  e. 新增 `WalkForwardResult` 数据类 + `ParamOptimizer.walk_forward(folds)`：滚动三段式，每折用全局起点→训练截止做样本内寻优、下一窗口做样本外确认，聚合样本外平均夏普（严格无未来函数：仅用训练截止前数据）。
+- 防未来：样本外确认只用样本内已选参数的【已发生】绩效，不生成任何预测数据；时间序列计算仅截至当折训练截止。
+- 验证结果：py_compile 2 文件 PASS；tests/unit/test_param_split_in_out.py 10 项全绿（无分割兼容/best=ranked首位/in_sample_end介于区间与越界抛错/双区段指标与试验次数/best样本内选参样本外结论/ranked_in-out并存/summary双列与试验次数/walk_forward两折与折数校验/split字段透传）；回测+防未来+序列化回归 176 passed + 批回测/增量/参数/优化器回测级 136 passed 无回归；ruff 新测试文件通过、param_optimizer 清理既有 unused import（ParallelManager）。
+- 纪律遵守：仅改蓝图已标注文件（param_optimizer.py，台账 T-05 改动文件）+ tests/unit 新增 test_param_split_in_out.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+- 备注：①台账编号——KP-P2-05 在台账为 T-05，用户指令标 T-04（该 T-04 实为 KP-P3-02，待办）；本回写落在 T-05 台账行。②既有 `make_demo_data`（英文列 open/high/low/close...）在 param_optimizer 引擎路径缺中文列导致 `KeyError: '收盘价'`，模块 __main__ 自测在 HEAD 即失败（改动前已存在，非本项引入），本次测试用自含中文列数据绕过；该演示数据列名问题与生产接线（scripts/参数优化.py 传 --in-sample-end）列为后续待处理项。

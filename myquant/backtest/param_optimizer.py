@@ -40,7 +40,7 @@ from myquant.backtest.engine import BacktestEngine
 from myquant.models.backtest import BacktestConfig
 from myquant.strategies.base import StrategyBase
 from myquant.strategies.ma_strategy import MACrossStrategy
-from myquant.utils.parallel import ParallelManager, parallel_factor_context
+from myquant.utils.parallel import parallel_factor_context
 from myquant.utils.timer import format_duration
 
 logger = logging.getLogger("myquant.backtest.param_optimizer")
@@ -144,6 +144,8 @@ class ParamTrial:
         end_date: 回测结束日期（YYYY-MM-DD）。
         initial_capital: 初始资金。
         frequency: K 线频率。
+        split: 区段标识：'in'=样本内（寻优）、'out'=样本外（确认）；
+            无 in_sample_end 分割时恒为 'in'（KP-P2-05）。
     """
 
     params: Dict[str, Any]
@@ -154,6 +156,7 @@ class ParamTrial:
     end_date: str
     initial_capital: float = DEFAULT_INITIAL_CAPITAL
     frequency: str = DEFAULT_FREQUENCY
+    split: str = "in"
 
     def to_dict(self) -> Dict[str, Any]:
         """序列化为可读字典（data 仅记标的名，避免整块数据入报告）。"""
@@ -165,6 +168,7 @@ class ParamTrial:
             "end_date": self.end_date,
             "initial_capital": self.initial_capital,
             "frequency": self.frequency,
+            "split": self.split,
         }
 
 
@@ -210,6 +214,7 @@ def evaluate_params(trial: ParamTrial) -> Dict[str, Any]:
     base: Dict[str, Any] = {
         "params": trial.params,
         "symbol": trial.symbol,
+        "split": trial.split,
         "status": "error",
         "total_return": None,
         "sharpe_ratio": None,
@@ -245,6 +250,88 @@ def evaluate_params(trial: ParamTrial) -> Dict[str, Any]:
     return base
 
 
+# ── 区段合并（KP-P2-05 样本内/样本外双列） ────────────────────────────
+
+# 结论指标字段名（与 evaluate_params 输出一致）
+_CONCLUSION_METRICS: Tuple[str, ...] = (
+    "sharpe_ratio",
+    "total_return",
+    "max_drawdown",
+    "trade_count",
+)
+
+
+def _coalesce_outcomes(
+    normalized: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """把按 (params, symbol, split) 展开的评估结果合并为按 (params, symbol) 的聚合记录。
+
+    每条聚合记录携带双区段指标（in_*/out_*）与结论字段：
+      - in_*：样本内指标（寻优依据）；
+      - out_*：样本外指标（确认依据）；
+      - 结论字段（sharpe_ratio 等）：有样本外且完成时取样本外，否则回退样本内——
+        即"结论以样本外为准"（KP-P2-05），无分割时等价于原全样本指标。
+
+    Args:
+        normalized: 归一化后的逐区段评估结果列表（含 split 字段）。
+
+    Returns:
+        按参数组合聚合的结果字典列表，status 聚合为 "completed"/"error"。
+    """
+    groups: Dict[Tuple[str, Any], Dict[str, Optional[Dict[str, Any]]]] = {}
+    order: List[Tuple[str, Any]] = []
+    for outcome in normalized:
+        # params 为 dict，不可哈希，用其稳定 repr 作分组键
+        key = (repr(outcome.get("params")), outcome.get("symbol"))
+        if key not in groups:
+            groups[key] = {"in": None, "out": None}
+            order.append(key)
+        seg = outcome.get("split", "in")
+        groups[key][seg] = outcome
+
+    combined: List[Dict[str, Any]] = []
+    for key in order:
+        segs = groups[key]
+        in_o = segs.get("in")
+        out_o = segs.get("out")
+        # has_out 区分分割模式（有 out 区段）与非分割模式（仅 in，out 段不存在）
+        has_out = out_o is not None
+        in_o = in_o or {}
+        out_o = out_o or {}
+        params = in_o.get("params")
+        if params is None:
+            params = out_o.get("params")
+        record: Dict[str, Any] = {"params": params, "symbol": key[1]}
+        # 双区段指标列
+        for metric in _CONCLUSION_METRICS:
+            record[f"in_{metric}"] = in_o.get(metric)
+            record[f"out_{metric}"] = out_o.get(metric)
+        # 结论字段：样本外完成优先，否则回退样本内
+        in_ok = bool(in_o.get("status") == "completed")
+        out_ok = bool(out_o.get("status") == "completed")
+        source = out_o if out_ok else (in_o if in_ok else {})
+        for metric in _CONCLUSION_METRICS:
+            record[metric] = source.get(metric)
+        # 聚合状态与错误（非分割模式：仅需 in 完成即视为成功）
+        if in_ok and (not has_out or out_ok):
+            record["status"] = "completed"
+            record["error"] = None
+        elif in_ok:  # 分割模式：样本内成功、样本外失败
+            record["status"] = "error"
+            record["error"] = out_o.get("error") or "样本外评估失败"
+        elif not has_out:  # 非分割模式：样本内失败
+            record["status"] = "error"
+            record["error"] = in_o.get("error") or "评估失败"
+        elif out_ok:  # 分割模式：样本内失败、样本外成功（异常情形，仍以样本外为结论）
+            record["status"] = "error"
+            record["error"] = in_o.get("error") or "样本内评估失败"
+        else:
+            record["status"] = "error"
+            record["error"] = (in_o.get("error") or out_o.get("error") or "评估失败")
+        combined.append(record)
+    return combined
+
+
 # ── 优化结果容器 ─────────────────────────────────────────────────────
 @dataclass
 class ParamOptimizationResult:
@@ -253,14 +340,18 @@ class ParamOptimizationResult:
     Attributes:
         strategy_name: 策略注册名。
         objective: 目标指标名。
-        trials: 全部评估结果字典列表（含错误组）。
+        trials: 聚合结果字典列表（含错误组；KP-P2-05 起每条含 in_*/out_* 双区段指标）。
         elapsed_seconds: 并行评估总耗时。
+        split_mode: 是否启用样本内→样本外分割（in_sample_end 已设置）。
+        evaluation_count: 试验次数（实际执行的回测数；分割模式=参数组合×2）。
     """
 
     strategy_name: str
     objective: str
     trials: List[Dict[str, Any]]
     elapsed_seconds: float
+    split_mode: bool = False
+    evaluation_count: int = 0
 
     # ── 派生统计（惰性缓存字段） ──
     _completed: Optional[List[Dict[str, Any]]] = None
@@ -268,7 +359,7 @@ class ParamOptimizationResult:
 
     @property
     def total_count(self) -> int:
-        """评估任务总数。"""
+        """参数组合总数。"""
         return len(self.trials)
 
     @property
@@ -293,26 +384,37 @@ class ParamOptimizationResult:
             ]
         return self._completed
 
-    def _score(self, outcome: Dict[str, Any]) -> Optional[float]:
-        """按目标指标对单条结果打分；非 completed 或无该指标返回 None。"""
-        value = outcome.get(self.objective)
+    def _score(self, outcome: Dict[str, Any], prefix: str = "") -> Optional[float]:
+        """按目标指标对单条结果打分；无该指标返回 None。
+
+        Args:
+            outcome: 聚合结果记录。
+            prefix: 指标字段前缀：""=结论字段（分割模式下为样本外）、
+                "in_"=样本内、 "out_"=样本外。
+        """
+        value = outcome.get(f"{prefix}{self.objective}")
         if value is None:
             return None
         return float(value)
 
-    def ranked(self, top: int = RANK_TOP_N) -> List[Dict[str, Any]]:
-        """按目标指标排序返回前 top 名（失败组恒排最后）。
+    def _rank(
+        self,
+        outcomes: List[Dict[str, Any]],
+        prefix: str,
+        top: int,
+    ) -> List[Dict[str, Any]]:
+        """按指定前缀的目标指标对结果排序，返回前 top 名（无指标恒排最后）。
 
         Args:
+            outcomes: 待排序的聚合结果列表。
+            prefix: 指标字段前缀（""/"in_"/"out_"）。
             top: 返回条数上限（非负整数）。
 
         Returns:
             排序后的结果字典列表，每条附加 "_rank" 排名。
         """
-        if top < 0:
-            raise ValueError(f"top 必须为非负整数，收到: {top!r}")
         direction = OBJECTIVE_DIRECTION[self.objective]
-        scored = [(t, self._score(t)) for t in self.trials]
+        scored = [(t, self._score(t, prefix)) for t in outcomes]
         # 有分值的按方向排序在前，None（失败/缺指标）按原始顺序排最后
         keyed = [(t, s, -s if (s is not None and direction) else s) for t, s in scored]
         ordered = sorted(
@@ -327,10 +429,66 @@ class ParamOptimizationResult:
             ranked_list.append(item)
         return ranked_list
 
+    def ranked(self, top: int = RANK_TOP_N) -> List[Dict[str, Any]]:
+        """按结论指标排序返回前 top 名（失败组恒排最后）。
+
+        分割模式下结论指标=样本外（"结论以样本外为准"）；无分割时=全样本指标。
+
+        Args:
+            top: 返回条数上限（非负整数）。
+
+        Returns:
+            排序后的结果字典列表，每条附加 "_rank" 排名。
+        """
+        if top < 0:
+            raise ValueError(f"top 必须为非负整数，收到: {top!r}")
+        return self._rank(self._completed_outcomes(), "", top)
+
+    def ranked_in_sample(self, top: int = RANK_TOP_N) -> List[Dict[str, Any]]:
+        """按样本内指标排序返回前 top 名（寻优依据）。
+
+        无分割模式下等价于 ranked()（此时无样本外概念）。
+
+        Args:
+            top: 返回条数上限（非负整数）。
+
+        Returns:
+            排序后的结果字典列表，每条附加 "_rank" 排名。
+        """
+        if top < 0:
+            raise ValueError(f"top 必须为非负整数，收到: {top!r}")
+        if not self.split_mode:
+            return self.ranked(top=top)
+        return self._rank(self._completed_outcomes(), "in_", top)
+
+    def ranked_out_sample(self, top: int = RANK_TOP_N) -> List[Dict[str, Any]]:
+        """按样本外指标排序返回前 top 名（确认依据）。
+
+        无分割模式（未启用样本外）下返回空列表。
+
+        Args:
+            top: 返回条数上限（非负整数）。
+
+        Returns:
+            排序后的结果字典列表，每条附加 "_rank" 排名。
+        """
+        if top < 0:
+            raise ValueError(f"top 必须为非负整数，收到: {top!r}")
+        if not self.split_mode:
+            return []
+        return self._rank(self._completed_outcomes(), "out_", top)
+
     def best(self) -> Optional[Dict[str, Any]]:
-        """返回最优参数组合（无成功结果时返回 None）。"""
+        """返回最优参数组合（无成功结果时返回 None）。
+
+        分割模式下：样本内选参（ranked_in_sample 取顶），返回的记录含 in_*/out_* 双列，
+        结论字段（sharpe_ratio 等）为样本外——即"同一网格在样本内选中后在样本外复算"；
+        无分割时按结论指标取顶（兼容原行为）。
+        """
         if self.completed_count == 0:
             return None
+        if self.split_mode:
+            return self.ranked_in_sample(top=1)[0]
         return self.ranked(top=1)[0]
 
     def to_dict(self) -> Dict[str, Any]:
@@ -338,7 +496,9 @@ class ParamOptimizationResult:
         return {
             "strategy_name": self.strategy_name,
             "objective": self.objective,
+            "split_mode": self.split_mode,
             "total_count": self.total_count,
+            "evaluation_count": self.evaluation_count,
             "completed_count": self.completed_count,
             "error_count": self.error_count,
             "elapsed_seconds": round(self.elapsed_seconds, 6),
@@ -347,7 +507,10 @@ class ParamOptimizationResult:
         }
 
     def to_dataframe(self) -> pd.DataFrame:
-        """转 DataFrame：每行一条结果，params 展开为独立列，失败组指标置空。"""
+        """转 DataFrame：每行一条结果，params 展开为独立列，失败组指标置空。
+
+        分割模式额外输出 in_*/out_* 双区段列（样本内寻优 / 样本外确认）。
+        """
         rows: List[Dict[str, Any]] = []
         for t in self.trials:
             row = {
@@ -359,45 +522,137 @@ class ParamOptimizationResult:
                 "trade_count": t.get("trade_count"),
                 "error": t.get("error"),
             }
+            if self.split_mode:
+                for metric in _CONCLUSION_METRICS:
+                    row[f"in_{metric}"] = t.get(f"in_{metric}")
+                    row[f"out_{metric}"] = t.get(f"out_{metric}")
             for k, v in (t.get("params") or {}).items():
                 row[f"param_{k}"] = v
             rows.append(row)
         return pd.DataFrame(rows)
 
     def summary(self) -> str:
-        """生成优化汇总报告文本（含最优参数与 Top 榜）。"""
+        """生成优化汇总报告文本（含最优参数与 Top 榜；分割模式输出 in/out 双列）。"""
         lines = ["策略参数优化报告"]
         lines.append("=" * 64)
-        lines.append(f"策略: {self.strategy_name} | 目标: {self.objective}")
+        mode = "样本内→样本外" if self.split_mode else "全样本"
+        lines.append(f"策略: {self.strategy_name} | 目标: {self.objective} | 分割: {mode}")
         lines.append(
-            f"任务: {self.total_count}（成功 {self.completed_count} / "
-            f"失败 {self.error_count}）| 评估耗时: {format_duration(self.elapsed_seconds)}"
+            f"参数组合: {self.total_count}（成功 {self.completed_count} / "
+            f"失败 {self.error_count}）| 试验次数: {self.evaluation_count} | "
+            f"评估耗时: {format_duration(self.elapsed_seconds)}"
         )
         best = self.best()
         if best is not None:
             lines.append("-" * 64)
-            lines.append("最优参数组合:")
-            lines.append(f"  {best.get('params')}")
-            lines.append(
-                f"  总收益 {best.get('total_return'):.2%} | "
-                f"夏普 {best.get('sharpe_ratio'):.3f} | "
-                f"最大回撤 {best.get('max_drawdown'):.2%} | "
-                f"交易数 {best.get('trade_count')}"
-            )
-        top = self.ranked(top=RANK_TOP_N)
+            if self.split_mode:
+                lines.append("最优参数组合（样本内寻优，结论以样本外为准）:")
+                lines.append(f"  {best.get('params')}")
+                lines.append(
+                    f"  样本内: 收益 {float(best.get('in_total_return') or 0):.2%} | "
+                    f"夏普 {float(best.get('in_sharpe_ratio') or 0):.3f} | "
+                    f"回撤 {float(best.get('in_max_drawdown') or 0):.2%}"
+                )
+                lines.append(
+                    f"  样本外: 收益 {float(best.get('out_total_return') or 0):.2%} | "
+                    f"夏普 {float(best.get('out_sharpe_ratio') or 0):.3f} | "
+                    f"回撤 {float(best.get('out_max_drawdown') or 0):.2%}"
+                )
+            else:
+                lines.append("最优参数组合:")
+                lines.append(f"  {best.get('params')}")
+                lines.append(
+                    f"  总收益 {float(best.get('total_return') or 0):.2%} | "
+                    f"夏普 {float(best.get('sharpe_ratio') or 0):.3f} | "
+                    f"最大回撤 {float(best.get('max_drawdown') or 0):.2%} | "
+                    f"交易数 {best.get('trade_count')}"
+                )
+        top = self.ranked_in_sample(top=RANK_TOP_N)
         if top:
             lines.append("-" * 64)
-            lines.append(f"Top {len(top)} 排名:")
-            lines.append(f"{'排名':<5} {'标的':<12} {'参数':<30} {'夏普':>8} {'收益':>8} {'回撤':>8}")
-            for item in top:
+            if self.split_mode:
+                lines.append(f"Top {len(top)} 样本内排名（寻优）:")
                 lines.append(
-                    f"{item['_rank']:<5} {str(item.get('symbol')):<12} "
-                    f"{str(item.get('params')):<30} "
-                    f"{float(item['sharpe_ratio'] or 0):>8.3f} "
-                    f"{float(item['total_return'] or 0):>8.2%} "
-                    f"{float(item['max_drawdown'] or 0):>8.2%}"
+                    f"{'排名':<5} {'标的':<10} {'参数':<28} {'样本内夏普':>10} {'样本外夏普':>10}"
                 )
+                for item in top:
+                    lines.append(
+                        f"{item['_rank']:<5} {str(item.get('symbol')):<10} "
+                        f"{str(item.get('params')):<28} "
+                        f"{float(item.get('in_sharpe_ratio') or 0):>10.3f} "
+                        f"{float(item.get('out_sharpe_ratio') or 0):>10.3f}"
+                    )
+            else:
+                lines.append(f"Top {len(top)} 排名:")
+                lines.append(
+                    f"{'排名':<5} {'标的':<10} {'参数':<28} {'夏普':>8} {'收益':>8} {'回撤':>8}"
+                )
+                for item in top:
+                    lines.append(
+                        f"{item['_rank']:<5} {str(item.get('symbol')):<10} "
+                        f"{str(item.get('params')):<28} "
+                        f"{float(item.get('sharpe_ratio') or 0):>8.3f} "
+                        f"{float(item.get('total_return') or 0):>8.2%} "
+                        f"{float(item.get('max_drawdown') or 0):>8.2%}"
+                    )
         return "\n".join(lines)
+
+
+@dataclass
+class WalkForwardResult:
+    """滚动 walk-forward 三段式验证聚合结果（KP-P2-05 第三阶段）。
+
+    Attributes:
+        strategy_name: 策略注册名。
+        objective: 目标指标名。
+        folds: 每折验证结果列表（含训练截止/测试截止/最优参数/in-out 样本外指标）。
+    """
+
+    strategy_name: str
+    objective: str
+    folds: List[Dict[str, Any]]
+
+    @property
+    def fold_count(self) -> int:
+        """滚动折数。"""
+        return len(self.folds)
+
+    def summary(self) -> str:
+        """生成滚动 walk-forward 验证报告文本。"""
+        lines = ["滚动 walk-forward 验证报告"]
+        lines.append("=" * 64)
+        lines.append(
+            f"策略: {self.strategy_name} | 目标: {self.objective} | 折数: {len(self.folds)}"
+        )
+        lines.append(
+            f"{'折':<4} {'训练截止':<12} {'测试截止':<12} "
+            f"{'样本内夏普':>10} {'样本外夏普':>10} {'样本外收益':>10}"
+        )
+        valid: List[Dict[str, Any]] = []
+        for fold in self.folds:
+            out_sr = fold.get("out_sharpe_ratio")
+            if out_sr is not None:
+                valid.append(fold)
+            lines.append(
+                f"{fold['fold_index']:<4} {fold['train_end']:<12} {fold['test_end']:<12} "
+                f"{float(fold.get('in_sharpe_ratio') or 0):>10.3f} "
+                f"{float(out_sr or 0):>10.3f} "
+                f"{float(fold.get('out_total_return') or 0):>10.2%}"
+            )
+        if valid:
+            avg_out = sum(float(f["out_sharpe_ratio"]) for f in valid) / len(valid)
+            lines.append("-" * 64)
+            lines.append(f"样本外平均夏普（{len(valid)} 折有效）: {avg_out:.3f}（结论以样本外为准）")
+        return "\n".join(lines)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """序列化为可读字典（供 JSON 落盘）。"""
+        return {
+            "strategy_name": self.strategy_name,
+            "objective": self.objective,
+            "fold_count": len(self.folds),
+            "folds": self.folds,
+        }
 
 
 # ── 优化器 ────────────────────────────────────────────────────────────
@@ -412,6 +667,8 @@ class ParamOptimizer:
         cpu_workers: 计算进程池大小；None 使用默认。
         start_date: 回测起始日期。
         end_date: 回测结束日期。
+        in_sample_end: 样本内截止日期（YYYY-MM-DD）；设置后启用样本内→样本外分割
+            （KP-P2-05：样本内寻优、样本外确认，报告输出 in/out 双列）。
         initial_capital: 初始资金（>0）。
         frequency: K 线频率。
 
@@ -430,6 +687,7 @@ class ParamOptimizer:
         cpu_workers: Optional[int] = None,
         start_date: str = "",
         end_date: str = "",
+        in_sample_end: str = "",
         initial_capital: float = DEFAULT_INITIAL_CAPITAL,
         frequency: str = DEFAULT_FREQUENCY,
     ) -> None:
@@ -454,6 +712,21 @@ class ParamOptimizer:
             raise ValueError(f"initial_capital 必须为正数，收到: {initial_capital!r}")
         if not isinstance(frequency, str) or not frequency.strip():
             raise ValueError("frequency 必须为非空字符串")
+        if not isinstance(in_sample_end, str):
+            raise TypeError(
+                f"in_sample_end 必须为字符串，收到: {type(in_sample_end).__name__}"
+            )
+        # KP-P2-05：in_sample_end 必须严格落在 [start, end] 开区间内，否则无法分割
+        if in_sample_end:
+            if not start_date or not end_date:
+                raise ValueError(
+                    "设置 in_sample_end 时必须同时提供 start_date 与 end_date"
+                )
+            if not (start_date < in_sample_end < end_date):
+                raise ValueError(
+                    f"in_sample_end 必须介于 start_date 与 end_date 之间: "
+                    f"{start_date} < {in_sample_end} < {end_date}"
+                )
 
         # 校验行情列（防御：缺 OHLCV 列导致子进程集体失败；中文列优先，兼容英文列）
         for symbol, df in data.items():
@@ -468,26 +741,61 @@ class ParamOptimizer:
         self.cpu_workers = cpu_workers
         self.start_date = start_date
         self.end_date = end_date
+        self.in_sample_end = in_sample_end
         self.initial_capital = initial_capital
         self.frequency = frequency
 
     def _build_trials(self) -> List[ParamTrial]:
-        """展开全部任务：参数组合 x 标的，每任务只携带本标的行情。"""
+        """展开全部任务：参数组合 x 标的，每任务只携带本标的行情。
+
+        启用 in_sample_end 时每个组合拆为两个区段任务（split="in"/"out"），
+        样本内寻优、样本外确认（KP-P2-05）；未启用时单任务（split="in"，兼容原行为）。
+        """
         trials: List[ParamTrial] = []
+        split_mode = bool(self.in_sample_end)
         for combo in self.grid.combinations():
             for symbol, df in self.data.items():
-                trials.append(
-                    ParamTrial(
-                        params=combo,
-                        strategy_name=self.strategy_name,
-                        symbol=symbol,
-                        data={symbol: df},
-                        start_date=self.start_date,
-                        end_date=self.end_date,
-                        initial_capital=self.initial_capital,
-                        frequency=self.frequency,
+                if split_mode:
+                    trials.append(
+                        ParamTrial(
+                            params=combo,
+                            strategy_name=self.strategy_name,
+                            symbol=symbol,
+                            data={symbol: df},
+                            start_date=self.start_date,
+                            end_date=self.in_sample_end,
+                            initial_capital=self.initial_capital,
+                            frequency=self.frequency,
+                            split="in",
+                        )
                     )
-                )
+                    trials.append(
+                        ParamTrial(
+                            params=combo,
+                            strategy_name=self.strategy_name,
+                            symbol=symbol,
+                            data={symbol: df},
+                            start_date=self.in_sample_end,
+                            end_date=self.end_date,
+                            initial_capital=self.initial_capital,
+                            frequency=self.frequency,
+                            split="out",
+                        )
+                    )
+                else:
+                    trials.append(
+                        ParamTrial(
+                            params=combo,
+                            strategy_name=self.strategy_name,
+                            symbol=symbol,
+                            data={symbol: df},
+                            start_date=self.start_date,
+                            end_date=self.end_date,
+                            initial_capital=self.initial_capital,
+                            frequency=self.frequency,
+                            split="in",
+                        )
+                    )
         return trials
 
     def optimize(self) -> ParamOptimizationResult:
@@ -531,6 +839,7 @@ class ParamOptimizer:
                     {
                         "params": trial.params,
                         "symbol": trial.symbol,
+                        "split": trial.split,
                         "status": "error",
                         "total_return": None,
                         "sharpe_ratio": None,
@@ -544,14 +853,102 @@ class ParamOptimizer:
 
         errors = sum(1 for o in normalized if o.get("status") != "completed")
         if errors:
-            logger.warning("参数优化完成: %d/%d 组失败（已隔离，不影响其余）",
+            logger.warning("参数优化完成: %d/%d 组区段失败（已隔离，不影响其余）",
                            errors, total)
+
+        # KP-P2-05：按 (params, symbol) 聚合 in/out 双区段为单条记录（含 in_*/out_* 双列）
+        combined = _coalesce_outcomes(normalized)
 
         return ParamOptimizationResult(
             strategy_name=self.strategy_name,
             objective=self.objective,
-            trials=normalized,
+            trials=combined,
             elapsed_seconds=elapsed,
+            split_mode=bool(self.in_sample_end),
+            evaluation_count=len(normalized),
+        )
+
+    def walk_forward(self, folds: int = 3) -> WalkForwardResult:
+        """滚动 walk-forward 三段式验证（KP-P2-05 第三阶段）。
+
+        把全局数据区间滚动切成 ``folds`` 个样本外窗口：每个折用【全局起点→该折训练截止】
+        的数据做样本内寻优（复用 optimize 的 in/out 分割），在该折测试窗口做样本外确认；
+        聚合所有折的样本外绩效作为抗过拟合的最终结论。
+
+        时间序列计算仅使用当前折训练截止（含）及之前的已可得数据，无未来函数。
+
+        Args:
+            folds: 滚动折数（>=2）。每折测试窗口大小 = 可用样本外 / folds。
+
+        Returns:
+            每折验证结果聚合（含样本外平均绩效）。
+
+        Raises:
+            ValueError: folds 非法或数据区间过短。
+        """
+        if not isinstance(folds, int) or isinstance(folds, bool) or folds < 2:
+            raise ValueError(f"folds 必须为 >=2 的整数，收到: {folds!r}")
+        # 从任一标的数据 index 取全局可用日期（升序去重）
+        index = next(iter(self.data.values())).index
+        dates: List = sorted(pd.Index(index).unique())
+        n = len(dates)
+        if n < (folds + 1):
+            raise ValueError(
+                f"数据区间过短，无法做 {folds} 折 walk-forward（可用日期仅 {n} 根）"
+            )
+        # 最小训练长度占 1/3，保证每折训练段有预热与寻优意义
+        min_train = max(1, n // 3)
+        available_test = n - min_train
+        if available_test < folds:
+            raise ValueError(
+                f"可用样本外过短（{available_test} 根 < 折数 {folds}），请减小 folds"
+            )
+        test_size = available_test // folds
+
+        fold_results: List[Dict[str, Any]] = []
+        global_start = dates[0].strftime("%Y-%m-%d")
+        for i in range(folds):
+            test_start_idx = min_train + i * test_size
+            test_end_idx = min_train + (i + 1) * test_size
+            if i == folds - 1:
+                test_end_idx = n - 1
+            train_end = dates[test_start_idx].strftime("%Y-%m-%d")
+            test_end = dates[test_end_idx].strftime("%Y-%m-%d")
+            sub_opt = ParamOptimizer(
+                strategy_name=self.strategy_name,
+                grid=self.grid,
+                data=self.data,
+                objective=self.objective,
+                cpu_workers=self.cpu_workers,
+                start_date=global_start,
+                end_date=test_end,
+                in_sample_end=train_end,
+                initial_capital=self.initial_capital,
+                frequency=self.frequency,
+            )
+            result = sub_opt.optimize()
+            best = result.best()
+            fold_results.append(
+                {
+                    "fold_index": i + 1,
+                    "train_end": train_end,
+                    "test_end": test_end,
+                    "best_params": best.get("params") if best is not None else None,
+                    "in_sharpe_ratio": (
+                        best.get("in_sharpe_ratio") if best is not None else None
+                    ),
+                    "out_sharpe_ratio": (
+                        best.get("out_sharpe_ratio") if best is not None else None
+                    ),
+                    "out_total_return": (
+                        best.get("out_total_return") if best is not None else None
+                    ),
+                }
+            )
+        return WalkForwardResult(
+            strategy_name=self.strategy_name,
+            objective=self.objective,
+            folds=fold_results,
         )
 
 
