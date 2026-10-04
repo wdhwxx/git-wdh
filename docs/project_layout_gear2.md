@@ -544,6 +544,7 @@ Pythonwdhmm/
 │   │   ├── test_incremental_config_signature.py # ✨【回写#168】增量缓存签名测试(KP-P5-09：签名对参数/费用/资金敏感/同配置稳定/缓存匹配复用/配置变更强制重算/格式版本不匹配重算/run写签名，8项)✅已完成
 │   │   ├── test_ml_volatility_robust.py # ✨【回写#97】F-10 波动率稳健化测试（std 默认零变化/ewma 递推数值对拍/λ 自适应触发/robust 滚动 MAD 对拍/winsorize 截断+防未来/ExtremeRegime 0-1 标记/参数防御/特征层默认零变化与启用产出新列/流式 update 与批量一致/端到端注册/验收对比股灾序列恢复段 EWMA 偏差<固定 std 偏差/method 非法报错，15项）✅已完成
 │   │   ├── test_tradability_filter.py # ✨【回写#98】F-11 可交易性过滤测试（停牌/20日均额阈值/一字涨跌停三规则/列缺失跳过/防未来 rolling 因果/拒因统计/策略侧启用后选层 0 不可交易标的/特征层行级 mask 置 NaN 保对齐/默认零变化/参数防御，22项）✅已完成
+│   │   ├── test_pool_tradability_filter.py # ✨【回写#173】股票池可交易性过滤测试(KP-P2-01：ST剔除/次新剔除/volume0剔除/无名称列不误杀/build含过滤/RSRS默认1/3可参数化，6项)✅已完成
 
 │   │   ├── test_data_fingerprint.py  # ✨【V5·P0】数据指纹测试（哈希级差异检测：指纹生成/查询/缓存失效/旧数据替换，20项）
 
@@ -830,13 +831,13 @@ Pythonwdhmm/
 
     │   ├── registry.py               # 策略注册器：装饰器注册、动态发现、外部插件入口点
 
-    │   ├── base.py                   # 策略抽象基类：信号生成、参数接口、生命周期钩子、通用工具；✨【回写#140】防未来守卫钩子（KP-P2-08：record_indicator_guard/record_stop_loss_guard/record_data_access_guard，data_end 因果口径；get_signal_data_end 供引擎 record_signal 上报真实数据截止日，禁自证常量）
+    │   ├── base.py                   # 策略抽象基类：信号生成、参数接口、生命周期钩子、通用工具；✨【回写#140】防未来守卫钩子（KP-P2-08：record_indicator_guard/record_stop_loss_guard/record_data_access_guard，data_end 因果口径；get_signal_data_end 供引擎 record_signal 上报真实数据截止日，禁自证常量）；✨【回写#173】StockPoolBuilder 增 filter_by_tradability（KP-P2-01：ST/停牌/次新/20日均量，min_listing_bars）
 
     │   │                             # ✨【V5·P1】三接口：on_bar(逐bar事件接口，event引擎用)/generate_signals_vectorized(向量化批量信号，vectorized引擎用)/generate_mixed_loop(混合模式混合循环，mixed引擎用)；6策略均实现双接口（on_bar+generate_signals_vectorized），混合引擎自动适配
 
     │   │                             # （check_stop_loss/check_take_profit/_should_rebalance/_get_close_series）
 
-    │   ├── ma_strategy.py            # RSRS三因子择时策略 + 均线交叉示例；✨【回写#140】指标点挂载 record_indicator_guard（KP-P2-08：RSRS/MA 指标计算、止损点 CHECK，铁律1/2 运行时真实上报）
+    │   ├── ma_strategy.py            # RSRS三因子择时策略 + 均线交叉示例；✨【回写#140】指标点挂载 record_indicator_guard（KP-P2-08：RSRS/MA 指标计算、止损点 CHECK，铁律1/2 运行时真实上报）；✨【回写#173】pool_top_ratio 默认回 1/3 并参数化（KP-P2-01）
 
     │   ├── grid_strategy.py          # 网格交易策略（震荡市，固定区间/auto_grid自适应）
 
@@ -3033,6 +3034,16 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：消息总线凭据缺失即显式失败，杜绝默认账号静默连接；校验前置不依赖 pika 安装。
 - 验证结果：py_compile 通过；新增 tests/unit/test_message_bus_credentials.py 6 项全绿（默认 None/源码默认值/空凭据 raise/部分凭据 raise/无 guest 回退/凭据齐全不误报）；回归 6 passed 无回归；ruff 干净（顺手清理 rabbitmq_bus 既有 json/time 未用导入与排序）。
 - 纪律遵守：改蓝图已标注文件（core/transports/base.py、core/transports/rabbitmq_bus.py）+ tests/unit 新增 test_message_bus_credentials.py（同步更新目录树）；无蓝图外文件；严格防未来。
+
+173. ✨【回写记录·2026-10-04·T-40 KP-P2-01 股票池可交易性过滤】
+
+【发现】strategies/base.py StockPoolBuilder.build 仅 filter_by_code（代码前缀），无 ST/停牌/次新/流动性过滤（审计 base.py:688-690）；ma_strategy.py:88 pool_top_ratio 默认 0.5 覆写规格 1/3（交集口径偏差）。
+- 修复：
+  a. **可交易性过滤**：StockPoolBuilder 新增 `filter_by_tradability(symbols, data_dict, as_of)`——剔除 ST 标记（仅当含名称列，无名称列不误杀）、上市不足 min_listing_bars(默认60) 根的次新、近 20 日均量为 0（volume=0 停牌/无成交）；__init__ 增 min_listing_bars 参数；build 流程改为 filter_by_code → filter_by_tradability → 三因子交集（数据已按 as_of 截断，严格防未来）。
+  b. **比例参数化**：ma_strategy.py RSRSStrategy pool_top_ratio 默认改回 1/3（规格口径，参数化可调），股票池构建器注释同步。
+- 防未来：可交易性判定仅用截至 as_of 的行情（成交量/上市天数），不引用未来数据；ST 判断无名称列时保守放行避免误杀。
+- 验证结果：py_compile 通过；新增 tests/unit/test_pool_tradability_filter.py 6 项全绿（ST剔除/次新剔除/volume=0剔除/无名称列不误杀/build 流程含过滤/RSRS 默认1/3可参数化）；回归 test_strategies 118 passed 无回归；ruff 干净（顺手清理 ma_strategy 既有未用导入）。
+- 纪律遵守：改蓝图已标注文件（strategies/base.py、strategies/ma_strategy.py）+ tests/unit 新增 test_pool_tradability_filter.py（同步更新目录树）；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】

@@ -728,11 +728,13 @@ class StockPoolBuilder:
         volatility_period: int = 20,
         momentum_period: int = 60,
         top_ratio: float = 1.0 / 3.0,
+        min_listing_bars: int = 60,
     ):
         self.exclude_prefixes = exclude_prefixes or self.DEFAULT_EXCLUDE_PREFIXES
         self.volatility_period = volatility_period
         self.momentum_period = momentum_period
         self.top_ratio = top_ratio
+        self.min_listing_bars = min_listing_bars
         logger.info(
             f"股票池构建器初始化: 波动率={volatility_period}日, "
             f"动量={momentum_period}日, 前{top_ratio:.2%}"
@@ -748,6 +750,54 @@ class StockPoolBuilder:
                 filtered.append(symbol)
         logger.debug(f"代码过滤: {len(symbols)} → {len(filtered)}")
         return filtered
+
+    def filter_by_tradability(
+        self,
+        symbols: List[str],
+        data_dict: Dict[str, pd.DataFrame],
+        as_of: Optional[Any] = None,
+    ) -> List[str]:
+        """按可交易性过滤股票池：剔除 ST/停牌(volume=0)/次新(上市<60天)/20日均量为0
+
+        仅依赖截至 as_of（或全量）时点已可得的历史数据，不引用未来数据。
+
+        Args:
+            symbols: 候选标的代码列表。
+            data_dict: {symbol: 行情DataFrame}。
+            as_of: 时点截断；不传则不截断（向后兼容）。
+        """
+        tradable: List[str] = []
+        for symbol in symbols:
+            df = data_dict.get(symbol)
+            if df is None or len(df) == 0:
+                continue
+            if as_of is not None:
+                as_of_ts = (
+                    pd.Timestamp.fromtimestamp(as_of)
+                    if isinstance(as_of, (int, float))
+                    else as_of
+                )
+                df = df[df.index <= as_of_ts]
+                if len(df) == 0:
+                    continue
+            # 上市≥min_listing_bars 天（至少 min_listing_bars 根历史K线，数据截至 t）
+            if len(df) < self.min_listing_bars:
+                continue
+            # ST 标记剔除：仅当数据含名称列（无名称列不误杀）
+            name_col = next((c for c in ("名称", "股票名称") if c in df.columns), None)
+            if name_col is not None:
+                last_name = str(df[name_col].iloc[-1]).upper()
+                if "ST" in last_name:
+                    continue
+            # 成交量列：近20日均量为0 或最新交易日 volume=0 视为停牌/不可交易（数据截至 t）
+            vol_col = next((c for c in ("成交量", "volume", "Volume") if c in df.columns), None)
+            if vol_col is not None:
+                recent_vol = df[vol_col].astype(float).tail(self.volatility_period)
+                if recent_vol.empty or recent_vol.mean() <= 0:
+                    continue
+            tradable.append(symbol)
+        logger.info(f"可交易性过滤: {len(symbols)} → {len(tradable)}")
+        return tradable
 
     def calculate_factors(self, data_dict: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         """计算三因子得分"""
@@ -831,5 +881,8 @@ class StockPoolBuilder:
                 as_of_ts = pd.Timestamp.fromtimestamp(as_of) if isinstance(as_of, (int, float)) else as_of
                 df = df[df.index <= as_of_ts]
             valid_data[s] = df
+        # KP-P2-01：插入可交易性过滤（ST/停牌/次新/20日均量），数据已按 as_of 截断
+        filtered = self.filter_by_tradability(list(valid_data.keys()), valid_data)
+        valid_data = {s: valid_data[s] for s in filtered if s in valid_data}
         factor_df = self.calculate_factors(valid_data)
         return self.select_by_intersection(factor_df)

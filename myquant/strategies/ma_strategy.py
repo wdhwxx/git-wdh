@@ -39,9 +39,13 @@ import pandas as pd
 from myquant.core.logger import get_logger
 from myquant.indicators import RSRS
 from myquant.models.market_data import Bar
-from myquant.models.trade import OrderSide, OrderType, Position
+from myquant.models.trade import Position
 from myquant.strategies.base import (
-    Signal, SignalType, StrategyBase, StrategyContext, StockPoolBuilder,
+    Signal,
+    SignalType,
+    StockPoolBuilder,
+    StrategyBase,
+    StrategyContext,
 )
 from myquant.strategies.registry import register_strategy
 
@@ -85,7 +89,7 @@ class RSRSStrategy(StrategyBase):
         max_positions: int = 5,
         pool_rebalance_days: int = 20,
         initial_capital: float = 1_000_000.0,
-        pool_top_ratio: float = 0.5,  # 各因子取前50%（原1/3太严格导致交集太小）
+        pool_top_ratio: float = 1.0 / 3.0,  # 各因子取前1/3（规格口径；可参数化调整）
         **params: Any,
     ):
         # 参数校验（防御式编程）
@@ -139,7 +143,7 @@ class RSRSStrategy(StrategyBase):
         self._days_since_rebalance = 0
         self._bar_count = 0
 
-        # 股票池构建器（top_ratio=0.5：各因子取前50%，避免交集太小）
+        # 股票池构建器（top_ratio 参数化，默认 1/3 规格口径，KP-P2-01 改回）
         self.pool_builder = StockPoolBuilder(top_ratio=pool_top_ratio)
 
         logger.info(
