@@ -136,12 +136,13 @@ three_factor_pool:
 
 # ========== 双均线策略（示例，用于对比）==========
 ma_cross:
-  short_period: 5                           # 短期均线周期
-  long_period: 20                           # 长期均线周期
+  fast_period: 5                            # 短期均线周期（P2-15修正：类签名为fast_period/short_period旧名已废弃）
+  slow_period: 20                           # 长期均线周期
   ma_type: "ema"                            # 均线类型：sma / ema / wma
   position_pct: 0.95                        # 买入仓位比例
 
-# ========== RSI策略（示例）==========
+# ========== 以下策略当前未在注册表注册（create_strategy 会抛 ValueError），【预留·未消费】仅作模板 ==========
+# RSI策略（示例）
 rsi:
   period: 14                                 # RSI计算周期
   overbought: 70                             # 超买阈值（卖出）

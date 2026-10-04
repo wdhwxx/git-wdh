@@ -2522,3 +2522,13 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
   risk_pause_total 等按正确类型导出，rate()/increase()语义恢复。
 
 【验证】py_compile两文件PASS；pytest全量2067 passed/0 failed（214s）。
+
+131. ✨【回写记录·2026-10-04·P2-15 策略参数双轨修正（P2批次第5项）】
+
+【P2-15｜strategy_params.example.yaml 参数名与注册策略不匹配】
+- 修复：ma_cross 块 short_period/long_period 改 fast_period/slow_period（对齐 ma_strategy 类签名，
+  旧名静默落**params失效，默认5/20掩盖问题）；
+  rsi/macd/bollinger 三块标注【预留·未消费】（注册表无对应策略，create_strategy会ValueError）。
+- 备注：ma_strategy pool_top_ratio默认0.5 vs 规格1/3 的口径差异，属策略默认值行为，留待策略规格对齐，不改代码默认值以免改变回测结果。
+
+【验证】pytest全量2067 passed/0 failed（219s）。
