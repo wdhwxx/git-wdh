@@ -323,7 +323,7 @@ Pythonwdhmm/
 
 │   ├── backtest_config.example.yaml  # 回测参数模板：初始资金、手续费、滑点、时间范围等；✨【V5】新增engine.mode（event/vectorized/mixed三模式选择）+ performance段（workers/chunk_size/memory_pool/预取开关），由BatchBacktest与run_批量回测.py读取
 
-│   ├── live_config.example.yaml     # 实盘参数模板：券商连接、风控阈值、订阅合约等
+│   ├── live_config.example.yaml     # 实盘参数模板：券商连接、风控阈值、订阅合约等；✨【回写#144】增 compliance 报备段（enabled+filing六字段，口径待律师确认）
 
 │   ├── strategy_params.example.yaml # 策略参数模板：全部7策略参数块（ma_cross/rsrs/grid/momentum/mean_reversion/multi_factor/kunpeng）
 
@@ -567,6 +567,7 @@ Pythonwdhmm/
 │   │   ├── test_run_mode.py       # ✨【回写#52】运行模式切割接口测试(枚举/resolve优先级/apply写回/validate_live安全门/check一致性，19项)✅已完成
 
 │   │   ├── test_acceptance.py     # ✨【回写#52】仿真绩效准入评估测试(全达标/回测比较/未达标/数据缺失NA/阈值覆盖/非法输入/序列化，11项)✅已完成
+│   │   ├── test_compliance_gate.py # ✨【回写#144】报备合规门禁测试(KP-P6-01：缺字段拦截exit2/放行exit0/开关未开/状态非approved/日期非法/自定义字段/validate_live联动/engine拦截/快照落盘，12项)✅已完成
 │   │   ├── test_paper_run_dialog.py  # ✨【回写#65】仿真运行弹窗 GUI 测试（offscreen）
 │   │   ├── test_data_incremental_clean_dual.py  # ✨【回写#59】增量清洗双通道测试
 │   │   └── test_update_symbol_incremental_start.py  # ✨【回写#67】增量起点以 processed 为准（M5）+ save 失败统计（11项）✅已完成
@@ -983,9 +984,9 @@ Pythonwdhmm/
 
     │   ├── emergency_liquidation.py  # ✨【回写#47补录】紧急平仓服务（EmergencyLiquidationService：execute(confirm=False默认dry_run)生成撤单+平仓计划；先撤挂单再卖/优先可卖数量/单标异常不阻断/报告结构化）；被engine._setup_force_close与scripts/一键平仓.py调用
 
-    │   ├── run_mode.py               # ✨【回写#52】运行模式切割接口：RunMode枚举(MONITOR/PAPER/SIM/LIVE)+describe+resolve(专先CLI>配置>默认paper)+apply_mode_to_config写回+validate_live实盘安全门(--confirm-live+证券qmt/ptrade+账户)+check_mode_consistency配置一致性；被run_实盘入口与create_live_engine消费；未来实盘切割 --mode sim→--mode live --confirm-live 一步切换
+    │   ├── run_mode.py               # ✨【回写#52】运行模式切割接口：RunMode枚举(MONITOR/PAPER/SIM/LIVE)+describe+resolve(专先CLI>配置>默认paper)+apply_mode_to_config写回+validate_live实盘安全门(--confirm-live+证券qmt/ptrade+账户)+check_mode_consistency配置一致性；被run_实盘入口与create_live_engine消费；未来实盘切割 --mode sim→--mode live --confirm-live 一步切换；✨【回写#144】validate_live 增 KP-P6-01 报备合规门禁（LIVE 未备案拒绝启动）
 
-    │   ├── acceptance.py             # ✨【回写#52】仿真绩效准入评估器(任务T10)：SimulationAcceptanceEvaluator对照表5阈值(DEFAULT_THRESHOLDS可覆盖)逐项判定8指标，缺数据判NA不误通过，产出AcceptanceReport(to_dict/to_text)；供scripts/仿真准入评估.py消费
+    │   ├── acceptance.py             # ✨【回写#52】仿真绩效准入评估器(任务T10)：SimulationAcceptanceEvaluator对照表5阈值(DEFAULT_THRESHOLDS可覆盖)逐项判定8指标，缺数据判NA不误通过，产出AcceptanceReport(to_dict/to_text)；供scripts/仿真准入评估.py消费；✨【回写#144】增 ComplianceGate/ComplianceReport（KP-P6-01 程序化交易报备门禁：六字段齐全+开关+已备案+日期格式，exit_code 0/2，快照落盘）
 
     │   └── brokers/                  # 券商适配层，只负责对接券商原始接口，不做清洗
 
@@ -2694,3 +2695,17 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：费用按已发生成交事实计提，不使用未来行情。
 - 验证结果：py_compile 2 文件 PASS；tests/unit/test_live_fee.py 6 项全绿（10万买单 fee=26>0 且滑点=20/卖单含印花税=126/佣金最低5元兜底=5.01/本地账本现金守恒（初始−成交额−累计费用）/卖单回笼扣费/与回测 FeeCalculator 口径同构）；qmt/live 回归 82 passed 无回归；ruff：测试文件通过（qmt_broker.py 4 处 F541 为既有，非本次引入）。
 - 纪律遵守：仅改蓝图已标注文件（live/brokers/qmt_broker.py）+ tests/unit 新增 test_live_fee.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+
+144. ✨【回写记录·2026-10-04·T-10 KP-P6-01 报备/高频/异常交易控制点全缺失（报备合规门禁前置部分）】
+
+【发现】`live_config.yaml` 无报备/compliance 段；`acceptance.py` `_ACCEPTABLE_MODES={paper,sim}` 仅约束绩效准入运行模式，无报备字段/启动门禁——实盘启动前无任何程序化交易报备校验。
+- 修复（补丁清单 §3.1.10 前置部分，异常交易监控模块留待后续任务）：
+  a. **acceptance.py 新增 ComplianceGate/ComplianceReport/ComplianceStatus**：报备必需字段 filing_number(报备编号)/filing_date(报备日期)/account_id(账户标识)/strategy_id(策略标识)/software_version(软件版本)/filing_status(备案状态)；`check()` 判字段齐全+开关 compliance.enabled+状态为已备案(approved)+日期格式 YYYY-MM-DD；`snapshot()`/`dump_snapshot()` 备案快照展示与落盘；`exit_code()` 合规返回 0、未通过返回 2（缺字段拦截）。
+  b. **run_mode.py validate_live**：LIVE 分支追加 ComplianceGate 校验（未备案 → 错误列表，拒绝 --mode live --confirm-live 启动）。
+  c. **engine.py create_live_engine**：trade_mode=live 时装配前 ComplianceGate 拦截（防绕过 CLI 直调工厂，与 check_mode_consistency 同层）。
+  d. **config/live_config.example.yaml** 新增 compliance 报备段（enabled + filing 六字段），口径标注待持牌律师/合规官按证监会/交易所官网最新原文确认。
+- 防未来：门禁仅校验已声明的报备事实，不预测未来状态；口径（必需字段/日期格式/状态枚举）可配置覆盖。
+- 验证结果：py_compile 全通过；新增 tests/unit/test_compliance_gate.py 12 项全绿（缺字段拦截 exit2 / 放行 exit0 / 开关未开拦截 / 状态非approved拦截 / 日期非法拦截 / 自定义必需字段 / validate_live LIVE未备案含合规错误+已备案放行+非LIVE不校验 / engine live未备案 ValueError+非live放行 / 快照落盘 JSON）；live 广回归 309 passed 无回归（同步 test_run_mode.py::_cfg 增合规段）；ruff 全部通过（engine.py 导入排序随 ruff 自动整理，无逻辑改动）。
+- 纪律遵守：仅改蓝图已标注文件（myquant/live/acceptance.py、run_mode.py、engine.py、config/live_config.example.yaml）+ tests/unit 新增 test_compliance_gate.py（本回写同步更新目录树）+ 同步既有 test_run_mode.py；无新增蓝图外业务文件；严格防未来。
+- 未决项：补丁清单 §3.1.10「新增异常交易监控模块（撤单率/报单频次/自成交/频繁撤单占比）」属独立控制点，留待后续任务；条款映射最终以律师/合规官确认口径为准。

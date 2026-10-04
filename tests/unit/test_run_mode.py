@@ -28,10 +28,21 @@ def _cfg(
     broker_type: str = "paper",
     broker_mode: str = "SIM",
 ) -> dict:
-    """构造最小实盘配置字典。"""
+    """构造最小实盘配置字典（含 KP-P6-01 报备合规段，放行 LIVE 校验）。"""
     return {
         "live": {"trade_mode": trade_mode},
         "broker": {"type": broker_type, "mode": broker_mode, "account": "888"},
+        "compliance": {
+            "enabled": True,
+            "filing": {
+                "filing_number": "ZJ2026-001",
+                "filing_date": "2026-01-15",
+                "account_id": "ACC-0001",
+                "strategy_id": "ma_cross_v1",
+                "software_version": "1.0.0",
+                "filing_status": "approved",
+            },
+        },
     }
 
 

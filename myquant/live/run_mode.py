@@ -225,6 +225,15 @@ def validate_live(
         errors.append(f"实盘(LIVE)要求券商为 qmt/ptrade，当前 broker.type={broker_type}")
     if not account:
         errors.append("实盘(LIVE)要求配置券商账户（broker.account）")
+    # KP-P6-01：程序化交易报备合规门禁（未备案拒绝实盘启动）
+    try:
+        from myquant.live.acceptance import ComplianceGate
+    except Exception as exc:  # pragma: no cover - 防御性导入失败
+        logger.error("导入 ComplianceGate 失败: %s", exc)
+        errors.append("合规门禁不可用，禁止实盘启动")
+    else:
+        comp = ComplianceGate(config).check()
+        errors.extend(comp.errors)
     return errors
 
 

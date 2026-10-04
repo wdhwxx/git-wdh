@@ -20,8 +20,10 @@
 from __future__ import annotations
 
 import enum
+import json
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger("live.acceptance")
@@ -128,6 +130,163 @@ class AcceptanceReport:
             f"（通过={self.passed} 未达标={self.failed} 待补充={self.pending}）"
         )
         return "\n".join(lines)
+
+
+
+# ── KP-P6-01：程序化交易报备合规门禁（实盘启动前置条件）──
+# 条款映射需持牌律师/合规官确认，以证监会/交易所官网最新原文为准；
+# 本门禁仅落地"字段齐全 + 已备案"的结构性校验，字段口径可配置调整。
+
+class ComplianceStatus(str, enum.Enum):
+    """程序化交易报备状态。"""
+
+    APPROVED = "approved"   # 已备案（允许实盘）
+    PENDING = "pending"     # 待报备（不允许实盘）
+    REJECTED = "rejected"   # 被驳回（不允许实盘）
+
+
+# 报备必需字段（补丁清单 §3.1.10；可被 required_fields 覆盖）
+DEFAULT_COMPLIANCE_FIELDS: Dict[str, str] = {
+    "filing_number": "报备编号",
+    "filing_date": "报备日期",
+    "account_id": "账户标识",
+    "strategy_id": "策略标识",
+    "software_version": "软件版本",
+    "filing_status": "备案状态",
+}
+
+# 视为"已备案"的状态值（兼容枚举值与中文别名）
+_APPROVED_STATUS_VALUES = frozenset({
+    ComplianceStatus.APPROVED.value, "已备案", "active", "1", "true",
+})
+
+
+@dataclass
+class ComplianceReport:
+    """程序化交易报备合规校验报告。"""
+
+    fields: Dict[str, str]  # 报备字段名 -> 字段值（含空）
+    missing: List[str]  # 缺失/空的必需字段
+    errors: List[str]  # 合规问题列表（空=通过）
+    enabled: bool  # 合规开关是否开启
+    overall: bool  # 是否允许实盘启动
+
+    def to_dict(self) -> Dict[str, Any]:
+        """序列化为字典（含备案快照，供启动自检落盘）。"""
+        return {
+            "snapshot": dict(self.fields),
+            "enabled": self.enabled,
+            "missing": list(self.missing),
+            "errors": list(self.errors),
+            "overall": self.overall,
+        }
+
+    def to_text(self) -> str:
+        """格式化为可打印文本报告。"""
+        lines = [
+            "程序化交易报备合规门禁（KP-P6-01）",
+            "-" * 56,
+            f"合规开关: {'开启' if self.enabled else '未开启(禁止实盘)'}",
+        ]
+        for name, value in self.fields.items():
+            lines.append(f"  {name}: {value or '(缺失)'}")
+        if self.missing:
+            lines.append(f"  缺失字段: {', '.join(self.missing)}")
+        for err in self.errors:
+            lines.append(f"  ❌ {err}")
+        lines.append("-" * 56)
+        lines.append(f"结论: {'✅ 已备案，允许实盘启动' if self.overall else '❌ 未通过，禁止实盘启动'}")
+        return "\n".join(lines)
+
+
+class ComplianceGate:
+    """程序化交易报备合规门禁。
+
+    校验实盘启动前置条件：报备字段齐全 + 备案状态为已备案 + 报备日期合法。
+    未通过时返回 exit_code 2（缺字段拦截），供启动入口拒绝 --mode live 启动。
+
+    Args:
+        config: 实盘配置字典（含 compliance 段）。
+        required_fields: 必需字段名->中文名映射（默认 DEFAULT_COMPLIANCE_FIELDS）。
+    """
+
+    def __init__(
+        self,
+        config: Dict[str, Any],
+        required_fields: Optional[Dict[str, str]] = None,
+    ) -> None:
+        if not isinstance(config, dict):
+            raise ValueError("config 必须为字典")
+        cfg = config.get("compliance", {})
+        cfg = cfg if isinstance(cfg, dict) else {}
+        filing = cfg.get("filing", {})
+        self._enabled = bool(cfg.get("enabled", False))
+        self._filing = filing if isinstance(filing, dict) else {}
+        self._required = dict(required_fields or DEFAULT_COMPLIANCE_FIELDS)
+
+    def check(self) -> ComplianceReport:
+        """执行报备合规校验。
+
+        防未来函数说明：仅校验配置中已声明的报备事实，不预测任何未来状态。
+        """
+        errors: List[str] = []
+        missing: List[str] = []
+        fields: Dict[str, str] = {}
+        for name in self._required:
+            value = str(self._filing.get(name, "") or "").strip()
+            fields[name] = value
+            if not value:
+                missing.append(name)
+        if missing:
+            errors.append("报备字段缺失: " + ", ".join(missing))
+        if not self._enabled:
+            errors.append("合规开关 compliance.enabled 未开启，禁止实盘启动")
+        status = str(self._filing.get("filing_status", "") or "").strip().lower()
+        if status not in _APPROVED_STATUS_VALUES:
+            errors.append(
+                f"备案状态须为已备案(approved)，当前: {status or '缺失'}"
+            )
+        filing_date = fields.get("filing_date", "")
+        if filing_date:
+            try:
+                datetime.strptime(filing_date, "%Y-%m-%d")
+            except ValueError:
+                errors.append(f"报备日期格式非法: {filing_date!r}（须 YYYY-MM-DD）")
+        return ComplianceReport(
+            fields=fields,
+            missing=missing,
+            errors=errors,
+            enabled=self._enabled,
+            overall=not errors,
+        )
+
+    def snapshot(self) -> Dict[str, Any]:
+        """备案快照（供启动自检展示）。"""
+        report = self.check()
+        return report.to_dict()
+
+    def dump_snapshot(self, path: Any) -> Dict[str, Any]:
+        """备案快照落盘（JSON 写入指定路径）。
+
+        Args:
+            path: 落盘文件路径（str 或 Path）。
+
+        Returns:
+            Dict：本次落盘的备案快照。
+        """
+        snap = self.snapshot()
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(snap, fh, ensure_ascii=False, indent=2)
+        except OSError as e:
+            logger.error("备案快照落盘失败: %s (%s)", path, e)
+            raise
+        logger.info("备案快照已落盘: %s", path)
+        return snap
+
+    def exit_code(self) -> int:
+        """启动拦截退出码：合规返回 0，未通过返回 2（缺字段拦截）。"""
+        return 0 if self.check().overall else 2
 
 
 # ── 数值提取工具 ──

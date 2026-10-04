@@ -64,23 +64,20 @@ from __future__ import annotations
 import threading
 import time
 from datetime import datetime
+
+# ── H2修复：实盘保障组件接线（风控/守护/状态/调度/事件总线）──
+from pathlib import Path as _Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
 import pandas as pd
 
-from myquant.core.logger import get_logger
 from myquant.core.date_utils import format_bar_date, get_date_part
-from myquant.core.lookahead_guard import LookaheadGuard, get_lookahead_guard
+from myquant.core.event_bus import get_event_bus
+from myquant.core.logger import get_logger
+from myquant.core.lookahead_guard import LookaheadGuard
 from myquant.engine.base import BaseEngine
 from myquant.live.brokers import BrokerManager
 from myquant.live.emergency_liquidation import EmergencyLiquidationService
-from myquant.models.market_data import Bar, BarFrequency, MarketEvent
-from myquant.models.trade import Order, OrderSide, OrderType, OrderStatus, Trade
-from myquant.strategies.base import Signal, SignalType, StrategyBase, StrategyContext
-
-# ── H2修复：实盘保障组件接线（风控/守护/状态/调度/事件总线）──
-from pathlib import Path as _Path
-from myquant.core.event_bus import get_event_bus
 from myquant.live.scheduler import LiveScheduler, attach_engine
 from myquant.live.state_store import (
     SnapshotNotFoundError,
@@ -89,6 +86,8 @@ from myquant.live.state_store import (
     capture_live_state,
     restore_live_state,
 )
+from myquant.models.market_data import Bar, BarFrequency, MarketEvent
+from myquant.models.trade import Order, OrderSide, OrderStatus, OrderType, Trade
 from myquant.risk import (
     DataQualityRiskConfig,
     DecisionType,
@@ -96,6 +95,7 @@ from myquant.risk import (
     RiskGuardian,
     RiskManager,
 )
+from myquant.strategies.base import Signal, StrategyBase, StrategyContext
 
 logger = get_logger("live.engine")
 
@@ -2568,6 +2568,14 @@ def create_live_engine(
     consistency_issues = check_mode_consistency(config)
     if consistency_issues:
         raise ValueError("运行模式配置不一致: " + "; ".join(consistency_issues))
+
+    # 0.6) KP-P6-01：实盘(LIVE)程序化交易报备合规门禁（装配前拦截，防绕过 CLI）
+    if trade_mode == "live":
+        from myquant.live.acceptance import ComplianceGate
+
+        comp = ComplianceGate(config).check()
+        if not comp.overall:
+            raise ValueError("实盘合规门禁未通过，禁止启动: " + "; ".join(comp.errors))
 
     # 1) 引擎级风控参数（与 position 段一致，双层风控同源）
     risk_config = RiskConfig(

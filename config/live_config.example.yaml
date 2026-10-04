@@ -225,3 +225,20 @@ intraday_monitor:
   check_interval: 60                       # 检查间隔（秒）
   take_profit_alert_pct: 0.18              # 接近止盈时提醒（18%时提醒，20%自动卖出）
   stop_loss_alert_pct: 0.13                # 接近止损时提醒（13%时提醒，15%自动卖出）
+
+# ========== 程序化交易报备合规（KP-P6-01）==========
+# 实盘(LIVE)启动前置门禁（myquant/live/acceptance.py ComplianceGate）：
+#   字段齐全 + 备案状态为已备案(approved) + 开关开启 才允许 --mode live 启动。
+# 缺失任一必需字段或未开启开关 → 拒绝启动（退出码 2）。
+# 条款口径（报备编号格式/日期格式/状态枚举等）需持牌律师/合规官按证监会/交易所
+# 官网最新原文确认，此处为结构性配置，口径可调整。
+compliance:
+  enabled: false                        # 合规门禁开关：实盘前必须开启
+  filing:
+    filing_number: ""                   # 报备编号（程序化交易报备）
+    filing_date: ""                     # 报备日期（YYYY-MM-DD）
+    account_id: ""                      # 账户标识
+    strategy_id: ""                     # 策略标识
+    software_version: ""                # 软件版本
+    filing_status: ""                   # 备案状态：approved=已备案 / pending=待报备 / rejected=被驳回
+
