@@ -445,7 +445,8 @@ Pythonwdhmm/
 │   │   ├── test_kunpeng_strategy.py  # ✨【回写#24】鲲鹏壹号策略单元测试（表9六组用例+出场规则+参数校验，9类56项）✅已完成
 
 │   │   ├── test_api_middleware.py   # ✨【回写#25】API认证/限流中间件接线回归（审计C1：create_app挂载
-│   │   ├── test_api_not_implemented.py # ✨【回写#154】占位接口伪造成功测试(KP-P1-01：order/live start-stop/risk pause-resume 六端点 501 + cli --host 默认 127.0.0.1，7项)✅已完成/关闭/CORS互斥/401/429逻辑）✅已完成
+│   │   ├── test_api_not_implemented.py # ✨【回写#154】占位接口伪造成功测试(KP-P1-01：order/live start-stop/risk pause-resume 六端点 501 + cli --host 默认 127.0.0.1，7项)✅已完成
+│   │   ├── test_backtest_not_placeholder.py # ✨【回写#155】回测API硬编码绩效常量测试(KP-P1-02：未注册501/缺参422/成功取真实值/失败501/异常501，5项)✅已完成/关闭/CORS互斥/401/429逻辑）✅已完成
 
 │   │   ├── test_broker_platform_check.py # ✨【回写#25】券商适配器平台校验（审计疑点3：qmt/ptrade非Windows拦截、paper/sim放行、大小写不敏感）✅已完成
 
@@ -1037,7 +1038,7 @@ Pythonwdhmm/
 
     │   ├── __init__.py                 # API包统一导出：create_app/run_api/FASTAPI_AVAILABLE + 11个响应/请求模型 + APIKeyAuth + FixedWindowLimiter/TokenBucketLimiter/RateLimitResult + ServiceContainer（__all__全量导出，供运行API.py与外部导入）
 
-    │   ├── routes.py                 # 路由聚合；✨【回写#154】占位写端点改真 501（KP-P1-01：live start/stop、risk pause/resume、order/cancel 未接线返回 HTTP 501 不伪造成功）
+    │   ├── routes.py                 # 路由聚合；✨【回写#154】占位写端点改真 501（KP-P1-01）；✨【回写#155】回测端点接线真实引擎（KP-P1-02：不再硬编码绩效常量，未注册/缺数据/失败返回 501）
 
     │   │                             # ✅已实现：6个数据质量端点(/api/data/quality, /overview, /runs, /runs/{id}, /dirty, /metrics) + 告警管理端点
 
@@ -2825,6 +2826,18 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：占位端点不再伪造成功，未接线时明确失败（501），杜绝『看似已执行』的假成功语义。
 - 验证结果：py_compile 通过；新增 tests/unit/test_api_not_implemented.py 7 项全绿（六端点 501 + cli host 默认 127.0.0.1，环境无 httpx 故直接调 route endpoint 断言 JSONResponse.status_code==501）；api 广回归 20 passed 无回归；ruff 干净。
 - 纪律遵守：仅改蓝图已标注文件（api/routes.py、api/cli.py）+ tests/unit 新增 test_api_not_implemented.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+155. ✨【回写记录·2026-10-04·T-21 KP-P1-02 回测API硬编码绩效常量】
+
+【发现】`routes.py` `POST /api/backtest/run` 端点硬编码绩效常量（BacktestMetrics total_return=0.0523/annual_return=0.125/sharpe=1.25/...），回测未跑即伪造『已完成』指标。
+- 修复：**接线真实回测引擎**，不再硬编码指标：
+  a. 经 `batch_backtest.STRATEGY_REGISTRY` 解析策略（未注册 → HTTP 501）；缺 symbol/start_date/end_date → HTTP 422。
+  b. `HistoricalDataProvider()` 加载本地清洗数据 + `run_backtest(config, strategy, data_provider=..., mode='auto')` 真实执行。
+  c. 回测未成功（is_success=False，如违规/数据缺失）→ HTTP 501；引擎抛异常 → 捕获记日志并 HTTP 501；均不返回伪造指标。
+  d. 成功 → 从 `bt_result.metrics`（PerformanceMetrics）映射真实指标构建 BacktestMetrics，equity_curve/trades 取自结果。
+- 防未来：回测指标严格来自真实引擎结果，不泄露/不伪造未来绩效。
+- 验证结果：py_compile 通过；新增 tests/unit/test_backtest_not_placeholder.py 5 项全绿（未注册 501/缺参 422/成功取真实值/失败 501/异常 501）；api 广回归 25 passed 无回归；ruff 干净。
+- 纪律遵守：仅改蓝图已标注文件（api/routes.py）+ tests/unit 新增 test_backtest_not_placeholder.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】

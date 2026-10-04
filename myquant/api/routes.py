@@ -457,32 +457,75 @@ def create_app(
 
     @app.post("/api/backtest/run", response_model=ApiResponse, tags=["回测"])
     async def run_backtest(request: BacktestRequest):
-        """运行回测"""
+        """运行回测（KP-P1-02：接线真实回测引擎，不再硬编码绩效常量）"""
         global _backtest_counter
         _backtest_counter += 1
         backtest_id = f"bt_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{_backtest_counter}"
 
-        # v1占位：后续迭代调用回测引擎
-        metrics = BacktestMetrics(
-            total_return=0.0523,
-            annual_return=0.125,
-            sharpe_ratio=1.25,
-            max_drawdown=0.085,
-            win_rate=0.55,
-            total_trades=23,
-            calmar_ratio=1.47,
-            sortino_ratio=1.82,
-        )
-        result = BacktestResponse(
-            backtest_id=backtest_id,
-            status="completed",
-            metrics=metrics,
-            equity_curve=[],
-            trades=[],
-            message=f"回测完成（v1占位，策略={request.strategy_name}, 标的={request.symbol}）",
-        )
-        _backtest_results[backtest_id] = result
-        return ApiResponse.success(data=result.model_dump(), message="回测任务已提交")
+        try:
+            from myquant.backtest.batch_backtest import STRATEGY_REGISTRY as _STRAT_REG
+            from myquant.backtest.engine import run_backtest as _run_backtest_engine
+            from myquant.data_access.provider import HistoricalDataProvider
+            from myquant.models.backtest import BacktestConfig
+
+            strategy_cls = _STRAT_REG.get(request.strategy_name)
+            if strategy_cls is None:
+                return JSONResponse(
+                    status_code=501,
+                    content={"success": False, "code": 501,
+                             "message": f"策略未注册: {request.strategy_name}", "data": {}},
+                )
+            if not request.symbol or not request.start_date or not request.end_date:
+                return JSONResponse(
+                    status_code=422,
+                    content={"success": False, "code": 422,
+                             "message": "缺少 symbol/start_date/end_date", "data": {}},
+                )
+
+            strategy = strategy_cls(**request.params)
+            provider = HistoricalDataProvider()
+            config = BacktestConfig(
+                strategy_name=request.strategy_name,
+                symbols=[request.symbol],
+                start_date=request.start_date,
+                end_date=request.end_date,
+                initial_capital=request.initial_capital,
+            )
+            bt_result = _run_backtest_engine(config, strategy, data_provider=provider, mode="auto")
+            if bt_result is None or not bt_result.is_success:
+                return JSONResponse(
+                    status_code=501,
+                    content={"success": False, "code": 501,
+                             "message": f"回测未成功（数据不可用或执行失败）: {getattr(bt_result, 'status', 'unknown')}", "data": {}},
+                )
+
+            m = bt_result.metrics
+            metrics = BacktestMetrics(
+                total_return=float(getattr(m, "total_return", 0.0)),
+                annual_return=float(getattr(m, "annualized_return", 0.0)),
+                sharpe_ratio=float(getattr(m, "sharpe_ratio", 0.0)),
+                max_drawdown=float(getattr(m, "max_drawdown", 0.0)),
+                win_rate=float(getattr(m, "win_rate", 0.0)),
+                total_trades=int(getattr(m, "total_trades", 0)),
+                calmar_ratio=float(getattr(m, "calmar_ratio", 0.0)),
+                sortino_ratio=float(getattr(m, "sortino_ratio", 0.0)),
+            )
+            result = BacktestResponse(
+                backtest_id=backtest_id,
+                status="completed",
+                metrics=metrics,
+                equity_curve=getattr(bt_result, "equity_curve", None) or [],
+                trades=getattr(bt_result, "trades", None) or [],
+                message=f"回测完成（策略={request.strategy_name}, 标的={request.symbol}）",
+            )
+            _backtest_results[backtest_id] = result
+            return ApiResponse.success(data=result.model_dump(), message="回测完成")
+        except Exception as e:
+            logger.error(f"[api] 回测执行失败: {e}")
+            return JSONResponse(
+                status_code=501,
+                content={"success": False, "code": 501, "message": f"回测执行失败: {e}", "data": {}},
+            )
 
     @app.get("/api/backtest/{backtest_id}", response_model=ApiResponse, tags=["回测"])
     async def get_backtest_result(backtest_id: str):
