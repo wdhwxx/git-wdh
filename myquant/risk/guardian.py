@@ -511,7 +511,7 @@ class RiskGuardian:
                 return False
 
         logger.warning(f"[guardian] 强制平仓所有（v1仅记录，未实际执行）: {reason}")
-        return True
+        return False  # KP-M02: 无回调不假成功（未实际平仓）
 
     def force_close_symbol(self, symbol: str, reason: str = "风控守护强制平仓") -> bool:
         """
@@ -550,7 +550,7 @@ class RiskGuardian:
                 return False
 
         logger.warning(f"[guardian] 强制平仓 {symbol}（v1仅记录，未实际执行）: {reason}")
-        return True
+        return False  # KP-M02: 无回调不假成功（未实际平仓）
 
     def set_force_close_callback(self, callback: Callable[[str, Optional[str]], bool]) -> None:
         """

@@ -1895,10 +1895,18 @@ class LiveEngine(BaseEngine):
                 symbol=symbol if action == "symbol" else None,
             )
             ok = bool(report.get("ok"))
-            logger.critical(
-                f"[engine] 强制平仓回调执行: action={action} symbol={symbol or '-'} "
-                f"mode={report.get('mode', '?')} ok={ok}"
-            )
+            executed = bool(report.get("executed"))
+            if executed:
+                logger.critical(
+                    f"[engine] 强制平仓已真实执行: action={action} symbol={symbol or '-'} "
+                    f"mode={report.get('mode', '?')} ok={ok}"
+                )
+            else:
+                # KP-M02: dry-run 恒未真实执行，显式 CRITICAL 提示需人工 --confirm 平仓
+                logger.critical(
+                    f"[engine] 强制平仓【仅生成计划，未真实执行】action={action} "
+                    f"symbol={symbol or '-'} executed=False，需人工确认后平仓"
+                )
             return ok
         except Exception as e:
             logger.error(f"[engine] 强制平仓回调异常: {e}")

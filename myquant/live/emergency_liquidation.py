@@ -25,7 +25,6 @@ emergency_liquidation.py - 紧急一键平仓服务（任务47 / P2）
 
 from __future__ import annotations
 
-import logging
 import time
 from typing import Any, Dict, List, Optional
 
@@ -79,13 +78,14 @@ class EmergencyLiquidationService:
         -------
         Dict[str, Any] : 结构化报告
             {
-              "ok": bool, "mode": "DRY_RUN" | "LIVE_EXEC",
+              "ok": bool, "executed": bool,
+              "mode": "DRY_RUN" | "LIVE_EXEC",
               "started_at": float, "finished_at": float, "elapsed_ms": float,
               "connect": {"ok": bool, "broker": str, "error": str},
               "cancelled_orders": [{"order_id", "symbol", "ok"}],
               "liquidation": {
                   "total_symbols": n, "success": n, "failed": n,
-                  "skipped": n, "total_quantity": n, "estimated_value": n,
+                  "skipped": n, "planned": n, "total_quantity": n, "estimated_value": n,
                   "items": [{"symbol", "quantity", "price", "status",
                              "reason", "order_id", "estimated_value"}],
               },
@@ -95,6 +95,7 @@ class EmergencyLiquidationService:
         started = time.time()
         report: Dict[str, Any] = {
             "ok": False,
+            "executed": False,  # KP-M02: 是否真实执行（dry-run 恒 False）
             "mode": "LIVE_EXEC" if confirm else "DRY_RUN",
             "started_at": started,
             "finished_at": 0.0,
@@ -106,6 +107,7 @@ class EmergencyLiquidationService:
                 "success": 0,
                 "failed": 0,
                 "skipped": 0,
+                "planned": 0,  # KP-M02: dry-run 计划项计数（不冒充 success）
                 "total_quantity": 0.0,
                 "estimated_value": 0.0,
                 "items": [],
@@ -130,12 +132,17 @@ class EmergencyLiquidationService:
             report["ok"] = report["liquidation"]["failed"] == 0 and not report["errors"]
             if report["liquidation"]["total_symbols"] == 0:
                 report["ok"] = True  # 无持仓：平仓本身成功（空仓）
+            # KP-M02: dry-run 即使 ok 也绝不视为真实执行
+            if not confirm:
+                report["executed"] = False
             report["finished_at"] = time.time()
             report["elapsed_ms"] = (report["finished_at"] - started) * 1000
             logger.info(
                 f"[emergency_liquidation] 一键平仓完成: mode={report['mode']} "
-                f"ok={report['ok']} 标的={report['liquidation']['total_symbols']} "
+                f"ok={report['ok']} executed={report['executed']} "
+                f"标的={report['liquidation']['total_symbols']} "
                 f"成功={report['liquidation']['success']} "
+                f"计划={report['liquidation']['planned']} "
                 f"失败={report['liquidation']['failed']}"
             )
         except Exception as e:  # noqa: BLE001 - 顶层兜底：任何异常都进报告不崩溃
@@ -198,6 +205,8 @@ class EmergencyLiquidationService:
                 try:
                     cancel_result = broker.cancel_order(order.order_id)
                     entry["ok"] = bool(cancel_result)
+                    if entry["ok"]:
+                        report["executed"] = True  # KP-M02: 真实撤单算已执行
                 except Exception as e:  # noqa: BLE001 - 单笔撤单失败记录继续
                     entry["reason"] = str(e)
                     report["errors"].append(f"撤单失败 {order.order_id}: {e}")
@@ -226,7 +235,7 @@ class EmergencyLiquidationService:
         items: List[Dict[str, Any]] = []
         total_quantity = 0.0
         estimated_value = 0.0
-        success = failed = skipped = 0
+        success = failed = skipped = planned = 0
         for pos in positions:
             sym = str(getattr(pos, "symbol", "") or "")
             if symbol and sym != symbol:
@@ -272,6 +281,7 @@ class EmergencyLiquidationService:
                         status = "SUBMITTED"
                         reason = ""
                         success += 1
+                        report["executed"] = True  # KP-M02: 真实提交平仓单算已执行
                     else:
                         status = "UNKNOWN"
                         reason = f"状态异常: {st}"
@@ -284,7 +294,7 @@ class EmergencyLiquidationService:
                     report["errors"].append(f"平仓异常 {sym}: {e}")
                     logger.warning(f"[emergency_liquidation] 平仓异常 {sym}: {e}")
             else:
-                success += 1  # dry_run 计划项计入 success（预览语义）
+                planned += 1  # KP-M02: dry_run 计划项计入 planned，不冒充 success
             total_quantity += quantity
             estimated_value += value
             items.append({
@@ -299,6 +309,7 @@ class EmergencyLiquidationService:
         liq["success"] = success
         liq["failed"] = failed
         liq["skipped"] = skipped
+        liq["planned"] = planned
         liq["total_quantity"] = total_quantity
         liq["estimated_value"] = round(estimated_value, 2)
 

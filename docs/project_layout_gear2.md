@@ -420,7 +420,7 @@ Pythonwdhmm/
 
 │   ├── 候选池交叉验证.py             # ✨【2026-09-09】双策略交叉验证候选池入口（薄入口）：rsrs×ma_cross各自硬过滤（夏普/交易/回撤）→交集→综合夏普降序标记TopN→导出CSV+HTML+PDF一套（双强候选池/<时间戳>前缀，表头中文）；调用myquant.backtest.candidate_pool + candidate_report；✨【2026-09-12】文件名/表头中文化+报告三件套+产物收进 results/batch_backtest/双强候选池/ 子文件夹（第3批自 cache/ 段错位更正归位）
 
-│   ├── 一键平仓.py                   # ✨【回写#47补录】紧急平仓薄入口（LIVE模式未加--confirm仅预览）：argparse（--config/--symbol/--confirm/--output）→ 加载live_config装配券商 → EmergencyLiquidationService.execute；预览输出控制台+落盘 outputs/emergency/一键平仓_<时间戳>.txt
+│   ├── 一键平仓.py                   # ✨【回写#47补录】紧急平仓薄入口（LIVE模式未加--confirm仅预览）：argparse（--config/--symbol/--confirm/--output）→ 加载live_config装配券商 → EmergencyLiquidationService.execute；预览输出控制台+落盘 outputs/emergency/一键平仓_<时间戳>.txt；✨【回写#152】报告增 executed/planned 展示（KP-M02）
 
 │   └── 仿真准入评估.py             # ✨【回写#52】仿真绩效准入评估薄入口(任务T10)：argparse(--metrics/--thresholds/--backtest/--run-mode/--output)→加载JSON→SimulationAcceptanceEvaluator.evaluate→打印报告+可落盘.txt/.csv；退出码0=通过/2=不通过或输入错误
 
@@ -567,6 +567,7 @@ Pythonwdhmm/
 │   │   ├── test_daily_loss_limit.py # ✨【回写#46】每日亏损限制测试（比例计算4项/规则判定4项/注册装配4项/引擎接线5项：跨日重置日初快照/硬编码1%兜底/配置工厂消费/缺省1%/端到端拒买放行卖，17项）✅已完成
 
 │   │   ├── test_emergency_liquidation.py # ✨【回写#47】紧急平仓服务测试（预览不下单/预览列撤单计划/确认全仓市价卖出/先撤挂单再卖/优先可卖数量/可卖0跳过/无可卖字段回退全仓/连接失败安全返回/断线重连恢复/单标异常不阻断/拒单记录/指定标只平该标的/无匹配持仓/空仓成功/报告结构完整，15项）✅已完成
+│   │   ├── test_emergency_dryrun.py # ✨【回写#152】熔断强平 dry-run 假成功测试(KP-M02：dry-run 不标 executed/planned 计数不冒充 success/confirm 标 executed/空仓 ok 但 executed=False/guardian 无回调返回 False/engine dry-run CRITICAL，6项)✅已完成
 
 │   │   ├── test_config_live_check.py # ✨【回写#50】配置模板完整性+第4批配置死项修复验证（4 example可解析/risk_params已删除断言/结构完整/BUG-07开关四象限消费/预留·未消费标注存在，15项）✅已完成
 
@@ -918,7 +919,7 @@ Pythonwdhmm/
 
     │   │                             # ✅已实现：DataQualityRiskConfig + SymbolDataQualityStatus + subscribe_to_event_bus(3类事件) + 脏数据自动暂停(单标的/全局) + 自动恢复
 
-    │   ├── guardian.py               # 风控守护进程：健康监控、强制平仓断开
+    │   ├── guardian.py               # 风控守护进程：健康监控、强制平仓断开；✨【回写#152】force_close_all/symbol 无回调 return False（KP-M02：不假成功）
 
     │   └── rules.py                  # 风控规则库；✨【回写#146】PriceLimitRule 缺昨收/现价 fail-closed（KP-P3-04：拒绝下单而非跳过放行）；✨【回写#148】StopLossRule 增 stop_price(avg_cost) 共享止损触发价口径（KP-P3-07，回测/混合引擎复用）；✨【回写#150】TradingHoursRule 增交易日维度（KP-P3-10：真实交易日历懒加载，非交易日拒绝下单）
 
@@ -968,7 +969,7 @@ Pythonwdhmm/
 
     │   ├── __init__.py
 
-    │   ├── engine.py                 # 实盘引擎继承BaseEngine，协调数据、策略、执行、风控；✨【回写#139】on_market_data 增 (symbol,date) bar级去重（KP-P3-02：_seen_bars集合，同根bar二次推送直接丢弃不达撮合，stats.bar_dedup_skipped计数，启动clear）；✨【回写#142】成交/订单关系账接线（KP-P4-02：可选 trade_ledger 注入，on_order_update 逐笔订单、on_trade 逐笔成交同步落库，长期归档）；✨【回写#146】on_market_data 捕获行情前收字段注入风控上下文（KP-P3-04：_prev_close_map，_build_risk_context extra 注入 prev_close）；✨【回写#149】定时券商账本对账（KP-P3-08：_setup_scheduler 注册 _broker_accountability_patrol，sync_from_broker 超阈 diff → CRITICAL+pause）
+    │   ├── engine.py                 # 实盘引擎继承BaseEngine，协调数据、策略、执行、风控；✨【回写#139】on_market_data 增 (symbol,date) bar级去重（KP-P3-02：_seen_bars集合，同根bar二次推送直接丢弃不达撮合，stats.bar_dedup_skipped计数，启动clear）；✨【回写#142】成交/订单关系账接线（KP-P4-02：可选 trade_ledger 注入，on_order_update 逐笔订单、on_trade 逐笔成交同步落库，长期归档）；✨【回写#146】on_market_data 捕获行情前收字段注入风控上下文（KP-P3-04：_prev_close_map，_build_risk_context extra 注入 prev_close）；✨【回写#149】定时券商账本对账（KP-P3-08：_setup_scheduler 注册 _broker_accountability_patrol，sync_from_broker 超阈 diff → CRITICAL+pause）；✨【回写#152】_on_force_close 消费 executed（KP-M02：dry-run 恒未真实执行 → 显式 CRITICAL 需人工 confirm 平仓）
 
     │   │                             # 【任务27】接入 BrokerManager 多券商管理器：set_broker自动包装(单券商向后兼容)/set_broker_manager(多券商并行)
 
@@ -988,7 +989,7 @@ Pythonwdhmm/
 
     │   ├── state_store.py            # 状态持久化，崩溃恢复；✨【回写#147】capture_live_state 增 t1_holdings 捕获（KP-P3-03 崩溃恢复冻结回写）
 
-    │   ├── emergency_liquidation.py  # ✨【回写#47补录】紧急平仓服务（EmergencyLiquidationService：execute(confirm=False默认dry_run)生成撤单+平仓计划；先撤挂单再卖/优先可卖数量/单标异常不阻断/报告结构化）；被engine._setup_force_close与scripts/一键平仓.py调用
+    │   ├── emergency_liquidation.py  # ✨【回写#47补录】紧急平仓服务（EmergencyLiquidationService：execute(confirm=False默认dry_run)生成撤单+平仓计划；先撤挂单再卖/优先可卖数量/单标异常不阻断/报告结构化）；被engine._setup_force_close与scripts/一键平仓.py调用；✨【回写#152】增 executed/planned 字段（KP-M02：dry-run 恒 executed=False、计划计 planned 不冒充 success、真实撤单/平仓置 executed）
 
     │   ├── run_mode.py               # ✨【回写#52】运行模式切割接口：RunMode枚举(MONITOR/PAPER/SIM/LIVE)+describe+resolve(专先CLI>配置>默认paper)+apply_mode_to_config写回+validate_live实盘安全门(--confirm-live+证券qmt/ptrade+账户)+check_mode_consistency配置一致性；被run_实盘入口与create_live_engine消费；未来实盘切割 --mode sim→--mode live --confirm-live 一步切换；✨【回写#144】validate_live 增 KP-P6-01 报备合规门禁（LIVE 未备案拒绝启动）
 
@@ -2788,6 +2789,19 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：涨停/跌停判定仅用昨收（上一bar已发生收盘）与当前bar开盘，不引用未来数据。
 - 验证结果：py_compile 通过；新增 tests/unit/test_event_price_limit.py 5 项全绿；backtest 广回归 175 passed +1 skipped 无回归；ruff 通过（1 处既有 F841 非本次引入）。
 - 纪律遵守：仅改蓝图已标注文件（execution/sim_broker.py、backtest/engine.py）+ tests/unit 新增 test_event_price_limit.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+152. ✨【回写记录·2026-10-04·T-18 KP-M02 熔断强平 dry-run 假成功】
+
+【发现】`emergency_liquidation.py:130` dry-run 恒 ok=True（计划项冒充 success），消费方误判已真实平仓。
+- 修复：
+  a. **emergency_liquidation.py 增 report["executed"] 字段**：dry-run 恒 False；真实撤单/真实提交平仓单置 True；汇总处 confirm=False 强制置 False。
+  b. **dry-run 计划项计 planned 不冒充 success**：liquidation 增 planned 计数；成功=真实提交的单（SUBMITTED/PENDING/PARTIAL）才 success+1。
+  c. **engine.py `_on_force_close` 消费 executed**：executed=False（dry-run）时显式 CRITICAL『仅生成计划，未真实执行，需人工 --confirm 平仓』。
+  d. **guardian.py force_close_all / force_close_symbol 无回调 return False**（不再假成功）。
+  e. **scripts/一键平仓.py 报告增 executed/planned 展示**（确认通道 --confirm 已接线）。
+- 防未来：平仓计划仅基于已查询持仓与挂单，成交价由券商市价撮合决定不假设。
+- 验证结果：py_compile 4 文件通过；新增 tests/unit/test_emergency_dryrun.py 6 项全绿（dry-run 不标 executed/planned 计数/confirm 标 executed/空仓 ok 但 executed=False/guardian 无回调 False/engine dry-run CRITICAL）；live/guardian 广回归 129 passed 无回归；ruff 通过。
+- 纪律遵守：仅改蓝图已标注文件（live/emergency_liquidation.py、live/engine.py、risk/guardian.py、scripts/一键平仓.py）+ tests/unit 新增 test_emergency_dryrun.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】

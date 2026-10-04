@@ -108,6 +108,7 @@ def _format_report(report: Dict[str, Any], config_path: Path) -> str:
         "=" * 68,
         f"  执行时间   : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         f"  执行模式   : {mode}（{'真实下单' if mode == 'LIVE_EXEC' else '仅预览，未下单'}）",
+        f"  真实执行   : {'是' if report.get('executed') else '否（仅生成计划/预览，未真实下单）'}",
         f"  配置文件   : {config_path}",
         f"  券商       : {report['connect'].get('broker', '')}",
         f"  连接状态   : {'正常' if report['connect'].get('ok') else '失败'}",
@@ -141,6 +142,7 @@ def _format_report(report: Dict[str, Any], config_path: Path) -> str:
     lines.append("  【平仓汇总】")
     lines.append(f"    持仓标的数 : {liq['total_symbols']}")
     lines.append(f"    成功/失败  : {liq['success']} / {liq['failed']}")
+    lines.append(f"    计划(预览) : {liq.get('planned', 0)}")
     lines.append(f"    跳过(不可卖): {liq['skipped']}")
     lines.append(f"    总卖出数量 : {liq['total_quantity']:,.0f}")
     lines.append(f"    估算卖出额 : {liq['estimated_value']:,.2f} 元")
@@ -173,8 +175,8 @@ def main() -> int:
     cfg = _load_config(config_path)
 
     # 券商装配（复用引擎工厂，业务逻辑归 myquant）
-    from myquant.live.engine import build_broker_from_config
     from myquant.live.emergency_liquidation import EmergencyLiquidationService
+    from myquant.live.engine import build_broker_from_config
 
     broker_cfg = cfg.get("broker", {}) or {}
     execution_cfg = cfg.get("execution", {}) or {}
