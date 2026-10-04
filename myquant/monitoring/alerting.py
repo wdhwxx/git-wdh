@@ -1365,8 +1365,11 @@ class AlertManager:
             except Exception as e:
                 logger.error(f"告警通道 [{channel.name}] 发送异常: {e}", exc_info=True)
 
-        if sent_count == 0 and self._channels:
-            logger.warning(f"告警未通过任何通道发送: {alert.summary()} (可用通道={len(self._channels)})")
+        if sent_count == 0:
+            # KP-P5-05: 未投递回退写 logs/alerts_undelivered.log（不静默丢失）
+            _write_undelivered(alert)
+            if self._channels:
+                logger.warning(f"告警未通过任何通道发送: {alert.summary()} (可用通道={len(self._channels)})")
 
         # 通知回调（metrics联动）
         if sent_count > 0:
@@ -2020,7 +2023,69 @@ def get_alert_manager() -> AlertManager:
             # 默认注册控制台和日志通道
             _global_alert_manager.add_channel(ConsoleAlertChannel())
             _global_alert_manager.add_channel(LogAlertChannel())
+            # KP-P5-05: 按 notification.channels 装配 Email/Webhook 通道
+            configure_notification_channels(_global_alert_manager)
         return _global_alert_manager
+
+
+def configure_notification_channels(manager: AlertManager) -> int:
+    """KP-P5-05: 按配置 notification.channels 装配 Email/Webhook 告警通道。"""
+    added = 0
+    try:
+        from myquant.core.settings import get_settings
+        notif = get_settings().get("notification", None) or {}
+        if not (notif.get("enabled") and isinstance(notif.get("channels"), dict)):
+            return 0
+        channels = notif["channels"]
+        # Email 通道
+        email = channels.get("email") or {}
+        if (
+            isinstance(email, dict)
+            and email.get("enabled")
+            and email.get("smtp_host")
+            and email.get("smtp_to")
+        ):
+            manager.add_channel(
+                EmailAlertChannel(
+                    name="email",
+                    smtp_host=email["smtp_host"],
+                    smtp_port=int(email.get("smtp_port", 465) or 465),
+                    username=email.get("smtp_user", ""),
+                    password=email.get("smtp_password", ""),
+                    recipients=[email["smtp_to"]],
+                    use_tls=True,
+                )
+            )
+            added += 1
+        # Webhook 通道（feishu / wecom）
+        for wh_name in ("feishu", "wecom"):
+            wh = channels.get(wh_name) or {}
+            url = wh.get("webhook") if isinstance(wh, dict) else None
+            if url:
+                manager.add_channel(
+                    WebhookAlertChannel(name=wh_name, webhook_url=url)
+                )
+                added += 1
+    except Exception as e:
+        logger.warning(f"告警通道装配失败: {e}")
+    return added
+
+
+def _write_undelivered(alert: Alert) -> None:
+    """KP-P5-05: 告警未通过任何通道投递时回退写 logs/alerts_undelivered.log。"""
+    try:
+        from myquant.core.settings import get_settings
+        log_dir = get_settings().project_root / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        line = (
+            f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] "
+            f"[{alert.level.value}] source={alert.source} "
+            f"category={alert.category} {alert.message}\n"
+        )
+        with open(log_dir / "alerts_undelivered.log", "a", encoding="utf-8") as fh:
+            fh.write(line)
+    except Exception as e:
+        logger.warning(f"写入未投递告警日志失败: {e}")
 
 
 def reset_alert_manager() -> None:

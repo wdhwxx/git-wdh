@@ -452,7 +452,8 @@ Pythonwdhmm/
 │   │   ├── test_api_docs_closed.py  # ✨【回写#158】API文档匿名开放测试(KP-P4-04：默认关docs/开启时存在/豁免仅健康，4项)✅已完成
 │   │   ├── test_health_probe_registry.py # ✨【回写#159】健康探针注册表测试(KP-P5-02：unknown计入degraded/live探针注册，3项)✅已完成
 │   │   ├── test_scheduler_health_alert.py # ✨【回写#160】监控阈值告警闭环测试(KP-P5-03：巡检注册/非healthy告警/healthy不告警，3项)✅已完成
-│   │   ├── test_scheduler_escalation.py    # ✨【回写#161】告警升级检查测试(KP-P5-04：任务注册/被调用/可禁用，3项)✅已完成底/env优先/运行API.py bootstrap不崩，4项)✅已完成1/缺参422/成功取真实值/失败501/异常501，5项)✅已完成/关闭/CORS互斥/401/429逻辑）✅已完成
+│   │   ├── test_scheduler_escalation.py    # ✨【回写#161】告警升级检查测试(KP-P5-04：任务注册/被调用/可禁用，3项)✅已完成
+│   │   ├── test_channel_assembly.py       # ✨【回写#162】告警通道装配测试(KP-P5-05：按channels装配/未启用不装配/未投递回退写日志，3项)✅已完成底/env优先/运行API.py bootstrap不崩，4项)✅已完成1/缺参422/成功取真实值/失败501/异常501，5项)✅已完成/关闭/CORS互斥/401/429逻辑）✅已完成
 
 │   │   ├── test_broker_platform_check.py # ✨【回写#25】券商适配器平台校验（审计疑点3：qmt/ptrade非Windows拦截、paper/sim放行、大小写不敏感）✅已完成
 
@@ -1028,7 +1029,7 @@ Pythonwdhmm/
 
     │   ├── health_check.py           # 健康检查：数据源连通性、磁盘、进程
 
-    │   ├── alerting.py               # 告警通道，支持分级去重
+    │   ├── alerting.py               # 告警通道，支持分级去重；✨【回写#162】按 notification.channels 装配 Email/Webhook + 未投递回退 logs/alerts_undelivered.log（KP-P5-05）
 
     │   │                             # ✅已实现：AlertManager.subscribe_to_event_bus(5类事件) + DataQualityEvent自动聚合告警 + Console/Log/Email/Webhook四通道
 
@@ -2902,6 +2903,14 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：告警升级检查接入调度周期执行，杜绝实现无调用方。
 - 验证结果：py_compile 通过；新增 tests/unit/test_scheduler_escalation.py 3 项全绿（任务注册/被调用/可禁用）；scheduler 回归 18 passed 无回归；ruff 干净。
 - 纪律遵守：仅改蓝图已标注文件（live/scheduler.py）+ tests/unit 新增 test_scheduler_escalation.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+162. ✨【回写记录·2026-10-04·T-28 KP-P5-05 告警通道邮件/Webhook 从未装配】
+
+【发现】`get_alert_manager()` 单例仅注册 Console/Log 通道，Email/Webhook 通道类已实现但从未按 `notification.channels` 装配；告警发送失败仅 logger 记录，未回退写盘（静默丢失风险）。
+- 修复：`alerting.py` 新增 `configure_notification_channels()`（按 `notification.enabled` + `channels` 装配 email→EmailAlertChannel、feishu/wecom→WebhookAlertChannel），`get_alert_manager()` 初始化后自动装配；`send_alert` 全通道投递失败（sent_count==0）回退写 `logs/alerts_undelivered.log`（不静默丢失）。
+- 防未来：告警通道按配置装配 + 未投递落盘留痕，杜绝『通道从未装配』『失败静默丢失』。
+- 验证结果：py_compile 通过；新增 tests/unit/test_channel_assembly.py 3 项全绿（按channels装配3通道/未启用不装配/未投递回退写日志）；P5 组回归 9 passed 无回归；ruff：test 干净（alerting.py 2 处既有 import/未用变量非本次引入）。
+- 纪律遵守：仅改蓝图已标注文件（monitoring/alerting.py）+ tests/unit 新增 test_channel_assembly.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】
