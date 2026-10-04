@@ -543,6 +543,7 @@ Pythonwdhmm/
 │   │   ├── test_restore_broker_state.py # ✨【回写#147】重启恢复券商账本测试(KP-P3-03：paper/qmt restore_state重建在途+冻结+T1/终态不恢复/engine补传broker触发/对账未领回cancel/超阈值pause，6项)✅已完成
 │   │   ├── test_accountability_sync.py # ✨【回写#149】券商权威账本对账测试(KP-P3-08：diff_vs_broker只diff不重建/账实一致通过/patrol超阈CRITICAL+pause/无差异不暂停，4项)✅已完成
 │   │   ├── test_trade_calendar_gate.py # ✨【回写#150】交易日历安全门测试(KP-P3-10：TradingHoursRule非交易日拒绝/交易日放行/显式日历/非交易时段仍拒绝/实盘入口真实日历判定，5项)✅已完成
+│   │   ├── test_abnormal_trade_rules.py # ✨【回写#153】异常交易类风控测试(KP-P3-06：自成交互斥/撤单率超阈/胖手指金额与偏离/注册表/撤单计数+事件+日报+重置，13项)✅已完成
 │   │   ├── test_event_price_limit.py # ✨【回写#151】event路径涨跌停/停牌测试(KP-P2-02：涨停拒买/跌停拒卖/停牌跳过/非涨跌停正常/默认不强制保持既有，5项)✅已完成
 │   │   ├── test_price_limit_fail_closed.py # ✨【回写#146】涨跌停硬拦截fail-closed测试(KP-P3-04：缺prev_close拒绝/涨停拒买/跌停拒卖/正常放行/engine注入prev_close，5项)✅已完成
 
@@ -915,13 +916,13 @@ Pythonwdhmm/
 
     │   ├── __init__.py
 
-    │   ├── risk_manager.py           # 风控核心：仓位限制、止损、流控、拦截
+    │   ├── risk_manager.py           # 风控核心：仓位限制、止损、流控、拦截；✨【回写#153】撤单计数与日报（KP-P3-06：CANCEL_ORDER 事件/record_cancel_order/set_pending_orders/get_daily_report/reset_daily_counts，check_order 注入计数）
 
     │   │                             # ✅已实现：DataQualityRiskConfig + SymbolDataQualityStatus + subscribe_to_event_bus(3类事件) + 脏数据自动暂停(单标的/全局) + 自动恢复
 
     │   ├── guardian.py               # 风控守护进程：健康监控、强制平仓断开；✨【回写#152】force_close_all/symbol 无回调 return False（KP-M02：不假成功）
 
-    │   └── rules.py                  # 风控规则库；✨【回写#146】PriceLimitRule 缺昨收/现价 fail-closed（KP-P3-04：拒绝下单而非跳过放行）；✨【回写#148】StopLossRule 增 stop_price(avg_cost) 共享止损触发价口径（KP-P3-07，回测/混合引擎复用）；✨【回写#150】TradingHoursRule 增交易日维度（KP-P3-10：真实交易日历懒加载，非交易日拒绝下单）
+    │   └── rules.py                  # 风控规则库；✨【回写#146】PriceLimitRule 缺昨收/现价 fail-closed（KP-P3-04：拒绝下单而非跳过放行）；✨【回写#148】StopLossRule 增 stop_price(avg_cost) 共享止损触发价口径（KP-P3-07，回测/混合引擎复用）；✨【回写#150】TradingHoursRule 增交易日维度（KP-P3-10：真实交易日历懒加载，非交易日拒绝下单）；✨【回写#153】异常交易类规则（KP-P3-06：SelfTrade 自成交互斥/CancelRate 撤单率/FatFinger 胖手指，注册 RULE_REGISTRY）
 
     │
 
@@ -2802,6 +2803,17 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：平仓计划仅基于已查询持仓与挂单，成交价由券商市价撮合决定不假设。
 - 验证结果：py_compile 4 文件通过；新增 tests/unit/test_emergency_dryrun.py 6 项全绿（dry-run 不标 executed/planned 计数/confirm 标 executed/空仓 ok 但 executed=False/guardian 无回调 False/engine dry-run CRITICAL）；live/guardian 广回归 129 passed 无回归；ruff 通过。
 - 纪律遵守：仅改蓝图已标注文件（live/emergency_liquidation.py、live/engine.py、risk/guardian.py、scripts/一键平仓.py）+ tests/unit 新增 test_emergency_dryrun.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+153. ✨【回写记录·2026-10-04·T-19 KP-P3-06 异常交易类风控】
+
+【发现】异常交易类风控（自成交/撤单率/胖手指）整体缺失，仅有仓位/止损/流控等常规规则。
+- 修复：
+  a. **rules.py 新增三条规则并注册 RULE_REGISTRY**：`SelfTradeRule`（self_trade，同标的反向未成交单互斥）、`CancelRateRule`（cancel_rate，撤单率 cancel/(new+cancel) 超阈值拒绝）、`FatFingerRule`（fat_finger，单笔金额超限或申报价偏离现价过大拒绝）。
+  b. **RiskContext 增字段**：pending_orders（活跃未成交单）、cancel_count_today、new_order_count_today。
+  c. **risk_manager.py 撤单计数与日报**：RiskEventType 增 CANCEL_ORDER；`set_pending_orders` 注入未成交单、`record_cancel_order` 累计撤单并记录事件、`get_daily_report` 输出撤单/新单/撤单率日报、`reset_daily_counts` 交易日重置；check_order 注入 context 计数、通过时累计新单数。
+- 防未来：三条规则仅用当前已存在未成交单、已发生撤单/下单计数、当前已可得现价与本次申报价，不引用未来数据。
+- 验证结果：py_compile 通过；新增 tests/unit/test_abnormal_trade_rules.py 13 项全绿（自成交互斥/撤单率超阈/胖手指金额与偏离/注册表/撤单计数+事件+日报+重置）；risk 广回归通过无回归；ruff 干净。
+- 纪律遵守：仅改蓝图已标注文件（risk/rules.py、risk/risk_manager.py）+ tests/unit 新增 test_abnormal_trade_rules.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】

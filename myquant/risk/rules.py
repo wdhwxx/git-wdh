@@ -106,6 +106,10 @@ class RiskContext:
     trading_date: str = ""
     day_start_assets: float = 0.0  # 当日开盘时点资产快照（每日亏损基准，任务46/P1）
     extra: Dict[str, Any] = field(default_factory=dict)
+    # KP-P3-06 异常交易类监控字段
+    pending_orders: List[Dict[str, Any]] = field(default_factory=list)  # 活跃未成交单（自成交防范）
+    cancel_count_today: int = 0        # 当日撤单数
+    new_order_count_today: int = 0     # 当日新下单数
 
     def get_position(self, symbol: str) -> Optional[Dict[str, Any]]:
         """获取指定标的持仓"""
@@ -552,6 +556,100 @@ class CashAvailabilityRule(RiskRule):
 #  规则注册表
 # ═══════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════
+#  异常交易类风控（KP-P3-06）
+# ═══════════════════════════════════════════════
+
+class SelfTradeRule(RiskRule):
+    """自成交防范：同标的反向未成交单互斥（异常交易类风控）。
+
+    同一标的已存在反向未成交单时拒绝同向新单，避免自成交/对敲。
+    防未来：只基于当前已存在的未成交单（context.pending_orders）。
+    """
+    name = "self_trade"
+    description = "自成交防范：同标的反向未成交单互斥"
+
+    def __init__(self, **params: Any) -> None:
+        super().__init__(**params)
+
+    def check(self, order: Order, context: RiskContext) -> RiskCheckResult:
+        opposite_side = OrderSide.SELL if order.side == OrderSide.BUY else OrderSide.BUY
+        for po in context.pending_orders:
+            if po.get("symbol") != order.symbol:
+                continue
+            raw = po.get("side")
+            po_side = raw.value if hasattr(raw, "value") else raw
+            if str(po_side).upper() == opposite_side.value:
+                return self._reject(
+                    f"自成交防范：{order.symbol} 存在反向未成交单，拒绝同向互斥下单"
+                )
+        return self._pass()
+
+
+class CancelRateRule(RiskRule):
+    """撤单率监控：cancel/(new+cancel) 超阈值拒绝（异常交易类风控）。
+
+    当日撤单率过高说明频繁撤单（异常/激进交易），超阈值拒绝新单。
+    防未来：只依据已发生的当日下单/撤单计数。
+    """
+    name = "cancel_rate"
+    description = "撤单率监控：cancel/(new+cancel) 超阈值拒绝"
+
+    def __init__(self, max_cancel_rate: float = 0.5, **params: Any) -> None:
+        super().__init__(**params)
+        self.max_cancel_rate = float(max_cancel_rate)
+
+    def check(self, order: Order, context: RiskContext) -> RiskCheckResult:
+        new_cnt = int(context.new_order_count_today)
+        cancel_cnt = int(context.cancel_count_today)
+        total = new_cnt + cancel_cnt
+        if total > 0:
+            rate = cancel_cnt / total
+            if rate > self.max_cancel_rate:
+                return self._reject(
+                    f"撤单率超限: {rate*100:.1f}% (撤单{cancel_cnt}/总{total}), "
+                    f"上限{self.max_cancel_rate*100:.1f}%"
+                )
+        return self._pass()
+
+
+class FatFingerRule(RiskRule):
+    """胖手指防护：单笔金额超限或申报价偏离现价过大（异常交易类风控）。
+
+    防未来：只基于当前已可得现价（context.current_price）与本次申报价格，
+    不引用未来数据。市价单无申报价时仅做金额上限判定。
+    """
+    name = "fat_finger"
+    description = "胖手指防护：单笔金额超限或价格偏离现价过大"
+
+    def __init__(
+        self,
+        max_order_amount: float = 1_000_000,
+        max_price_deviation_pct: float = 0.20,
+        **params: Any,
+    ) -> None:
+        super().__init__(**params)
+        self.max_order_amount = float(max_order_amount)
+        self.max_price_deviation_pct = float(max_price_deviation_pct)
+
+    def check(self, order: Order, context: RiskContext) -> RiskCheckResult:
+        price = order.price if (order.price or 0) > 0 else context.current_price.get(order.symbol, 0.0)
+        amount = order.quantity * price
+        if amount > self.max_order_amount:
+            return self._reject(
+                f"胖手指：单笔金额超限 {amount:,.0f} > {self.max_order_amount:,.0f}"
+            )
+        ref = context.current_price.get(order.symbol)
+        if ref and ref > 0 and price and price > 0:
+            dev = abs(price - ref) / ref
+            if dev > self.max_price_deviation_pct:
+                return self._reject(
+                    f"胖手指：申报价偏离现价 {dev*100:.1f}% > "
+                    f"{self.max_price_deviation_pct*100:.1f}%"
+                )
+        return self._pass()
+
+
 RULE_REGISTRY: Dict[str, type] = {
     "position_limit": PositionLimitRule,
     "single_order_limit": SingleOrderLimitRule,
@@ -564,6 +662,9 @@ RULE_REGISTRY: Dict[str, type] = {
     "trading_hours": TradingHoursRule,
     "blacklist": BlacklistRule,
     "cash_availability": CashAvailabilityRule,
+    "self_trade": SelfTradeRule,
+    "cancel_rate": CancelRateRule,
+    "fat_finger": FatFingerRule,
 }
 
 

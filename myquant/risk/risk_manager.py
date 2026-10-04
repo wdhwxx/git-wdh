@@ -55,15 +55,15 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from myquant.core.logger import get_logger
 from myquant.core.event_bus import (
+    DataQualityEvent,
     EventBus,
     EventType,
-    DataQualityEvent,
-    QualityAlertEvent,
     PipelineCompleteEvent,
+    QualityAlertEvent,
     StrategyPauseEvent,
 )
+from myquant.core.logger import get_logger
 from myquant.models.trade import Order, OrderSide
 from myquant.risk.rules import (
     RiskCheckResult,
@@ -100,6 +100,7 @@ class RiskEventType(Enum):
     RULE_TRIGGERED = "rule_triggered"      # 规则触发（非拒绝类，如接近阈值）
     DATA_QUALITY_PAUSE = "data_quality_pause"  # 数据质量触发暂停
     DATA_QUALITY_WARNING = "data_quality_warning"  # 数据质量警告
+    CANCEL_ORDER = "cancel_order"  # 撤单（KP-P3-06 异常交易监控）
 
 
 # ═══════════════════════════════════════════════
@@ -456,7 +457,14 @@ class RiskManager:
             "data_quality_warnings": 0,
             "data_quality_resumes": 0,
             "last_check_time": 0.0,
+            "cancel_orders_today": 0,
+            "new_orders_today": 0,
         }
+
+        # KP-P3-06 异常交易日内计数
+        self._cancel_count_today: int = 0
+        self._new_order_count_today: int = 0
+        self._pending_orders: List[Dict[str, Any]] = []
 
         # ═══ 数据质量风控（任务12） ═══
         self._dq_config = data_quality_config or DataQualityRiskConfig()
@@ -558,12 +566,18 @@ class RiskManager:
                 )
                 return result
 
-        # 3. 规则库批量检查
+        # 3. KP-P3-06 注入异常交易计数与未成交单（供 SelfTrade/CancelRate 规则）
+        context.cancel_count_today = self._cancel_count_today
+        context.new_order_count_today = self._new_order_count_today
+        context.pending_orders = list(self._pending_orders)
+        # 4. 规则库批量检查
         result = self._library.check_all(order, context)
 
-        # 4. 记录结果
+        # 5. 记录结果
         if result.passed:
             self._stats["orders_passed"] += 1
+            self._new_order_count_today += 1
+            self._stats["new_orders_today"] = self._new_order_count_today
         else:
             self._stats["orders_rejected"] += 1
             self._record_event(RiskEvent(
@@ -1551,6 +1565,48 @@ class RiskManager:
     # ═══════════════════════════════════════════
     #  风控事件
     # ═══════════════════════════════════════════
+
+    def set_pending_orders(self, orders: List[Any]) -> None:
+        """注入活跃未成交单（供 SelfTradeRule 互斥判定；由引擎/broker 更新）。"""
+        self._pending_orders = [
+            {
+                "symbol": str(getattr(o, "symbol", "") or ""),
+                "side": getattr(o, "side", None),
+                "order_id": str(getattr(o, "order_id", "") or ""),
+            }
+            for o in orders
+        ]
+
+    def record_cancel_order(self, order: Order, reason: str = "撤单") -> None:
+        """记录撤单事件并累计当日撤单数（KP-P3-06 异常交易监控）。"""
+        self._cancel_count_today += 1
+        self._stats["cancel_orders_today"] = self._cancel_count_today
+        self._record_event(RiskEvent(
+            event_type=RiskEventType.CANCEL_ORDER,
+            rule_name="cancel_rate",
+            symbol=str(getattr(order, "symbol", "") or ""),
+            reason=reason,
+            details={"cancel_count_today": self._cancel_count_today},
+        ))
+
+    def get_daily_report(self) -> Dict[str, Any]:
+        """当日异常交易日报（撤单/新单/撤单率）。"""
+        total = self._new_order_count_today + self._cancel_count_today
+        rate = (self._cancel_count_today / total) if total > 0 else 0.0
+        return {
+            "new_orders_today": self._new_order_count_today,
+            "cancel_orders_today": self._cancel_count_today,
+            "cancel_rate": round(rate, 4),
+            "pending_orders": len(self._pending_orders),
+        }
+
+    def reset_daily_counts(self) -> None:
+        """交易日切换时重置当日异常交易计数。"""
+        self._cancel_count_today = 0
+        self._new_order_count_today = 0
+        self._pending_orders = []
+        self._stats["cancel_orders_today"] = 0
+        self._stats["new_orders_today"] = 0
 
     def _record_event(self, event: RiskEvent) -> None:
         """记录风控事件（内部方法）"""
