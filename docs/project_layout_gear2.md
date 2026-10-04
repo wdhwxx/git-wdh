@@ -168,6 +168,8 @@ Pythonwdhmm/
 
 ├── .gitignore                        # 忽略数据集、日志、密钥、缓存、虚拟环境、输出结果、脏数据目录
 
+├── .dockerignore                       # ✨【回写#164】根级镜像构建排除（KP-M01：排除 .env*/database/logs/outputs/datasets/实盘状态/实盘信号/backups/.git 等，保留 .env.example）
+
 ├── pyproject.toml                    # 项目元信息、依赖分组（gui/web/live/dev/benchmark），3个插件入口点
 
 │                                     # entry-points: myquant.strategies（外部策略包注册）/ myquant.brokers（券商适配器注册）/ myquant.data_sources（行情数据源注册）；pytest配置含lookahead/slow/benchmark标记
@@ -346,9 +348,9 @@ Pythonwdhmm/
 
 ├── docker/                           # 容器化部署配置
 
-│   ├── Dockerfile                    # 基于Python官方镜像，安装项目与依赖，设置工作目录
+│   ├── Dockerfile                    # 基于Python官方镜像，安装项目与依赖，设置工作目录；✨【回写#164】非 root 运行（USER appuser）+ pip 去 dev（KP-M01）
 
-│   ├── docker-compose.yml            # 编排服务：应用容器、数据库容器（可选）、监控容器
+│   ├── docker-compose.yml            # 编排服务：应用容器、数据库容器（可选）、监控容器；✨【回写#164】live 探针 pgrep 改业务健康接口（KP-M01：live_status.json 新鲜度）
 
 │   └── nginx/
 
@@ -388,7 +390,7 @@ Pythonwdhmm/
 
 │   ├── 运行API.py                     # REST API服务启动入口（uvicorn/FastAPI）；✨【回写#156】业务导入前显式 get_settings 加载 .env（KP-P1-04：QUANT_API_KEYS 生效）
 
-│   ├── 结果备份.py                    # 备份outputs、datasets/bad和关键状态到归档文件
+│   ├── 结果备份.py                    # 备份outputs、datasets/bad和关键状态到归档文件；✨【回写#165】默认源扩到 db/config/state + --verify/--restore + 白名单清理（KP-P5-06）
 
 │   ├── 标的预筛选.py                  # ✨【回写】标的预筛选入口：从quant.db按代码前缀/上市年限/日均成交额/换手率筛出可交易标的池，输出config/stock_pool.yaml供回测配置引用；流动性指标按回测起始日前历史窗口计算（防未来）；回测/实盘共用同一套筛选条件（实盘无缝对接）
 
@@ -509,6 +511,8 @@ Pythonwdhmm/
 │   │   ├── test_bar_cleaner_factor_exempt.py # ✨【回写#82】除权跳变豁免单测（函数版/类版豁免/非除权日仍检测/无因子回退，合成数据零网络，8项）✅已完成（前缀过滤/ST串联/json缺失回退/防焊死反例——规则增删范围跟随/空池/统计字段/exclude_st无名单，7项）；✨【回写#79】+长期停牌/退市规则5项（60天启用剔除/边界==阈值保留/DB无记录保留/未配置不启用/DB缺失不报错，sqlite临时库替身）✅已完成，现共12项
 │   │   ├── test_cleanup_service.py # ✨【回写#77】清理pattern保护语义测试（生产报告/真实备份不匹配、测试前缀匹配，4项）✅已完成
 │   │   ├── test_cleanup_dryrun.py   # ✨【回写#163】清理dry-run约束测试(KP-M05：dry-run不删除/execute删除，2项)✅已完成
+│   │   ├── test_docker_min_privilege.py # ✨【回写#164】镜像最小权限测试(KP-M01：dockerignore排除/非root/去dev/live探针业务化，6项)✅已完成
+│   │   ├── test_backup_manifest.py    # ✨【回写#165】备份与恢复测试(KP-P5-06：MANIFEST/篡改判失败/restore/默认源含db+config+state/白名单，6项)✅已完成
 │   │   ├── test_financial_sync_service.py # ✨【回写#74】财务CSV增量同步测试（定位缺失标的14条排除/新旧合并去重17列头/无新记录None/增量流程/自动入库monkeypatch/无可拉取跳过，6项）✅已完成
 │   │   ├── test_data_download_finance_sync.py # ✨【回写#75】GUI财务CSV增量更新选项测试（选项注册完整/执行顺序在入库前/_entry_finance_sync调用服务返回同构汇总，3项）✅已完成
 │   │   ├── test_data_download_cli_incremental.py # ✨【回写#86】CLI数据下载增量链路测试（池过滤只进清洗池/写回走清洗链路复用records无二次拉取/写回失败逐只计数不阻断，3项）✅已完成
@@ -1100,7 +1104,7 @@ Pythonwdhmm/
 
         ├── time_utils.py             # 日期时间、时区、交易日历，清洗模块强依赖本工具
 
-        ├── file_utils.py             # 路径读写压缩
+        ├── file_utils.py             # 路径读写压缩；✨【回写#165】backup_files 写 MANIFEST.sha256 + verify_backup/restore_backup（KP-P5-06）
 
         ├── math_utils.py             # 统计、数值格式化，用于异常值检测（3σ、四分位）
 
@@ -2920,6 +2924,29 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：删除以 dry-run 为默认约束，杜绝绕过预览直接删除的删除行为。
 - 验证结果：py_compile 通过；新增 tests/unit/test_cleanup_dryrun.py 2 项全绿（dry-run 不删除/execute 删除）；ruff：test 干净（cleanup_service.py 1 处既有 f-string 非本次引入）。
 - 纪律遵守：仅改蓝图已标注文件（utils/cleanup_service.py）+ tests/unit 新增 test_cleanup_dryrun.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+164. ✨【回写记录·2026-10-04·T-31 KP-M01 镜像构建与最小权限】
+
+【发现】镜像构建无 `.dockerignore`（`.env` 密钥/实盘状态/信号/数据库/备份可能入镜像）；`Dockerfile` 以 root 运行且 `pip install -e '.[live,dev,web]'` 装 dev extras；live 容器探针用 `pgrep -f` 进程匹配（非业务健康）。
+- 修复：
+  a. **根级 .dockerignore**：排除 `.env*`/database/logs/outputs/datasets/实盘状态/实盘信号/backups/.git/__pycache__/docker/审计等，保留 `.env.example`（模板无密钥），构建上下文不含敏感文件。
+  b. **Dockerfile 最小权限**：`useradd -u 1000 appuser` + `chown /app` + `USER appuser`（非 root 运行）；`pip install -e '.[live,web]'` 去除 dev extras。
+  c. **live 探针改业务健康接口**：docker-compose live 容器探针从 `pgrep` 进程匹配改为校验业务状态文件 `live_status.json`（引擎主循环每 5s 写）mtime 新鲜度（<30s 判业务健康），反映引擎真实运行而非进程常驻。
+- 防未来：镜像构建排除敏感数据、非 root 最小权限、探针基于业务健康状态。
+- 验证结果：新增 tests/unit/test_docker_min_privilege.py 6 项全绿（.dockerignore 排除敏感/保留 env.example/Dockerfile 非root+去dev/compose 探针业务化/探针新鲜度逻辑）；ruff 干净。
+- 纪律遵守：新建根级 .dockerignore（本回写同步登记根目录树）+ 改蓝图已标注文件（docker/Dockerfile、docker/docker-compose.yml）+ tests/unit 新增 test_docker_min_privilege.py（同步更新目录树）；严格防未来。
+
+165. ✨【回写记录·2026-10-04·T-32 KP-P5-06 备份与恢复】
+
+【发现】备份仅覆盖 outputs/logs（db/config/state 为可选 gate 默认不备），备份无 MANIFEST.sha256 完整性清单、无恢复验证，清理按纯 mtime（无白名单/锁定标记）。
+- 修复：
+  a. **备份源扩到 db/config/state**：scripts/结果备份.py `collect_backup_sources` 默认纳入 `database/quant.db`、`config/*.yaml`（跳过 example）、`实盘状态/`、`实盘信号/`、`datasets/live_state`（原 --include-db/--include-config 语义并入默认）。
+  b. **MANIFEST.sha256**：file_utils.backup_files 目录/zip 两种模式均写备份内 MANIFEST.sha256（每文件 sha256）。
+  c. **抽样还原比对**：新增 file_utils.verify_backup（读 MANIFEST 逐文件哈希比对）、restore_backup（按 MANIFEST 还原到目标根）；scripts 增 --verify/--restore（缺省取最近备份）。
+  d. **白名单清理**：cleanup_old_backups 跳过带 .keep 锁定标记的备份（白名单/锁定标记而非纯 mtime）。
+- 防未来：备份有完整性清单+可校验可还原，清理受白名单保护，杜绝『仅覆盖部分源/不可恢复/误删』。
+- 验证结果：py_compile 通过；新增 tests/unit/test_backup_manifest.py 6 项全绿（目录/zip MANIFEST/篡改判失败/restore 还原/默认源含 db+config+state/清理白名单）；ruff 干净。
+- 纪律遵守：仅改蓝图已标注文件（utils/file_utils.py、scripts/结果备份.py）+ tests/unit 新增 test_backup_manifest.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】
