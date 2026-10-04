@@ -47,7 +47,6 @@ from myquant.core.logger import get_logger
 from myquant.models.trade import (
     Order,
     OrderSide,
-    OrderStatus,
     OrderType,
     Position,
     Trade,
@@ -316,6 +315,34 @@ class PaperBroker(BaseBroker):
         return order
 
     @_locked
+    def restore_state(self, state: Dict[str, Any]) -> None:
+        """崩溃恢复：重新登记在途订单并回写冻结（KP-P3-03）。
+
+        只恢复快照中的已发生事实（在途订单/冻结资金/T+1 冻结数量），不生成新信号。
+        """
+        restored = 0
+        for od in state.get("orders") or []:
+            if not isinstance(od, dict):
+                continue
+            try:
+                order = Order.from_dict(dict(od))
+            except Exception as e:
+                logger.warning(f"[paper_broker] 恢复订单解析失败，跳过: {e}")
+                continue
+            if order.order_id and order.status.is_active:
+                self._orders[order.order_id] = order
+                restored += 1
+        frozen = 0.0
+        for o in self._orders.values():
+            if o.side == OrderSide.BUY and o.status.is_active:
+                px = o.price or self._market_prices.get(o.symbol, 0) or 0
+                frozen += o.remaining_qty * px
+        self.frozen_cash = frozen
+        t1 = state.get("t1_holdings") or {}
+        if isinstance(t1, dict):
+            self._t1_holdings = {k: float(v) for k, v in t1.items() if float(v) > 0}
+        logger.info(f"[paper_broker] 崩溃恢复: 在途订单 {restored} 笔，冻结回写 {frozen:.2f}")
+
     def cancel_order(self, order_id: str) -> bool:
         """
         撤销订单

@@ -37,7 +37,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from myquant.core.logger import get_logger
 
@@ -609,6 +609,7 @@ def capture_live_state(
         "account": _capture_account(portfolio, broker),
         "positions": _capture_positions(portfolio, broker),
         "orders": _capture_orders(broker),
+        "t1_holdings": _capture_t1_holdings(broker),
         "scheduler": _capture_scheduler(scheduler),
     }
     if extra is not None:
@@ -670,6 +671,15 @@ def _capture_orders(broker: Any) -> List[Dict[str, Any]]:
         return [{"error": f"{type(e).__name__}: {e}"}]
     return []
 
+
+def _capture_t1_holdings(broker: Any) -> Dict[str, Any]:
+    """采集 T+1 冻结数量（KP-P3-03：崩溃恢复冻结回写用）。"""
+    if broker is None or not hasattr(broker, "_t1_holdings"):
+        return {}
+    try:
+        return {k: float(v) for k, v in dict(broker._t1_holdings).items() if float(v) > 0}
+    except Exception:
+        return {}
 
 def _capture_scheduler(scheduler: Any) -> Dict[str, Any]:
     """采集调度器任务总览。"""

@@ -540,6 +540,7 @@ Pythonwdhmm/
 │   │   ├── test_engine_benchmark.py  # ✨【V5·P3】三模式性能基准测试（吞吐/耗时阈值断言，15项）
 
 │   │   ├── test_live_guard_failover.py # ✨【回写#31】实盘保障组件故障注入（审计H2降级：事件总线断连/订阅失败/挂载失败/风控异常拒单/调度失败/巡检异常/快照失败/全组件关闭，10项）✅已完成
+│   │   ├── test_restore_broker_state.py # ✨【回写#147】重启恢复券商账本测试(KP-P3-03：paper/qmt restore_state重建在途+冻结+T1/终态不恢复/engine补传broker触发/对账未领回cancel/超阈值pause，6项)✅已完成
 │   │   ├── test_price_limit_fail_closed.py # ✨【回写#146】涨跌停硬拦截fail-closed测试(KP-P3-04：缺prev_close拒绝/涨停拒买/跌停拒卖/正常放行/engine注入prev_close，5项)✅已完成
 
 │   │   ├── test_qmt_broker_live.py  # ✨【回写#41】QMT实盘通道测试（fake SDK不连真实QMT：模式隔离/连接流程/委托撤单/成交回调/资金持仓/状态映射，23项）✅已完成
@@ -982,7 +983,7 @@ Pythonwdhmm/
 
     │   │                             # 【回写#135】attach_engine 注册日终 T+1 日切结算 cron（enable_t1_settle 默认 True，15:30 调 broker.settle_t1_all()/settle_t1()）
 
-    │   ├── state_store.py            # 状态持久化，崩溃恢复
+    │   ├── state_store.py            # 状态持久化，崩溃恢复；✨【回写#147】capture_live_state 增 t1_holdings 捕获（KP-P3-03 崩溃恢复冻结回写）
 
     │   ├── emergency_liquidation.py  # ✨【回写#47补录】紧急平仓服务（EmergencyLiquidationService：execute(confirm=False默认dry_run)生成撤单+平仓计划；先撤挂单再卖/优先可卖数量/单标异常不阻断/报告结构化）；被engine._setup_force_close与scripts/一键平仓.py调用
 
@@ -996,13 +997,13 @@ Pythonwdhmm/
 
     │       ├── base_broker.py        # 券商抽象基类
 
-    │       ├── paper_broker.py       # 本地模拟券商（Paper Trading，模拟撮合）
+    │       ├── paper_broker.py       # 本地模拟券商（Paper Trading，模拟撮合）；✨【回写#147】增 restore_state（KP-P3-03：在途订单重新登记+冻结+T1回写）
 
-    │       ├── qmt_broker.py         # 迅投QMT适配器（SIM模拟撮合+LIVE SDK占位，第1项实盘对接）；✨【回写#143】LIVE 成交走 fee_common 唯一入口计提费用（KP-P4-03：佣金+过户费+印花税，与 SIM/回测同构，本地账本现金守恒）；✨【回写#145】昨收改前收字段注入+跨日重置（KP-P3-09，移除首笔=昨收），_check_price_limit 缺昨收 fail-closed
+    │       ├── qmt_broker.py         # 迅投QMT适配器（SIM模拟撮合+LIVE SDK占位，第1项实盘对接）；✨【回写#143】LIVE 成交走 fee_common 唯一入口计提费用（KP-P4-03：佣金+过户费+印花税，与 SIM/回测同构，本地账本现金守恒）；✨【回写#145】昨收改前收字段注入+跨日重置（KP-P3-09，移除首笔=昨收），_check_price_limit 缺昨收 fail-closed；✨【回写#147】增 restore_state（KP-P3-03：在途订单重新登记+冻结+T1回写）
 
     │       ├── ptrade_broker.py      # 恒生Ptrade适配器（SIM模拟撮合+LIVE API占位，第1项实盘对接）
 
-    │       └── manager.py            # 多券商管理器（双券商并行：路由/主备切换/合并视图/健康监控）；✨【回写#145】push_market_data 撮合改传当日 open（防未来）+ 经 set_prev_close 注入昨收
+    │       └── manager.py            # 多券商管理器（双券商并行：路由/主备切换/合并视图/健康监控）；✨【回写#145】push_market_data 撮合改传当日 open（防未来）+ 经 set_prev_close 注入昨收；✨【回写#147】增 get_orders() 委托主券商（对账/快照用）
 
     │                                 # 【回写#135】BrokerManager.settle_t1_all()：遍历各券商逐个调用 settle_t1()（T+1 日终结算，无实现 skipped，异常不阻断）
 
@@ -2735,3 +2736,17 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：昨收/现价均为已发生事实，由行情快照注入，不预测。
 - 验证结果：py_compile 通过；新增 tests/unit/test_price_limit_fail_closed.py 5 项全绿（缺prev_close拒绝(DoD)/涨停拒买/跌停拒卖/正常放行/engine注入prev_close到extra(DoD)）；risk/live 广回归 251 passed（同步 test_live_guard_failover.py 两处注入 prev_close+现价以保持事件总线韧性语义）；ruff 全部通过。
 - 纪律遵守：仅改蓝图已标注文件（risk/rules.py、live/engine.py）+ tests/unit 新增 test_price_limit_fail_closed.py + 同步既有 test_live_guard_failover.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+
+147. ✨【回写记录·2026-10-04·T-13 KP-P3-03 重启不恢复券商订单与持仓，双账本漂移】
+
+【发现】engine.py 恢复调用 `restore_live_state(snapshot, portfolio=...)` 未传 broker → `restore_state` 永不调用；paper/qmt broker 无 `restore_state`（在途订单/冻结不恢复）；启动后无快照订单 vs 券商在途订单对账。
+- 修复：
+  a. **engine.py `_restore_state` 补传 broker**：`restore_live_state(snapshot, portfolio=..., broker=self._broker_manager or self._broker)`。
+  b. **paper_broker / qmt_broker 增 `restore_state(state)`**：从快照 orders 经 Order.from_dict 重新登记在途（非终态）订单；冻结资金回写（活跃 BUY 剩余名义）；T+1 冻结数量回写（快照 t1_holdings）。
+  c. **state_store.capture_live_state 增 t1_holdings 捕获**（`_capture_t1_holdings`）。
+  d. **engine 启动后对账 `_reconcile_restored_orders`**：快照订单 vs 券商在途订单差集，未领回挂单 cancel；超阈值（live=1/sim=5）→ pause + CRITICAL（双账本漂移风险）。
+  e. **BrokerManager 增 `get_orders()`** 委托主券商（对账/快照用，补齐 manager 缺 get_orders）。
+- 防未来：只恢复快照中的已发生事实（在途订单/冻结），不生成新信号。
+- 验证结果：py_compile 通过；新增 tests/unit/test_restore_broker_state.py 6 项全绿（paper/qmt restore_state 重建在途+冻结+T1回写(DoD)/终态订单不恢复/engine 补传 broker 触发 restore_state(DoD)/对账未领回挂单 cancel(DoD)/超阈值 pause+CRITICAL）；live 广回归 302 passed 无回归；ruff 测试通过（3 处既有 F821/F841 非本次引入）。
+- 纪律遵守：仅改蓝图已标注文件（live/engine.py、live/brokers/paper_broker.py、qmt_broker.py、manager.py、live/state_store.py）+ tests/unit 新增 test_restore_broker_state.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。

@@ -1764,14 +1764,60 @@ class LiveEngine(BaseEngine):
             logger.warning(f"[engine] 状态快照加载失败，全新开始: {e}")
             return
         try:
-            result = restore_live_state(snapshot, portfolio=self._portfolio)
+            result = restore_live_state(
+                snapshot, portfolio=self._portfolio,
+                broker=self._broker_manager or self._broker,
+            )
             self._state_recovered = True
+            # KP-P3-03：恢复后对账（快照订单 vs 券商在途订单差集，未领回挂单取消）
+            self._reconcile_restored_orders(snapshot.state.get("orders") or [])
             logger.info(
                 f"[engine] 崩溃恢复完成: 快照v{snapshot.version} "
                 f"tag={snapshot.tag!r} result={result}"
             )
         except Exception as e:
             logger.warning(f"[engine] 状态恢复失败，全新开始: {e}")
+
+    def _reconcile_restored_orders(
+        self,
+        snapshot_orders: List[Dict[str, Any]],
+    ) -> None:
+        """启动恢复后对账（KP-P3-03）。
+
+        快照订单 vs 券商在途订单差集：未领回挂单 → cancel；
+        超阈值 → pause + CRITICAL（双账本漂移风险）。
+        """
+        broker = self._broker_manager or self._broker
+        if broker is None or not hasattr(broker, "get_orders"):
+            return
+        try:
+            broker_ids = {o.order_id for o in broker.get_orders()}
+        except Exception as e:
+            logger.warning(f"[engine] 对账读取券商订单失败: {e}")
+            return
+        snapshot_ids = {
+            od.get("order_id") for od in snapshot_orders
+            if isinstance(od, dict) and od.get("order_id")
+        }
+        unclaimed = snapshot_ids - broker_ids
+        if not unclaimed:
+            return
+        logger.warning(
+            f"[engine] 恢复后未领回订单 {len(unclaimed)} 笔，尝试取消: {sorted(unclaimed)}"
+        )
+        if hasattr(broker, "cancel_order"):
+            for oid in sorted(unclaimed):
+                try:
+                    broker.cancel_order(oid)
+                except Exception as e:
+                    logger.warning(f"[engine] 取消未领回订单 {oid} 失败: {e}")
+        threshold = 1 if self._trade_mode == "live" else 5
+        if len(unclaimed) > threshold:
+            logger.critical(
+                f"[engine] 未领回订单 {len(unclaimed)} 超过阈值 {threshold}，"
+                "暂停引擎（双账本漂移风险）"
+            )
+            self.pause()
 
     def _save_state(self, tag: str = "") -> None:
         """保存实盘状态快照（H2修复；停止时/定时快照调用）"""

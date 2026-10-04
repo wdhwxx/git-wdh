@@ -811,6 +811,15 @@ class BrokerManager:
         )
         return result
 
+    def get_orders(self, symbol: Optional[str] = None) -> List[Order]:
+        """获取主券商在途订单（状态快照/启动对账用，KP-P3-03）。"""
+        b = self.primary
+        if b is None or not hasattr(b, "get_orders"):
+            return []
+        if symbol:
+            return b.get_orders(symbol=symbol)
+        return b.get_orders()
+
     def cancel_order(self, order_id: str, broker_id: Optional[str] = None) -> bool:
         """撤单（默认在全部券商中查找订单；指定 broker_id 则定向）"""
         if broker_id is not None:
