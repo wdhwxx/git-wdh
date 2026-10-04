@@ -1629,6 +1629,36 @@ def attach_engine(
             if report["status"] != PATROL_HEALTHY:
                 logger.warning(f"[attach] 巡检非健康: {report['status']}")
 
+            # KP-P5-03: 监控告警闭环——HealthChecker 巡检非 healthy 经告警管理器 alert
+            try:
+                from myquant.core.constants import SeverityLevel
+                from myquant.monitoring.alerting import get_alert_manager
+                from myquant.monitoring.health_check import get_health_checker
+                hc = get_health_checker()
+                hc.run_all()
+                summary = hc.get_summary()
+                if not summary.get("is_healthy", True):
+                    level = (
+                        SeverityLevel.CRITICAL
+                        if summary.get("is_critical")
+                        else SeverityLevel.WARNING
+                    )
+                    get_alert_manager().alert(
+                        level=level,
+                        message=(
+                            "健康检查非健康: "
+                            f"{summary.get('overall_status')} "
+                            f"(degraded={summary.get('degraded_count')}, "
+                            f"unhealthy={summary.get('unhealthy_count')})"
+                        ),
+                        source="live.scheduler",
+                        category="health",
+                        details=summary,
+                        deduplication_key=f"health:{summary.get('overall_status')}",
+                    )
+            except Exception as e:
+                logger.warning(f"[attach] 健康告警闭环异常: {e}")
+
         task_ids["patrol"] = scheduler.add_interval_task(
             _patrol_job,
             name="健康巡检",

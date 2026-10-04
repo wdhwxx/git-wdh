@@ -450,7 +450,8 @@ Pythonwdhmm/
 │   │   ├── test_env_auth_chain.py    # ✨【回写#156】.env与认证链路测试(KP-P1-04：env生效/settings兜
 │   │   ├── test_exception_swallowing.py # ✨【回写#157】异常吞噬测试(KP-P1-07：无fastapi raise/close_all异常warning/CI BLE001护栏，3项)✅已完成
 │   │   ├── test_api_docs_closed.py  # ✨【回写#158】API文档匿名开放测试(KP-P4-04：默认关docs/开启时存在/豁免仅健康，4项)✅已完成
-│   │   ├── test_health_probe_registry.py # ✨【回写#159】健康探针注册表测试(KP-P5-02：unknown计入degraded/live探针注册，3项)✅已完成底/env优先/运行API.py bootstrap不崩，4项)✅已完成1/缺参422/成功取真实值/失败501/异常501，5项)✅已完成/关闭/CORS互斥/401/429逻辑）✅已完成
+│   │   ├── test_health_probe_registry.py # ✨【回写#159】健康探针注册表测试(KP-P5-02：unknown计入degraded/live探针注册，3项)✅已完成
+│   │   ├── test_scheduler_health_alert.py # ✨【回写#160】监控阈值告警闭环测试(KP-P5-03：巡检注册/非healthy告警/healthy不告警，3项)✅已完成底/env优先/运行API.py bootstrap不崩，4项)✅已完成1/缺参422/成功取真实值/失败501/异常501，5项)✅已完成/关闭/CORS互斥/401/429逻辑）✅已完成
 
 │   │   ├── test_broker_platform_check.py # ✨【回写#25】券商适配器平台校验（审计疑点3：qmt/ptrade非Windows拦截、paper/sim放行、大小写不敏感）✅已完成
 
@@ -990,7 +991,7 @@ Pythonwdhmm/
 
     │   ├── portfolio.py              # 实时持仓、市值、可用冻结资金；✨【回写#141】账实对账 ReconciliationDiff + reconcile_vs_broker（KP-P4-01：本地 vs 券商只读 diff，现金容差0.01+持仓数量差）+ sync_from_broker 改先 diff 后重建，超阈值 critical 告警+__reconciliation_diff__ 回调，禁静默 clear 覆盖；✨【回写#149】增 diff_vs_broker 只读差异入口（KP-P3-08 风控基准券商权威账本）
 
-    │   ├── scheduler.py              # 定时任务、巡检、日报；✨【回写#141】attach_engine 增 enable_reconcile/reconcile_cron 盘后账实对账 cron（KP-P4-01：只对账不重建，超阈值 critical 告警）
+    │   ├── scheduler.py              # 定时任务、巡检、日报；✨【回写#141】attach_engine 增 enable_reconcile/reconcile_cron 盘后账实对账 cron（KP-P4-01：只对账不重建，超阈值 critical 告警）；✨【回写#160】巡检健康告警闭环（KP-P5-03：run_all 非 healthy → alert_mgr.alert）
 
     │   │                             # 【回写#135】attach_engine 注册日终 T+1 日切结算 cron（enable_t1_settle 默认 True，15:30 调 broker.settle_t1_all()/settle_t1()）
 
@@ -2884,6 +2885,14 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：健康状态如实反映组件探针注册与引擎运行状态，探针未注册即降级，杜绝恒 healthy 谎报。
 - 验证结果：py_compile 通过；新增 tests/unit/test_health_probe_registry.py 3 项全绿（无探针 /api/health=degraded+unknown/探针注册代码存在/HealthChecker 注册探针 run_all 可用）；routes 回归 3 passed；ruff：routes/test 干净（run_实盘入口.py 7 处既有 import 顺序非本次引入）。
 - 纪律遵守：仅改蓝图已标注文件（api/routes.py、run_实盘入口.py）+ tests/unit 新增 test_health_probe_registry.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+160. ✨【回写记录·2026-10-04·T-26 KP-P5-03 监控无阈值告警闭环】
+
+【发现】`attach_engine` 健康巡检（60s）仅调 `HealthPatrol.build_report` + `logger.warning`，非健康无告警闭环；未调用 `get_health_checker().run_all()`，探针健康状态无消费方。
+- 修复：`scheduler.py attach_engine._patrol_job` 增健康告警闭环——巡检时 `get_health_checker().run_all()` + `get_summary()`，`is_healthy=False` 时经 `get_alert_manager().alert()`（is_critical→CRITICAL，否则 WARNING，source=live.scheduler/category=health，dedup 按 overall_status）。
+- 防未来：健康探针状态由调度巡检消费并告警，监控从『只采集查询』变为『阈值告警闭环』。
+- 验证结果：py_compile 通过；新增 tests/unit/test_scheduler_health_alert.py 3 项全绿（巡检任务注册/非 healthy 触发告警/healthy 不触发）；scheduler 回归 15 passed 无回归；ruff 干净。
+- 纪律遵守：仅改蓝图已标注文件（live/scheduler.py）+ tests/unit 新增 test_scheduler_health_alert.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】
