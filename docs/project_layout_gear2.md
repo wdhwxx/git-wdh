@@ -534,6 +534,7 @@ Pythonwdhmm/
 │   │   ├── test_ml_cost_labels.py   # ✨【回写#96】F-09 训练目标纳入交易成本测试（roundtrip_rate 数值对拍 0.00182/扣费后标签=毛−双边成本率/direction 临界翻转/默认无 cost 零变化/与 config_builder 撮合口径对拍/net_return+turnover/换手惩罚 turnover=0→net=毛/win gate net_return 激活与拒绝/FeatureConfig cost 序列化往返/端到端带 cost 训练注册/防未来/参数防御负费率，16项）✅已完成
 │   │   ├── test_ml_cv_walkforward.py # ✨【回写#99】F-12 滚动/扩展窗口 CV + walk-forward 测试（各折 train 严格先于 valid+日历缓冲/验证段连续不重叠/expanding 训练窗单调递增/rolling 固定窗长/面板整组归属不切开/IC 均值·波动·ICIR 手算对拍/win_metric 汇总/CV 证据供超参选择（alpha 两组对比禁止单次留出）/walk-forward 逐期 IC+换手+毛净收益与累计稳定性曲线/正 IC 期占比/参数防御/单标的+面板端到端/既有 run 零变化回归，22项）✅已完成
 │   │   ├── test_incremental_session.py # ✨【回写#102】F-14 增量特征会话与推理缓存测试（warmup 末行 vs 全量 compute_features 容差内一致/push 单 bar 特征一致/push 耗时不随历史长度增长/无 update 指标自动降级全量/NaN→None JSON 安全/结果短 TTL 缓存命中与过期/默认关闭零变化，N项）✅已完成
+│   │   ├── test_incremental_config_signature.py # ✨【回写#168】增量缓存签名测试(KP-P5-09：签名对参数/费用/资金敏感/同配置稳定/缓存匹配复用/配置变更强制重算/格式版本不匹配重算/run写签名，8项)✅已完成
 │   │   ├── test_ml_volatility_robust.py # ✨【回写#97】F-10 波动率稳健化测试（std 默认零变化/ewma 递推数值对拍/λ 自适应触发/robust 滚动 MAD 对拍/winsorize 截断+防未来/ExtremeRegime 0-1 标记/参数防御/特征层默认零变化与启用产出新列/流式 update 与批量一致/端到端注册/验收对比股灾序列恢复段 EWMA 偏差<固定 std 偏差/method 非法报错，15项）✅已完成
 │   │   ├── test_tradability_filter.py # ✨【回写#98】F-11 可交易性过滤测试（停牌/20日均额阈值/一字涨跌停三规则/列缺失跳过/防未来 rolling 因果/拒因统计/策略侧启用后选层 0 不可交易标的/特征层行级 mask 置 NaN 保对齐/默认零变化/参数防御，22项）✅已完成
 
@@ -872,7 +873,7 @@ Pythonwdhmm/
 
     │   ├── batch_backtest.py         # ✨【V5·P2】批量回测调度器：数据指纹去重（同指纹跳过）+三模式复用+内存水位降级+失败续跑+汇总表，供run_批量回测.py调用；✨【2026-09-09】新增可选on_batch_done批次回调（GUI进度刷新用）；STRATEGY_REGISTRY扩为6策略（ma_cross/rsrs/grid/momentum/mean_reversion/multi_factor）
 
-    │   ├── incremental_backtest.py   # ✨【V5·P2】增量回测：基期分段+新增段增量计算+结果拼接（历史结果复用，只重算新增交易日），供scripts/增量回测.py调用
+    │   ├── incremental_backtest.py   # ✨【V5·P2】增量回测：基期分段+新增段增量计算+结果拼接（历史结果复用，只重算新增交易日），供scripts/增量回测.py调用；✨【回写#168】_config_signature 10字段 + format_version 升版全量重算（KP-P5-09）
 
     │   ├── param_optimizer.py        # ✨【V5·P2】参数优化器：网格/随机/坐标下降三策略搜索最优参数，输出参数热度图，供scripts/参数优化.py调用；✨【回写#138】in_sample_end 样本内→样本外分割（KP-P2-05）：ranked_in_sample寻优/ranked_out_sample确认/best样本内选参样本外结论/报告in-out双列/试验次数/WalkForwardResult滚动walk-forward
 
@@ -2971,6 +2972,17 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：崩溃恢复在途订单不丢失（未领回挂单 cancel 留痕）、快照结构版本可审计、auto_recover 必须显式决策。
 - 验证结果：py_compile 通过；新增 tests/unit/test_crash_recovery_orders.py 6 项全绿（未领回 cancel/已领回不cancel/save 写 schema/未来版本拒载/auto_recover 缺失 ValueError/显式 true+false 生效）；既有 test_restore_broker_state.py 空 state_store 适配加显式键，回归 23 passed 无回归；ruff 干净。
 - 纪律遵守：仅改蓝图已标注文件（live/state_store.py、live/engine.py）+ tests/unit 新增 test_crash_recovery_orders.py + 同步适配 test_restore_broker_state.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+168. ✨【回写记录·2026-10-04·T-35 KP-P5-09 增量回测缓存签名】
+
+【发现】incremental_backtest.py 增量复用仅比数据 fingerprint_hash（结果缓存按数据指纹匹配），参数/费用/区间等配置变更（同数据）会静默复用旧缓存；无格式版本控制，RESULTS_FORMAT_VERSION 升版不会触发重算。
+- 修复：
+  a. **_config_signature 复用 batch 10 字段**：IncrementalBacktester 新增 `_config_signature()`（与 batch_backtest._config_signature 同构 payload：strategy_name/params/commission/slippage/benchmark/risk_free_rate/start_date/end_date/initial_capital/frequency）；__init__ 增 commission/slippage/benchmark/risk_free_rate 可选参数（默认 None）。
+  b. **缓存读写带签名**：plan() 比对缓存 config_signature 与 format_version（RESULTS_FORMAT_VERSION），任一不匹配即强制重算；run() 写缓存条目增 config_signature + format_version。
+  c. **format_version 升版全量重算**：RESULTS_FORMAT_VERSION 变化 → 全部缓存不匹配 → 一次性全量重算。
+- 防未来：增量缓存复用受配置签名+格式版本约束，参数/费用/区间变更或格式升版不会静默复用旧结果。
+- 验证结果：py_compile 通过；新增 tests/unit/test_incremental_config_signature.py 8 项全绿（签名对 params/commission/initial_capital 敏感/同配置稳定/缓存匹配复用/配置变更强制重算/格式版本不匹配强制重算/run 写签名）；回归 37 passed 无回归；ruff 干净。
+- 纪律遵守：仅改蓝图已标注文件（backtest/incremental_backtest.py）+ tests/unit 新增 test_incremental_config_signature.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】

@@ -23,6 +23,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -211,6 +212,10 @@ class IncrementalBacktester:
         end_date: str = "",
         initial_capital: float = DEFAULT_INITIAL_CAPITAL,
         frequency: str = DEFAULT_FREQUENCY,
+        commission: Optional[Any] = None,
+        slippage: Optional[Any] = None,
+        benchmark: Optional[str] = None,
+        risk_free_rate: Optional[float] = None,
     ) -> None:
         """初始化并做防御式参数校验。"""
         if not isinstance(strategy_name, str) or not strategy_name.strip():
@@ -241,6 +246,10 @@ class IncrementalBacktester:
         self.end_date = end_date
         self.initial_capital = initial_capital
         self.frequency = frequency
+        self.commission = commission
+        self.slippage = slippage
+        self.benchmark = benchmark
+        self.risk_free_rate = risk_free_rate
 
         self._fingerprint_path = Path(fingerprint_path)
         self._results_path = Path(results_path)
@@ -248,6 +257,31 @@ class IncrementalBacktester:
         self._results: Dict[str, Dict[str, Any]] = self._load_results()
 
     # ── 指纹与结果缓存 ──
+
+    def _config_signature(self) -> str:
+        """计算回测参数签名（策略/参数/成本/绩效/区间，与 batch_backtest._config_signature 同构 10 字段）。
+
+        任一参数变化（佣金率/滑点/基准/无风险利率/区间/资金）即签名变化；
+        plan() 比对缓存签名，不一致时强制重算，避免参数变更后静默复用旧缓存。
+        防未来函数：仅对当前配置做确定性哈希，不涉及时序数据。
+
+        Returns:
+            SHA-256 十六进制签名。
+        """
+        payload: Dict[str, Any] = {
+            "strategy_name": self.strategy_name,
+            "params": self.params,
+            "commission": self.commission,
+            "slippage": self.slippage,
+            "benchmark": self.benchmark,
+            "risk_free_rate": self.risk_free_rate,
+            "start_date": self.start_date,
+            "end_date": self.end_date,
+            "initial_capital": self.initial_capital,
+            "frequency": self.frequency,
+        }
+        canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def compute_fingerprints(self) -> Dict[str, DataFingerprint]:
         """计算全部标的的当前数据指纹。
@@ -327,10 +361,13 @@ class IncrementalBacktester:
             fp = fps.get(symbol)
             if symbol in changed:
                 final_changed.append(symbol)
-            elif cached is None or fp is None or cached.get("fingerprint_hash") != fp.hash_value:
-                # 缓存缺失或指纹不匹配（仓库与缓存不同步），防御性重算
+            elif (cached is None or fp is None
+                  or cached.get("fingerprint_hash") != fp.hash_value
+                  or cached.get("config_signature") != self._config_signature()
+                  or cached.get("format_version") != RESULTS_FORMAT_VERSION):
+                # 缓存缺失/指纹不匹配/配置签名不一致（参数或费用变更）/格式版本升版，防御性重算
                 final_changed.append(symbol)
-                logger.info("防御性重算: %s（结果缓存缺失或指纹不匹配）", symbol)
+                logger.info("防御性重算: %s（缓存缺失/指纹不匹配/配置签名或格式版本不一致）", symbol)
 
         final_changed = sorted(set(final_changed))
         unchanged = [s for s in symbols if s not in final_changed]
@@ -382,6 +419,8 @@ class IncrementalBacktester:
                 if isinstance(outcome, BaseException):
                     self._results[symbol] = {
                         "fingerprint_hash": fp.hash_value,
+                        "config_signature": self._config_signature(),
+                        "format_version": RESULTS_FORMAT_VERSION,
                         "status": "error",
                         "metrics": None,
                         "trade_count": None,
@@ -391,6 +430,8 @@ class IncrementalBacktester:
                     }
                 else:
                     outcome["fingerprint_hash"] = fp.hash_value
+                    outcome["config_signature"] = self._config_signature()
+                    outcome["format_version"] = RESULTS_FORMAT_VERSION
                     outcome["computed_at"] = datetime.now(timezone.utc).isoformat()
                     self._results[symbol] = outcome
         else:
