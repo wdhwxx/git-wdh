@@ -38,11 +38,17 @@ backtest/engine.py - 回测引擎
 __version__ = "0.2.0"
 __author__ = "Pythonwdhmm"
 
+import time
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 
+from myquant.backtest.data_loader import DataProviderBase
+from myquant.backtest.metrics import MetricsCalculator
+from myquant.backtest.mixed_engine import MixedBacktestEngine
+from myquant.backtest.recorder import TradeRecorder
+from myquant.backtest.vectorized_engine import VectorizedBacktestEngine
 from myquant.core.logger import get_logger
 from myquant.core.lookahead_guard import (
     LookaheadGuard,
@@ -52,12 +58,8 @@ from myquant.engine.base import BaseEngine
 from myquant.execution.sim_broker import SimBroker
 from myquant.models.backtest import BacktestConfig, BacktestResult
 from myquant.models.market_data import Bar, MarketEvent
+from myquant.risk.rules import RiskContext  # KP-P3-07: 回测复用实盘风控上下文
 from myquant.strategies.base import Signal, SignalType, StrategyBase, StrategyContext
-from myquant.backtest.data_loader import DataProviderBase
-from myquant.backtest.metrics import MetricsCalculator
-from myquant.backtest.recorder import TradeRecorder
-from myquant.backtest.mixed_engine import MixedBacktestEngine
-from myquant.backtest.vectorized_engine import VectorizedBacktestEngine
 
 logger = get_logger(__name__)
 
@@ -148,6 +150,15 @@ class BacktestEngine(BaseEngine):
         # 订单ID -> 信号日期映射（用于成交时关联信号日，校验T+1规则）
         self._order_signal_dates: Dict[str, str] = {}
 
+        # KP-P3-07: 回测复用实盘 RiskManager（on_init 装配；缺省 None 不拦截）
+        self._risk_manager: Optional[Any] = None
+        self._risk_prev_close: Dict[str, float] = {}
+        self._risk_day = ""
+        self._risk_day_start_assets = float(self.config.initial_capital)
+        self._risk_peak_assets = float(self.config.initial_capital)
+        self._risk_order_count = 0
+        self._risk_last_order_time = 0.0
+
         logger.info(f"回测引擎初始化: {self.config}")
         if data_provider:
             logger.info(f"数据提供器: {data_provider}")
@@ -223,6 +234,24 @@ class BacktestEngine(BaseEngine):
             slippage_model=self.config.slippage,
         )
         self.broker.connect()
+
+        # 1b. KP-P3-07: 装配与实盘同源的 RiskManager（回测执行实盘风控）
+        from myquant.live.engine import (
+            build_risk_manager_from_config,  # 懒导入避免重型耦合
+        )
+        _cfg = self.config.to_dict()
+        self._risk_manager = build_risk_manager_from_config(
+            risk_cfg=_cfg.get("risk_control"),
+            position_cfg=_cfg.get("position"),
+            strategy_cfg=_cfg.get("strategy"),
+            enable_trading_hours=False,
+        )
+        self._risk_peak_assets = float(getattr(self.broker, "total_assets", self.config.initial_capital))
+        # 回测为批量回放，墙钟下单间隔无意义 → 关闭 rate_limit 间隔约束（KP-P3-07 适配）
+        _rl = self._risk_manager.get_rule("rate_limit")
+        if _rl is not None:
+            _rl.min_interval_seconds = 0.0
+        logger.info("[backtest] 已装配实盘同源 RiskManager（KP-P3-07）")
 
         # 2. 创建记录器
         self.recorder = TradeRecorder(initial_capital=self.config.initial_capital)
@@ -367,6 +396,16 @@ class BacktestEngine(BaseEngine):
 
         symbol = bar.symbol
 
+        # ── 步骤0：KP-P3-07 风控日切状态（当日首bar快照日初资产/重置下单计数）──
+        trade_date = self._bar_date_str(bar)
+        if self._risk_manager is not None and self._risk_day != trade_date:
+            self._risk_day = trade_date
+            _acct = self.broker.get_account() if self.broker is not None else None
+            self._risk_day_start_assets = (
+                float(_acct["total_assets"]) if _acct and _acct.get("total_assets") else 0.0
+            )
+            self._risk_order_count = 0
+
         # ── 步骤1：撮合上一根bar创建的订单（用当前bar开盘价）──
         if self.broker:
             trades = self.broker.on_bar(bar)
@@ -410,6 +449,10 @@ class BacktestEngine(BaseEngine):
                 benchmark_equity=benchmark_equity,
             )
 
+        # KP-P3-07: 当前bar收盘写入 prev_close 映射（下一bar作昨收基准）
+        if self._risk_manager is not None:
+            self._risk_prev_close[bar.symbol] = float(bar.close)
+
         self._event_count += 1
 
     def _execute_signal(self, signal: Signal, bar: Bar) -> None:
@@ -440,6 +483,18 @@ class BacktestEngine(BaseEngine):
             order = signal.to_order(quantity=quantity, order_type=__import__('myquant.models.trade', fromlist=['OrderType']).OrderType.MARKET)
 
         if order and self.broker:
+            # KP-P3-07: 回测执行实盘风控（未通过单记录 skip）
+            if self._risk_manager is not None:
+                context = self._build_backtest_risk_context(bar)
+                result = self._risk_manager.check_order(order, context)
+                self._risk_order_count += 1
+                self._risk_last_order_time = time.time()
+                if not result.passed:
+                    logger.warning(
+                        f"[backtest] 实盘风控拒绝订单（跳过）: {order.symbol} "
+                        f"{order.side.value} {order.quantity:.0f} 原因={result.reason}"
+                    )
+                    return
             self.broker.submit_order(order)
             logger.debug(
                 f"提交订单: {order.symbol} {order.side.value} "
@@ -468,6 +523,43 @@ class BacktestEngine(BaseEngine):
                 )
                 # 保存订单ID -> 信号日期映射，用于成交时校验T+1规则
                 self._order_signal_dates[order.order_id] = signal_date
+
+    def _build_backtest_risk_context(self, bar: Bar) -> RiskContext:
+        """构建回测风控上下文（KP-P3-07，字段全部取自已发生事实，防未来）。"""
+        broker = self.broker
+        positions: List[Dict[str, Any]] = []
+        cash = 0.0
+        total_assets = 0.0
+        initial_capital = float(self.config.initial_capital)
+        if broker is not None:
+            cash = float(getattr(broker, "available_cash", 0.0))
+            total_assets = float(getattr(broker, "total_assets", 0.0))
+            initial_capital = float(getattr(broker, "initial_capital", initial_capital))
+            for pos in broker.get_positions():
+                positions.append({
+                    "symbol": pos.symbol,
+                    "quantity": float(pos.quantity),
+                    "avg_cost": float(pos.avg_cost),
+                    "market_price": float(pos.market_price),
+                })
+        if total_assets > self._risk_peak_assets:
+            self._risk_peak_assets = total_assets
+        current_price = dict(self._risk_prev_close)
+        current_price[bar.symbol] = float(bar.close)
+        return RiskContext(
+            cash=cash,
+            total_assets=total_assets,
+            initial_capital=initial_capital,
+            positions=positions,
+            position_count=len(positions),
+            peak_assets=self._risk_peak_assets,
+            current_price=current_price,
+            order_count_today=self._risk_order_count,
+            last_order_time=self._risk_last_order_time,
+            trading_date=self._bar_date_str(bar),
+            day_start_assets=self._risk_day_start_assets,
+            extra={"prev_close": dict(self._risk_prev_close)},
+        )
 
     def _calc_buy_quantity(self, symbol: str, price: float) -> int:
         """计算买入数量（基于策略的仓位管理规则）"""
@@ -990,9 +1082,8 @@ def _run_self_test() -> int:
     返回:
         通过的测试项数量。
     """
-    import numpy as np
 
-    from myquant.strategies.base import Signal, SignalType, StrategyBase, StrategyContext
+    from myquant.strategies.base import Signal, StrategyBase, StrategyContext
 
     passed = 0
     failures: List[str] = []
@@ -1087,7 +1178,7 @@ def _run_self_test() -> int:
     try:
         run_backtest(config, eo, data=data, mode="vectorized")
         check("显式 vectorized + event-only 策略抛异常", False, "未抛出")
-    except NotImplementedError as e:
+    except NotImplementedError:
         check("显式 vectorized + event-only 策略抛异常", True)
 
     # 6. 非法 mode

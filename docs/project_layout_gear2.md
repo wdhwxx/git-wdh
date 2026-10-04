@@ -2750,3 +2750,13 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：只恢复快照中的已发生事实（在途订单/冻结），不生成新信号。
 - 验证结果：py_compile 通过；新增 tests/unit/test_restore_broker_state.py 6 项全绿（paper/qmt restore_state 重建在途+冻结+T1回写(DoD)/终态订单不恢复/engine 补传 broker 触发 restore_state(DoD)/对账未领回挂单 cancel(DoD)/超阈值 pause+CRITICAL）；live 广回归 302 passed 无回归；ruff 测试通过（3 处既有 F821/F841 非本次引入）。
 - 纪律遵守：仅改蓝图已标注文件（live/engine.py、live/brokers/paper_broker.py、qmt_broker.py、manager.py、live/state_store.py）+ tests/unit 新增 test_restore_broker_state.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】
+
+【发现】`backtest/engine.py` 构造 SimBroker 无 RiskManager → 回测不执行实盘风控；`mixed_engine.py:491-505` 自实现止损阈值（`avg_cost×(1-stop_loss_pct)`）与实盘 StopLossRule 口径分叉。
+- 修复：
+  a. **backtest/engine.py 装配实盘同源 RiskManager**：on_init 调 `build_risk_manager_from_config`（同 live 引擎同一构造）从回测 config 的 risk_control/position/strategy 段装配；新增 `_build_backtest_risk_context()`（字段全部取自已发生事实：available_cash/total_assets/持仓/prev_close/日初资产/当日下单数，防未来）；`on_bar` 维护日切（首bar快照日初资产+重置下单计数）与 `_risk_prev_close`（昨收基准）；`_execute_signal` 提交前 `check_order`，未通过单记录 skip（不下单、无成交）。
+  b. **回测批量回放适配**：装配后把 rate_limit 墙钟下单间隔（0.5s）置 0（批量回放墙钟间隔无意义，避免同 bar 多信号误拒）；回测默认关闭 trading_hours（enable_trading_hours=False）。
+  c. **mixed_engine.py 止损复用实盘 StopLossRule**：`StopLossRule` 新增 `stop_price(avg_cost)` 共享口径；mixed `_check_stop_loss` 改调 `self._stop_loss_rule.stop_price(pos.avg_cost)`（同一实现，消除分叉）。
+- 验证结果：py_compile 通过；新增 tests/unit/test_backtest_risk.py 5 项全绿（回测装配实盘RiskManager/风控拒绝单记录skip无成交/风控上下文prev_close防未来/StopLossRule.stop_price同源公式/mixed止损复用）；backtest 广回归 170 passed +1 skipped 无回归（较基线 165 净增 5）；ruff 通过（2 处既有 F841 非本次引入）。
+- 纪律遵守：仅改蓝图已标注文件（backtest/engine.py、backtest/mixed_engine.py、risk/rules.py）+ tests/unit 新增 test_backtest_risk.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。

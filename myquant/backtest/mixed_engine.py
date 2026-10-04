@@ -62,16 +62,17 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from myquant.models.backtest import BacktestConfig, BacktestResult, PerformanceMetrics
-from myquant.models.market_data import Bar, MarketEvent
-from myquant.models.trade import Order, OrderSide, OrderType, Position, Trade
-from myquant.strategies.base import Signal, SignalType, StrategyBase, StrategyContext
 from myquant.backtest.data_loader import DataProviderBase
 from myquant.backtest.fee_common import FeeCalculator
 from myquant.backtest.metrics import MetricsCalculator
 from myquant.backtest.order_matcher import OrderMatcher
 from myquant.backtest.recorder import TradeRecorder
 from myquant.core.lookahead_guard import LookaheadGuard  # #H2修复：防未来函数校验器
+from myquant.models.backtest import BacktestConfig, BacktestResult, PerformanceMetrics
+from myquant.models.market_data import Bar, MarketEvent
+from myquant.models.trade import Order, OrderSide, OrderType, Position, Trade
+from myquant.risk.rules import StopLossRule  # KP-P3-07: 止损阈值与实盘同源
+from myquant.strategies.base import Signal, SignalType, StrategyBase, StrategyContext
 
 logger = logging.getLogger(__name__)
 
@@ -502,7 +503,9 @@ class MixedBacktestEngine:
         pos = self.positions.get(bar.symbol)
         if pos is None or pos.quantity <= 0 or pos.avg_cost <= 0:
             return
-        stop_price = pos.avg_cost * (1.0 - self.stop_loss_pct)
+        if not hasattr(self, "_stop_loss_rule"):
+            self._stop_loss_rule = StopLossRule(max_loss_pct=self.stop_loss_pct)
+        stop_price = self._stop_loss_rule.stop_price(pos.avg_cost)
         stop_order = Order(
             symbol=bar.symbol,
             side=OrderSide.SELL,
@@ -1302,6 +1305,8 @@ def _run_self_test() -> int:
     # 2. 与 vectorized 引擎单标的结果逐点一致（同一目标序列）
     from myquant.backtest.vectorized_engine import (
         VectorizedBacktestEngine,
+    )
+    from myquant.backtest.vectorized_engine import (
         _FixedTargetStrategy as _VecFixedTarget,
     )
     vec_targets = [0.0, 0.0, 0.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0]

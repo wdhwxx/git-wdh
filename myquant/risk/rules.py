@@ -308,6 +308,10 @@ class StopLossRule(RiskRule):
         super().__init__(**params)
         self.max_loss_pct = max_loss_pct
 
+    def stop_price(self, avg_cost: float) -> float:
+        """止损触发价（KP-P3-07：与实盘持仓止损阈值同一口径，回测/混合引擎复用）。"""
+        return avg_cost * (1.0 - self.max_loss_pct)
+
     def check(self, order: Order, context: RiskContext) -> RiskCheckResult:
         if order.side != OrderSide.BUY:
             return self._pass()
