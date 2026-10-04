@@ -225,6 +225,7 @@ def create_app(
     version: str = "v1.0.0",
     enable_auth: bool = True,
     enable_rate_limit: bool = True,
+    enable_docs: bool = False,
     data_quality_explorer: Any = None,
     metrics_collector: Any = None,
     alert_manager: Any = None,
@@ -244,6 +245,9 @@ def create_app(
     enable_rate_limit : bool
         是否启用IP限流（默认开启；阈值经 QUANT_RATE_LIMIT_MAX /
         QUANT_RATE_LIMIT_WINDOW 环境变量配置，默认 100 次/60 秒）
+    enable_docs : bool
+        KP-P4-04: 是否开放 Swagger/ReDoc/OpenAPI 文档（默认 False 关闭，
+        生产不暴露接口文档；文档端点也不在认证/限流豁免内）
     data_quality_explorer : DataQualityExplorer | None
         数据质量探查器（任务16，None则自动构建全局单例）
     metrics_collector : MetricsCollector | None
@@ -259,10 +263,14 @@ def create_app(
         # KP-P1-07: 不静默降级——无 fastapi 时启动必须显式失败，避免『看似可用』的假成功
         raise RuntimeError("[api] fastapi未安装，API服务不可用。请运行: pip install fastapi uvicorn")
 
+    # KP-P4-04: 生产默认关闭文档/OpenAPI 暴露（enable_docs=False 时 docs_url 等为 None）
     app = FastAPI(
         title=title,
         version=version,
         description="量化交易系统REST API，支持策略管理、回测、实盘、风控、数据、数据质量、监控等功能。",
+        docs_url="/docs" if enable_docs else None,
+        redoc_url="/redoc" if enable_docs else None,
+        openapi_url="/openapi.json" if enable_docs else None,
     )
 
     # ── M4修复：服务获取统一走依赖注入层（api/dependencies/get_services.py）──
@@ -337,9 +345,10 @@ def create_app(
         max_requests=int(os.environ.get("QUANT_RATE_LIMIT_MAX", "100")),
         window_seconds=int(os.environ.get("QUANT_RATE_LIMIT_WINDOW", "60")),
     )
-    # 豁免路径：健康检查（监控探活）与 API 文档（浏览器浏览）
+    # 豁免路径：仅健康检查（监控探活）
+    # KP-P4-04: 移除 /docs /redoc /openapi.json——API 文档不再匿名豁免
     # L7修复: 移除 /health——M10 后真实路由为 /api/health，/health 已 404（死配置）
-    _exempt_paths = {"/api/health", "/docs", "/redoc", "/openapi.json"}
+    _exempt_paths = {"/api/health"}
 
     if enable_rate_limit:
         app.add_middleware(

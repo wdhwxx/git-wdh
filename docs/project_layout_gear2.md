@@ -448,7 +448,8 @@ Pythonwdhmm/
 │   │   ├── test_api_not_implemented.py # ✨【回写#154】占位接口伪造成功测试(KP-P1-01：order/live start-stop/risk pause-resume 六端点 501 + cli --host 默认 127.0.0.1，7项)✅已完成
 │   │   ├── test_backtest_not_placeholder.py # ✨【回写#155】回测API硬编码绩效常量测试(KP-P1-02：未注册50
 │   │   ├── test_env_auth_chain.py    # ✨【回写#156】.env与认证链路测试(KP-P1-04：env生效/settings兜
-│   │   ├── test_exception_swallowing.py # ✨【回写#157】异常吞噬测试(KP-P1-07：无fastapi raise/close_all异常warning/CI BLE001护栏，3项)✅已完成底/env优先/运行API.py bootstrap不崩，4项)✅已完成1/缺参422/成功取真实值/失败501/异常501，5项)✅已完成/关闭/CORS互斥/401/429逻辑）✅已完成
+│   │   ├── test_exception_swallowing.py # ✨【回写#157】异常吞噬测试(KP-P1-07：无fastapi raise/close_all异常warning/CI BLE001护栏，3项)✅已完成
+│   │   ├── test_api_docs_closed.py  # ✨【回写#158】API文档匿名开放测试(KP-P4-04：默认关docs/开启时存在/豁免仅健康，4项)✅已完成底/env优先/运行API.py bootstrap不崩，4项)✅已完成1/缺参422/成功取真实值/失败501/异常501，5项)✅已完成/关闭/CORS互斥/401/429逻辑）✅已完成
 
 │   │   ├── test_broker_platform_check.py # ✨【回写#25】券商适配器平台校验（审计疑点3：qmt/ptrade非Windows拦截、paper/sim放行、大小写不敏感）✅已完成
 
@@ -1040,7 +1041,7 @@ Pythonwdhmm/
 
     │   ├── __init__.py                 # API包统一导出：create_app/run_api/FASTAPI_AVAILABLE + 11个响应/请求模型 + APIKeyAuth + FixedWindowLimiter/TokenBucketLimiter/RateLimitResult + ServiceContainer（__all__全量导出，供运行API.py与外部导入）
 
-    │   ├── routes.py                 # 路由聚合；✨【回写#154】占位写端点改真 501（KP-P1-01）；✨【回写#155】回测端点接线真实引擎（KP-P1-02）；✨【回写#157】无 fastapi 启动 raise（KP-P1-07）
+    │   ├── routes.py                 # 路由聚合；✨【回写#154】占位写端点改真 501（KP-P1-01）；✨【回写#155】回测端点接线真实引擎（KP-P1-02）；✨【回写#157】无 fastapi 启动 raise（KP-P1-07）；✨【回写#158】文档默认关闭+移除文档豁免（KP-P4-04）
 
     │   │                             # ✅已实现：6个数据质量端点(/api/data/quality, /overview, /runs, /runs/{id}, /dirty, /metrics) + 告警管理端点
 
@@ -2861,6 +2862,17 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：异常吞噬类违规通过 CI 护栏持续阻断，关键路径显式失败/留痕。
 - 验证结果：py_compile 通过；新增 tests/unit/test_exception_swallowing.py 3 项全绿（无 fastapi raise/close_all 异常 warning/CI BLE001 护栏存在）；回归 70 passed 无回归；ruff 干净；ci.yml YAML 校验通过。
 - 纪律遵守：仅改蓝图已标注文件（api/routes.py、database/connection.py、.github/workflows/ci.yml）+ tests/unit 新增 test_exception_swallowing.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+158. ✨【回写记录·2026-10-04·T-24 KP-P4-04 API文档与OpenAPI匿名开放】
+
+【发现】`routes.py` create_app 构造 FastAPI 默认开放 `/docs` `/redoc` `/openapi.json`（Swagger/ReDoc/OpenAPI 匿名可访问），且文档路径在认证/限流 `_exempt_paths` 豁免中——接口文档匿名开放。
+- 修复：
+  a. **create_app 增 `enable_docs: bool = False`**（生产默认关闭）：`docs_url/redoc_url/openapi_url` 仅在 enable_docs=True 时设为路径，否则 None（端点不暴露）。
+  b. **_exempt_paths 移除 `/docs` `/redoc` `/openapi.json`**：仅保留 `/api/health`（监控探活）；即便 enable_docs=True 开放文档，也需过认证/限流（不再匿名豁免）。
+  c. **更新 test_api_middleware.py test_豁免路径包含健康检查**：断言 /docs 不再豁免（行为变更随本补丁）。
+- 防未来：API 文档默认不暴露、不做匿名豁免，杜绝接口结构泄露。
+- 验证结果：py_compile 通过；新增 tests/unit/test_api_docs_closed.py 4 项全绿（默认关文档/开启时文档存在/认证豁免仅健康/限流豁免无文档）；回归 17 passed 无回归；ruff 干净。
+- 纪律遵守：仅改蓝图已标注文件（api/routes.py、tests/unit/test_api_middleware.py）+ tests/unit 新增 test_api_docs_closed.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】

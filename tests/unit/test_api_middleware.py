@@ -62,11 +62,11 @@ class TestAuthWiring:
         assert _RateLimitMiddleware not in _middleware_classes(app)
 
     def test_豁免路径包含健康检查(self) -> None:
-        """健康检查/文档路径免认证（监控探活可用）"""
+        """健康检查免认证（监控探活可用）；KP-P4-04: 文档端点不再豁免"""
         app = create_app(enable_auth=True, enable_rate_limit=False)
         kwargs = _middleware_kwargs(app, _AuthMiddleware)
         assert "/api/health" in kwargs["exempt_paths"]
-        assert "/docs" in kwargs["exempt_paths"]
+        assert "/docs" not in kwargs["exempt_paths"]
 
     def test_auth_verify_request_逻辑(self) -> None:
         """APIKeyAuth 逻辑单元：header/query 取 key，无效拒绝"""
