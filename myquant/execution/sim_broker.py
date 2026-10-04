@@ -26,15 +26,14 @@ execution/sim_broker.py - 回测模拟券商
 __version__ = "0.1.0"
 __author__ = "Pythonwdhmm"
 
-import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from myquant.core.logger import get_logger
 from myquant.execution.base import ExecutionInterface
 from myquant.execution.state_machine import OrderStateMachine
 from myquant.models.backtest import CommissionModel, SlippageModel
 from myquant.models.market_data import Bar
-from myquant.models.trade import Order, OrderSide, OrderStatus, Position, Trade
+from myquant.models.trade import Order, OrderSide, Position, Trade
 
 logger = get_logger(__name__)
 
@@ -68,6 +67,9 @@ class SimBroker(ExecutionInterface):
         commission_model: Optional[CommissionModel] = None,
         slippage_model: Optional[SlippageModel] = None,
         enable_partial_fill: bool = False,
+        price_limit_pct: float = 0.10,
+        enforce_limit: bool = False,
+        is_suspended: Optional[Callable[[str], bool]] = None,
     ):
         """
         初始化模拟券商
@@ -88,6 +90,10 @@ class SimBroker(ExecutionInterface):
         self.commission_model = commission_model or CommissionModel()
         self.slippage_model = slippage_model or SlippageModel()
         self.enable_partial_fill = enable_partial_fill
+        self.price_limit_pct = float(price_limit_pct)   # KP-P2-02: 涨跌停幅度
+        self.enforce_limit = bool(enforce_limit)        # KP-P2-02: 是否强制涨跌停校验（event 路径开启）
+        self.is_suspended = is_suspended                # KP-P2-02: 停牌判定函数
+        self._prev_close: Dict[str, float] = {}        # KP-P2-02: 昨收基准（上一bar收盘）
         self.state_machine = OrderStateMachine()
         self._market_prices: Dict[str, float] = {}  # 最新市场价
         logger.info(
@@ -257,6 +263,9 @@ class SimBroker(ExecutionInterface):
         返回:
             List[Trade]: 本bar产生的成交记录
         """
+        # KP-P2-02: 记录昨收基准（上一bar收盘，当前尚未更新为 bar.close）
+        if self.enforce_limit:
+            self._prev_close[bar.symbol] = self._market_prices.get(bar.symbol, 0.0)
         # 更新市场价
         self._market_prices[bar.symbol] = bar.close
         pos = self.positions.get(bar.symbol)
@@ -276,6 +285,26 @@ class SimBroker(ExecutionInterface):
 
         return trades
 
+    def _price_limit_check(self, order: Order, bar: Bar) -> Optional[str]:
+        """涨跌停/停牌前置检查（KP-P2-02）。
+
+        涨停价 = 昨收×(1+幅度)，跌停价 = 昨收×(1-幅度)。
+        涨停时买单（挂涨停价买不到）拒绝；跌停时卖单拒绝；停牌跳过。
+        未启用 enforce_limit 或缺昨收时返回 None（不拦截）。
+        """
+        if not self.enforce_limit:
+            return None
+        if self.is_suspended is not None and self.is_suspended(order.symbol):
+            return "停牌"
+        pc = self._prev_close.get(order.symbol, 0.0)
+        if pc <= 0 or self.price_limit_pct <= 0:
+            return None
+        if order.side == OrderSide.BUY and bar.open >= pc * (1 + self.price_limit_pct):
+            return "涨停"
+        if order.side == OrderSide.SELL and bar.open <= pc * (1 - self.price_limit_pct):
+            return "跌停"
+        return None
+
     def _match_order(self, order: Order, bar: Bar) -> Optional[Trade]:
         """
         撮合单个订单
@@ -288,6 +317,13 @@ class SimBroker(ExecutionInterface):
             Trade: 成交记录（未成交返回None）
         """
         from myquant.models.trade import OrderType
+
+        # KP-P2-02: 涨停拒买/跌停拒卖/停牌跳过（event 路径；mixed/vectorized 走 OrderMatcher 已有判定）
+        reject = self._price_limit_check(order, bar)
+        if reject:
+            logger.debug(f"[sim_broker] {reject}拒单（KP-P2-02）: {order.symbol} {order.side.value}")
+            self.cancel_order(order.order_id)
+            return None
 
         if order.order_type == OrderType.MARKET:
             fill_price = bar.open

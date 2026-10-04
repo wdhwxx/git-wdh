@@ -228,10 +228,14 @@ class BacktestEngine(BaseEngine):
             self._load_data_from_provider()
 
         # 1. 创建模拟券商
+        _bcfg = self.config.to_dict()
         self.broker = SimBroker(
             initial_capital=self.config.initial_capital,
             commission_model=self.config.commission,
             slippage_model=self.config.slippage,
+            price_limit_pct=float(_bcfg.get("price_limit_pct", 0.10)),
+            enforce_limit=bool(_bcfg.get("enforce_limit", False)),
+            is_suspended=None,
         )
         self.broker.connect()
 

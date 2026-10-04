@@ -543,6 +543,7 @@ Pythonwdhmm/
 │   │   ├── test_restore_broker_state.py # ✨【回写#147】重启恢复券商账本测试(KP-P3-03：paper/qmt restore_state重建在途+冻结+T1/终态不恢复/engine补传broker触发/对账未领回cancel/超阈值pause，6项)✅已完成
 │   │   ├── test_accountability_sync.py # ✨【回写#149】券商权威账本对账测试(KP-P3-08：diff_vs_broker只diff不重建/账实一致通过/patrol超阈CRITICAL+pause/无差异不暂停，4项)✅已完成
 │   │   ├── test_trade_calendar_gate.py # ✨【回写#150】交易日历安全门测试(KP-P3-10：TradingHoursRule非交易日拒绝/交易日放行/显式日历/非交易时段仍拒绝/实盘入口真实日历判定，5项)✅已完成
+│   │   ├── test_event_price_limit.py # ✨【回写#151】event路径涨跌停/停牌测试(KP-P2-02：涨停拒买/跌停拒卖/停牌跳过/非涨跌停正常/默认不强制保持既有，5项)✅已完成
 │   │   ├── test_price_limit_fail_closed.py # ✨【回写#146】涨跌停硬拦截fail-closed测试(KP-P3-04：缺prev_close拒绝/涨停拒买/跌停拒卖/正常放行/engine注入prev_close，5项)✅已完成
 
 │   │   ├── test_qmt_broker_live.py  # ✨【回写#41】QMT实盘通道测试（fake SDK不连真实QMT：模式隔离/连接流程/委托撤单/成交回调/资金持仓/状态映射，23项）✅已完成
@@ -827,7 +828,7 @@ Pythonwdhmm/
 
     │   ├── __init__.py
 
-    │   ├── engine.py                 # ✨【V5·P1】回测引擎升级为三模式调度器：BacktestScheduler（按config engine.mode切换event/vectorized/mixed，统一数据加载+防未来函数校验+结果封装）+ run_backtest()便捷函数；原Engine保留为event真值基准（时间序列事件循环+内置LookaheadGuard：on_market_event记录成交铁律3、_execute_signal记录信号铁律4、on_stop assert_pass()；_bar_date_str/_order_signal_dates映射）；✨【回写#140】context 注入 lookahead_guard 到 extra（KP-P2-08：策略守卫钩子可达 guard）+ record_signal 的 data_end 改用策略 get_signal_data_end 真实上报（去 self-proving 常量）
+    │   ├── engine.py                 # ✨【V5·P1】回测引擎升级为三模式调度器：BacktestScheduler（按config engine.mode切换event/vectorized/mixed，统一数据加载+防未来函数校验+结果封装）+ run_backtest()便捷函数；原Engine保留为event真值基准（时间序列事件循环+内置LookaheadGuard：on_market_event记录成交铁律3、_execute_signal记录信号铁律4、on_stop assert_pass()；_bar_date_str/_order_signal_dates映射）；✨【回写#140】context 注入 lookahead_guard 到 extra（KP-P2-08：策略守卫钩子可达 guard）+ record_signal 的 data_end 改用策略 get_signal_data_end 真实上报（去 self-proving 常量）；✨【回写#148】装配实盘同源 RiskManager（KP-P3-07：_execute_signal 提交前 check_order 未通过单记录 skip）；✨【回写#151】SimBroker 构造从 config 传 price_limit_pct/enforce_limit（KP-P2-02 event 路径涨跌停）
 
     │   ├── data_loader.py            # ✨【回写#105】已迁移为兼容薄壳（re-export）：DataProviderBase + HistoricalDataProvider + require_ohlcv + EN_TO_CN_COLUMN_MAP 真实实现已于 2026-10-03 下沉至 myquant/data_access/provider.py，本文件仅做 from myquant.data_access.provider import ... 向后兼容，18 处历史调用方（run_*.py/scripts/gui/backtest 内部/tests）零改动；新代码应直接 from myquant.data_access.provider import；原注释「从processed加载，严格end_date过滤防未来」逻辑全部在 provider.py；✨【回写#72】EN_TO_CN_COLUMN_MAP 加 turnover→换手率；✨【回写#83】S1 派生量复权现算 _recompute_price_derived_metrics
 
@@ -889,7 +890,7 @@ Pythonwdhmm/
 
     │   ├── base.py                   # ExecutionInterface抽象基类：下单撤单查单
 
-    │   ├── sim_broker.py             # 回测模拟撮合：滑点佣金印花税部分成交
+    │   ├── sim_broker.py             # 回测模拟撮合：滑点佣金印花税部分成交；✨【回写#151】增涨跌停/停牌前置检查（KP-P2-02：__init__ 增 price_limit_pct/enforce_limit/is_suspended，_match_order 前涨停拒买/跌停拒卖/停牌跳过，on_bar 记昨收基准）
 
     │   └── state_machine.py          # 订单生命周期状态机
 
@@ -2775,6 +2776,18 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：交易日历仅用于当前已发生日期的准入判定，不预支未来交易日；缓存懒加载不触网。
 - 验证结果：py_compile 通过；新增 tests/unit/test_trade_calendar_gate.py 5 项全绿；risk/live 广回归 157 passed 无回归；ruff：rules.py/测试通过（run_实盘入口.py 7 处既有 import 顺序非本次引入）。
 - 纪律遵守：仅改蓝图已标注文件（run_实盘入口.py、risk/rules.py）+ tests/unit 新增 test_trade_calendar_gate.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+151. ✨【回写记录·2026-10-04·T-17 KP-P2-02 event 引擎不校验涨跌停/停牌】
+
+【发现】`sim_broker.py:292-293,313-314` `_match_order` 不校验涨跌停/停牌（缺陷范围仅 event 路径，mixed/vectorized 走 OrderMatcher 已有判定）。
+- 修复：
+  a. **sim_broker.py `__init__` 增 `price_limit_pct/enforce_limit/is_suspended`**：默认 enforce_limit=False 保持既有行为，event 路径可开启。
+  b. **`_match_order` 前置涨跌停/停牌检查**：新增 `_price_limit_check(order, bar)`——停牌跳过（is_suspended 命中）；涨停时买单拒绝、跌停时卖单拒绝（昨收×(1±price_limit_pct) 边界）；拒绝即 `cancel_order`（置 CANCELLED 防后续重试）+ 返回 None 无成交。
+  c. **on_bar 记录昨收基准**：enforce_limit 时 `_prev_close[symbol] = 上一bar收盘`（当前未更新为 bar.close 前取值），供涨停/跌停判定。
+  d. **backtest/engine.py SimBroker 构造从 config 传入**：price_limit_pct=config.price_limit_pct(默认0.10)、enforce_limit=config.enforce_limit(默认False)、is_suspended=None。
+- 防未来：涨停/跌停判定仅用昨收（上一bar已发生收盘）与当前bar开盘，不引用未来数据。
+- 验证结果：py_compile 通过；新增 tests/unit/test_event_price_limit.py 5 项全绿；backtest 广回归 175 passed +1 skipped 无回归；ruff 通过（1 处既有 F841 非本次引入）。
+- 纪律遵守：仅改蓝图已标注文件（execution/sim_broker.py、backtest/engine.py）+ tests/unit 新增 test_event_price_limit.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】
