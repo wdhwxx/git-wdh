@@ -27,19 +27,17 @@ Usage:
 
 from __future__ import annotations
 
-import json
 import logging
 import threading
-import time
 from typing import Any, Callable, Dict, Optional
 
+from myquant.core.exceptions import TransportConnectionError, TransportError
 from myquant.core.transports.base import (
     Message,
     Transport,
     TransportConfig,
     TransportState,
 )
-from myquant.core.exceptions import TransportConnectionError, TransportError
 
 # C3: 模块级可选导入（_handle_message 重投路径使用 pika.BasicProperties）
 try:
@@ -77,6 +75,12 @@ class RabbitMQTransport(Transport):
         self._dlx_name = f"{config.queue_prefix}.dlx"
 
     def connect(self) -> None:
+        # KP-P4-07：空凭据拒绝 guest/guest 静默回退，显式抛错（防御性补丁，当前未启用）
+        # 校验先于 import pika，凭据缺失无需装依赖即可 fail-closed
+        if not (self.config.username and self.config.password):
+            raise TransportConnectionError(
+                "RabbitMQ 凭据缺失：username/password 不能为空（拒绝 guest/guest 静默回退）"
+            )
         try:
             import pika
         except ImportError:
@@ -85,8 +89,8 @@ class RabbitMQTransport(Transport):
         self._state = TransportState.CONNECTING
         try:
             credentials = pika.PlainCredentials(
-                self.config.username or "guest",
-                self.config.password or "guest",
+                self.config.username,
+                self.config.password,
             )
             params = pika.ConnectionParameters(
                 host=self.config.host,

@@ -517,6 +517,7 @@ Pythonwdhmm/
 │   │   ├── test_cleanup_dryrun.py   # ✨【回写#163】清理dry-run约束测试(KP-M05：dry-run不删除/execute删除，2项)✅已完成
 │   │   ├── test_docker_min_privilege.py # ✨【回写#164】镜像最小权限测试(KP-M01：dockerignore排除/非root/去dev/live探针业务化，6项)✅已完成
 │   │   ├── test_dashboard_auth.py         # ✨【回写#171】看板鉴权测试(KP-P4-06：TLS/HSTS/301跳转/BasicAuth/口令secret非env/证书卷+回环443，6项)✅已完成
+│   │   ├── test_message_bus_credentials.py   # ✨【回写#172】消息总线凭据测试(KP-P4-07：默认None/源码默认值/空凭据raise/部分凭据raise/无guest回退/齐全不误报，6项)✅已完成
 │   │   ├── test_backup_manifest.py    # ✨【回写#165】备份与恢复测试(KP-P5-06：MANIFEST/篡改判失败/restore/默认源含db+config+state/白名单，6项)✅已完成
 │   │   ├── test_dependency_security.py    # ✨【回写#170】依赖与CI安全测试(KP-M03：marker默认pyproject/参数覆盖/锁文件存在/锁含哈希/ci有安全扫描job，5项)✅已完成
 │   │   ├── test_financial_sync_service.py # ✨【回写#74】财务CSV增量同步测试（定位缺失标的14条排除/新旧合并去重17列头/无新记录None/增量流程/自动入库monkeypatch/无可拉取跳过，6项）✅已完成
@@ -679,11 +680,11 @@ Pythonwdhmm/
 
     │       ├── __init__.py
 
-    │       ├── base.py               # 传输抽象基类 publish/subscribe
+    │       ├── base.py               # 传输抽象基类 publish/subscribe；✨【回写#172】TransportConfig 默认凭据改 None（KP-P4-07）
 
     │       ├── redis_bus.py          # Redis Pub/Sub实现（可选）
 
-    │       └── rabbitmq_bus.py       # RabbitMQ实现（可选）
+    │       └── rabbitmq_bus.py       # RabbitMQ实现（可选）；✨【回写#172】空凭据拒绝 guest/guest 静默回退，fail-closed（KP-P4-07）
 
     │
 
@@ -3022,6 +3023,16 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：看板经 TLS+HSTS 强认证传输，口令走 docker secret 不入环境变量，端口回环绑定防非本机越权访问。
 - 验证结果：dashboard_auth.conf 静态校验含 443 ssl/证书/HSTS/301 跳转；docker-compose.yml YAML 校验通过（顶层 secrets、auth 引用 secret、证书卷、8501:443 回环）；新增 tests/unit/test_dashboard_auth.py 6 项全绿；回归 11 passed 无回归；ruff 干净。
 - 纪律遵守：改蓝图已标注文件（docker/nginx/dashboard_auth.conf、docker/docker-compose.yml）+ tests/unit 新增 test_dashboard_auth.py（同步更新目录树）；无蓝图外文件；严格防未来。
+
+172. ✨【回写记录·2026-10-04·T-39 KP-P4-07 消息总线凭据（防御性补丁）】
+
+【发现】rabbitmq_bus.py connect 空凭据回退 guest/guest（`username or 'guest'`，审计 :87-90）；TransportConfig username/password 默认空串（base.py:32-33），未提供凭据即静默以 guest 连 RabbitMQ（默认账号，现实敞口）。
+- 修复：
+  a. **默认凭据改 None**：myquant/core/transports/base.py TransportConfig username/password 默认值由空串改 `Optional[str] = None`（redis_bus 用 `password or None` 天然兼容，无影响）。
+  b. **空凭据 fail-closed**：rabbitmq_bus.py connect 先于 import pika 校验 `username and password`，任一为空即 raise TransportConnectionError（拒绝 guest/guest 静默回退），删除 `or 'guest'` 回退；防御性补丁（当前未启用，无现实敞口）。
+- 防未来：消息总线凭据缺失即显式失败，杜绝默认账号静默连接；校验前置不依赖 pika 安装。
+- 验证结果：py_compile 通过；新增 tests/unit/test_message_bus_credentials.py 6 项全绿（默认 None/源码默认值/空凭据 raise/部分凭据 raise/无 guest 回退/凭据齐全不误报）；回归 6 passed 无回归；ruff 干净（顺手清理 rabbitmq_bus 既有 json/time 未用导入与排序）。
+- 纪律遵守：改蓝图已标注文件（core/transports/base.py、core/transports/rabbitmq_bus.py）+ tests/unit 新增 test_message_bus_credentials.py（同步更新目录树）；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】

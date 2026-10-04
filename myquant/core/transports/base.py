@@ -29,8 +29,8 @@ class TransportConfig:
     """传输层配置"""
     host: str = "localhost"
     port: int = 6379
-    username: str = ""
-    password: str = ""
+    username: Optional[str] = None
+    password: Optional[str] = None
     database: int = 0
     vhost: str = "/"
     exchange: str = ""
