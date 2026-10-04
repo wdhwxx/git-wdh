@@ -2609,6 +2609,15 @@ def build_risk_manager_from_config(
     return RiskManager(config=rules, data_quality_config=DataQualityRiskConfig())
 
 
+def _require_auto_recover(state_cfg: Dict[str, Any]) -> bool:
+    """KP-P5-08: auto_recover_on_start 显式必填（杜绝静默默认跳过崩溃恢复）。"""
+    if "auto_recover_on_start" not in state_cfg:
+        raise ValueError(
+            "state_store.auto_recover_on_start 必须显式配置（KP-P5-08 崩溃恢复显式必填）"
+        )
+    return bool(state_cfg.get("auto_recover_on_start"))
+
+
 def create_live_engine(
     config: Dict[str, Any],
     engine_id: Optional[str] = None,
@@ -2741,7 +2750,7 @@ def create_live_engine(
         lookahead_guard=lookahead_guard,
         enable_lookahead_guard=lookahead_enabled,
         enable_scheduler=bool(scheduler_cfg.get("enabled", True)),
-        auto_recover=bool(state_cfg.get("auto_recover_on_start", False)),
+        auto_recover=_require_auto_recover(state_cfg),
         monitor_only=monitor_only,
         snapshot_interval=float(state_cfg.get("backup_interval", 300)),
         trade_mode=trade_mode,

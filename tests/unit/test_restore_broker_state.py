@@ -111,7 +111,8 @@ class TestEngineRestoreBroker:
             "live": {"trade_mode": "paper", "name": "t13", "initial_capital": 100000},
             "broker": {"type": "paper"},
             "execution": {}, "market_data": {}, "strategy": {},
-            "position": {}, "risk_control": {}, "state_store": {},
+            "position": {}, "risk_control": {},
+            "state_store": {"auto_recover_on_start": False},  # T-34 显式必填
             "scheduler": {}, "lookahead_guard": {},
         }
         return create_live_engine(config)

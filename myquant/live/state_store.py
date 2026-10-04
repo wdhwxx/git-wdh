@@ -47,6 +47,7 @@ logger = get_logger("live.state_store")
 _DEFAULT_KEEP = 50                  # 默认保留快照份数
 _INDEX_FILE = "index.json"          # 索引文件名
 _SNAPSHOT_PREFIX = "snap_"          # 快照文件名前缀
+_SCHEMA_VERSION = 1                   # ✨【回写#167】快照 schema 版本（KP-P5-08：不兼容版本抛 SnapshotVersionError）
 
 
 # ═══════════════════════════════════════════════
@@ -307,6 +308,8 @@ class StateStore:
                 metadata=dict(metadata or {}),
                 state=state,
             )
+            # KP-P5-08: schema_version 写快照 metadata（配置/结构版本可审计、不兼容即拒绝恢复）
+            snap.metadata.setdefault("schema_version", _SCHEMA_VERSION)
 
             # 1. 写快照文件（原子）
             path = self._snapshot_path(version)
@@ -380,6 +383,12 @@ class StateStore:
         if not snap.verify():
             raise SnapshotIntegrityError(
                 f"快照 v{version} 完整性校验失败（checksum 不匹配）"
+            )
+        # KP-P5-08: schema_version 不兼容（高于当前）拒绝加载，防旧代码误读新结构
+        sv = int(snap.metadata.get("schema_version", 1) or 1)
+        if sv > _SCHEMA_VERSION:
+            raise SnapshotVersionError(
+                f"快照 v{version} schema_version={sv} 高于当前 {_SCHEMA_VERSION}，不兼容，禁止加载"
             )
         return snap
 
@@ -775,6 +784,7 @@ def restore_live_state(
         "restored_broker": False,
         "restored_scheduler": False,
         "restored_positions": 0,
+        "reconciled_orders": 0,
         "notes": [],
     }
 
@@ -803,6 +813,44 @@ def restore_live_state(
             restored["notes"].append(f"broker 恢复失败: {type(e).__name__}: {e}")
     elif broker is not None:
         restored["notes"].append("broker 无 restore_state，跳过（账户以 portfolio 为准）")
+
+    # ── 订单对账（KP-P5-08：崩溃恢复在途订单不丢失）──
+    #   快照 orders vs 券商账本 get_orders() 差集：快照有而券商未领回的挂单 cancel + 告警
+    snapshot_orders = list(state.get("orders", []) or [])
+    if snapshot_orders and broker is not None and hasattr(broker, "get_orders"):
+        try:
+            live_orders = broker.get_orders() or []
+            live_ids: set = set()
+            for o in live_orders:
+                if isinstance(o, dict):
+                    oid = o.get("order_id")
+                else:
+                    oid = getattr(o, "order_id", None)
+                if oid is not None:
+                    live_ids.add(oid)
+            unclaimed = []
+            for so in snapshot_orders:
+                so_id = so.get("order_id") if isinstance(so, dict) else getattr(so, "order_id", None)
+                if so_id is not None and so_id not in live_ids:
+                    unclaimed.append(so_id)
+            if unclaimed:
+                if hasattr(broker, "cancel_order"):
+                    for oid in unclaimed:
+                        try:
+                            broker.cancel_order(str(oid))
+                        except Exception as e:  # noqa: BLE001
+                            restored["notes"].append(f"订单对账 cancel {oid} 失败: {type(e).__name__}: {e}")
+                restored["reconciled_orders"] = len(unclaimed)
+                restored["notes"].append(
+                    f"快照订单对账: {len(unclaimed)} 笔挂单未在券商账本领回，已 cancel: {sorted(map(str, unclaimed))}"
+                )
+                logger.warning(
+                    f"[state_store] 崩溃恢复订单对账: 未领回挂单 {len(unclaimed)} 笔已 cancel: {sorted(map(str, unclaimed))}"
+                )
+        except Exception as e:  # noqa: BLE001
+            restored["notes"].append(f"订单对账失败: {type(e).__name__}: {e}")
+    elif snapshot_orders and broker is None:
+        restored["notes"].append("快照含在途订单但 broker 未接入，无法对账")
 
     # ── scheduler 恢复（v1 仅记录）──
     if scheduler is not None:
