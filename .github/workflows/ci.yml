@@ -242,13 +242,20 @@ jobs:
       - name: 设置Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: 构建版本登记（KP-P5-07：git sha tag 变更留痕）
+        run: |
+          echo "镜像构建版本: pythonwdhmm:${{ github.sha }}"
+          echo "构建日期: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
       - name: 构建Docker镜像（不推送，仅验证构建成功）
         uses: docker/build-push-action@v5
         with:
           context: .
           file: docker/Dockerfile
           push: false
-          tags: pythonwdhmm:ci-test
+          tags: |
+            pythonwdhmm:ci-test
+            pythonwdhmm:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -318,6 +325,23 @@ jobs:
                                             'mean_reversion', 'multi_factor'), '回测策略名非法'
           print('  ✓ 回测策略 {} / 实盘策略 {} 定义有效'.format(
               bt['strategy']['name'], live['strategy']['name']))
+
+          # 5. KP-P5-07: example vs 生产配置键级 diff（防生产配置漂移缺键/多键）
+          with open('config/live_config.example.yaml', 'r', encoding='utf-8') as fp:
+              example_cfg = yaml.safe_load(fp)
+          prod_path = Path('config/live_config.yaml')
+          if prod_path.exists():
+              with open(prod_path, 'r', encoding='utf-8') as fp:
+                  prod_cfg = yaml.safe_load(fp)
+              ex_keys = set(example_cfg.keys())
+              prod_keys = set(prod_cfg.keys())
+              missing = ex_keys - prod_keys
+              extra = prod_keys - ex_keys
+              assert not missing, f'生产 live_config.yaml 缺失键: {sorted(missing)}'
+              print('  ✓ example vs 生产键级 diff: 生产缺失键={} / 生产多余键={}'.format(
+                  sorted(missing) or '无', sorted(extra) or '无'))
+          else:
+              print('  - 无 config/live_config.yaml（生产配置未入库，跳过键级 diff）')
           "
 
 

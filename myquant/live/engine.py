@@ -643,6 +643,9 @@ class LiveEngine(BaseEngine):
             self._state = EngineState.ERROR
             return False
 
+        # KP-P5-07: 启动日志记录配置版本（config_version，配置变更留痕）
+        logger.info(f"[engine] 启动: config_version={getattr(self, '_config_version', '')!r}")
+
         try:
             # ── 任务42：防未来函数校验器重置（每次启动全新会话，回测/实盘同源）──
             if self._lookahead_guard:
@@ -1830,7 +1833,11 @@ class LiveEngine(BaseEngine):
                 portfolio=self._portfolio,
                 broker=self._broker_manager or self._broker,
                 scheduler=self._scheduler,
-                extra={"monitor_only": self._monitor_only},
+                extra={
+                    "monitor_only": self._monitor_only,
+                    # KP-P5-07: config_version 落快照 metadata（配置变更版本可审计）
+                    "config_version": getattr(self, "_config_version", ""),
+                },
             )
             snapshot = self._state_store.save(state, tag=tag or "auto")
             logger.info(f"[engine] 状态快照已保存: v{snapshot.version} tag={tag or 'auto'}")
@@ -2754,5 +2761,8 @@ def create_live_engine(
 
     # 本地历史预热目录（配置外置：market_data.local_history_dir）
     engine._local_history_dir = str(market_cfg.get("local_history_dir", "datasets/processed"))
+
+    # KP-P5-07: config_version 落引擎（来自 live_config.config_version，变更管理版本留痕）
+    engine._config_version = str(config.get("config_version", "") or "")
 
     return engine

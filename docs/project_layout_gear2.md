@@ -362,7 +362,7 @@ Pythonwdhmm/
 
 │   └── workflows/
 
-│       └── ci.yml                    # ✨【V5·P3】CI流水线（重写为7-job）：lint → test（全量tests/u；✨【回写#157】lint 增 BLE001 专项护栏（KP-P1-07：新增裸 except 阻断）nit，gui extras 已装、offscreen 跑 GUI 测试）→ consistency-check（三模式一致性）→ backtest-smoke（回测冒烟）→ docker-build（构建镜像）→ live-config-check（实盘配置检查）→ data-clean（数据清洗单元测试）；任一job失败即阻断合并
+│       └── ci.yml                    # ✨【V5·P3】CI流水线（重写为7-job）：lint → test（全量tests/u；✨【回写#157】lint 增 BLE001 专项护栏（KP-P1-07：新增裸 except 阻断）nit，gui extras 已装、offscreen 跑 GUI 测试）→ consistency-check（三模式一致性）→ backtest-smoke（回测冒烟）→ docker-build（构建镜像）→ live-config-check（实盘配置检查）→ data-clean（数据清洗单元测试）；任一job失败即阻断合并；✨【回写#166】live-config-check 增 example vs 生产键级 diff + docker-build 镜像打 git sha tag（KP-P5-07）
 
 │
 
@@ -555,6 +555,7 @@ Pythonwdhmm/
 
 │   │   ├── test_live_guard_failover.py # ✨【回写#31】实盘保障组件故障注入（审计H2降级：事件总线断连/订阅失败/挂载失败/风控异常拒单/调度失败/巡检异常/快照失败/全组件关闭，10项）✅已完成
 │   │   ├── test_restore_broker_state.py # ✨【回写#147】重启恢复券商账本测试(KP-P3-03：paper/qmt restore_state重建在途+冻结+T1/终态不恢复/engine补传broker触发/对账未领回cancel/超阈值pause，6项)✅已完成
+│   │   ├── test_config_version_trace.py # ✨【回写#166】变更管理测试(KP-P5-07：create_live_engine设config_version/缺省空串/快照extra含config_version/键级diff缺键判失败/键级diff通过，5项)✅已完成
 │   │   ├── test_accountability_sync.py # ✨【回写#149】券商权威账本对账测试(KP-P3-08：diff_vs_broker只diff不重建/账实一致通过/patrol超阈CRITICAL+pause/无差异不暂停，4项)✅已完成
 │   │   ├── test_trade_calendar_gate.py # ✨【回写#150】交易日历安全门测试(KP-P3-10：TradingHoursRule非交易日拒绝/交易日放行/显式日历/非交易时段仍拒绝/实盘入口真实日历判定，5项)✅已完成
 │   │   ├── test_abnormal_trade_rules.py # ✨【回写#153】异常交易类风控测试(KP-P3-06：自成交互斥/撤单率超阈/胖手指金额与偏离/注册表/撤单计数+事件+日报+重置，13项)✅已完成
@@ -984,7 +985,7 @@ Pythonwdhmm/
 
     │   ├── __init__.py
 
-    │   ├── engine.py                 # 实盘引擎继承BaseEngine，协调数据、策略、执行、风控；✨【回写#139】on_market_data 增 (symbol,date) bar级去重（KP-P3-02：_seen_bars集合，同根bar二次推送直接丢弃不达撮合，stats.bar_dedup_skipped计数，启动clear）；✨【回写#142】成交/订单关系账接线（KP-P4-02：可选 trade_ledger 注入，on_order_update 逐笔订单、on_trade 逐笔成交同步落库，长期归档）；✨【回写#146】on_market_data 捕获行情前收字段注入风控上下文（KP-P3-04：_prev_close_map，_build_risk_context extra 注入 prev_close）；✨【回写#149】定时券商账本对账（KP-P3-08：_setup_scheduler 注册 _broker_accountability_patrol，sync_from_broker 超阈 diff → CRITICAL+pause）；✨【回写#152】_on_force_close 消费 executed（KP-M02：dry-run 恒未真实执行 → 显式 CRITICAL 需人工 confirm 平仓）
+    │   ├── engine.py                 # 实盘引擎继承BaseEngine，协调数据、策略、执行、风控；✨【回写#166】config_version 落快照+启动日志（KP-P5-07：create_live_engine 装配 engine._config_version）✨【回写#139】on_market_data 增 (symbol,date) bar级去重（KP-P3-02：_seen_bars集合，同根bar二次推送直接丢弃不达撮合，stats.bar_dedup_skipped计数，启动clear）；✨【回写#142】成交/订单关系账接线（KP-P4-02：可选 trade_ledger 注入，on_order_update 逐笔订单、on_trade 逐笔成交同步落库，长期归档）；✨【回写#146】on_market_data 捕获行情前收字段注入风控上下文（KP-P3-04：_prev_close_map，_build_risk_context extra 注入 prev_close）；✨【回写#149】定时券商账本对账（KP-P3-08：_setup_scheduler 注册 _broker_accountability_patrol，sync_from_broker 超阈 diff → CRITICAL+pause）；✨【回写#152】_on_force_close 消费 executed（KP-M02：dry-run 恒未真实执行 → 显式 CRITICAL 需人工 confirm 平仓）
 
     │   │                             # 【任务27】接入 BrokerManager 多券商管理器：set_broker自动包装(单券商向后兼容)/set_broker_manager(多券商并行)
 
@@ -2947,6 +2948,17 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：备份有完整性清单+可校验可还原，清理受白名单保护，杜绝『仅覆盖部分源/不可恢复/误删』。
 - 验证结果：py_compile 通过；新增 tests/unit/test_backup_manifest.py 6 项全绿（目录/zip MANIFEST/篡改判失败/restore 还原/默认源含 db+config+state/清理白名单）；ruff 干净。
 - 纪律遵守：仅改蓝图已标注文件（utils/file_utils.py、scripts/结果备份.py）+ tests/unit 新增 test_backup_manifest.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+166. ✨【回写记录·2026-10-04·T-33 KP-P5-07 变更管理】
+
+【发现】CI live-config-check 仅校验 example 配置自洽，无 example vs 生产键级对拍（生产配置漂移缺键不被发现）；引擎快照/启动日志不记录配置版本（config_version），配置变更无版本留痕；镜像构建 tag 固定 ci-test 无 git 版本标识。
+- 修复：
+  a. **CI 键级 diff**：.github/workflows/ci.yml live-config-check 增第5段——读 config/live_config.yaml（若存在）与 example 顶层键集比对，生产缺失 example 键即 assert 失败（防生产配置漂移缺键），打印缺失/多余键。
+  b. **config_version 落快照+启动日志**：myquant/live/engine.py create_live_engine 装配后 `engine._config_version = str(config.get('config_version', '') or '')`；_save_state 快照 extra 增 config_version（metadata 可审计）；start() 启动日志打印 config_version（配置变更留痕）。
+  c. **镜像 git 版本 tag**：docker-build 镜像 tags 增 `pythonwdhmm:${{ github.sha }}`（buildx 多 tag），加『构建版本登记』步骤输出 sha+日期（发布版本留痕）。
+- 防未来：配置版本随快照/启动日志留痕、CI 强制 example 与生产键级一致、镜像按 git 版本标识，杜绝配置漂移/版本不可溯。
+- 验证结果：ci.yml YAML 校验通过；py_compile 通过；新增 tests/unit/test_config_version_trace.py 5 项全绿（create_live_engine 设 config_version/缺省空串/_save_state extra 含 config_version/键级diff缺键判失败/键级diff通过）；回归 47 passed 无回归；ruff 干净。
+- 纪律遵守：仅改蓝图已标注文件（live/engine.py、.github/workflows/ci.yml）+ tests/unit 新增 test_config_version_trace.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】
