@@ -44,7 +44,7 @@ COPY pyproject.toml README.md ./
 # 实盘依赖（websocket/aiohttp/schedule）为实时行情和券商对接预留
 # P1-D13-001 整改：补 web extras —— compose app 服务（运行API.py 需 fastapi/uvicorn）与
 # dashboard 服务（streamlit run）均依赖 web 组，缺此 extras 容器启动即 ImportError
-RUN pip install --no-cache-dir -e ".[live,dev,web]"
+RUN pip install --no-cache-dir -e ".[live,web]"
 
 # ===== 复制项目代码 =====
 COPY . .
@@ -53,8 +53,15 @@ COPY . .
 RUN mkdir -p datasets/raw datasets/processed datasets/features \
     outputs logs database 实盘状态 实盘信号
 
+# ===== 非 root 运行（T-31 KP-M01：容器最小权限，避免 root 特权运行）=====
+RUN useradd --no-log-init -r -m -u 1000 appuser \
+    && chown -R appuser:appuser /app
+
 # ===== 暴露端口（REST API；8501 为 dashboard 服务专用，疑点1确认后不再在此暴露）=====
 EXPOSE 8000
+
+# ===== 切换非 root 用户（最小权限）=====
+USER appuser
 
 # ===== 健康检查 =====
 HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \

@@ -96,9 +96,10 @@ services:
     # （argparse 退出码2，容器启动即崩），改为 "sim"。
     command: ["python", "run_实盘入口.py", "--mode", "sim"]
     healthcheck:
-      # M10修复: 实盘入口不提供 HTTP 服务，原 curl 8000/health 永远失败；
-      # 改为进程存活检查（业务进程常驻即健康）
-      test: ["CMD-SHELL", "pgrep -f run_实盘入口.py || exit 1"]
+      # T-31 KP-M01: live 探针从 pgrep 进程匹配改业务健康接口——校验业务状态文件
+      # live_status.json（引擎主循环每5s写，含 timestamp）新鲜度：文件存在且
+      # mtime 距今 < 30s 视为业务健康（反映引擎真实运行，而非进程常驻）
+      test: ["CMD", "python", "-c", "import os,time,sys; p='/app/outputs/paper_stats/live_status.json'; sys.exit(0 if os.path.isfile(p) and time.time()-os.path.getmtime(p)<30 else 1)"]
       interval: 60s
       timeout: 10s
       retries: 3

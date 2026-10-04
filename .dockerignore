@@ -1,0 +1,49 @@
+# 文件名：.dockerignore（根级）
+# T-31（KP-M01）整改：构建上下文排除敏感数据/密钥/运行时目录/临时文件，
+# 防止 .env 密钥、实盘状态/信号、数据库、备份等敏感文件被打入镜像。
+# 保留 .env.example（模板，无真实密钥）。
+
+# ── 密钥与环境 ──
+.env
+.env.*
+!.env.example
+
+# ── 敏感运行数据（运行时经卷挂载覆盖，不进镜像层）──
+database/
+logs/
+outputs/
+datasets/
+实盘状态/
+实盘信号/
+backups/
+
+# ── VCS / 版本控制 ──
+.git/
+.gitignore
+
+# ── Python 缓存与虚拟环境 ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+
+# ── IDE / 系统 ──
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# ── 部署与构建辅助（Dockerfile 以 .. 为 context，排除自身避免递归）──
+docker/
+
+# ── 审计与临时 ──
+_audit_20261004/
+.tmp_*.py
