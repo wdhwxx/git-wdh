@@ -1,8 +1,8 @@
-﻿# 鲲鹏量化交易系统 
+﻿# <span style="color:red">鲲鹏量化交易系统 
 
-## 项目架构蓝图
+## <span style="color:red">项目架构蓝图
 
-### ｜折中档位2（v1落地蓝图，预留后续迭代扩展点）
+### <span style="color:red">｜折中档位2（v1落地蓝图，预留后续迭代扩展点）
 
 > 说明：
 
@@ -2532,3 +2532,17 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 备注：ma_strategy pool_top_ratio默认0.5 vs 规格1/3 的口径差异，属策略默认值行为，留待策略规格对齐，不改代码默认值以免改变回测结果。
 
 【验证】pytest全量2067 passed/0 failed（219s）。
+
+132. ✨【回写记录·2026-10-04·P2-08 cache收盘对齐 + 蓝图/基线治理批次（P2批次第6项）】
+
+【P2-08｜fetch_cache固定24h墙钟TTL】
+- 修复：fetcher._MemoryCache 默认到期对齐交易日收盘15:30（_eod_expiry_ts），
+  盘中未定型bar不再缓存满24h，收盘后旧值当日失效；显式自定义ttl仍按now+ttl。
+【P2-02｜唯一权威测试基线裁定】
+- 裁定：以本次全量运行结果为唯一权威基线 = 2067 passed / 2 skipped / 0 failed；
+  历史文档中的1730/1750/2026等均为过程值，"不劣化"判据以2067为准。
+【P2-01/P2-05｜蓝图计数与文档矛盾】
+- 处理：蓝图权威目录树计数漂移属治理维护项，后续每次回写以磁盘实测为准；
+  config/risk_params.example.yaml 幽灵条目等在下次全量盘点时统一修订，不在本轮改代码。
+
+【验证】py_compile fetcher PASS；pytest全量2067 passed/0 failed（216s）。

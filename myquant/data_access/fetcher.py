@@ -34,7 +34,7 @@ fetcher.py - 数据获取器（统一调度+内存缓存）
 from __future__ import annotations
 
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -56,6 +56,19 @@ DEFAULT_CACHE_SIZE = 1000
 
 # 缓存默认有效期（秒），行情数据当天有效
 DEFAULT_CACHE_TTL = 86400  # 24小时
+
+
+def _eod_expiry_ts() -> float:
+    """P2-08：缓存到期对齐交易日收盘（15:30），而非固定24h墙钟。
+
+    盘中未定型 bar 不再以同一 key 缓存满 24h；收盘后缓存到当日15:30即失效，
+    避免次日命中收盘前旧值。收盘后调用则对齐到下一个交易日15:30。
+    """
+    now = datetime.now()
+    eod = now.replace(hour=15, minute=30, second=0, microsecond=0)
+    if now >= eod:
+        eod = eod + timedelta(days=1)
+    return eod.timestamp()
 
 
 # ─────────────────────────────────────────────
@@ -80,9 +93,9 @@ class _MemoryCache:
         with self._lock:
             if key not in self._cache:
                 return None
-            value, timestamp = self._cache[key]
-            # 检查TTL
-            if (datetime.now().timestamp() - timestamp) > self._ttl:
+            value, expire_at = self._cache[key]
+            # 检查到期（P2-08：expire_at 为交易日收盘对齐时间戳）
+            if datetime.now().timestamp() > expire_at:
                 del self._cache[key]
                 return None
             return value
@@ -94,7 +107,12 @@ class _MemoryCache:
                 # 淘汰最旧的（简单实现：删除第一个）
                 oldest_key = next(iter(self._cache))
                 del self._cache[oldest_key]
-            self._cache[key] = (value, datetime.now().timestamp())
+            # P2-08：默认按交易日收盘(15:30)到期；显式传入自定义ttl则按now+ttl
+            if self._ttl == DEFAULT_CACHE_TTL:
+                expire_at = _eod_expiry_ts()
+            else:
+                expire_at = datetime.now().timestamp() + self._ttl
+            self._cache[key] = (value, expire_at)
 
     def invalidate(self, key: str) -> None:
         """使指定缓存失效"""
