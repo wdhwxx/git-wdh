@@ -115,6 +115,14 @@ class APIKeyAuth:
 
         # 从环境变量加载
         env_keys = os.environ.get(env_var, "")
+        # KP-P1-04: 环境变量缺失时经 settings（.env/config）兜底，
+        #           避免 .env 未被显式加载时密钥不生效
+        if not env_keys:
+            try:
+                from myquant.core.settings import get_settings as _gs
+                env_keys = _gs().get(env_var, "") or ""
+            except Exception:
+                env_keys = ""
         if env_keys:
             for key in env_keys.split(","):
                 key = key.strip()

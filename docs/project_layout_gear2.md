@@ -386,7 +386,7 @@ Pythonwdhmm/
 
 │   ├── 数据库初始化.py                # 数据库初始化：调用database.schema与migrations创建表结构
 
-│   ├── 运行API.py                     # REST API服务启动入口（uvicorn/FastAPI）
+│   ├── 运行API.py                     # REST API服务启动入口（uvicorn/FastAPI）；✨【回写#156】业务导入前显式 get_settings 加载 .env（KP-P1-04：QUANT_API_KEYS 生效）
 
 │   ├── 结果备份.py                    # 备份outputs、datasets/bad和关键状态到归档文件
 
@@ -446,7 +446,8 @@ Pythonwdhmm/
 
 │   │   ├── test_api_middleware.py   # ✨【回写#25】API认证/限流中间件接线回归（审计C1：create_app挂载
 │   │   ├── test_api_not_implemented.py # ✨【回写#154】占位接口伪造成功测试(KP-P1-01：order/live start-stop/risk pause-resume 六端点 501 + cli --host 默认 127.0.0.1，7项)✅已完成
-│   │   ├── test_backtest_not_placeholder.py # ✨【回写#155】回测API硬编码绩效常量测试(KP-P1-02：未注册501/缺参422/成功取真实值/失败501/异常501，5项)✅已完成/关闭/CORS互斥/401/429逻辑）✅已完成
+│   │   ├── test_backtest_not_placeholder.py # ✨【回写#155】回测API硬编码绩效常量测试(KP-P1-02：未注册50
+│   │   ├── test_env_auth_chain.py    # ✨【回写#156】.env与认证链路测试(KP-P1-04：env生效/settings兜底/env优先/运行API.py bootstrap不崩，4项)✅已完成1/缺参422/成功取真实值/失败501/异常501，5项)✅已完成/关闭/CORS互斥/401/429逻辑）✅已完成
 
 │   │   ├── test_broker_platform_check.py # ✨【回写#25】券商适配器平台校验（审计疑点3：qmt/ptrade非Windows拦截、paper/sim放行、大小写不敏感）✅已完成
 
@@ -1048,7 +1049,7 @@ Pythonwdhmm/
 
     │   │   ├── __init__.py             # 中间件包统一导出：APIKeyAuth/create_auth + RateLimiter/FixedWindowLimiter/TokenBucketLimiter/RateLimitResult + 工厂create_fixed_window_limiter/create_token_bucket_limiter
 
-    │   │   ├── auth.py                 # API Key认证中间件（v1基础骨架）：APIKeyAuth认证类（Header/Query取Key+恒时比较secrets.compare_digest）+ verify_api_key()/get_current_user()（FastAPI依赖注入）；多Key配置（环境变量/配置）；JWT/OAuth2/RBAC预留TODO；防未来函数：只验证当前凭证，不预测未来
+    │   │   ├── auth.py                 # API Key认证中间件（v1基础骨架）：APIKeyAuth认证类（Header/Query；✨【回写#156】密钥加载经 settings 兜底 .env/config（KP-P1-04）取Key+恒时比较secrets.compare_digest）+ verify_api_key()/get_current_user()（FastAPI依赖注入）；多Key配置（环境变量/配置）；JWT/OAuth2/RBAC预留TODO；防未来函数：只验证当前凭证，不预测未来
 
     │   │   └── rate_limit.py           # 限流中间件（v1基础骨架）：RateLimiter基类 + FixedWindowLimiter固定窗口 + TokenBucketLimiter令牌桶；按IP/APIKey/用户维度限流+状态查询（剩余次数/重置时间）；Redis分布式限流预留TODO；防未来函数：仅基于当前时间与历史请求计数
 
@@ -2838,6 +2839,16 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：回测指标严格来自真实引擎结果，不泄露/不伪造未来绩效。
 - 验证结果：py_compile 通过；新增 tests/unit/test_backtest_not_placeholder.py 5 项全绿（未注册 501/缺参 422/成功取真实值/失败 501/异常 501）；api 广回归 25 passed 无回归；ruff 干净。
 - 纪律遵守：仅改蓝图已标注文件（api/routes.py）+ tests/unit 新增 test_backtest_not_placeholder.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+156. ✨【回写记录·2026-10-04·T-22 KP-P1-04 .env与认证链路未连通】
+
+【发现】`scripts/运行API.py` 启动时未先加载 .env 配置，`QUANT_API_KEYS` 等密钥若仅写在 .env 则不生效（认证恒拒绝/密钥失效）；`auth.py` 仅读 `os.environ`，不经 settings（.env/config）统一读取。
+- 修复：
+  a. **scripts/运行API.py：业务导入前显式加载配置**——在导入 myquant.api.* 之前 `from myquant.core.settings import get_settings as _bootstrap_settings; _bootstrap_settings()`，触发 .env/config 加载，确保 QUANT_API_KEYS 生效（E402/I001 因 sys.path 先行 + bootstrap 语义需要，显式 noqa）。
+  b. **auth.py 经 settings 兜底**——`APIKeyAuth.__init__` 加载密钥时，环境变量缺失则 `get_settings().get(env_var)`（.env/config）兜底，杜绝 .env 未加载时密钥不生效；环境变量仍优先。
+- 防未来：认证密钥来源统一收敛到 settings 配置链路，杜绝『配置在 .env 但运行时未生效』的静默失败。
+- 验证结果：py_compile 通过；新增 tests/unit/test_env_auth_chain.py 4 项全绿（env 生效/settings 兜底/env 优先/运行API.py --help bootstrap 不崩）；auth 回归 17 passed 无回归；ruff 干净。
+- 纪律遵守：仅改蓝图已标注文件（scripts/运行API.py、api/middleware/auth.py）+ tests/unit 新增 test_env_auth_chain.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】

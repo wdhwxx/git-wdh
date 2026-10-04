@@ -32,8 +32,12 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from myquant.api.cli import parse_api_args
-from myquant.core.logger import get_logger
+# KP-P1-04: 业务导入前显式加载配置（.env/config），确保 QUANT_API_KEYS 等经 settings 生效
+from myquant.core.settings import get_settings as _bootstrap_settings  # noqa: E402, I001
+_bootstrap_settings()
+
+from myquant.api.cli import parse_api_args  # noqa: E402
+from myquant.core.logger import get_logger  # noqa: E402
 
 logger = get_logger("scripts.run_api")
 
