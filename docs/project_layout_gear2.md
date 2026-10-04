@@ -392,7 +392,7 @@ Pythonwdhmm/
 
 │   ├── 标的预筛选.py                  # ✨【回写】标的预筛选入口：从quant.db按代码前缀/上市年限/日均成交额/换手率筛出可交易标的池，输出config/stock_pool.yaml供回测配置引用；流动性指标按回测起始日前历史窗口计算（防未来）；回测/实盘共用同一套筛选条件（实盘无缝对接）
 
-│   ├── 数据导出_DB到processed.py      # ✨【回写】DB导出入口（当前主格式）：quant.db的hfq日线→datasets/processed/扁平parquet，逐只导出+完整性校验+断点续传；格式与实盘数据提供器一致（实盘无缝对接）；取代旧CSV子目录版脚本（导出DB到回测数据.py，仅存档不再使用）；✨【回写#72】CN_COLUMN_MAP/SELECT/数值列加 turnover→换手率，导出列集合=增量 _en_to_cn 13列统一；✨【回写#77】F1 改扁平式（去set_index/"日期"列整数YYYYMMDD/eps按df["日期"].dt.strftime/verify_parquet读"日期"列+旧索引式判失败触发重建/to_parquet(index=False)/新增_int_date_to_iso）+ export_all 接 resolve_incremental_symbols 规则过滤（防 DB 全量污染 processed）
+│   ├── 数据导出_DB到processed.py      # ✨【回写】DB导出入口（当前主格式）：quant.db的hfq日线→datasets/processed/扁平parquet，逐只导出+完整性校验+断点续传；格式与实盘数据提供器一致（实盘无缝对接）；取代旧CSV子目录版脚本（导出DB到回测数据.py，仅存档不再使用）；✨【回写#72】CN_COLUMN_MAP/SELECT/数值列加 turnover→换手率，导出列集合=增量 _en_to_cn 13列统一；✨【回写#77】F1 改扁平式（去set_index/"日期"列整数YYYYMMDD/eps按df["日期"].dt.strftime/verify_parquet读"日期"列+旧索引式判失败触发重建/to_parquet(index=False)/新增_int_date_to_iso）+ export_all 接 resolve_incremental_symbols 规则过滤（防 DB 全量污染 processed）；✨【回写#136】load_symbol_data 派生 前收盘价=收盘价.shift(1)（df.insert 紧跟收盘价列，防涨跌停校验 pre_close 恒 0 空转）
 │   ├── 复权因子同步.py          # ✨【回写#82】方案B复权因子同步薄入口：--all/--symbols/--limit/--dry-run；业务逻辑在 data_access/factor_sync_service.py（架构纪律）✅已完成
 
 │   ├── 数据全量清洗.py                # ✨【回写】全量清洗薄入口：参数解析→组装配置→调用FullCleanService.run()；链路=DB读取→清洗管线→事务写回→清洗元信息→bad归档→可选重建processed；支持--config/--symbols/--dry-run/--workers；与GUI全量清洗对话框共用同一服务
@@ -469,6 +469,8 @@ Pythonwdhmm/
 │   │   ├── test_live_risk.py         # 风控规则拦截、仓位限制、流控（83项）✅已完成
 
 │   │   ├── test_t1_settle.py     # ✨【回写#135】T+1日终结算接线测试（KP-P3-01：settle_t1_all遍历结算/日切闭环买冻结算可卖/attach_engine日终cron/engine启动解冻/双交易日无拒单，12项）✅已完成
+
+│   │   ├── test_price_limit_preclose.py # ✨【回写#136】涨跌停校验接线测试（KP-P2-10：标量fail-closed/涨停买拦/跌停卖拦/mixed+vectorized涨停样本买单0成交/provider前收盘价派生/跌停拦截联动，10项）✅已完成
 
 │   │   ├── test_models.py            # 数据模型校验、序列化（88项）✅已完成
 
@@ -706,7 +708,7 @@ Pythonwdhmm/
 
     │   ├── loader.py                 # ✨【V5·P0】数据加载器（回测专用）：预取next_chunk+分块加载（chunk_size）+流水线模式（多bar并行预取）+内存水位降级（联动utils/memory_watcher，超阈值自动降为单块流式）；三模式引擎共用同一加载路径；✨【回写#105】import 由 backtest.data_loader 改为 data_access.provider（同包），打断 data_access <-> backtest 循环依赖
 
-    │   ├── provider.py               # ✨【回写#105】历史数据提供层（2026-10-03 自 backtest/data_loader.py 下沉）：DataProviderBase 抽象基类 + HistoricalDataProvider（从 datasets/processed 加载 parquet/csv，严格 end_date 过滤防未来，hfq/qfq 复权现算按 factor_sync_service 因子表内存变换，EN→CN 列名兜底）；require_ohlcv 校验；backtest/data_loader.py 变为 re-export 薄壳，18 处历史调用方零改动
+    │   ├── provider.py               # ✨【回写#105】历史数据提供层（2026-10-03 自 backtest/data_loader.py 下沉）：DataProviderBase 抽象基类 + HistoricalDataProvider（从 datasets/processed 加载 parquet/csv，严格 end_date 过滤防未来，hfq/qfq 复权现算按 factor_sync_service 因子表内存变换，EN→CN 列名兜底）；require_ohlcv 校验；backtest/data_loader.py 变为 re-export 薄壳，18 处历史调用方零改动；✨【回写#136】get_bars 前收盘价兜底派生（列缺失时收盘价.shift(1)）+ _recompute_price_derived_metrics 复权现算后同步刷新前收盘价
 
     │   ├── full_clean_service.py     # ✨【回写】全量清洗业务逻辑层：FullCleanService——DB读取→清洗管线→事务写回→清洗元信息落库→bad归档→可选重建processed（subprocess调scripts/数据导出_DB到processed.py）；唯一调用方=scripts/数据全量清洗.py（CLI与GUI全量清洗对话框共用）；业务逻辑归myquant，脚本只做薄入口（架构纪律）；✨【回写#77】F4 新增公共函数 resolve_incremental_symbols（filter_excluded_symbols+filter_st_blacklist_symbols串联，读config/data_clean_run.json 14条实口径，json缺失回退DEFAULT_EXCLUDE_RULES+warning；返回keep+stats；防焊死：每次调用实时推导）——供增量下载与全量导出共用范围口径；✨【回写#79】新增 SUSPEND_DB_REL_PATH + filter_long_suspended_symbols（按 market_data(daily,hfq) MAX(trade_date) 与参考日 gap > exclude_suspended_days 剔除，等于阈值保留；DB无记录/解析失败/查询异常/阈值≤0 均保留不阻断；ref_date 可注入防未来）；resolve_incremental_symbols 串联该规则（stats 增 excluded_suspended，config 缺省 0 不启用）；FullCleanService.__init__ 读 exclude_suspended_days、resolve_symbols 用 dq.conn 同口径串联（全量/增量一致）；✨【回写#87】DEFAULT_EXCLUDE_RULES 10→14 条（补 68/90/20/99，与 config/data_clean_run.json + financial_sync_service 内置兜底一致，防 config 缺失时 B 股/科创板复活）
     │   ├── factor_sync_service.py   # ✨【回写#82】方案B复权因子同步业务：akshare stock_zh_a_daily(adjust="hfq-factor") 东财事件表→清洗(1900脏行/NaN/排序去重)→UPSERT adjust_factor(symbol,event_date,factor)；hfq价=raw×factor事件日生效；qfq=hfq/最新因子；限速/失败留痕/as_of防未来；供清洗豁免与data_loader复权现算 ✅已完成
@@ -824,11 +826,11 @@ Pythonwdhmm/
 
     │   ├── fee_table.py              # ✨【V5·P1】费用查表加速：预计算费用矩阵查表（默认关闭，大批量回测开启后可显著提速）
 
-    │   ├── order_matcher.py          # ✨【V5·P1】统一撮合逻辑：三模式引擎共用（处理部分成交/涨跌停/滑点），保证不同引擎成交语义一致
+    │   ├── order_matcher.py          # ✨【V5·P1】统一撮合逻辑：三模式引擎共用（处理部分成交/涨跌停/滑点），保证不同引擎成交语义一致；✨【回写#136】涨跌停校验 fail-closed：enable_price_limit 且 pre_close<=0 → 抛错，禁止"恒空转"
 
     │   ├── vectorized_engine.py      # ✨【V5·P1】纯向量化引擎：整段numpy批量计算（无Python逐bar循环），参数扫描/大批量场景最快；防未来函数由light_lookahead_guard轻校验
 
-    │   ├── mixed_engine.py           # ✨【V5·P1】混合引擎（生产主力）：分块向量化+块内事件回调，精度接近event、速度接近vectorized，默认mode
+    │   ├── mixed_engine.py           # ✨【V5·P1】混合引擎（生产主力）：分块向量化+块内事件回调，精度接近event、速度接近vectorized，默认mode；✨【回写#136】_build_unified_bars 按标的前收盘价兜底派生（收盘价.shift(1)，防涨跌停校验 pre_close 恒 0 空转）
 
     │   ├── batch_backtest.py         # ✨【V5·P2】批量回测调度器：数据指纹去重（同指纹跳过）+三模式复用+内存水位降级+失败续跑+汇总表，供run_批量回测.py调用；✨【2026-09-09】新增可选on_batch_done批次回调（GUI进度刷新用）；STRATEGY_REGISTRY扩为6策略（ma_cross/rsrs/grid/momentum/mean_reversion/multi_factor）
 
@@ -2588,3 +2590,16 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：日切只释放【已发生】的当日买入冻结，不生成任何预测数据。
 - 验证结果：py_compile 四文件 PASS；tests/unit/test_t1_settle.py 12 项全绿（settle_t1_all settled/skipped/空管理器、T日买入冻结→卖单被拒→结算后可卖、禁用T1当日可卖、attach_engine 注册/单券商/无实现/显式关闭、engine启动解冻/无manager不报错、双交易日无可卖不足拒单）；broker/live/scheduler 相关回归 226 passed 无回归；ruff 测试文件通过。
 - 纪律遵守：仅改蓝图已标注文件（manager.py/scheduler.py/engine.py）+ tests/unit 新增 test_t1_settle.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+136. ✨【回写记录·2026-10-04·T-02 KP-P2-10 涨跌停校验恒空转（pre_close 恒 0）】
+
+【发现】涨跌停不可成交约束恒空转：导出 SQL 无 前收盘价 列 → mixed_engine._build_unified_bars row.get("前收盘价",0) 恒取 0 → order_matcher._check_halt_and_limit 因 pre_close<=0 恒跳过校验（数据充足时本可拦截涨停开盘买单/跌停开盘卖单却全部放行）。
+- 修复（4 处 + CI 契约）：
+  a. scripts/数据导出_DB到processed.py load_symbol_data：前收盘价=前一日收盘价（收盘价.shift(1)），df.insert 紧跟收盘价列，列顺序稳定（首行无前驱为 NaN）。
+  b. myquant/data_access/provider.py：get_bars 前收盘价兜底派生（列缺失时按收盘价.shift(1)）+ _recompute_price_derived_metrics 复权现算后同步刷新前收盘价（与复权价同口径）。
+  c. myquant/backtest/mixed_engine.py _build_unified_bars：按标的前收盘价兜底派生（数据源未含该列时）。
+  d. myquant/backtest/order_matcher.py _check_halt_and_limit fail-closed：enable_price_limit=True 且 pre_close<=0 → raise ValueError("pre_close 缺失，涨跌停校验不可空转")，禁止静默跳过；enable_price_limit=False 时不校验不抛错。首根 bar 无前驱（pre_close=0）时引擎 T+1 撮合时机保证不会被调用（T 日下单 T+1 开盘撮合）。
+- CI 契约：tests/unit/test_data_export_columns.py EXPECTED_CN_COLUMNS 增 前收盘价（14 列）+ 断言导出派生存在（shift(1)）。
+- 防未来：只按【已发生】的收盘价派生前收盘价，不生成任何预测数据；vectorized 引擎本已派生 pre_closes，涨停拦截与标量路径一致。
+- 验证结果：py_compile 六文件 PASS；tests/unit/test_price_limit_preclose.py 10 项全绿（标量 fail-closed/涨停买拦/跌停卖拦/mixed+vectorized 涨停样本买单 0 成交/provider 前收盘价派生/跌停拦截联动）；test_data_export_columns 6 项全绿；backtest/数据加载相关回归 244 passed + 增量/清洗/因子 154 passed 无回归；order_matcher 模块自测 30 项全通过。
+- 纪律遵守：仅改蓝图已标注文件（order_matcher/mixed_engine/provider/数据导出脚本）+ tests/unit 新增 test_price_limit_preclose.py + 更新 test_data_export_columns.py CI 契约（本回写同步更新目录树）；无蓝图外文件；严格防未来。

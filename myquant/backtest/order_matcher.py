@@ -380,8 +380,15 @@ class OrderMatcher:
         if bar.volume <= 0:
             return "停牌(volume=0)"
 
-        # 涨跌停（需要 pre_close）
-        if self.enable_price_limit and bar.pre_close > 0:
+        # 涨跌停（需要 pre_close；enable_price_limit=False 时不校验也不抛错）
+        # KP-P2-10/T-02：fail-closed——涨跌停校验启用时 pre_close 缺失必须显式报错，
+        # 禁止"pre_close<=0 静默跳过"导致约束恒空转（数据层应已派生前收盘价；
+        # 首根 bar 无前驱时本方法不会被调用，见引擎 T+1 撮合时机）。
+        if self.enable_price_limit:
+            if bar.pre_close <= 0:
+                raise ValueError(
+                    "pre_close 缺失，涨跌停校验不可空转（数据层需派生前收盘价）"
+                )
             limit_up = bar.pre_close * (1.0 + self.price_limit_pct)
             limit_down = bar.pre_close * (1.0 - self.price_limit_pct)
             if side == OrderSide.BUY and bar.open >= limit_up - _PRICE_EPSILON:
@@ -651,7 +658,8 @@ class OrderMatcher:
             ValueError: 任一元素不一致时抛出（携带具体位置）。
         """
         n = int(opens.size)
-        # 一致性校验：传入与标量 Bar 一致的 volume/pre_close（volume=1e6 不停牌，pre_close=0 跳过涨跌停）
+        # 一致性校验：标量与向量化必须使用一致的 volume/pre_close（KP-P2-10/T-02：
+        # 不再用 pre_close=0 跳过涨跌停，改用统一有效前收盘价 10.0，两侧判定一致）。
         result = self.match_vectorized(
             sides=sides,
             order_types=order_types,
@@ -661,7 +669,7 @@ class OrderMatcher:
             highs=highs,
             lows=lows,
             quantities=quantities,
-            pre_closes=np.zeros(n, dtype=np.float64),
+            pre_closes=np.full(n, 10.0, dtype=np.float64),
             volumes=np.full(n, 1_000_000.0, dtype=np.float64),
         )
         for i in range(n):
@@ -688,6 +696,7 @@ class OrderMatcher:
                 high=float(highs[i]),
                 low=float(lows[i]),
                 close=float(opens[i]),
+                pre_close=10.0,
                 volume=1_000_000.0,
                 timestamp=float(i),
             )
@@ -796,7 +805,9 @@ def _run_self_test() -> int:
         open_px: float,
         high_px: float,
         low_px: float,
-        pre_close: float = 0.0,
+        # KP-P2-10/T-02：默认给有效前收盘价（10.0），基础撮合用例不会误触发
+        # fail-closed；涨跌停/空转用例显式传 pre_close 控制行为。
+        pre_close: float = 10.0,
         volume: float = 1_000_000.0,
     ) -> Bar:
         return Bar(
@@ -1006,16 +1017,23 @@ def _run_self_test() -> int:
         f_limit_down_buy is not None and abs(f_limit_down_buy.price - 9.0) < 1e-9,
         f"结果={f_limit_down_buy}",
     )
-    # pre_close=0 时跳过涨跌停检查（数据不足）
-    f_no_pc = matcher.match(
-        make_order("MARKET", "BUY"),
-        make_bar(11.0, 11.5, 11.0, pre_close=0.0),
-    )
-    check(
-        "pre_close=0 跳过涨跌停检查(买单可成交)",
-        f_no_pc is not None and abs(f_no_pc.price - 11.0) < 1e-9,
-        f"结果={f_no_pc}",
-    )
+    # KP-P2-10/T-02：pre_close<=0 且启用涨跌停校验 → fail-closed 显式抛错，禁止静默空转
+    try:
+        matcher.match(
+            make_order("MARKET", "BUY"),
+            make_bar(11.0, 11.5, 11.0, pre_close=0.0),
+        )
+        check(
+            "pre_close=0 且启用涨跌停 → 应抛错（fail-closed，禁止空转）",
+            False,
+            "未抛出 ValueError",
+        )
+    except ValueError:
+        check(
+            "pre_close=0 且启用涨跌停 → 应抛错（fail-closed，禁止空转）",
+            True,
+            "抛出 ValueError",
+        )
 
     # 9d. 向量化涨跌停/停牌一致性
     vec_n = 6

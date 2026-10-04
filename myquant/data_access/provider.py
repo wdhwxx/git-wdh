@@ -457,6 +457,11 @@ class HistoricalDataProvider(DataProviderBase):
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
 
+        # KP-P2-10/T-02：前收盘价兜底派生——processed/旧缓存未含该列时按收盘价.shift(1) 派生，
+        # 防混合/事件引擎涨跌停校验因 pre_close 恒 0 而空转（首行无前驱为 NaN，由撮合层跳过）。
+        if "前收盘价" not in df.columns and "收盘价" in df.columns:
+            df["前收盘价"] = pd.to_numeric(df["收盘价"], errors="coerce").shift(1)
+
         # 去除内部标记列（清洗时添加的_warnings等）
         internal_cols = [c for c in df.columns if c.startswith("_")]
         if internal_cols:
@@ -581,6 +586,9 @@ class HistoricalDataProvider(DataProviderBase):
             return df
         close = pd.to_numeric(df["收盘价"], errors="coerce")
         prev_close = close.shift(1)
+        # KP-P2-10/T-02：复权现算后同步刷新前收盘价（涨跌停校验基准需与复权价同口径，
+        # 首行无前驱为 NaN）
+        df["前收盘价"] = prev_close
         denom_valid = prev_close.notna() & (prev_close != 0)
         if "涨跌幅" in df.columns:
             pct = ((close - prev_close) / prev_close * 100.0).round(4)

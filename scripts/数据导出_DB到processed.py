@@ -121,6 +121,11 @@ def load_symbol_data(conn: sqlite3.Connection, symbol: str) -> pd.DataFrame:
     # 表头全中文显示（下游加载器自动映射回英文列名，不影响回测）；
     # trade_date 一并映射为「日期」列（扁平式）
     df = df.rename(columns={**CN_COLUMN_MAP, "trade_date": "日期"})
+    # KP-P2-10/T-02：前收盘价 = 前一日收盘价（导出 SQL 无该列，统一派生；
+    # 防混合/事件引擎涨跌停校验因 pre_close 恒 0 而空转——首行无前驱为 NaN）；
+    # 用 insert 紧跟收盘价列，保证列顺序稳定（CI 契约断言依赖）。
+    _pre_close = pd.to_numeric(df["收盘价"], errors="coerce").shift(1)
+    df.insert(int(df.columns.get_loc("收盘价")) + 1, "前收盘价", _pre_close)
     # 每股收益 = 按交易日匹配最近一期 financial_data.eps（防未来函数）
     fin_cur = conn.cursor()
     fin_cur.execute("SELECT report_date, eps FROM financial_data WHERE symbol=? ORDER BY report_date", (symbol,))

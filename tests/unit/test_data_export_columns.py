@@ -22,9 +22,9 @@ from myquant.database.schema import CREATE_FINANCIAL_DATA_SQL, CREATE_MARKET_DAT
 
 _EXPORT_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "数据导出_DB到processed.py"
 
-#: 目标中文列集合（与增量 _en_to_cn 列集合一致）
+#: 目标中文列集合（与增量 _en_to_cn 列集合一致）；#135/KP-P2-10 补 前收盘价 派生列
 EXPECTED_CN_COLUMNS: List[str] = [
-    "开盘价", "最高价", "最低价", "收盘价", "成交量", "成交额",
+    "开盘价", "最高价", "最低价", "收盘价", "前收盘价", "成交量", "成交额",
     "涨跌幅", "振幅", "量比", "换手率", "流通股本", "市盈动", "每股收益",
 ]
 
@@ -70,9 +70,12 @@ class TestExportColumnSet:
         assert "turnover" in body
         assert "float_share" in body
         assert "pe_dynamic" in body
+        # KP-P2-10/T-02：前收盘价派生（收盘价.shift(1)）必须在导出链路中
+        assert "前收盘价" in body
+        assert ".shift(1)" in body
 
     def test_load_symbol_data_输出完整列集合(self, tmp_path: Path) -> None:
-        """load_symbol_data 输出 13 列中文集合（含换手率），与增量 _en_to_cn 一致。"""
+        """load_symbol_data 输出 14 列中文集合（含换手率与前收盘价），与增量 _en_to_cn 一致。"""
         row: List[Any] = [
             "000001.SZ", "A股", "daily", "raw", "2026-09-28", 11.28, 11.41, 11.27, 11.3,
             71534144.0, 810575808.0, 0.0, 1.23, 1.2389, 0.8165, 1.94e10, 5.0, "test",
@@ -97,6 +100,8 @@ class TestExportColumnSet:
         assert df["换手率"].iloc[0] == 1.23
         # 每股收益按报告期向前匹配
         assert df["每股收益"].iloc[0] == 1.24
+        # KP-P2-10/T-02：单行行情无前驱 → 前收盘价为 NaN（列存在）
+        assert df["前收盘价"].isna().iloc[0]
 
     def test_load_symbol_data_无财务记录每股收益为None(self, tmp_path: Path) -> None:
         """financial_data 无记录 → 每股收益列仍存在（全 None），列集合不受影响。"""

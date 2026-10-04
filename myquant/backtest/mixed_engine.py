@@ -931,6 +931,10 @@ class MixedBacktestEngine:
             _rename = {en: cn for en, cn in EN_TO_CN_COLUMN_MAP.items() if en in df.columns}
             if _rename:
                 df = df.rename(columns=_rename)
+            # KP-P2-10/T-02：前收盘价兜底派生——数据源未含该列时按收盘价.shift(1) 派生，
+            # 防涨跌停校验因 pre_close 恒 0 而空转（首行无前驱为 0，由撮合层跳过不误触发）。
+            if "前收盘价" not in df.columns and "收盘价" in df.columns:
+                df["前收盘价"] = pd.to_numeric(df["收盘价"], errors="coerce").shift(1)
             # ★ 防未来函数：按日期范围过滤（双重保障）
             if self.config.start_date:
                 df = df[df.index.astype(str) >= self.config.start_date]
