@@ -300,19 +300,25 @@ def compute_ic_series(
     return pd.Series(ic_values, index=ic_dates, dtype=float)
 
 
-def _annualized_mean(values: Sequence[float]) -> float:
-    """简单收益序列的年化均值（评估用途）"""
+def _annualized_mean(values: Sequence[float], horizon: int = DEFAULT_HORIZON) -> float:
+    """h 日重叠收益序列的年化均值（评估用途）。
+
+    P2-12修复：forward 为 h 日持有期重叠收益，每期均值须除以 horizon 折成日频，
+    再乘 252；此前直接 mean*252 把 h 日收益当日频，高估约 h 倍（h=5 时约5倍）。
+    """
     clean = [float(v) for v in values if v is not None and np.isfinite(v)]
     if not clean:
         return 0.0
     mean_v = float(np.mean(clean))
-    return mean_v * TRADING_DAYS_PER_YEAR
+    h = max(1, int(horizon))
+    return mean_v / h * TRADING_DAYS_PER_YEAR
 
 
 def layer_returns(
     factor_panel: pd.DataFrame,
     forward_returns: pd.DataFrame,
     n_layers: int = N_LAYERS,
+    horizon: int = DEFAULT_HORIZON,
 ) -> Dict[str, float]:
     """因子值分层组合的年化收益（分层收益曲线）。
 
@@ -353,7 +359,7 @@ def layer_returns(
                 continue
             idx = ranks.iloc[lo:hi].index
             layer_series[f"layer_{i + 1}"].extend(float(v) for v in yv.loc[idx])
-    return {k: round(_annualized_mean(v), 6) for k, v in layer_series.items()}
+    return {k: round(_annualized_mean(v, horizon=horizon), 6) for k, v in layer_series.items()}
 
 
 def factor_turnover(
@@ -521,7 +527,7 @@ def evaluate_factor(
         ic_h = compute_ic_series(f, fwd_h, method="spearman")
         decay[str(h)] = round(float(ic_h.mean()), 6) if len(ic_h) > 0 else 0.0
 
-    layer_ret = layer_returns(f, forward, n_layers=n_layers)
+    layer_ret = layer_returns(f, forward, n_layers=n_layers, horizon=horizon)
     turnover = factor_turnover(f, n_layers=n_layers)
     status = decide_status(ic_mean, icir, t_stat, win_rate, thresholds)
 

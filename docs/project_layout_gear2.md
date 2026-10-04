@@ -2476,3 +2476,14 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 以上均不阻塞当前 2065 测试基线，列入 P2 工程体验与部署接线批次。
 
 【基线】pytest 2065 passed/2 skipped/0 failed。
+
+127. ✨【回写记录·2026-10-04·P2-12 factor_validator年化错误修复（P2批次第1项）】
+
+【P2-12｜h日重叠收益按252直接年化】
+- 根因：layer_returns 用 horizon=5 日重叠 forward 收益，_annualized_mean 直接
+  mean*252，把h日收益当日频→分层收益高估约5倍，且被F-02 IC加权决策消费。
+- 修复：_annualized_mean(values, horizon) 改 mean/h*252（h=持有期）；
+  layer_returns 增加 horizon 形参并透传；evaluate 调用处传入 horizon。
+- 单测：test_p212_factor_annualize——mean=0.01/h=5→0.504（旧错2.52的1/5）；h=1退化为日频年化。
+
+【验证】py_compile PASS；factor/validat 201 passed；pytest全量2067 passed/0 failed（216s）。
