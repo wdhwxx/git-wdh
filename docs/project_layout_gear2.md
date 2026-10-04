@@ -3125,6 +3125,13 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 验证结果：py_compile provider/scanner 通过；新增 tests/unit/test_adjust_strict.py 5 项全绿（strict raise/降级 attrs raw/生效 attrs hfq/扫描器读 yaml adjust/结果 meta 落盘源码断言）；ruff 干净。
 - 纪律遵守：改蓝图已标注文件（data_access/provider.py、backtest/kunpeng_param_scanner.py）+ tests/unit 新增 test_adjust_strict.py（同步更新目录树）；无蓝图外文件；严格防未来。
 
+181. ✨【回写记录·2026-10-04·T-48 KP-P4-09 备份恢复验证（复核确认已由 T-32 覆盖，无新增）】
+
+【勘察】KP-P4-09 与 KP-P5-06 为同一条款（补丁清单 §3.4 L225 备份与恢复 P1/P2 合并）。T-32 已完整落地全部技术内容：file_utils.py backup_files 写 MANIFEST.sha256（目录/zip）+ verify_backup（篡改/缺失判失败）+ restore_backup（按 MANIFEST 还原）+ collect_backup_sources 默认源含 db/config/实盘状态/实盘信号（example 排除）+ scripts/结果备份.py --verify/--restore 真实接线（L302-320）+ 清理白名单（.keep 锁定标记不清理，cleanup_old_backups）；test_backup_manifest.py 校验/恢复/白名单/默认源 6 项单测。
+- 处置：T-48 复核确认上述全部存在且测试通过（test_backup_manifest 6 项全绿），无需新增代码（遵守零变化纪律，不重复实现已存在能力）。
+- 验证结果：tests/unit/test_backup_manifest.py 6 项全绿（目录/zip MANIFEST/篡改判失败/restore 还原/默认源含 db/config/state/白名单 .keep 不清理）。
+- 纪律遵守：本项无代码改动（条款已由 T-32 完整落地），仅回写台账确认；蓝图目录树 test_backup_manifest.py 行 T-32 已登记。
+
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】
 
