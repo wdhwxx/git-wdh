@@ -360,7 +360,7 @@ Pythonwdhmm/
 
 │   └── workflows/
 
-│       └── ci.yml                    # ✨【V5·P3】CI流水线（重写为7-job）：lint → test（全量tests/unit，gui extras 已装、offscreen 跑 GUI 测试）→ consistency-check（三模式一致性）→ backtest-smoke（回测冒烟）→ docker-build（构建镜像）→ live-config-check（实盘配置检查）→ data-clean（数据清洗单元测试）；任一job失败即阻断合并
+│       └── ci.yml                    # ✨【V5·P3】CI流水线（重写为7-job）：lint → test（全量tests/u；✨【回写#157】lint 增 BLE001 专项护栏（KP-P1-07：新增裸 except 阻断）nit，gui extras 已装、offscreen 跑 GUI 测试）→ consistency-check（三模式一致性）→ backtest-smoke（回测冒烟）→ docker-build（构建镜像）→ live-config-check（实盘配置检查）→ data-clean（数据清洗单元测试）；任一job失败即阻断合并
 
 │
 
@@ -447,7 +447,8 @@ Pythonwdhmm/
 │   │   ├── test_api_middleware.py   # ✨【回写#25】API认证/限流中间件接线回归（审计C1：create_app挂载
 │   │   ├── test_api_not_implemented.py # ✨【回写#154】占位接口伪造成功测试(KP-P1-01：order/live start-stop/risk pause-resume 六端点 501 + cli --host 默认 127.0.0.1，7项)✅已完成
 │   │   ├── test_backtest_not_placeholder.py # ✨【回写#155】回测API硬编码绩效常量测试(KP-P1-02：未注册50
-│   │   ├── test_env_auth_chain.py    # ✨【回写#156】.env与认证链路测试(KP-P1-04：env生效/settings兜底/env优先/运行API.py bootstrap不崩，4项)✅已完成1/缺参422/成功取真实值/失败501/异常501，5项)✅已完成/关闭/CORS互斥/401/429逻辑）✅已完成
+│   │   ├── test_env_auth_chain.py    # ✨【回写#156】.env与认证链路测试(KP-P1-04：env生效/settings兜
+│   │   ├── test_exception_swallowing.py # ✨【回写#157】异常吞噬测试(KP-P1-07：无fastapi raise/close_all异常warning/CI BLE001护栏，3项)✅已完成底/env优先/运行API.py bootstrap不崩，4项)✅已完成1/缺参422/成功取真实值/失败501/异常501，5项)✅已完成/关闭/CORS互斥/401/429逻辑）✅已完成
 
 │   │   ├── test_broker_platform_check.py # ✨【回写#25】券商适配器平台校验（审计疑点3：qmt/ptrade非Windows拦截、paper/sim放行、大小写不敏感）✅已完成
 
@@ -691,7 +692,7 @@ Pythonwdhmm/
 
     │   ├── __init__.py
 
-    │   ├── connection.py             # SQLite连接管理上下文管理器
+    │   ├── connection.py             # SQLite连接管理上下文管理器；✨【回写#157】close_all 关闭异常记 warning（KP-P1-07：不裸 pass 吞噬）+ 注入 logger
 
     │   ├── schema.py                 # 表结构总览DDL；✨【回写#87】drop_all_tables 顺序 share_change 重复行清理（L502-503 双行→单行，幂等不变）；✨【回写#142】TABLE_NAMES 10→13 张（KP-P4-02：orders/fills/positions_daily 三关系账 + DDL/索引/ALL_CREATE/drop_all 同步）
 
@@ -1039,7 +1040,7 @@ Pythonwdhmm/
 
     │   ├── __init__.py                 # API包统一导出：create_app/run_api/FASTAPI_AVAILABLE + 11个响应/请求模型 + APIKeyAuth + FixedWindowLimiter/TokenBucketLimiter/RateLimitResult + ServiceContainer（__all__全量导出，供运行API.py与外部导入）
 
-    │   ├── routes.py                 # 路由聚合；✨【回写#154】占位写端点改真 501（KP-P1-01）；✨【回写#155】回测端点接线真实引擎（KP-P1-02：不再硬编码绩效常量，未注册/缺数据/失败返回 501）
+    │   ├── routes.py                 # 路由聚合；✨【回写#154】占位写端点改真 501（KP-P1-01）；✨【回写#155】回测端点接线真实引擎（KP-P1-02）；✨【回写#157】无 fastapi 启动 raise（KP-P1-07）
 
     │   │                             # ✅已实现：6个数据质量端点(/api/data/quality, /overview, /runs, /runs/{id}, /dirty, /metrics) + 告警管理端点
 
@@ -2849,6 +2850,17 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：认证密钥来源统一收敛到 settings 配置链路，杜绝『配置在 .env 但运行时未生效』的静默失败。
 - 验证结果：py_compile 通过；新增 tests/unit/test_env_auth_chain.py 4 项全绿（env 生效/settings 兜底/env 优先/运行API.py --help bootstrap 不崩）；auth 回归 17 passed 无回归；ruff 干净。
 - 纪律遵守：仅改蓝图已标注文件（scripts/运行API.py、api/middleware/auth.py）+ tests/unit 新增 test_env_auth_chain.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+157. ✨【回写记录·2026-10-04·T-23 KP-P1-07 异常吞噬规模大】
+
+【发现】全项目裸 `except: pass`/`except Exception: pass` 约 382 处，关键路径静默吞异常：`routes.py` 无 fastapi 时返回降级占位实例（假可用）；`database/connection.py` close_all 关闭连接异常裸 `pass`（不留痕）。
+- 修复：
+  a. **routes.py create_app：无 fastapi 时显式 raise RuntimeError**（不再静默降级返回占位实例，杜绝『看似可用』）。
+  b. **database/connection.py close_all：关闭异常 `except Exception as e` → `logger.warning` 留痕**（不再裸 pass 吞噬），并注入 logger。py文件代码规则：禁静默吞异常。
+  c. **CI ruff BLE001 专项护栏**：`.github/workflows/ci.yml` lint job 增『BLE001 裸 except 专项护栏』，实测基线 382（`BLE001_BASELINE` env），新增裸 except 即失败，阻断异常吞噬回潮。
+- 防未来：异常吞噬类违规通过 CI 护栏持续阻断，关键路径显式失败/留痕。
+- 验证结果：py_compile 通过；新增 tests/unit/test_exception_swallowing.py 3 项全绿（无 fastapi raise/close_all 异常 warning/CI BLE001 护栏存在）；回归 70 passed 无回归；ruff 干净；ci.yml YAML 校验通过。
+- 纪律遵守：仅改蓝图已标注文件（api/routes.py、database/connection.py、.github/workflows/ci.yml）+ tests/unit 新增 test_exception_swallowing.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】

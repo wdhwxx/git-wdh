@@ -35,6 +35,8 @@ env:
   # ruff 历史 lint 债基线（E4/E7/E9/F/I 契约；L4修复: 从 530 更新——
   # 本地 ruff 0.15.1 实测源码（不含 backups）515 项，留 45 余量覆盖 0.16.3 规则差异）
   RUFF_BASELINE: "560"
+  # KP-P1-07: BLE001 专项基线（裸 except 异常吞噬数，实测 382；新增即失败，阻断异常吞噬回潮）
+  BLE001_BASELINE: "382"
 
 jobs:
   # ============================================================
@@ -80,6 +82,25 @@ jobs:
               print(f'   规则分布: {top}')
               sys.exit(1)
           print(f'✅ ruff 违规 {count} 项 ≤ 基线 {baseline}（历史债，不阻塞；见实施报告遗留债清单）')
+          "
+
+      - name: ruff BLE001 专项护栏（KP-P1-07：异常吞噬阻断，新增裸 except 即失败）
+        env:
+          BLE001_BASELINE: ${{ env.BLE001_BASELINE }}
+        run: |
+          ruff check . --exclude backups --select BLE001 --output-format json > ble001_report.json || true
+          python -c "
+          import json
+          import os
+          import sys
+
+          data = json.load(open('ble001_report.json', encoding='utf-8'))
+          count = len(data)
+          baseline = int(os.environ['BLE001_BASELINE'])
+          if count > baseline:
+              print(f'❌ BLE001 裸 except 违规 {count} 项 超过基线 {baseline}（存在新增异常吞噬！）')
+              sys.exit(1)
+          print(f'✅ BLE001 裸 except 违规 {count} 项 ≤ 基线 {baseline}')
           "
 
   # ============================================================

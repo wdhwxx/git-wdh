@@ -256,9 +256,8 @@ def create_app(
     FastAPI : FastAPI应用实例
     """
     if not FASTAPI_AVAILABLE:
-        logger.warning("[api] fastapi未安装，返回降级应用实例。请运行: pip install fastapi uvicorn")
-        # 返回降级占位实例，不抛出异常，便于在无fastapi环境下导入和测试
-        return FastAPI(title=title, version=version)
+        # KP-P1-07: 不静默降级——无 fastapi 时启动必须显式失败，避免『看似可用』的假成功
+        raise RuntimeError("[api] fastapi未安装，API服务不可用。请运行: pip install fastapi uvicorn")
 
     app = FastAPI(
         title=title,

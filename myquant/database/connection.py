@@ -21,6 +21,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
+from myquant.core.logger import get_logger
+
+logger = get_logger("database.connection")
+
 # ─────────────────────────────────────────────
 # 常量定义
 # ─────────────────────────────────────────────
@@ -135,8 +139,9 @@ class DatabaseConnection:
         for c in conns:
             try:
                 c.close()
-            except Exception:
-                pass  # 已关闭/连接异常的连接忽略，确保全部清理不中断
+            except Exception as e:
+                # KP-P1-07: 不静默吞噬——关闭异常记 warning 留痕，确保清理不中断且可追溯
+                logger.warning(f"[db] 关闭连接异常（忽略以继续清理）: {e}")
         if hasattr(self._local, "conn"):
             self._local.conn = None
         self._connected = False
