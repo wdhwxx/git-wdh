@@ -20,12 +20,12 @@ from tests.unit.test_backtest import _make_config, _make_df
 
 
 class TestBacktestRiskManager:
-    def test_回测装配实盘riskmanager(self, crossover_df) -> None:
+    def test_回测装配实盘riskmanager(self) -> None:
         """DoD：run 后 engine._risk_manager 已装配（含 position_limit 规则）。"""
         engine = BacktestEngine(
             config=_make_config(),
             strategy=MACrossStrategy(3, 10),
-            data={"000001.SZ": crossover_df},
+            data={"000001.SZ": _make_df([10, 11, 12, 13, 14, 15, 16])},
         )
         engine.run()
         assert engine._risk_manager is not None
@@ -51,12 +51,12 @@ class TestBacktestRiskManager:
         # 单笔金额上限=1 → 买卖单全部被拒 → 无成交
         assert result.trades == []
 
-    def test_风控上下文_防未来字段(self, crossover_df) -> None:
+    def test_风控上下文_防未来字段(self) -> None:
         """DoD：回测风控上下文 current_price/prev_close 取自已发生事实。"""
         engine = BacktestEngine(
             config=_make_config(),
             strategy=MACrossStrategy(3, 10),
-            data={"000001.SZ": crossover_df},
+            data={"000001.SZ": _make_df([10, 11, 12, 13, 14, 15, 16])},
         )
         engine.run()
         # run 结束后最后一根 bar 的 close 已入 prev_close（非未来）
