@@ -584,6 +584,7 @@ Pythonwdhmm/
 
 │   │   ├── test_live_warmup.py       # ✨【回写#55】实盘本地parquet历史预热+context.data中文列测试（_load_local_history读取/升序限count/缺失缺列降级/_sync_context_data中文列/_warmup_history优先本地/降级akshare，7项）✅已完成
 │   │   ├── test_live_bar_dedup.py    # ✨【回写#139】日线bar去重测试（KP-P3-02：bar_date_to_epoch往返/解析失败0.0/make_bar时间戳确定性且还原日期/引擎同根bar二次推送丢弃且不达撮合/不同日期正常/不同标的同日不误删，7项）✅已完成
+    │   ├── test_sim_partial_fill_cap.py # ✨【回写#179】sim_broker 参与率限成交测试（KP-P2-03：默认全量不变/参与率限到 volume*rate/不超限/零成交保留订单/vectorized 负现金计数源码断言，5项）✅已完成
 
 │   │   ├── test_signal_idempotency.py # ✨【回写#43】幂等去重测试（Signal确定性ID/to_order映射/引擎去重/分钟线粒度/start重置/QMT端按订单ID去重/统计双计修复验证，19项）✅已完成
 │   │   ├── test_guard_mounting.py    # ✨【回写#140】防未来铁律1/2/4挂载测试（KP-P2-08：indicators_recorded>0/钩子因果口径/T+1指标桩抛错/T+1信号桩引擎标记失败/止损UPDATE早于CHECK抛错/数据访问未来抛错/无guard注入退化为无操作，10项）✅已完成
@@ -879,7 +880,7 @@ Pythonwdhmm/
 
     │   ├── order_matcher.py          # ✨【V5·P1】统一撮合逻辑：三模式引擎共用（处理部分成交/涨跌停/滑点），保证不同引擎成交语义一致；✨【回写#136】涨跌停校验 fail-closed：enable_price_limit 且 pre_close<=0 → 抛错，禁止"恒空转"
 
-    │   ├── vectorized_engine.py      # ✨【V5·P1】纯向量化引擎：整段numpy批量计算（无Python逐bar循环），参数扫描/大批量场景最快；防未来函数由light_lookahead_guard轻校验
+    │   ├── vectorized_engine.py      # ✨【V5·P1】纯向量化引擎：整段numpy批量计算（无Python逐bar循环），参数扫描/大批量场景最快；防未来函数由light_lookahead_guard轻校验；✨【回写#179】负现金按可用现金缩 notional+计数入结果（KP-P2-03）
 
     │   ├── mixed_engine.py           # ✨【V5·P1】混合引擎（生产主力）：分块向量化+块内事件回调，精度接近event、速度接近vectorized，默认mode；✨【回写#136】_build_unified_bars 按标的前收盘价兜底派生（收盘价.shift(1)，防涨跌停校验 pre_close 恒 0 空转）；✨【回写#137】_run_lookahead_assert 保留 _run_light_guard_check 返回值（不再无条件 return True，防 light guard 已 mark_failed 被 on_stop 的 mark_complete 覆盖）
 
@@ -921,7 +922,7 @@ Pythonwdhmm/
 
     │   ├── base.py                   # ExecutionInterface抽象基类：下单撤单查单
 
-    │   ├── sim_broker.py             # 回测模拟撮合：滑点佣金印花税部分成交；✨【回写#151】增涨跌停/停牌前置检查（KP-P2-02：__init__ 增 price_limit_pct/enforce_limit/is_suspended，_match_order 前涨停拒买/跌停拒卖/停牌跳过，on_bar 记昨收基准）
+    │   ├── sim_broker.py             # 回测模拟撮合：滑点佣金印花税部分成交；✨【回写#151】增涨跌停/停牌前置检查（KP-P2-02：__init__ 增 price_limit_pct/enforce_limit/is_suspended，_match_order 前涨停拒买/跌停拒卖/停牌跳过，on_bar 记昨收基准）；✨【回写#179】增 participation_rate 参与率限成交（KP-P2-03）
 
     │   └── state_machine.py          # 订单生命周期状态机
 
@@ -3102,6 +3103,16 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：three_factor 未接线即显式失败，不假装成功；mode 声明与默认一致，消除隐性降级。
 - 验证结果：py_compile config_builder 通过；tests/unit/test_config_live_check.py 扩展 4 项（示例 type 与实现一致/three_factor raise 源码断言/live mode 一致/P2 Gate 状态准确）19 项全绿；ruff 干净（顺手清理既有 I001 import 排序）。
 - 纪律遵守：改蓝图已标注文件（backtest/config_builder.py、config/backtest_config.example.yaml、config/live_config.example.yaml）+ 同步修正 docs/因子与机器学习档案/P2整改任务清单.md Gate 状态 + tests/unit 扩展 test_config_live_check.py（同步更新目录树）；无蓝图外新文件；严格防未来。
+
+179. ✨【回写记录·2026-10-04·T-46 KP-P2-03 sim_broker 成交量参与率 + vectorized 负现金缩 notional】
+
+【发现】sim_broker.py:350 订单默认全量成交（无成交量参与率约束，量高估流动性）；vectorized_engine.py:556 负现金仅 warning（视为杠杆保持计算，未约束资金超配）。
+- 修复：
+  a. SimBroker 新增 participation_rate 参数（默认 1.0 全量，零变化）；0<rate<1 时 fill_qty = min(remaining, int(bar.volume*participation_rate))，剩余走 partial_fill（state_machine 已支持）；参与率下成交 0 则保留订单待后续 bar。
+  b. vectorized_engine 负现金日按可用现金比例缩 notional（scale=可用现金/need，重算该日及之后 position/cash），计数 cash_constraint_caps 写入 result.extra['cash_constraint_caps']。
+- 防未来：成交量参与率仅基于当前 bar 成交量；资金约束仅基于已实现现金，无未来引用。
+- 验证结果：py_compile sim_broker/vectorized_engine 通过；新增 tests/unit/test_sim_partial_fill_cap.py 5 项全绿（默认全量不变/参与率限到 volume*rate/不超限/零成交保留订单/vectorized 计数源码断言）；ruff 干净（顺手清理既有 I001 import 排序）。
+- 纪律遵守：改蓝图已标注文件（execution/sim_broker.py、backtest/vectorized_engine.py）+ tests/unit 新增 test_sim_partial_fill_cap.py（同步更新目录树）；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】

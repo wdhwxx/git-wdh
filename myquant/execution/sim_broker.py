@@ -67,6 +67,7 @@ class SimBroker(ExecutionInterface):
         commission_model: Optional[CommissionModel] = None,
         slippage_model: Optional[SlippageModel] = None,
         enable_partial_fill: bool = False,
+        participation_rate: float = 1.0,
         price_limit_pct: float = 0.10,
         enforce_limit: bool = False,
         is_suspended: Optional[Callable[[str], bool]] = None,
@@ -79,6 +80,7 @@ class SimBroker(ExecutionInterface):
             commission_model: 手续费模型（默认A股写实标准）
             slippage_model: 滑点模型（默认固定2基点）
             enable_partial_fill: 是否启用部分成交（默认全量成交，简化回测）
+            participation_rate: 成交量参与率（0<rate<1 时按 bar.volume*rate 限成交，剩余走 partial_fill；默认 1.0 全量成交）
         """
         super().__init__(name="sim_broker")
         self.initial_capital = float(initial_capital)
@@ -90,6 +92,7 @@ class SimBroker(ExecutionInterface):
         self.commission_model = commission_model or CommissionModel()
         self.slippage_model = slippage_model or SlippageModel()
         self.enable_partial_fill = enable_partial_fill
+        self.participation_rate = float(participation_rate)  # KP-P2-03: 成交量参与率
         self.price_limit_pct = float(price_limit_pct)   # KP-P2-02: 涨跌停幅度
         self.enforce_limit = bool(enforce_limit)        # KP-P2-02: 是否强制涨跌停校验（event 路径开启）
         self.is_suspended = is_suspended                # KP-P2-02: 停牌判定函数
@@ -346,8 +349,15 @@ class SimBroker(ExecutionInterface):
         # 应用滑点
         fill_price = self._apply_slippage(fill_price, order.side, bar)
 
-        # 成交数量（默认全量成交）
-        fill_qty = order.remaining_qty
+        # 成交数量（默认全量成交；KP-P2-03 支持按参与率限制成交量）
+        # 0<rate<1 时 fill_qty = min(remaining, int(bar.volume*participation_rate))，剩余量走 partial_fill
+        if 0.0 < self.participation_rate < 1.0:
+            fill_qty = min(order.remaining_qty, int(bar.volume * self.participation_rate))
+            fill_qty = max(int(fill_qty), 0)
+        else:
+            fill_qty = order.remaining_qty
+        if fill_qty <= 0:
+            return None  # 参与率限制下无可成交数量，保留订单待后续 bar
 
         # 创建成交记录
         trade = Trade(

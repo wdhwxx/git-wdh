@@ -43,27 +43,25 @@ backtest/vectorized_engine.py - 纯向量化回测引擎
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
+from myquant.backtest.data_loader import EN_TO_CN_COLUMN_MAP, DataProviderBase
+from myquant.backtest.fee_common import FeeCalculator
+from myquant.backtest.metrics import MetricsCalculator
+from myquant.backtest.order_matcher import OrderMatcher
+from myquant.core.lookahead_guard import LookaheadGuard  # #H2修复：防未来函数校验器
 from myquant.models.backtest import (
     BacktestConfig,
     BacktestResult,
     EquityPoint,
-    PerformanceMetrics,
     TradeRecord,
 )
 from myquant.models.trade import OrderSide, OrderType
 from myquant.strategies.base import StrategyBase, StrategyContext
-from myquant.backtest.fee_common import FeeCalculator
-from myquant.backtest.order_matcher import OrderMatcher
-from myquant.backtest.metrics import MetricsCalculator
-from myquant.backtest.data_loader import DataProviderBase, EN_TO_CN_COLUMN_MAP
-from myquant.core.lookahead_guard import LookaheadGuard  # #H2修复：防未来函数校验器
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +175,7 @@ class VectorizedBacktestEngine:
         self.name: str = name
         # 统计：因子账户预算不足一手而信号全部落空的标的数（run 末尾汇总告警）
         self._no_trade_symbols: int = 0
+        self._cash_constraint_caps: int = 0  # KP-P2-03: 可用现金不足被缩 notional 的日次
 
         # 核心组件
         self.fee_calculator: FeeCalculator = fee_calculator or FeeCalculator(
@@ -335,6 +334,7 @@ class VectorizedBacktestEngine:
         self.result = BacktestResult(config=self.config)
         self.result.status = "running"
         self._no_trade_symbols = 0
+        self._cash_constraint_caps = 0
 
         # #H2修复：防未来函数校验器重置（每次回测独立校验）
         if self._lookahead_guard:
@@ -393,6 +393,13 @@ class VectorizedBacktestEngine:
         # #H2修复：回测结束统一校验防未来函数（P0-01：通过才标记 completed；失败已 mark_failed）
         if self._run_lookahead_assert():
             self.result.mark_complete()
+
+        # KP-P2-03：可用现金不足被缩 notional 的日次写入结果
+        if self._cash_constraint_caps > 0:
+            self.result.extra["cash_constraint_caps"] = self._cash_constraint_caps
+            logger.warning(
+                "全量合计 %d 日次因可用现金不足缩 notional（KP-P2-03）", self._cash_constraint_caps
+            )
 
         # 汇总告警：子账户预算不足导致信号落空的标的数（超大股票池提示换 mixed）
         if self._no_trade_symbols > 0:
@@ -551,11 +558,34 @@ class VectorizedBacktestEngine:
         position_value = position * closes
         total_asset = cash + position_value
 
-        # 资金约束检查（负现金视为杠杆，告警但保持计算）
+        # 资金约束检查（KP-P2-03：负现金不再仅告警，按可用现金比例缩 notional，超限计数写入结果）
         min_cash = float(np.min(cash)) if n else 0.0
-        if min_cash < -1.0:
+        cash_constraint_caps = 0
+        if n and min_cash < -1.0:
+            deficit = np.where(cash < 0.0)[0]
+            cash_constraint_caps = int(len(deficit))
+            for i in deficit:
+                if int(exec_shares[i]) <= 0 or not bool(traded[i]):
+                    continue
+                need = float(notional[i]) + float(fees.total_cost[i])
+                have = float(cash[i - 1]) if i > 0 else sub_initial
+                if need <= 0.0:
+                    continue
+                scale = max(0.0, min(1.0, have / need))
+                if scale >= 1.0:
+                    continue
+                capped = float(fill_qty[i]) * scale
+                fill_qty[i] = capped
+                exec_shares[i] = float(exec_shares[i]) * scale
+                signed_fill[i] = capped * (1.0 if exec_shares[i] > 0 else -1.0)
+                notional[i] = capped * float(fill_price_safe[i])
+                cashflow[i] = -notional[i] - float(fees.total_cost[i])
+                position[i:] = np.cumsum(signed_fill[i:])
+                cash[i:] = sub_initial + np.cumsum(cashflow[i:])
+        self._cash_constraint_caps += cash_constraint_caps
+        if cash_constraint_caps > 0:
             logger.warning(
-                "标的 %s 出现负现金 %.2f（策略目标超资金，按杠杆处理）", symbol, min_cash
+                "标的 %s 出现负现金 %.2f，已按可用现金缩 notional %d 日（KP-P2-03）", symbol, min_cash, cash_constraint_caps
             )
 
         # 日期与时间戳
