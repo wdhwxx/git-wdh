@@ -299,7 +299,11 @@ class CompositeDataSource(DataSourceBase):
                 self._record_usage(source.name, False)
                 continue
 
-        # 全部失败，返回空结果
+        # 全部失败，返回空结果（P2-09：显式告警，区分"该标的无数据"与"所有源都挂"）
+        logger.warning(
+            "composite_source 全部源取数失败返回空: symbol=%s period=%s 候选源=%s",
+            symbol, period, [s.name for s in candidates],
+        )
         return MarketDataResult(symbol, [], source="none")
 
     def get_financial_data(

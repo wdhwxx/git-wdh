@@ -169,6 +169,15 @@ def load_clean_config(
             except Exception as e:
                 logger.debug(f"加载默认清洗配置失败: {e}")
 
+    # P2-10：加载完成后跑值域校验（此前 validate_config 全项目无调用点），
+    # 非法阈值不再静默生效，显式告警。
+    try:
+        ok, errs = validate_config(config)
+        if not ok:
+            logger.warning("清洗配置值域校验未通过: %s", "; ".join(errs))
+    except Exception as e:
+        logger.warning("清洗配置校验异常（不阻断加载）: %s", e)
+
     return config
 
 

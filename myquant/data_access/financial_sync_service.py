@@ -249,8 +249,12 @@ def _merge_and_save_csv(
                 old_rows = list(csv.DictReader(f))
             logger.info("合并基准 CSV: %s（%d 行）", old_path.name, len(old_rows))
         except (OSError, csv.Error) as exc:
-            logger.warning("旧 CSV 读取失败，仅保留新记录: %s (%s)", old_path, exc)
-            old_rows = []
+            # P2-11：旧CSV读取失败时绝不截断历史（old_rows留空会把raw覆盖为仅本次标的），
+            # 改为中止本次落盘，保留旧文件，待人工/重试恢复。
+            logger.error(
+                "旧财务CSV读取失败，中止本次落盘以避免截断历史: %s (%s)", old_path, exc,
+            )
+            return None
 
     # 新记录优先：symbol+report_date 去重 keep=新
     merged: Dict[Tuple[str, str], Dict[str, Any]] = {}

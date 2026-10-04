@@ -2497,3 +2497,17 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
   更新文件头"阶段0 utils未实现"过时docstring为已接入说明。
 
 【验证】py_compile两脚本PASS；pytest全量2067 passed/0 failed（218s）。
+
+129. ✨【回写记录·2026-10-04·P2-09/10/11 数据静默漂移三件套（P2批次第3项）】
+
+【P2-09｜composite_source全源失败静默返空】
+- 修复：composite_source.py 全部候选源取数失败时，return空前 logger.warning 记录
+  symbol/period/候选源名，区分"该标的无数据"与"所有源都挂"。
+【P2-10｜rules_loader.validate_config无调用点】
+- 修复：load_clean_config 合并完成后调用 validate_config(config)，不通过则
+  logger.warning 列出非法阈值；校验异常不阻断加载。
+【P2-11｜financial_sync旧CSV读失败截断raw】
+- 修复：旧财务CSV读取失败由 old_rows=[]（会把raw覆盖为仅本次标的）改为
+  logger.error 并 return None 中止落盘，保留旧文件，杜绝静默截断历史。
+
+【验证】py_compile三文件PASS；pytest全量2067 passed/0 failed（215s）。
