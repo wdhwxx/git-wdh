@@ -47,7 +47,7 @@ from __future__ import annotations
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from datetime import time as dtime
 from typing import Any, Dict, List, Optional, Set
 
@@ -426,23 +426,53 @@ class PriceLimitRule(RiskRule):
 #  规则8：交易时段限制
 # ═══════════════════════════════════════════════
 
+#: 交易日历缓存（模块级懒加载，避免重复读盘；KP-P3-10）
+_TRADING_CALENDAR_CACHE: Optional[Set[date]] = None
+
+
+def _load_trading_calendar_cache() -> Optional[Set[date]]:
+    """懒加载真实交易日历（data/trade_calendar.csv）；失败回退 None（工作日近似）。"""
+    global _TRADING_CALENDAR_CACHE
+    if _TRADING_CALENDAR_CACHE is None:
+        try:
+            from pathlib import Path as _Path
+
+            from myquant.utils.trade_calendar import load_trade_calendar
+            root = _Path(__file__).resolve().parent.parent.parent
+            _TRADING_CALENDAR_CACHE = load_trade_calendar(root)
+        except Exception:
+            _TRADING_CALENDAR_CACHE = None
+    return _TRADING_CALENDAR_CACHE
+
+
 class TradingHoursRule(RiskRule):
     """交易时段限制规则：A股交易时段外禁止下单"""
     name = "trading_hours"
     description = "交易时段限制：非交易时段禁止下单"
 
     def __init__(self, morning_start: str = "09:30", morning_end: str = "11:30",
-                 afternoon_start: str = "13:00", afternoon_end: str = "15:00", **params):
+                 afternoon_start: str = "13:00", afternoon_end: str = "15:00",
+                 trading_calendar: Optional[Set[date]] = None, **params):
         super().__init__(**params)
         self.morning_start = self._parse_time(morning_start)
         self.morning_end = self._parse_time(morning_end)
         self.afternoon_start = self._parse_time(afternoon_start)
         self.afternoon_end = self._parse_time(afternoon_end)
+        self.trading_calendar = trading_calendar  # 显式注入优先；None 时懒加载缓存
 
     @staticmethod
     def _parse_time(time_str: str) -> dtime:
         h, m = map(int, time_str.split(":"))
         return dtime(hour=h, minute=m)
+
+    def _is_trading_day(self, d: date) -> bool:
+        """是否交易日：显式日历优先；否则懒加载真实日历；再回退工作日近似（KP-P3-10）。"""
+        cal = self.trading_calendar
+        if cal is None:
+            cal = _load_trading_calendar_cache()
+        if cal is not None:
+            return d in cal
+        return d.weekday() < 5
 
     def _is_trading_time(self, now: Optional[datetime] = None) -> bool:
         if now is None:
@@ -455,8 +485,12 @@ class TradingHoursRule(RiskRule):
         now = context.extra.get("current_time")
         if now and isinstance(now, str):
             now = datetime.strptime(now, "%H:%M:%S")
+        now_dt = now or datetime.now()
+        # 交易日维度：用真实当前日期（current_time 仅盘中时钟 HH:MM:SS，不承载日期）
+        if not self._is_trading_day(datetime.now().date()):
+            return self._reject(f"非交易日: {datetime.now().date().isoformat()}")
         if not self._is_trading_time(now):
-            current_time = (now or datetime.now()).strftime("%H:%M:%S")
+            current_time = (now_dt).strftime("%H:%M:%S")
             return self._reject(f"非交易时段: 当前{current_time}")
         return self._pass()
 

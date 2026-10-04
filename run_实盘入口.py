@@ -67,10 +67,9 @@ logger = logging.getLogger("run_live")
 import sys
 import threading
 import time
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-
+from typing import Any, Dict, Optional
 
 # ═══════════════════════════════════════════════
 #  基础工具
@@ -90,14 +89,26 @@ def find_project_root() -> Path:
     raise RuntimeError("无法自动探测项目根目录（找不到 pyproject.toml）。")
 
 
+def _is_trading_day(d: date) -> bool:
+    """是否 A股交易日：优先真实交易日历缓存；无缓存回退周一至周五近似（KP-P3-10）。"""
+    try:
+        from myquant.utils.trade_calendar import load_trade_calendar
+        cal = load_trade_calendar(find_project_root())
+    except Exception:
+        cal = None
+    if cal is not None:
+        return d in cal
+    return d.weekday() < 5
+
+
 def is_trading_time() -> bool:
     """
     检查当前是否为A股交易时间
-    交易日：周一至周五（节假日需交易日历判断，此处简化）
+    交易日：优先真实交易日历（data/trade_calendar.csv），无缓存回退周一至周五；
     交易时段：9:30-11:30, 13:00-15:00
     """
     now = datetime.now()
-    if now.weekday() >= 5:
+    if not _is_trading_day(now.date()):
         return False
     hour_minute = now.hour * 100 + now.minute
     morning = 930 <= hour_minute <= 1130
@@ -379,7 +390,7 @@ def show_live_status(project_root: Path) -> int:
     扫描状态存储根目录下的全部存储实例（按引擎ID隔离），
     打印存储摘要与最新快照信息。
     """
-    from myquant.live.state_store import StateStore, SnapshotNotFoundError
+    from myquant.live.state_store import SnapshotNotFoundError, StateStore
 
     candidate_roots = [
         project_root / "datasets" / "live_state",
@@ -752,7 +763,12 @@ def run_live_trading(args: argparse.Namespace) -> int:
         return 1
 
     # ── 1.4 运行模式一致性校验 + 实盘安全门（切割接口）──
-    from myquant.live.run_mode import RunMode, check_mode_consistency, describe, validate_live
+    from myquant.live.run_mode import (
+        RunMode,
+        check_mode_consistency,
+        describe,
+        validate_live,
+    )
 
     consistency_issues = check_mode_consistency(config)
     if consistency_issues:

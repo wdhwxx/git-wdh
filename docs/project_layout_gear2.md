@@ -542,6 +542,7 @@ Pythonwdhmm/
 │   │   ├── test_live_guard_failover.py # ✨【回写#31】实盘保障组件故障注入（审计H2降级：事件总线断连/订阅失败/挂载失败/风控异常拒单/调度失败/巡检异常/快照失败/全组件关闭，10项）✅已完成
 │   │   ├── test_restore_broker_state.py # ✨【回写#147】重启恢复券商账本测试(KP-P3-03：paper/qmt restore_state重建在途+冻结+T1/终态不恢复/engine补传broker触发/对账未领回cancel/超阈值pause，6项)✅已完成
 │   │   ├── test_accountability_sync.py # ✨【回写#149】券商权威账本对账测试(KP-P3-08：diff_vs_broker只diff不重建/账实一致通过/patrol超阈CRITICAL+pause/无差异不暂停，4项)✅已完成
+│   │   ├── test_trade_calendar_gate.py # ✨【回写#150】交易日历安全门测试(KP-P3-10：TradingHoursRule非交易日拒绝/交易日放行/显式日历/非交易时段仍拒绝/实盘入口真实日历判定，5项)✅已完成
 │   │   ├── test_price_limit_fail_closed.py # ✨【回写#146】涨跌停硬拦截fail-closed测试(KP-P3-04：缺prev_close拒绝/涨停拒买/跌停拒卖/正常放行/engine注入prev_close，5项)✅已完成
 
 │   │   ├── test_qmt_broker_live.py  # ✨【回写#41】QMT实盘通道测试（fake SDK不连真实QMT：模式隔离/连接流程/委托撤单/成交回调/资金持仓/状态映射，23项）✅已完成
@@ -918,7 +919,7 @@ Pythonwdhmm/
 
     │   ├── guardian.py               # 风控守护进程：健康监控、强制平仓断开
 
-    │   └── rules.py                  # 风控规则库；✨【回写#146】PriceLimitRule 缺昨收/现价 fail-closed（KP-P3-04：拒绝下单而非跳过放行）
+    │   └── rules.py                  # 风控规则库；✨【回写#146】PriceLimitRule 缺昨收/现价 fail-closed（KP-P3-04：拒绝下单而非跳过放行）；✨【回写#148】StopLossRule 增 stop_price(avg_cost) 共享止损触发价口径（KP-P3-07，回测/混合引擎复用）；✨【回写#150】TradingHoursRule 增交易日维度（KP-P3-10：真实交易日历懒加载，非交易日拒绝下单）
 
     │
 
@@ -2763,6 +2764,17 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：对账只依据"已发生"的券商权威账本快照（当前现金/持仓），不假设未来。
 - 验证结果：py_compile 通过；新增 tests/unit/test_accountability_sync.py 4 项全绿（diff_vs_broker 只 diff 不重建/账实一致通过/patrol 超阈 CRITICAL+pause/patrol 无差异不暂停）；live 广回归 301 passed 无回归；ruff 全部通过。
 - 纪律遵守：仅改蓝图已标注文件（live/engine.py、live/portfolio.py）+ tests/unit 新增 test_accountability_sync.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+150. ✨【回写记录·2026-10-04·T-16 KP-P3-10 交易日历缺失，非交易日可通过安全门】
+
+【发现】`run_实盘入口.py:99-105` 安全门仅 weekday+时段判断（节假日被放行）；`rules.py` TradingHoursRule 只查时段不查交易日；data/trade_calendar.csv 已存在但未接入。
+- 修复：
+  a. **run_实盘入口.py `is_trading_time` 接入真实交易日历**：新增 `_is_trading_day(d)`——`load_trade_calendar(find_project_root())` 判定（data/trade_calendar.csv 权威），无缓存回退周一至周五近似；交易日通过后再判时段。
+  b. **rules.py TradingHoursRule 增交易日维度**：`__init__` 增 `trading_calendar: Optional[Set[date]]`（显式注入优先）；新增 `_is_trading_day(d)`（显式日历→懒加载 `_load_trading_calendar_cache()` 模块级缓存→工作日近似）；`check()` 先用真实当前日期判交易日（current_time 仅盘中时钟不承载日期），非交易日拒绝，再判时段。
+  c. **engine.py**：create_live_engine 已对 sim/live 启用 trading_hours，交易日维度随 TradingHoursRule 生效。
+- 防未来：交易日历仅用于当前已发生日期的准入判定，不预支未来交易日；缓存懒加载不触网。
+- 验证结果：py_compile 通过；新增 tests/unit/test_trade_calendar_gate.py 5 项全绿；risk/live 广回归 157 passed 无回归；ruff：rules.py/测试通过（run_实盘入口.py 7 处既有 import 顺序非本次引入）。
+- 纪律遵守：仅改蓝图已标注文件（run_实盘入口.py、risk/rules.py）+ tests/unit 新增 test_trade_calendar_gate.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】
