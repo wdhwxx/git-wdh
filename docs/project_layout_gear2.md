@@ -280,6 +280,7 @@ Pythonwdhmm/
 │   ├── 回测性能优化实施报告_v5.md      # ✨【V5·P3】完整方案文档（约32KB，8章）：三模式引擎架构/分阶段实施明细/性能验证/风险矩阵12项/局限L1-L10与中长期演进路线
 
 │   ├── 回测性能优化 V5｜任务完成度摘要.md # ✨【V5】阶段归档/评审附件：P0-P3共35/35项完成、验收A/B/C、全量回归1187 passed/2 skipped、落地红线5条
+│   ├── 实盘事故响应与复盘制度.md      # ✨【回写#169】事故响应制度(KP-P5-11：P0~P3分级/MTTD/MTTR/通报升级时限/无责复盘/演练与复盘台账)
 
 │   ├── 回测性能优化V5_收官总结.html    # ✨【V5】收官可视化总结（HTML参考文档）
 
@@ -455,6 +456,7 @@ Pythonwdhmm/
 │   │   ├── test_health_probe_registry.py # ✨【回写#159】健康探针注册表测试(KP-P5-02：unknown计入degraded/live探针注册，3项)✅已完成
 │   │   ├── test_scheduler_health_alert.py # ✨【回写#160】监控阈值告警闭环测试(KP-P5-03：巡检注册/非healthy告警/healthy不告警，3项)✅已完成
 │   │   ├── test_scheduler_escalation.py    # ✨【回写#161】告警升级检查测试(KP-P5-04：任务注册/被调用/可禁用，3项)✅已完成
+│   │   ├── test_incident_response.py          # ✨【回写#169】事故响应测试(KP-P5-11：CRITICAL暂停/缺省不暂停/WARNING不暂停/pause异常不崩/制度文档/配置on_unhealthy，6项)✅已完成
 │   │   ├── test_channel_assembly.py       # ✨【回写#162】告警通道装配测试(KP-P5-05：按channels装配/未启用不装配/未投递回退写日志，3项)✅已完成底/env优先/运行API.py bootstrap不崩，4项)✅已完成1/缺参422/成功取真实值/失败501/异常501，5项)✅已完成/关闭/CORS互斥/401/429逻辑）✅已完成
 
 │   │   ├── test_broker_platform_check.py # ✨【回写#25】券商适配器平台校验（审计疑点3：qmt/ptrade非Windows拦截、paper/sim放行、大小写不敏感）✅已完成
@@ -1001,7 +1003,7 @@ Pythonwdhmm/
 
     │   ├── portfolio.py              # 实时持仓、市值、可用冻结资金；✨【回写#141】账实对账 ReconciliationDiff + reconcile_vs_broker（KP-P4-01：本地 vs 券商只读 diff，现金容差0.01+持仓数量差）+ sync_from_broker 改先 diff 后重建，超阈值 critical 告警+__reconciliation_diff__ 回调，禁静默 clear 覆盖；✨【回写#149】增 diff_vs_broker 只读差异入口（KP-P3-08 风控基准券商权威账本）
 
-    │   ├── scheduler.py              # 定时任务、巡检、日报；✨【回写#141】attach_engine 增 enable_reconcile/reconcile_cron 盘后账实对账 cron（KP-P4-01：只对账不重建，超阈值 critical 告警）；✨【回写#160】巡检健康告警闭环（KP-P5-03：run_all 非 healthy → alert_mgr.alert）；✨【回写#161】告警升级检查周期任务（KP-P5-04：check_escalations 接入调用方）
+    │   ├── scheduler.py              # 定时任务、巡检、日报；✨【回写#169】健康巡检 CRITICAL 可执行处置（KP-P5-11：pause_on_critical 自动暂停开仓/降级）；✨【回写#141】attach_engine 增 enable_reconcile/reconcile_cron 盘后账实对账 cron（KP-P4-01：只对账不重建，超阈值 critical 告警）；✨【回写#160】巡检健康告警闭环（KP-P5-03：run_all 非 healthy → alert_mgr.alert）；✨【回写#161】告警升级检查周期任务（KP-P5-04：check_escalations 接入调用方）
 
     │   │                             # 【回写#135】attach_engine 注册日终 T+1 日切结算 cron（enable_t1_settle 默认 True，15:30 调 broker.settle_t1_all()/settle_t1()）
 
@@ -2983,6 +2985,17 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：增量缓存复用受配置签名+格式版本约束，参数/费用/区间变更或格式升版不会静默复用旧结果。
 - 验证结果：py_compile 通过；新增 tests/unit/test_incremental_config_signature.py 8 项全绿（签名对 params/commission/initial_capital 敏感/同配置稳定/缓存匹配复用/配置变更强制重算/格式版本不匹配强制重算/run 写签名）；回归 37 passed 无回归；ruff 干净。
 - 纪律遵守：仅改蓝图已标注文件（backtest/incremental_backtest.py）+ tests/unit 新增 test_incremental_config_signature.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+169. ✨【回写记录·2026-10-04·T-36 KP-P5-11 事故响应制度】
+
+【发现】无事故分级/通报升级/无责复盘制度文档，演练与复盘无留痕台账；live_config.yaml scheduler.tasks 巡检 action=health_check 空壳（审计 :3355-3357），非健康仅巡检不处置（不暂停开仓/不降级）。
+- 修复：
+  a. **制度文档**：新建 docs/实盘事故响应与复盘制度.md——P0~P3 事故分级、MTTD/MTTR 目标、通报与升级时限、可执行处置动作（告警+暂停开仓/降级）、无责复盘要求、演练与复盘台账（初始空，权威留痕记录）。
+  b. **可执行处置接线**：scheduler.attach_engine 增 pause_on_critical 参数（默认 False）；_patrol_job 非健康 CRITICAL 且 pause_on_critical 时自动 engine.pause()（暂停开仓/降级）+ logger.error 留痕，pause 异常仅 warning 不中断巡检（人工介入兜底）。
+  c. **配置留痕**：live_config.yaml 巡检任务 action 增 on_unhealthy=[alert, pause_trading]（真实配置不入库，本地生效），与制度文档一致。
+- 防未来：事故有分级/时限/处置/复盘闭环，健康巡检 CRITICAL 可自动暂停开仓，杜绝『告警后无人处置』『事故无留痕』。
+- 验证结果：py_compile 通过；新增 tests/unit/test_incident_response.py 6 项全绿（CRITICAL+pause_on_critical 暂停/缺省不暂停/WARNING 不暂停/pause 异常不崩/制度文档要素/配置 on_unhealthy 声明）；回归 12 passed 无回归；ruff 干净；live_config.yaml YAML 校验通过。
+- 纪律遵守：新建 docs/实盘事故响应与复盘制度.md（本回写同步登记 docs 树）+ 改蓝图已标注文件（live/scheduler.py）+ 本地真实配置 live_config.yaml（不入库）+ tests/unit 新增 test_incident_response.py；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】

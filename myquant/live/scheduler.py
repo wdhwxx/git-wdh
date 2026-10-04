@@ -1569,6 +1569,7 @@ def attach_engine(
     resend_pending_interval: float = 60.0,
     enable_escalation: bool = True,
     escalation_interval: float = 300.0,
+    pause_on_critical: bool = False,
 ) -> Dict[str, str]:
     """
     将实盘引擎一键挂载到调度器：自动注册巡检任务 + 收盘日报任务 + 断线补单对账任务。
@@ -1658,6 +1659,15 @@ def attach_engine(
                         details=summary,
                         deduplication_key=f"health:{summary.get('overall_status')}",
                     )
+                    # KP-P5-11: 非健康可执行处置——CRITICAL 且 pause_on_critical 时暂停开仓/降级
+                    if level == SeverityLevel.CRITICAL and pause_on_critical and engine is not None:
+                        try:
+                            engine.pause()
+                            logger.error(
+                                "[attach] 健康检查 CRITICAL：已暂停引擎（KP-P5-11 事故处置：暂停开仓/降级）"
+                            )
+                        except Exception as pe:  # noqa: BLE001
+                            logger.warning(f"[attach] 暂停引擎失败（人工介入）: {pe}")
             except Exception as e:
                 logger.warning(f"[attach] 健康告警闭环异常: {e}")
 
