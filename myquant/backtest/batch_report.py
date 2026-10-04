@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime
@@ -28,7 +27,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from myquant.backtest.pdf_report import _ReportPdf, PdfReportGenerator
+from myquant.backtest.pdf_report import PdfReportGenerator, _ReportPdf
 from myquant.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -142,7 +141,7 @@ class BatchSummaryReportGenerator:
             ts: 时间戳字符串；None 时按当前时间生成。
             data_coverage: 数据口径声明 dict（F-04：退市股覆盖/池构建口径/
                 偏差折价系数，来自 survivorship_bias.audit_data_coverage）；
-                None 时报告不渲染声明节（默认零变化）。
+                None 时自动调 audit_data_coverage 强制渲染声明节（KP-P2-07）。
 
         Returns:
             {"html": HTML 路径, "pdf": PDF 路径}。
@@ -155,6 +154,15 @@ class BatchSummaryReportGenerator:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         ts = ts or datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # KP-P2-07：强制渲染数据口径声明节——None 时自动数据覆盖审计（不再默认零变化）
+        if data_coverage is None:
+            from myquant.backtest.survivorship_bias import audit_data_coverage
+
+            try:
+                data_coverage = audit_data_coverage().to_dict()
+            except Exception as exc:
+                logger.warning("数据口径声明自动审计失败（声明节跳过）: %s", exc)
 
         html_path = self.generate_html(
             rows, meta, output_dir / f"批量回测汇总_{ts}.html",

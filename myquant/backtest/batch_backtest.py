@@ -699,6 +699,7 @@ class BatchBacktester:
                 "status": "error", "error": "结果缓存缺失",
             })
 
+        data_coverage = self._build_data_coverage()
         return BatchBacktestResult(
             plan=plan,
             per_symbol=per_symbol,
@@ -706,7 +707,33 @@ class BatchBacktester:
             degradation_events=degradation_events,
             memory_level=level.value,
             batch_count=len(batches),
+            data_coverage=data_coverage,
         )
+
+    def _build_data_coverage(self) -> Optional[Dict[str, Any]]:
+        """KP-P2-07：批量回测收尾注入数据覆盖审计（幸存者偏差披露）。
+
+        调 audit_data_coverage + estimate_survivorship_discount，写入
+        result.data_coverage（报告强制渲染声明节依据）；DB 缺失/折价样本不足
+        时降级（audit 声明仍落盘，discount=None），绝不阻断回测结果。
+        """
+        from myquant.backtest.survivorship_bias import (
+            audit_data_coverage,
+            estimate_survivorship_discount,
+        )
+
+        try:
+            audit = audit_data_coverage()
+            dc: Dict[str, Any] = audit.to_dict()
+            try:
+                dc.update(estimate_survivorship_discount())
+            except ValueError as exc:
+                dc["discount"] = None
+                dc["discount_error"] = str(exc)
+            return dc
+        except Exception as exc:
+            logger.warning("幸存者偏差数据覆盖审计失败（降级不阻断）: %s", exc)
+            return None
 
 
 # ── 聚合结果 ─────────────────────────────────────────────────────────
@@ -729,6 +756,7 @@ class BatchBacktestResult:
     degradation_events: List[Dict[str, Any]]
     memory_level: str
     batch_count: int
+    data_coverage: Optional[Dict[str, Any]] = None  # KP-P2-07：幸存者偏差数据覆盖审计
 
     @property
     def recomputed_count(self) -> int:

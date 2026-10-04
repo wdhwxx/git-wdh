@@ -535,6 +535,7 @@ Pythonwdhmm/
 │   │   ├── test_factor_validator.py # ✨【回写#89】F-02 因子有效性校验测试（RankIC/PearsonIC双口径、ICIR/t/胜率手算对拍、衰减曲线1/5/10/20、5层分层收益+换手、active/observe/eliminated三态、IC加权方向校正+下限约束+归一化、经济逻辑缺省拒绝、FactorProfile序列化往返、策略IC加权集成+默认零变化+extra因子缺逻辑拒绝，22项）✅已完成
 │   │   ├── test_factor_preprocessor.py # ✨【回写#90】F-03 因子预处理测试（对称/偏态分布判定、MAD截断、分位数截断、自适应方法选择、中性化后市值相关≈0、行业哑变量后行业均值差≈0、暴露t值、残差诊断告警、报告序列化往返、策略默认none零变化+neutralize集成+非法mode报错，25项）✅已完成
 │   │   ├── test_survivorship_bias.py # ✨【回写#91】F-04 幸存者偏差测试（审计字段齐全、折价数值合成数据对拍、逐期池as_of过滤、报告口径声明注入零变化、非法参数防御，15项）✅已完成
+│   │   ├── test_data_coverage_mount.py # ✨【回写#176】幸存者偏差接入测试(KP-P2-07：audit+折价合并/折价样本不足降级/审计失败None/BatchBacktestResult字段/run注入/full_report强制渲染，7项)✅已完成
 │   │   ├── test_exogenous_pool.py      # ✨【回写#175】参数扫描外生池测试(KP-P2-06：分层抽样/窗口外剔除/meta selection_bias_note/空目录/load_active_symbols兼容/run meta pool，6项)✅已完成
 │   │   ├── test_model_monitor.py     # ✨【回写#92】F-05 模型失效监控测试（低IC连续3月检出/回升不失效/回撤超限判定/HealthReport序列化/from_config非法防御/降级切换/无候选清空/retired加载拒绝/win gate激活与拒绝/缺指标跳过/默认零变化回归/防未来序列，27项）✅已完成
 │   │   ├── test_ml_e2e.py            # ✨【回写#93】F-06 ML 端到端与负向测试（特征一致性全链路/时序切分日历化缓冲负向/标签无泄露+未来突变/registry读写+checksum篡改/推理兜底/未来函数负向：样本内预测strict拦截，23项）✅已完成
@@ -3069,6 +3070,16 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：池构建只用 START_DATE 前窗口已可得行情（as_of 口径），不引用窗口后/回测期数据；processed=清洗后存续池未含退市/长期停牌，幸存者偏差显式声明（selection_bias_note 指向 KP-P2-07）。
 - 验证结果：py_compile 通过；新增 tests/unit/test_exogenous_pool.py 6 项全绿（分层抽样含高流动性剔除窗口外标的/meta selection_bias_note 关键词/空目录空池/窗口无历史跳过/load_active_symbols 外生兼容/run meta 记录 pool）；ruff 干净。
 - 纪律遵守：改蓝图已标注文件（backtest/kunpeng_param_scanner.py）+ tests/unit 新增 test_exogenous_pool.py（同步更新目录树）；无蓝图外文件；严格防未来。
+
+176. ✨【回写记录·2026-10-04·T-43 KP-P2-07 幸存者偏差工具无接入（残留已消除）】
+
+【发现】survivorship_bias.py（audit_data_coverage/estimate_survivorship_discount/build_point_in_time_pool）调用方只有 tests（F-04 验收项'回测报告声明口径+偏差折价'从未进入真实产物）；batch_report.py:134,163-165 data_coverage=None 默认且生产不传 → 声明节从不渲染；引擎结果无 data_coverage 落盘，收益偏乐观对外不可见。
+- 修复：
+  a. **引擎结果收尾注入**：batch_backtest.py run() 收尾新增 _build_data_coverage()——调 audit_data_coverage（DB/processed 覆盖审计）+ estimate_survivorship_discount（偏差折价），合并写入 BatchBacktestResult.data_coverage（新增字段）；DB 缺失/折价样本不足时降级（audit 声明仍落盘、discount=None + discount_error），绝不阻断回测。
+  b. **报告强制渲染声明节**：batch_report.py generate_full_report 的 data_coverage 为 None 时自动调 audit_data_coverage().to_dict() 强制渲染「数据口径声明」节（不再默认零变化），docstring 同步。
+- 防未来：audit/折价均基于 ref_date/区间注入可测；审计失败降级不阻断回测结果，声明节缺失有日志可追溯。
+- 验证结果：py_compile batch_backtest/batch_report 通过；新增 tests/unit/test_data_coverage_mount.py 7 项全绿（audit+折价合并/折价样本不足降级/审计失败返回 None/BatchBacktestResult 默认 None 与传入生效/run 注入源码断言/full_report 强制渲染源码断言）；回归 19 passed 无回归；ruff 干净。
+- 纪律遵守：改蓝图已标注文件（backtest/batch_backtest.py、backtest/batch_report.py）+ tests/unit 新增 test_data_coverage_mount.py（同步更新目录树）；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】
