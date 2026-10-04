@@ -19,7 +19,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-
 # ═══════════════════════════════════════════════
 #  BacktestConfig - 回测配置
 # ═══════════════════════════════════════════════
@@ -178,8 +177,8 @@ class PerformanceMetrics:
     # 收益指标
     total_return: float = 0.0
     annualized_return: float = 0.0
-    benchmark_return: float = 0.0
-    excess_return: float = 0.0
+    benchmark_return: Optional[float] = None  # KP-P2-04：无基准时 None
+    excess_return: Optional[float] = None  # KP-P2-04：无基准时 None
 
     # 风险指标
     annualized_volatility: float = 0.0
@@ -210,8 +209,8 @@ class PerformanceMetrics:
     turnover: float = 0.0
 
     # 其他
-    alpha: float = 0.0
-    beta: float = 0.0
+    alpha: Optional[float] = None  # KP-P2-04：无基准时 None
+    beta: Optional[float] = None  # KP-P2-04：无基准时 None
     tracking_error: float = 0.0
     var_95: float = 0.0
     cvar_95: float = 0.0
@@ -229,8 +228,8 @@ class PerformanceMetrics:
             "收益指标": {
                 "总收益率": f"{self.total_return:.4%}",
                 "年化收益率": f"{self.annualized_return:.4%}",
-                "基准收益率": f"{self.benchmark_return:.4%}",
-                "超额收益": f"{self.excess_return:.4%}",
+                "基准收益率": "-" if self.benchmark_return is None else f"{self.benchmark_return:.4%}",
+                "超额收益": "-" if self.excess_return is None else f"{self.excess_return:.4%}",
             },
             "风险指标": {
                 "年化波动率": f"{self.annualized_volatility:.4%}",
@@ -261,8 +260,8 @@ class PerformanceMetrics:
                 "换手率": f"{self.turnover:.2f}",
             },
             "希腊值": {
-                "Alpha": round(self.alpha, 6),
-                "Beta": round(self.beta, 4),
+                "Alpha": "-" if self.alpha is None else round(self.alpha, 6),
+                "Beta": "-" if self.beta is None else round(self.beta, 4),
                 "跟踪误差": f"{self.tracking_error:.4%}",
             },
             "分布": {
@@ -294,8 +293,8 @@ class PerformanceMetrics:
             f"║ 胜率:         {self.win_rate:>12.2%}              ║",
             f"║ 盈亏比:       {self.profit_loss_ratio:>12.4f}              ║",
             f"║ 总交易次数:   {self.total_trades:>12d}              ║",
-            f"║ Alpha:        {self.alpha:>12.6f}              ║",
-            f"║ Beta:         {self.beta:>12.4f}              ║",
+            f"║ Alpha:        {('-' if self.alpha is None else f'{self.alpha:>12.6f}'):>12}              ║",
+            f"║ Beta:         {('-' if self.beta is None else f'{self.beta:>12.4f}'):>12}              ║",
             "╚══════════════════════════════════════════════╝",
         ]
         return "\n".join(lines)

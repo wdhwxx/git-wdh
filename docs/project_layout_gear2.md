@@ -326,7 +326,7 @@ Pythonwdhmm/
 
 ├── config/                           # 结构化配置文件目录（模板文件入库，真实yaml不提交）
 
-│   ├── backtest_config.example.yaml  # 回测参数模板：初始资金、手续费、滑点、时间范围等；✨【V5】新增engine.mode（event/vectorized/mixed三模式选择）+ performance段（workers/chunk_size/memory_pool/预取开关），由BatchBacktest与run_批量回测.py读取
+│   ├── backtest_config.example.yaml  # 回测参数模板：初始资金、手续费、滑点、时间范围等；✨【V5】新增engine.mode（event/vectorized/mixed三模式选择）+ performance段（workers/chunk_size/memory_pool/预取开关），由BatchBacktest与run_批量回测.py读取；✨【回写#174】增 benchmark_required（KP-P2-04）
 
 │   ├── live_config.example.yaml     # 实盘参数模板：券商连接、风控阈值、订阅合约等；✨【回写#144】增 compliance 报备段（enabled+filing六字段，口径待律师确认）
 
@@ -474,6 +474,7 @@ Pythonwdhmm/
 │   │   ├── test_trade_boundary.py   # ✨【回写#25】交易模型边界回归（审计H3+H4：Order.fill超额成交拒绝、Position.apply_fill反转成本价重置）✅已完成
 
 │   │   ├── test_backtest.py          # 回测引擎事件循环、撮合、绩效计算（V5三模式改造后124项）✅已完成
+│   │   ├── test_benchmark_missing.py    # ✨【回写#174】基准缺失测试(KP-P2-04：PerformanceMetrics默认None/无基准metrics置None/performance_report无基准None/有基准数值/engine标记与extra落盘/yaml benchmark_required，6项)✅已完成
 
 │   │   ├── test_database.py          # 数据库连接、查询、迁移脚本（68项）✅已完成
 
@@ -855,11 +856,11 @@ Pythonwdhmm/
 
     │   ├── __init__.py
 
-    │   ├── engine.py                 # ✨【V5·P1】回测引擎升级为三模式调度器：BacktestScheduler（按config engine.mode切换event/vectorized/mixed，统一数据加载+防未来函数校验+结果封装）+ run_backtest()便捷函数；原Engine保留为event真值基准（时间序列事件循环+内置LookaheadGuard：on_market_event记录成交铁律3、_execute_signal记录信号铁律4、on_stop assert_pass()；_bar_date_str/_order_signal_dates映射）；✨【回写#140】context 注入 lookahead_guard 到 extra（KP-P2-08：策略守卫钩子可达 guard）+ record_signal 的 data_end 改用策略 get_signal_data_end 真实上报（去 self-proving 常量）；✨【回写#148】装配实盘同源 RiskManager（KP-P3-07：_execute_signal 提交前 check_order 未通过单记录 skip）；✨【回写#151】SimBroker 构造从 config 传 price_limit_pct/enforce_limit（KP-P2-02 event 路径涨跌停）
+    │   ├── engine.py                 # ✨【V5·P1】回测引擎升级为三模式调度器：BacktestScheduler（按config engine.mode切换event/vectorized/mixed，统一数据加载+防未来函数校验+结果封装）+ run_backtest()便捷函数；原Engine保留为event真值基准（时间序列事件循环+内置LookaheadGuard：on_market_event记录成交铁律3、_execute_signal记录信号铁律4、on_stop assert_pass()；_bar_date_str/_order_signal_dates映射）；✨【回写#140】context 注入 lookahead_guard 到 extra（KP-P2-08：策略守卫钩子可达 guard）+ record_signal 的 data_end 改用策略 get_signal_data_end 真实上报（去 self-proving 常量）；✨【回写#148】装配实盘同源 RiskManager（KP-P3-07：_execute_signal 提交前 check_order 未通过单记录 skip）；✨【回写#151】SimBroker 构造从 config 传 price_limit_pct/enforce_limit（KP-P2-02 event 路径涨跌停）；✨【回写#174】空基准显式标记 benchmark_missing + result.extra 落盘（KP-P2-04）
 
     │   ├── data_loader.py            # ✨【回写#105】已迁移为兼容薄壳（re-export）：DataProviderBase + HistoricalDataProvider + require_ohlcv + EN_TO_CN_COLUMN_MAP 真实实现已于 2026-10-03 下沉至 myquant/data_access/provider.py，本文件仅做 from myquant.data_access.provider import ... 向后兼容，18 处历史调用方（run_*.py/scripts/gui/backtest 内部/tests）零改动；新代码应直接 from myquant.data_access.provider import；原注释「从processed加载，严格end_date过滤防未来」逻辑全部在 provider.py；✨【回写#72】EN_TO_CN_COLUMN_MAP 加 turnover→换手率；✨【回写#83】S1 派生量复权现算 _recompute_price_derived_metrics
 
-    │   ├── metrics.py                # 绩效指标：夏普、最大回撤、胜率、Calmar、Sortino
+    │   ├── metrics.py                # 绩效指标：夏普、最大回撤、胜率、Calmar、Sortino；✨【回写#174】无基准时 alpha/beta/excess/benchmark_return 显式置 None（KP-P2-04）
 
     │   ├── recorder.py               # 交易记录器：成交明细、持仓变动、资金曲线
 
@@ -1117,7 +1118,7 @@ Pythonwdhmm/
 
         ├── file_utils.py             # 路径读写压缩；✨【回写#165】backup_files 写 MANIFEST.sha256 + verify_backup/restore_backup（KP-P5-06）；✨【回写#170】find_project_root 默认 marker 改 pyproject.toml（KP-M03）
 
-        ├── math_utils.py             # 统计、数值格式化，用于异常值检测（3σ、四分位）
+        ├── math_utils.py             # 统计、数值格式化，用于异常值检测（3σ、四分位）；✨【回写#174】performance_report 无基准显式置 beta/alpha=None（KP-P2-04）
 
         ├── data_fingerprint.py       # ✨【V5·P0】数据指纹：按标的+日期范围+版本生成哈希级指纹（数据差异即指纹变化），仓库cache/fingerprint，批量回测同指纹跳过复用
 
@@ -3044,6 +3045,18 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：可交易性判定仅用截至 as_of 的行情（成交量/上市天数），不引用未来数据；ST 判断无名称列时保守放行避免误杀。
 - 验证结果：py_compile 通过；新增 tests/unit/test_pool_tradability_filter.py 6 项全绿（ST剔除/次新剔除/volume=0剔除/无名称列不误杀/build 流程含过滤/RSRS 默认1/3可参数化）；回归 test_strategies 118 passed 无回归；ruff 干净（顺手清理 ma_strategy 既有未用导入）。
 - 纪律遵守：改蓝图已标注文件（strategies/base.py、strategies/ma_strategy.py）+ tests/unit 新增 test_pool_tradability_filter.py（同步更新目录树）；无蓝图外文件；严格防未来。
+
+174. ✨【回写记录·2026-10-04·T-41 KP-P2-04 基准缺失（残留已消除）】
+
+【发现】engine.py 基准配置但 data/provider 均未取到仅静默（_benchmark_data=None 无告警）；metrics 无基准时 alpha/beta/excess/benchmark_return 保持默认 0.0（伪造基准可比）；math_utils.performance_report 无基准缺 beta/alpha 键。
+- 修复：
+  a. **空基准显式标记**：backtest/engine.py __init__ 增 _benchmark_missing；基准配置但加载为空 → logger.error（基准不可比）+ 标记；结果 on_stop 落 result.extra['benchmark_missing']=True（可追溯）。
+  b. **metrics 显式 None**：metrics.py calculate 无 benchmark_curve → 显式置 metrics.benchmark_return/excess_return/alpha/beta = None（不再伪造 0.0）；math_utils.performance_report 无基准 → report beta/alpha 显式 None。
+  c. **模型字段与格式化防护**：models/backtest.py PerformanceMetrics benchmark_return/excess_return/alpha/beta 默认改 Optional[float]=None；to_dict/summary 对 None 显示 '-'（不崩、不伪装）。
+  d. **配置声明**：config/backtest_config.example.yaml 增 benchmark_required: true（缺失即标记）。
+- 防未来：缺基准不再静默/不伪造，回测基准不可比显式可追溯（extra/日志/配置三重声明）。
+- 验证结果：py_compile 通过；新增 tests/unit/test_benchmark_missing.py 6 项全绿（PerformanceMetrics 默认 None/无基准 metrics 置 None/performance_report 无基准 None/有基准数值/engine 标记与 extra 落盘/yaml benchmark_required）；回归 12 passed 无回归；ruff 干净（顺手清理 engine/metrics 既有未用变量、metrics/models/math_utils 既有导入与 demo f-string）。
+- 纪律遵守：改蓝图已标注文件（backtest/engine.py、backtest/metrics.py、models/backtest.py、utils/math_utils.py、config/backtest_config.example.yaml）+ tests/unit 新增 test_benchmark_missing.py（同步更新目录树）；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】

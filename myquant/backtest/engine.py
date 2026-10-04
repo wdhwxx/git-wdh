@@ -141,6 +141,8 @@ class BacktestEngine(BaseEngine):
 
         # 基准数据
         self._benchmark_data: Optional[pd.DataFrame] = None
+        # KP-P2-04：基准配置了但加载为空 → 标记缺失（不静默，alpha/beta/excess 置 None）
+        self._benchmark_missing: bool = False
 
         # #S3修复：防未来函数显式校验器（引擎内置能力，不再仅依赖入口脚本）
         self._enable_lookahead_guard = enable_lookahead_guard
@@ -298,6 +300,13 @@ class BacktestEngine(BaseEngine):
                         f"基准数据已加载: {self.config.benchmark}, "
                         f"{len(self._benchmark_data)} 根K线"
                     )
+        # KP-P2-04：基准配置了但 data/provider 均未取到 → 显式告警 + 标记缺失（不再静默）
+        if self.config.benchmark and self._benchmark_data is None:
+            self._benchmark_missing = True
+            logger.error(
+                f"基准 {self.config.benchmark} 数据缺失（data/provider 均未取到），"
+                f"alpha/beta/excess 将置 None，回测基准不可比（benchmark_missing=True）"
+            )
 
         self._initialized = True
         logger.info(
@@ -398,7 +407,6 @@ class BacktestEngine(BaseEngine):
         if not isinstance(bar, Bar):
             return
 
-        symbol = bar.symbol
 
         # ── 步骤0：KP-P3-07 风控日切状态（当日首bar快照日初资产/重置下单计数）──
         trade_date = self._bar_date_str(bar)
@@ -702,6 +710,9 @@ class BacktestEngine(BaseEngine):
             # 防御性：on_stop() 被异常调用且 result 尚未创建时
             self.result = BacktestResult(config=self.config)
         self.result.metrics = metrics
+        # KP-P2-04：基准缺失标记落盘（result.extra 可追溯）
+        if getattr(self, '_benchmark_missing', False) and hasattr(self.result, 'extra'):
+            self.result.extra['benchmark_missing'] = True
         self.result.equity_curve = self.recorder.get_equity_curve() if self.recorder else []
         self.result.trades = self.recorder.get_trades() if self.recorder else []
         # #S3修复：回测结束时运行防未来函数统一校验（引擎内置能力，不再仅依赖入口脚本）

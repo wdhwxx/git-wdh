@@ -27,14 +27,16 @@ __version__ = "0.1.0"
 __author__ = "Pythonwdhmm"
 
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import numpy as np
 import pandas as pd
 
 from myquant.core.logger import get_logger
 from myquant.models.backtest import (
-    EquityPoint, PerformanceMetrics, TradeRecord,
+    EquityPoint,
+    PerformanceMetrics,
+    TradeRecord,
 )
 
 logger = get_logger(__name__)
@@ -122,6 +124,12 @@ class MetricsCalculator:
         if benchmark_curve:
             bench_df = self._equity_to_df(benchmark_curve)
             self._calc_benchmark_metrics(metrics, returns, bench_df)
+        else:
+            # KP-P2-04：无基准曲线 → 显式置 None，不伪造 0.0 基准指标
+            metrics.benchmark_return = None
+            metrics.excess_return = None
+            metrics.alpha = None
+            metrics.beta = None
 
         # 7. 收益分布（VaR/CVaR/偏度/峰度）
         self._calc_distribution_metrics(metrics, returns)
@@ -388,7 +396,6 @@ class MetricsCalculator:
 
         # 第1级：优先使用数据点自带 date；空则从时间戳推断（第2级）
         dates = []
-        all_from_ts = True  # 是否全部依赖时间戳推断（决定是否用顺序索引兜底）
         any_valid = False
         for ep in equity_curve:
             d = str(ep.date or "").strip()

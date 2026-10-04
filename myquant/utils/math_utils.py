@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import math
 import statistics
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import List, Optional, Sequence, Tuple
 
 # ─────────────────────────────────────────────
 # 常量
@@ -458,6 +458,10 @@ def performance_report(
     if benchmark_returns:
         report["beta"] = round(calc_beta(clean, benchmark_returns), 4)
         report["alpha"] = round(calc_alpha(clean, benchmark_returns), 6)
+    else:
+        # KP-P2-04：无基准 → 显式置 None，不伪造 alpha/beta
+        report["beta"] = None
+        report["alpha"] = None
 
     return report
 
@@ -586,14 +590,14 @@ if __name__ == "__main__":
     daily_returns = [random.gauss(0.0005, 0.02) for _ in range(252)]
 
     # 1) 基础统计
-    print(f"\n[1] 基础统计:")
+    print("\n[1] 基础统计:")
     print(f"    均值:   {mean(daily_returns):.6f}")
     print(f"    标准差: {std(daily_returns):.6f}")
     print(f"    偏度:   {skewness(daily_returns):.4f}")
     print(f"    峰度:   {kurtosis(daily_returns):.4f}")
 
     # 2) 绩效指标
-    print(f"\n[2] 绩效指标:")
+    print("\n[2] 绩效指标:")
     print(f"    累计收益:   {fmt_percent(cumulative_return(daily_returns))}")
     print(f"    年化收益:   {fmt_percent(calc_annualized_return(daily_returns))}")
     print(f"    年化波动率: {fmt_percent(calc_volatility(daily_returns))}")
@@ -613,7 +617,7 @@ if __name__ == "__main__":
     print(f"    最长回撤持续: {calc_max_drawdown_duration(equity)} 天")
 
     # 4) 格式化
-    print(f"\n[4] 格式化:")
+    print("\n[4] 格式化:")
     print(f"    {fmt_number(1234567.891)}")
     print(f"    {fmt_percent(0.1523)}")
     print(f"    {fmt_price(1800.5)}")
@@ -621,7 +625,7 @@ if __name__ == "__main__":
     print(f"    {fmt_duration(8130)}")
 
     # 5) 完整报告
-    print(f"\n[5] 完整绩效报告:")
+    print("\n[5] 完整绩效报告:")
     report = performance_report(daily_returns)
     for k, v in report.items():
         print(f"    {k:>25s}: {v}")

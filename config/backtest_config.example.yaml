@@ -19,6 +19,7 @@ backtest:
   end_date: "2025-12-31"            # 回测结束日期
   initial_capital: 1000000          # 初始资金（元），默认100万
   benchmark: "000300.SH"            # 基准指数（沪深300，带交易所后缀）
+  benchmark_required: true            # KP-P2-04：基准缺失时回测基准指标置 None 并告警标记 benchmark_missing
   time_frame: "1d"                   # K线周期：1d日线 / 1h / 30m / 5m / 1m（为实盘多周期预留）
 
 # ========== 引擎模式（三模式调度，P1）==========
