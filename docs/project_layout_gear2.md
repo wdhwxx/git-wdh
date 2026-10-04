@@ -585,6 +585,7 @@ Pythonwdhmm/
 │   │   ├── test_live_warmup.py       # ✨【回写#55】实盘本地parquet历史预热+context.data中文列测试（_load_local_history读取/升序限count/缺失缺列降级/_sync_context_data中文列/_warmup_history优先本地/降级akshare，7项）✅已完成
 │   │   ├── test_live_bar_dedup.py    # ✨【回写#139】日线bar去重测试（KP-P3-02：bar_date_to_epoch往返/解析失败0.0/make_bar时间戳确定性且还原日期/引擎同根bar二次推送丢弃且不达撮合/不同日期正常/不同标的同日不误删，7项）✅已完成
     │   ├── test_sim_partial_fill_cap.py # ✨【回写#179】sim_broker 参与率限成交测试（KP-P2-03：默认全量不变/参与率限到 volume*rate/不超限/零成交保留订单/vectorized 负现金计数源码断言，5项）✅已完成
+    │   ├── test_adjust_strict.py      # ✨【回写#180】复权因子缺失不再静默降级测试（KP-P2-09：strict raise/降级 attrs raw/生效 attrs hfq/扫描器读 yaml adjust/结果 meta 落盘源码断言，5项）✅已完成
 
 │   │   ├── test_signal_idempotency.py # ✨【回写#43】幂等去重测试（Signal确定性ID/to_order映射/引擎去重/分钟线粒度/start重置/QMT端按订单ID去重/统计双计修复验证，19项）✅已完成
 │   │   ├── test_guard_mounting.py    # ✨【回写#140】防未来铁律1/2/4挂载测试（KP-P2-08：indicators_recorded>0/钩子因果口径/T+1指标桩抛错/T+1信号桩引擎标记失败/止损UPDATE早于CHECK抛错/数据访问未来抛错/无guard注入退化为无操作，10项）✅已完成
@@ -902,7 +903,7 @@ Pythonwdhmm/
 
     │   └── candidate_pool.py         # ✨【2026-09-09】双策略交叉验证候选池业务模块（第3批自 tests/ 段错位更正归位）：读批量回测results.json（completed）→各自硬过滤→交集双强→综合夏普降序→TopN标记→CSV导出（utf-8-sig）；供scripts/候选池交叉验证.py调用；✨【2026-09-12】新增CSV_HEADERS_ZH中文表头映射（导出时仅替换表头，内部列名保持英文）
 
-    │   ├── kunpeng_param_scanner.py # ✨【P3-6】鲲鹏策略参数网格扫描器（自 scripts/kunpeng_param_scan.py 下沉）：KunpengParamScanner类（BASE_PARAMS/SIGNAL_GRID/EXIT_GRID等常量 + load_active_symbols/load_data/run_one/expand_grid/run(stage,top_n,min_trades)），路径可注入默认 project_root=parents[2]；真实数据 vectorized 两阶段扫描、聚合口径与排序与原脚本一致；供 scripts/kunpeng_param_scan.py 薄入口调用（已重写）；✨【回写#175】build_exogenous_pool 外生池（START_DATE前60日成交额分层，消除内生挑选），run meta 记录 selection_bias_note（KP-P2-06）
+    │   ├── kunpeng_param_scanner.py # ✨【P3-6】鲲鹏策略参数网格扫描器（自 scripts/kunpeng_param_scan.py 下沉）：KunpengParamScanner类（BASE_PARAMS/SIGNAL_GRID/EXIT_GRID等常量 + load_active_symbols/load_data/run_one/expand_grid/run(stage,top_n,min_trades)），路径可注入默认 project_root=parents[2]；真实数据 vectorized 两阶段扫描、聚合口径与排序与原脚本一致；供 scripts/kunpeng_param_scan.py 薄入口调用（已重写）；✨【回写#175】build_exogenous_pool 外生池（START_DATE前60日成交额分层，消除内生挑选），run meta 记录 selection_bias_note（KP-P2-06）；✨【回写#180】load_data 复权读 yaml data.adjust，结果 meta 落盘 adjust_effective（KP-P2-09）
 
     │   ├── config_builder.py         # ✨【回写#32】回测配置构建模块（L4修复：load_stock_pool_from_csv/apply_exclude_prefixes/build_backtest_config 自 run_回测入口.py 下沉，供入口与 scripts/生成回测报告.py 共用，消除脚本反向导入）；✨【回写#178】three_factor 未接线显式 raise（KP-P1-08）
 
@@ -3113,6 +3114,16 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：成交量参与率仅基于当前 bar 成交量；资金约束仅基于已实现现金，无未来引用。
 - 验证结果：py_compile sim_broker/vectorized_engine 通过；新增 tests/unit/test_sim_partial_fill_cap.py 5 项全绿（默认全量不变/参与率限到 volume*rate/不超限/零成交保留订单/vectorized 计数源码断言）；ruff 干净（顺手清理既有 I001 import 排序）。
 - 纪律遵守：改蓝图已标注文件（execution/sim_broker.py、backtest/vectorized_engine.py）+ tests/unit 新增 test_sim_partial_fill_cap.py（同步更新目录树）；无蓝图外文件；严格防未来。
+
+180. ✨【回写记录·2026-10-04·T-47 KP-P2-09 复权因子缺失不再静默降级 + 扫描器读 yaml data.adjust】
+
+【发现】provider.py:532-535 _apply_factor_adjust 因子缺失静默降级 raw（无 adjust_strict 选项）；扫描器 kunpeng_param_scanner.py:203,210 硬编码 adjust='raw'，与 config/backtest_kunpeng.yaml data.adjust=hfq 脱节；实际生效复权未落盘。
+- 修复：
+  a. provider.py get_bars/_apply_factor_adjust 增 adjust_strict（因子缺失且 strict 时 raise ValueError，不静默降级）；df.attrs['adjust_effective'] 记录实际生效复权（成功=requested，因子缺失降级='raw'）。
+  b. 扫描器 load_data 改读 config/backtest_kunpeng.yaml data.adjust（_read_data_adjust，非法/失败回退 raw 并告警）；run 结果 meta 落盘 adjust_effective。
+- 防未来：复权 qfq 最新因子仍按 end_date 截断（防未来函数不变）；strict 仅在因子缺失时拒绝降级，不引入未来数据。
+- 验证结果：py_compile provider/scanner 通过；新增 tests/unit/test_adjust_strict.py 5 项全绿（strict raise/降级 attrs raw/生效 attrs hfq/扫描器读 yaml adjust/结果 meta 落盘源码断言）；ruff 干净。
+- 纪律遵守：改蓝图已标注文件（data_access/provider.py、backtest/kunpeng_param_scanner.py）+ tests/unit 新增 test_adjust_strict.py（同步更新目录树）；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】

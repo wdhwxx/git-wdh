@@ -352,6 +352,7 @@ class HistoricalDataProvider(DataProviderBase):
         end_date: Optional[str] = None,
         period: str = "daily",
         adjust: Optional[str] = None,
+        adjust_strict: bool = False,
     ) -> pd.DataFrame:
         """
         从processed目录加载K线数据
@@ -468,9 +469,13 @@ class HistoricalDataProvider(DataProviderBase):
             df = df.drop(columns=internal_cols)
 
         # ★ 复权现算（方案B #82）：processed 只存 raw，hfq/qfq 按因子表内存变换
+        # KP-P2-09：adjust_strict 时因子缺失即 raise（不静默降级）；df.attrs 记实际生效复权
         requested_adjust = adjust or self._default_adjust
         if requested_adjust in ("hfq", "qfq") and not df.empty:
-            df = self._apply_factor_adjust(df, symbol, requested_adjust, end_date)
+            df = self._apply_factor_adjust(
+                df, symbol, requested_adjust, end_date, adjust_strict=adjust_strict
+            )
+        df.attrs.setdefault("adjust_effective", requested_adjust)
 
         if not df.empty:
             logger.info(
@@ -527,17 +532,26 @@ class HistoricalDataProvider(DataProviderBase):
         symbol: str,
         adjust: str,
         end_date: Optional[str],
+        adjust_strict: bool = False,
     ) -> pd.DataFrame:
         """按复权因子表现算 hfq/qfq 价（processed 只存 raw，消费端内存变换）。
 
         - hfq价 = raw价 × factor（事件日及之后生效）
         - qfq价 = hfq价 / 最新因子（最新因子按 end_date 截断，防未来函数）
-        - 标的无因子事件时降级返回 raw 并告警（不阻断回测）
+        - 标的无因子事件时降级返回 raw 并告警（不阻断回测）；KP-P2-09：adjust_strict 时 raise
         """
         factors = self._get_factor_lookup(symbol, as_of=end_date)
         if not factors:
+            if adjust_strict:
+                raise ValueError(
+                    f"{symbol} 无复权因子事件，adjust={adjust} 且 adjust_strict=True，拒绝静默降级 raw"
+                )
             logger.warning(f"{symbol} 无复权因子事件，adjust={adjust} 降级为不复权 raw")
+            df = df.copy()
+            df.attrs["adjust_effective"] = "raw"
             return df
+        df = df.copy()
+        df.attrs["adjust_effective"] = adjust
 
         factor_series = pd.Series(factors)  # index 为 str 日期
         factor_series.index = pd.to_datetime(factor_series.index)  # 转 Timestamp（避免 dict+index 错配致 NaN）
@@ -558,7 +572,9 @@ class HistoricalDataProvider(DataProviderBase):
         out = merged.drop(columns=["_factor"]).set_index(CN_INDEX_NAME)
         out.index.name = CN_INDEX_NAME
         out = out.sort_index()
-        return self._recompute_price_derived_metrics(out)
+        out = self._recompute_price_derived_metrics(out)
+        out.attrs["adjust_effective"] = adjust  # recompute 返回新 df，重设复权标识
+        return out
 
     def _recompute_price_derived_metrics(
         self,

@@ -80,6 +80,7 @@ class KunpengParamScanner:
         root = Path(project_root or Path(__file__).resolve().parents[2])
         self._project_root = root
         self._processed_dir = str(processed_dir or (root / "datasets" / "processed"))
+        self._active_adjust: str = "raw"  # KP-P2-09: 实际生效复权（读 yaml data.adjust）
         self._results_json = Path(
             results_json or (root / "results" / "batch_backtest" / "kunpeng" / "results.json")
         )
@@ -195,20 +196,42 @@ class KunpengParamScanner:
     # ── 阶段2：数据加载 ──
 
     def load_data(self, symbols: List[str]) -> Dict[str, Any]:
-        """加载真实行情（HistoricalDataProvider，raw 不复权原始层）。"""
+        """加载真实行情（HistoricalDataProvider，复权方式读 config/backtest_kunpeng.yaml data.adjust）。"""
         from myquant.backtest.data_loader import HistoricalDataProvider
 
+        adjust = self._read_data_adjust()
+        self._active_adjust = adjust  # KP-P2-09：实际生效复权，供结果 meta 落盘
         provider = HistoricalDataProvider(
             processed_dir=self._processed_dir,
-            default_adjust="raw",
+            default_adjust=adjust,
             data_format="parquet",
         )
         return provider.load_multiple(
             symbols,
             start_date=self.START_DATE,
             end_date=None,
-            adjust="raw",
+            adjust=adjust,
         )
+
+    def _read_data_adjust(self) -> str:
+        """读取 config/backtest_kunpeng.yaml 的 data.adjust（KP-P2-09：扫描器复权与配置一致）。
+
+        缺省 raw；读取失败/非法值回退 raw 并告警（不崩扫描）。
+        """
+        project_root = Path(__file__).resolve().parents[2]
+        yml = project_root / "config" / "backtest_kunpeng.yaml"
+        try:
+            import yaml
+            with open(yml, "r", encoding="utf-8") as f:
+                cfg = yaml.safe_load(f)
+            adj = str(((cfg or {}).get("data", {}) or {}).get("adjust", "raw"))
+            if adj not in ("raw", "hfq", "qfq"):
+                logger.warning(f"yaml data.adjust={adj!r} 非法，回退 raw")
+                return "raw"
+            return adj
+        except Exception as exc:
+            logger.warning(f"读取 backtest_kunpeng.yaml data.adjust 失败，回退 raw: {exc}")
+            return "raw"
 
     # ── 阶段3：单组合评估 ──
 
@@ -305,6 +328,7 @@ class KunpengParamScanner:
                 "end_date": None,
                 "n_symbols": len(data),
                 "pool": pool_meta,  # KP-P2-06 外生池构建依据 + selection_bias_note
+                "adjust_effective": self._active_adjust,  # KP-P2-09 实际生效复权
             },
             "stages": {},
         }
