@@ -866,7 +866,10 @@ class FeatureEngine:
         if full.empty:
             return True
         cols = [c for c in full.columns]
-        for i in range(min(max_rows, len(df))):
+        # P3-19：从预热结束后取样，避免早期全NaN的行被 continue 空过（空过会return True误判通过）
+        start = min(len(df), max(2, len(df) // 2))
+        checked = 0
+        for i in range(start, min(len(df), start + max_rows)):
             prefix = df.iloc[: i + 1]
             if len(prefix) < 3:
                 continue
@@ -882,7 +885,9 @@ class FeatureEngine:
                     return False
                 if not pd.isna(v_full) and abs(float(v_full) - float(v_pref)) > 1e-9:
                     return False
-        return True
+                checked += 1
+        # P3-19：若全程无任何有效（非全NaN）比较样本，不能放行
+        return checked > 0
 
 
 # ═══════════════════════════════════════════════════════════

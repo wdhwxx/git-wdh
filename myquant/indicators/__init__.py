@@ -367,7 +367,7 @@ from .factor_engine import (  # noqa: E402
 
 from .moving_average import EMA, MACD, SMA, WMA  # noqa: E402
 from .momentum import KDJ, MOM, ROC, RSI  # noqa: E402
-from .volatility import ATR, BollingerBands, Volatility  # noqa: E402
+from .volatility import ATR, BollingerBands, Volatility, ExtremeRegime  # noqa: E402
 from .rsrs import RSRS  # noqa: E402
 
 __all__ = [
@@ -394,7 +394,7 @@ __all__ = [
     # 动量类指标
     'ROC', 'MOM', 'RSI', 'KDJ',
     # 波动率类指标
-    'ATR', 'Volatility', 'BollingerBands',
+    'ATR', 'Volatility', 'BollingerBands', 'ExtremeRegime',
     # RSRS核心指标
     'RSRS',
 ]

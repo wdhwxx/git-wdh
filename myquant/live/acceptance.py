@@ -336,6 +336,14 @@ class SimulationAcceptanceEvaluator:
         for fn in _EVALUATORS:
             items.append(fn(self._metrics, self._thresholds, self._backtest))
 
+        # P3-16：准入仅允许 paper/sim；LIVE 等模式不得凭 stats JSON 判"准入通过"
+        if self._run_mode not in _ACCEPTABLE_MODES:
+            items.append(ItemResult(
+                key="run_mode", name="运行模式", status=AcceptanceStatus.FAIL,
+                actual=self._run_mode, threshold="/".join(sorted(_ACCEPTABLE_MODES)),
+                detail=f"仅允许 {sorted(_ACCEPTABLE_MODES)}，拒绝 {self._run_mode} 的准入判定",
+            ))
+
         passed = sum(1 for i in items if i.status is AcceptanceStatus.PASS)
         failed = sum(1 for i in items if i.status is AcceptanceStatus.FAIL)
         pending = sum(1 for i in items if i.status is AcceptanceStatus.NA)

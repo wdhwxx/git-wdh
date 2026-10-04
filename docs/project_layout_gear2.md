@@ -2558,3 +2558,14 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 其余P3（注释/文档/入口/锁文件清理等）属低危文档与环境清理，按需后续处理。
 
 【验证】py_compile三文件PASS；pytest全量2067 passed/0 failed（218s）。
+
+134. ✨【回写记录·2026-10-04·P3剩余代码小项（P3批次第2项）】
+
+【P3-11｜indicators未导出ExtremeRegime】
+- 修复：volatility导入与__all__补ExtremeRegime；已实测 from myquant.indicators import ExtremeRegime OK。
+【P3-16｜acceptance _ACCEPTABLE_MODES无引用，LIVE也能准入通过】
+- 修复：evaluate()开头校验 run_mode in {paper,sim}，否则追加FAIL项，综合不得通过。
+【P3-19｜ml lookahead_Guard早期全NaN行continue空过→误判True】
+- 修复：取样从预热后半段(start=len//2)开始，并要求至少一次有效(非全NaN)比较，否则return False。
+
+【验证】py_compile三文件PASS；导入冒烟OK；pytest全量2067 passed/0 failed（217s）。
