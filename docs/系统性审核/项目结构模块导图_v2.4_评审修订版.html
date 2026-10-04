@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>myquant 鲲鹏量化系统 · 项目结构模块导图 v2.4（评审修订版）</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 2600px; }
+  body {
+    height: 1820px;
+    background: radial-gradient(ellipse 60% 55% at 50% 44%, #1c2a4a 0%, #0d1322 55%, #070a12 100%);
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    color: #e0e6f0; position: relative; overflow: hidden;
+    padding: 96px 96px 96px;
+  }
+  /* 背景网格与光晕点缀（沿用 v2.3） */
+  body::before {
+    content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    background-image:
+      linear-gradient(rgba(90,120,180,0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(90,120,180,0.05) 1px, transparent 1px);
+    background-size: 60px 60px;
+    -webkit-mask-image: radial-gradient(ellipse 70% 70% at 50% 48%, #000 40%, transparent 85%);
+            mask-image: radial-gradient(ellipse 70% 70% at 50% 48%, #000 40%, transparent 85%);
+  }
+
+  #wires { position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none; }
+
+  .title { position: absolute; top: 34px; left: 50%; transform: translateX(-50%); text-align: center; z-index: 6; }
+  .title h1 { font-size: 44px; color: #fff; letter-spacing: 4px; text-shadow: 0 0 24px rgba(120,160,255,0.35); font-weight: bold; }
+  .title .sub { font-size: 16px; color: #7a8ab0; margin-top: 10px; letter-spacing: 6px; }
+  .title .ver { font-size: 15px; color: #ffd84d; margin-top: 8px; letter-spacing: 2px; }
+
+  /* 三栏舞台：真实文档流，卡片天然不重叠 */
+  .stage { position: relative; z-index: 5; display: grid;
+    grid-template-columns: 700px 1fr 700px; column-gap: 40px; align-items: center; }
+  .column { display: flex; flex-direction: column; justify-content: center; gap: 24px; }
+  .column.left  { align-items: flex-start; }
+  .column.right { align-items: flex-end; }
+  .mid { display: flex; align-items: center; justify-content: center; }
+
+  .center {
+    position: relative; width: 560px; height: 300px;
+    background: radial-gradient(ellipse at 40% 38%, #ffe88a 0%, #ffd84d 42%, #d4a800 100%);
+    border-radius: 50%;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    box-shadow: 0 0 90px rgba(255,216,77,0.55), 0 0 190px rgba(255,216,77,0.25), inset 0 -10px 30px rgba(0,0,0,0.2);
+    border: 4px solid rgba(255,240,180,0.85);
+  }
+  .center .name { font-size: 46px; font-weight: bold; color: #3a2800; letter-spacing: 3px; }
+  .center .desc { font-size: 21px; color: #5a4400; margin-top: 6px; }
+  .center .layers { font-size: 15px; color: #6a5500; margin-top: 10px; letter-spacing: 2px; }
+
+  .card {
+    width: 700px;
+    background: linear-gradient(135deg, rgba(26,40,72,0.94) 0%, rgba(15,22,42,0.94) 100%);
+    border: 2px solid; border-left-width: 6px; border-radius: 14px;
+    padding: 14px 20px 16px; backdrop-filter: blur(8px);
+  }
+  .card h2 { font-size: 21px; margin-bottom: 10px; display: flex; align-items: center; gap: 10px; color: #fff; }
+  .card h2 .dot { width: 13px; height: 13px; border-radius: 50%; box-shadow: 0 0 10px currentColor; flex: none; }
+  .card h2 .cnt { margin-left: auto; font-size: 13px; color: #8899bb; font-weight: normal; letter-spacing: 0.5px; }
+
+  .files { font-size: 13.5px; line-height: 1.7; color: #b8c8e0; }
+  .grp { margin-bottom: 7px; }
+  .grp-name { font-size: 12.5px; color: #7a8ab0; margin-bottom: 3px; letter-spacing: 1px; }
+  .chip { display: inline-block; background: rgba(255,255,255,0.045); border-radius: 4px;
+          padding: 0 6px; margin: 1px 4px 1px 0; color: #e8d89a; white-space: nowrap; }
+  .hl  { color: #ffd84d; font-weight: bold; background: rgba(255,216,77,0.13); }
+  .pend{ color: #ffab40; background: rgba(255,171,64,0.14); }
+  .note { margin-top: 8px; padding-top: 7px; border-top: 1px dashed rgba(255,255,255,0.13);
+          font-size: 13px; color: #8ea3c4; line-height: 1.6; }
+  .note b { color: #ffd84d; font-weight: normal; }
+  .note .warn { color: #ff8b8b; }
+
+  /* 各带配色（沿用 v2.3 色板） */
+  .c-core  { border-color: #4dd0e1; box-shadow: 0 0 22px rgba(77,208,225,0.14); } .c-core .dot  { background:#4dd0e1; color:#4dd0e1; }
+  .c-data  { border-color: #4da3ff; box-shadow: 0 0 22px rgba(77,163,255,0.14); } .c-data .dot  { background:#4da3ff; color:#4da3ff; }
+  .c-ml    { border-color: #c77dff; box-shadow: 0 0 22px rgba(199,125,255,0.14); } .c-ml .dot    { background:#c77dff; color:#c77dff; }
+  .c-strat { border-color: #b2ff59; box-shadow: 0 0 22px rgba(178,255,89,0.14); } .c-strat .dot { background:#b2ff59; color:#b2ff59; }
+  .c-live  { border-color: #ffd740; box-shadow: 0 0 22px rgba(255,215,64,0.14); } .c-live .dot  { background:#ffd740; color:#ffd740; }
+  .c-api   { border-color: #4dd0e1; box-shadow: 0 0 22px rgba(77,208,225,0.14); } .c-api .dot   { background:#4dd0e1; color:#4dd0e1; }
+  .c-risk  { border-color: #ff6e6e; box-shadow: 0 0 26px rgba(255,110,110,0.20); } .c-risk .dot  { background:#ff6e6e; color:#ff6e6e; }
+  .c-exe   { border-color: #2dd4bf; box-shadow: 0 0 30px rgba(45,212,191,0.24); border-width: 3px; border-left-width: 7px; } .c-exe .dot { background:#2dd4bf; color:#2dd4bf; }
+  .c-ent   { border-color: #ffab40; box-shadow: 0 0 22px rgba(255,171,64,0.16); border-style: dashed; } .c-ent .dot { background:#ffab40; color:#ffab40; }
+
+  /* 运行环境双分支 */
+  .branches { display: flex; gap: 0; align-items: stretch; }
+  .branch { flex: 1; padding-right: 18px; }
+  .branch + .branch { border-left: 1px dashed rgba(255,255,255,0.16); padding-left: 18px; padding-right: 0; }
+  .branch h3 { font-size: 15px; color: #fff; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+  .branch h3 .tag { font-size: 12px; font-weight: normal; padding: 0 7px; border-radius: 9px; }
+  .tag-bt { background: rgba(255,110,158,0.18); color: #ff9ebb; }
+  .tag-lv { background: rgba(255,215,64,0.18); color: #ffd740; }
+
+  .footer { position: absolute; bottom: 38px; left: 50%; transform: translateX(-50%);
+    font-size: 15px; color: #55617d; letter-spacing: 1px; z-index: 6; text-align: center; line-height: 1.9; }
+  .footer .legend { margin-bottom: 6px; }
+  .footer .lg { display: inline-block; margin: 0 14px; font-size: 14px; }
+  .footer .sw { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+  .footer .hi { color: #7a8ab0; }
+</style>
+</head>
+<body>
+<svg id="wires"><defs>
+  <filter id="glow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+</defs></svg>
+
+<div class="title">
+  <h1>Pythonwdhmm · 鲲鹏量化交易系统</h1>
+  <div class="sub">PROJECT ARCHITECTURE · DATA-DRIVEN · FULL-CHAIN</div>
+  <div class="ver">项目结构模块导图 v2.4 · 评审修订版（依据《项目结构模块导图_评审报告_v2.3》）</div>
+</div>
+
+<div class="stage">
+  <!-- ================= 左栏：① 契约底座 / ② 数据管线 / ③ 因子与模型流水线 / ⑦ 风控闸门 ================= -->
+  <div class="column left">
+
+    <!-- ===== B1 契约底座 ===== -->
+    <div class="card c-core" id="b1">
+      <h2><span class="dot"></span>① 契约底座<span class="cnt">models + utils + core + database · 27 文件</span></h2>
+      <div class="files">
+        <div class="grp">
+          <div class="grp-name">models/ (4) 数据契约 · 第一道校验关口</div>
+          <span class="chip">market_data.py</span><span class="chip">trade.py</span><span class="chip">backtest.py</span>
+        </div>
+        <div class="grp">
+          <div class="grp-name">utils/ (21) 通用工具</div>
+          <span class="chip">data_fingerprint.py</span><span class="chip">data_versioner.py</span><span class="chip">memory_watcher.py</span><span class="chip">cache_sync.py</span><span class="chip">pickle_checker.py</span><span class="chip">performance_config.py</span><span class="chip">cleanup_service.py</span><span class="chip">csv_utils.py</span><span class="chip">trade_calendar.py</span>
+        </div>
+        <div class="grp">
+          <div class="grp-name">core/ (15) 基础设施</div>
+          <span class="chip">settings.py</span><span class="chip">config_loader.py</span><span class="chip">constants.py</span><span class="chip">exceptions.py</span><span class="chip">logger.py</span><span class="chip">event_bus.py</span><span class="chip">async_runtime.py</span><span class="chip">transports/ (4)</span>
+        </div>
+        <div class="grp">
+          <div class="grp-name">database/ (6) 持久化边界</div>
+          <span class="chip">connection.py</span><span class="chip">schema.py</span><span class="chip">queries.py</span><span class="chip">migrations/ (Alembic)</span>
+        </div>
+      </div>
+      <div class="note">配置优先级：<b>环境变量 &gt; config/*.yaml &gt; 代码默认值</b>；database = 8 表 + Alembic 迁移</div>
+    </div>
+
+    <!-- ===== B2 数据管线 ===== -->
+    <div class="card c-data" id="b2">
+      <h2><span class="dot"></span>② 数据管线<span class="cnt">data_access/ (37) + datasets/</span></h2>
+      <div class="files">
+        <div class="grp">
+          <div class="grp-name">sources/ (7) 多源接入 · 只取原始数据不做业务清洗</div>
+          <span class="chip">akshare_source.py</span><span class="chip">tdx_source.py</span><span class="chip">web_source.py</span><span class="chip">composite_source.py</span><span class="chip pend">broker_source.py</span><span class="chip">base.py</span>
+        </div>
+        <div class="grp">
+          <div class="grp-name">cleaner/ (9) 清洗规则</div>
+          <span class="chip">pipeline.py</span><span class="chip">bar_cleaner.py</span><span class="chip">tick_cleaner.py</span><span class="chip">derived_metrics.py</span><span class="chip">error_codes.py</span><span class="chip">quality_reporter.py</span><span class="chip">rules_loader.py</span>
+        </div>
+        <div class="grp">
+          <div class="grp-name">服务层 · 编排与同步</div>
+          <span class="chip">manager.py</span><span class="chip">fetcher.py</span><span class="chip">factory.py</span><span class="chip">provider.py</span><span class="chip">loader.py</span><span class="chip">full_clean_service.py</span><span class="chip">financial_service.py</span><span class="chip">factor_sync_service.py</span>
+        </div>
+        <div class="grp">
+          <div class="grp-name">datasets/ 四级边界</div>
+          <span class="chip hl">raw（只读）</span><span class="chip hl">processed（唯一数据源）</span><span class="chip">features</span><span class="chip">bad（脏数据归档）</span>
+        </div>
+      </div>
+      <div class="note"><span class="warn">纪律</span>：业务逻辑归 myquant，脚本只做薄入口</div>
+    </div>
+
+    <!-- ===== B3 因子与模型流水线 ===== -->
+    <div class="card c-ml" id="b3">
+      <h2><span class="dot"></span>③ 因子与模型流水线<span class="cnt">indicators/ + ml/ · 研究域</span></h2>
+      <div class="files">
+        <div class="grp">
+          <div class="grp-name">指标计算核（运行域 · 与回测实盘共用，改动即口径变更）</div>
+          <span class="chip">indicators/ (10)</span><span class="chip">rsrs.py</span><span class="chip">moving_average.py</span><span class="chip">momentum.py</span><span class="chip">volatility.py</span><span class="chip">tradability.py</span><span class="chip">factor_engine.py</span><span class="chip">factor_cache.py</span>
+        </div>
+        <div class="grp">
+          <div class="grp-name">统计处理与有效性闸门</div>
+          <span class="chip pend">factor_preprocessor.py（去极值/中性化）</span><span class="chip pend">factor_validator.py（RankIC/ICIR）</span>
+        </div>
+        <div class="grp">
+          <div class="grp-name">ml/ (9) 模型产线 · 按 IC 门槛流转 / 按 CV 定参</div>
+          <span class="chip pend">features.py</span><span class="chip pend">feature_contract.py</span><span class="chip pend">training_pipeline.py</span><span class="chip pend">model_registry.py</span><span class="chip pend">model_monitor.py</span><span class="chip pend">inference_service.py</span><span class="chip pend">inference_benchmark.py</span>
+        </div>
+      </div>
+      <div class="note">本次评审修订：<b>ml/ 9 模块产线独立成带</b>，不再压成 2 个散点；计算核与研究域分离</div>
+    </div>
+
+    <!-- ===== B7 风控闸门 ===== -->
+    <div class="card c-risk" id="b7">
+      <h2><span class="dot"></span>⑦ 风控闸门<span class="cnt">risk/ (3) · 横切于订单提交前</span></h2>
+      <div class="files">
+        <span class="chip">risk_manager.py</span><span class="chip">rules.py</span><span class="chip">guardian.py</span>
+      </div>
+      <div class="note">逐单拦截 · <b>pause 暂停新开仓</b> · <b>FORCE_CLOSE 强制平仓</b>；拦截点在 <b>live/engine._process_signal</b> 同一锁域内；<span class="warn">与 allocation 分离</span></div>
+    </div>
+
+  </div>
+
+  <!-- ================= 中栏：枢纽 ================= -->
+  <div class="mid">
+    <div class="center" id="hub">
+      <div class="name">myquant</div>
+      <div class="desc">鲲鹏量化交易系统</div>
+      <div class="layers">19 个 py 子包 · 186 个 py 文件</div>
+    </div>
+  </div>
+
+  <!-- ================= 右栏：④ 策略与组合 / ⑤ 撮合与执行 / ⑥ 运行环境 / ⑧ 可观测 ================= -->
+  <div class="column right">
+
+    <!-- ===== B4 策略与组合 ===== -->
+    <div class="card c-strat" id="b4">
+      <h2><span class="dot"></span>④ 策略与组合<span class="cnt">strategies + allocation · 决策域</span></h2>
+      <div class="files">
+        <div class="grp">
+          <div class="grp-name">strategies/ (8) 策略实例 · 三接口</div>
+          <span class="chip">registry.py</span><span class="chip">base.py</span><span class="chip">kunpeng_strategy.py</span><span class="chip">ma_strategy.py</span><span class="chip">grid_strategy.py</span><span class="chip">momentum_strategy.py</span><span class="chip">mean_reversion_strategy.py</span><span class="chip">multi_factor_strategy.py</span>
+        </div>
+        <div class="grp">
+          <div class="grp-name">allocation/ (5) 资金分配</div>
+          <span class="chip">base.py</span><span class="chip">equal_weight.py</span><span class="chip">risk_parity.py</span><span class="chip">target_volatility.py</span>
+        </div>
+      </div>
+      <div class="note">三接口：<b>on_bar</b> / <b>generate_signals_vectorized</b> / <b>generate_mixed_loop</b> — 回测与实盘共用同一策略类</div>
+    </div>
+
+    <!-- ===== B5 撮合与执行 ===== -->
+    <div class="card c-exe" id="b5">
+      <h2><span class="dot"></span>⑤ 撮合与执行<span class="cnt">回测 ↔ 实盘 同构锚点</span></h2>
+      <div class="files">
+        <div class="grp">
+          <div class="grp-name">execution/ (4) 统一执行抽象层</div>
+          <span class="chip">base.py</span><span class="chip">sim_broker.py</span><span class="chip">state_machine.py</span>
+        </div>
+        <div class="grp">
+          <div class="grp-name">回测侧实现（backtest/）</div>
+          <span class="chip">order_matcher.py</span><span class="chip">fee_common.py</span><span class="chip">fee_table.py</span>
+        </div>
+      </div>
+      <div class="note"><span class="warn">本次评审修订</span>：execution 从「实盘执行」中拆出独立成带 —— 回测与实盘共用同一套订单状态机与撮合语义，是防止两端口径漂移的<b>物理锚点</b></div>
+    </div>
+
+    <!-- ===== B6 运行环境 ===== -->
+    <div class="card c-live" id="b6">
+      <h2><span class="dot"></span>⑥ 运行环境 · 实盘 / 回测<span class="cnt">engine/base 共用骨架 · 两支</span></h2>
+      <div class="branches">
+        <div class="branch">
+          <h3>回测分支 <span class="tag tag-bt">backtest/ (26)</span></h3>
+          <div class="files">
+            <span class="chip">engine.py</span><span class="chip">vectorized_engine.py</span><span class="chip">mixed_engine.py</span><span class="chip">batch_backtest.py</span><span class="chip">incremental_backtest.py</span><span class="chip">metrics.py</span><span class="chip">recorder.py</span><span class="chip">report.py</span><span class="chip">pdf_report.py</span><span class="chip">monte_carlo.py</span><span class="chip">consistency_check.py</span><span class="chip">survivorship_bias.py</span>
+          </div>
+        </div>
+        <div class="branch">
+          <h3>实盘分支 <span class="tag tag-lv">live/ (15)</span></h3>
+          <div class="files">
+            <span class="chip">engine.py</span><span class="chip">data_feed.py</span><span class="chip">portfolio.py</span><span class="chip">scheduler.py</span><span class="chip">state_store.py</span><span class="chip hl">run_mode.py</span><span class="chip">acceptance.py</span><span class="chip">emergency_liquidation.py</span><span class="chip">brokers/ (7)</span>
+          </div>
+        </div>
+      </div>
+      <div class="note">共用骨架 <b>engine/base.py (2)</b>：BaseEngine · on_init / on_market_event / on_stop　|　装配根 <b>create_live_engine</b>：feed → broker → portfolio → strategy → RiskManager → StateStore → LiveEngine</div>
+    </div>
+
+    <!-- ===== B8 可观测与接入 ===== -->
+    <div class="card c-api" id="b8">
+      <h2><span class="dot"></span>⑧ 可观测与接入<span class="cnt">api + web + gui + monitoring</span></h2>
+      <div class="files">
+        <div class="grp">
+          <div class="grp-name">监控与展示</div>
+          <span class="chip">alerting.py（5 类事件）</span><span class="chip">metrics_collector.py</span><span class="chip">health_check.py</span><span class="chip">data_quality_explorer.py</span><span class="chip pend">web/dashboard.py</span>
+        </div>
+        <div class="grp">
+          <div class="grp-name">接口与桌面端</div>
+          <span class="chip pend">api/ (5) 骨架</span><span class="chip pend">gui/ (10)</span><span class="chip">batch_backtest_tab.py</span><span class="chip">data_download_dialog.py</span><span class="chip">backtest_config_dialog.py</span>
+        </div>
+      </div>
+      <div class="note">方向：<b>monitoring / api / web / gui → 订阅 event_bus</b>（不可反向依赖业务层，防架构倒置复发）</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ================= 底部：入口带（挂载边，统一到各带） ================= -->
+<div style="position:relative; z-index:5; margin-top:28px;">
+  <div class="card c-ent" id="b9" style="width:100%;">
+    <h2><span class="dot"></span>⑨ 入口带（挂载边，非模块）<span class="cnt">run_*.py (11) + scripts/*.py (32) = 43</span></h2>
+    <div class="files">
+      <div class="grp">
+        <div class="grp-name">根入口 run_*.py (11)</div>
+        <span class="chip">run_回测入口.py</span><span class="chip">run_实盘入口.py</span><span class="chip">run_GUI入口.py</span><span class="chip">run_批量回测.py</span><span class="chip">run_鲲鹏批量回测.py</span><span class="chip">run_鲲鹏参数优化.py</span><span class="chip">run_鲲鹏一键应用推荐参数.py</span><span class="chip">run_回测配置GUI.py</span><span class="chip">run_数据下载GUI.py</span><span class="chip">run_全量清洗GUI.py</span><span class="chip">run_清理GUI.py</span>
+      </div>
+      <div class="grp">
+        <div class="grp-name">scripts/ 薄入口 (32) · 按服务域分簇</div>
+        <span class="chip">数据运维 (14)</span><span class="chip">回测运维 (11)</span><span class="chip">实盘运维 (7)</span>
+      </div>
+    </div>
+    <div class="note"><span class="warn">本次评审修订</span>：scripts 从「模块区块」降级为<b>挂载边</b> —— 薄入口仅做参数解析 + 项目根探测 + 调用 myquant，不占模块节点体量</div>
+  </div>
+</div>
+
+<div class="footer">
+  <div class="legend">
+    <span class="lg"><span class="sw" style="background:#4dd0e1;"></span>契约底座</span>
+    <span class="lg"><span class="sw" style="background:#4da3ff;"></span>数据管线</span>
+    <span class="lg"><span class="sw" style="background:#c77dff;"></span>因子/模型</span>
+    <span class="lg"><span class="sw" style="background:#b2ff59;"></span>策略组合</span>
+    <span class="lg"><span class="sw" style="background:#2dd4bf;"></span>撮合执行（同构锚点）</span>
+    <span class="lg"><span class="sw" style="background:#ffd740;"></span>运行环境</span>
+    <span class="lg"><span class="sw" style="background:#ff6e6e;"></span>风控闸门</span>
+    <span class="lg"><span class="sw" style="background:#ffab40;"></span>入口带</span>
+  </div>
+  <div>
+    <span class="lg"><span class="sw" style="background:#ffd84d;"></span>已接线并被消费</span>
+    <span class="lg"><span class="sw" style="background:#ffab40;"></span>已实现未接线 / opt-in</span>
+    <span class="hi">统计口径：myquant/**/*.py 全量（含 __init__.py / migrations / transports / widgets）</span>
+  </div>
+  <div class="hi">19 个 py 子包 · 186 个 py 文件 · 根入口 11 · scripts 32　|　基线 v2.3（10 子包 / 158 文件）已按磁盘实测修正　|　2026-10-04</div>
+</div>
+
+<script>
+(function () {
+  var svg = document.getElementById('wires');
+  if (!svg) return;
+  function ready(fn) {
+    if (document.readyState === 'complete' || document.readyState === 'interactive') setTimeout(fn, 60);
+    else document.addEventListener('DOMContentLoaded', function () { setTimeout(fn, 60); });
+  }
+  function rect(id) {
+    var el = document.getElementById(id);
+    return el ? el.getBoundingClientRect() : null;
+  }
+  ready(function () {
+    var W = document.documentElement.clientWidth;
+    var H = document.body.scrollHeight;
+    svg.setAttribute('width', W);
+    svg.setAttribute('height', H);
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+
+    var NS = 'http://www.w3.org/2000/svg';
+    var defs = svg.querySelector('defs');
+    ['#4dd0e1', '#4da3ff', '#c77dff', '#b2ff59', '#2dd4bf', '#ffd740', '#ff6e6e', '#4dd0e1', '#ffab40']
+      .forEach(function (col, i) {
+        var m = document.createElementNS(NS, 'marker');
+        m.setAttribute('id', 'ar' + i);
+        m.setAttribute('viewBox', '0 0 10 10');
+        m.setAttribute('refX', '10'); m.setAttribute('refY', '5');
+        m.setAttribute('markerWidth', '7'); m.setAttribute('markerHeight', '7');
+        m.setAttribute('orient', 'auto-start-reverse');
+        var p = document.createElementNS(NS, 'path');
+        p.setAttribute('d', 'M0,0 L10,5 L0,10 z');
+        p.setAttribute('fill', col);
+        m.appendChild(p); defs.appendChild(m);
+      });
+
+    function seg(x1, y1, x2, y2, col, dashed, mk) {
+      var path = document.createElementNS(NS, 'path');
+      path.setAttribute('d', 'M' + x1.toFixed(1) + ',' + y1.toFixed(1) + ' L' + x2.toFixed(1) + ',' + y2.toFixed(1));
+      path.setAttribute('stroke', col);
+      path.setAttribute('stroke-width', '2.2');
+      path.setAttribute('fill', 'none');
+      path.setAttribute('opacity', '0.82');
+      path.setAttribute('filter', 'url(#glow)');
+      if (dashed) path.setAttribute('stroke-dasharray', '7 7');
+      if (mk) path.setAttribute('marker-end', 'url(#' + mk + ')');
+      svg.appendChild(path);
+    }
+
+    var hb = rect('hub');
+    var hubL = { x: hb.left, y: hb.top + hb.height * 0.5 };
+    var hubR = { x: hb.right, y: hb.top + hb.height * 0.5 };
+
+    // 左栏：① ② ③ ⑦ → 枢纽左侧
+    [['b1', '#4dd0e1'], ['b2', '#4da3ff'], ['b3', '#c77dff'], ['b7', '#ff6e6e']].forEach(function (it, i, arr) {
+      var r = rect(it[0]); if (!r) return;
+      var t = (i + 0.6) / (arr.length + 0.2);
+      seg(r.right, r.top + r.height * t, hubL.x - 6, hb.top + hb.height * t, it[1], i === 3);
+    });
+
+    // 右栏：④ ⑤ ⑥ ⑧ → 枢纽右侧
+    [['b4', '#b2ff59'], ['b5', '#2dd4bf'], ['b6', '#ffd740'], ['b8', '#4dd0e1']].forEach(function (it, i, arr) {
+      var r = rect(it[0]); if (!r) return;
+      var t = (i + 0.6) / (arr.length + 0.2);
+      seg(r.left, r.top + r.height * t, hubR.x + 6, hb.top + hb.height * t, it[1], i === 3);
+    });
+
+    // ⑤ 撮合执行 → ⑥ 运行环境：同构锚点竖向连线
+    var r5 = rect('b5'), r6 = rect('b6');
+    if (r5 && r6) seg(r5.left + 90, r5.bottom + 2, r6.left + 90, r6.top - 2, '#2dd4bf', false, 'ar4');
+
+    // ⑨ 入口带 → ② 数据管线（挂载边示意）
+    var r9 = rect('b9'), r2 = rect('b2');
+    if (r9 && r2) seg(r9.left + 40, r9.top, r2.right - 60, r2.bottom + 4, '#ffab40', true, 'ar8');
+  });
+})();
+</script>
+</body>
+</html>
