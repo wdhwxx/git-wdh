@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import math
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -86,19 +87,110 @@ class KunpengParamScanner:
         self._out_json = Path(out_json or (root / "results" / "param_scan" / "scan_results.json"))
         self._cpu_workers = cpu_workers
 
-    # ── 阶段1：活跃标的池 ──
+    # ── 阶段1：活跃标的池（KP-P2-06 外生池，消除内生挑选偏差）──
+
+    def build_exogenous_pool(
+        self,
+        top_n: int = 50,
+        liquidity_window_days: int = 60,
+        n_strata: int = 5,
+    ) -> tuple:
+        """KP-P2-06：START_DATE 前 liquidity_window_days 日日均成交额分层外生池。
+
+        不再依赖全池回测成交笔数（消除内生挑选偏差）；按日均成交额（含流通股本）
+        降序分 n_strata 层覆盖流动性高/中/低，取 top_n。processed 池本身=清洗后存续池
+        （未含退市/长期停牌），仍存在幸存者偏差，selection_bias_note 显式声明。
+        返回 (symbols, pool_meta)。
+        """
+        import pandas as pd
+
+        processed = Path(self._processed_dir)
+        files = sorted(processed.glob("*.parquet"))
+        cutoff = int(self.START_DATE.replace("-", ""))  # 例 20240101
+        scored: List[tuple] = []
+        scanned = 0
+        for fp in files:
+            sym = fp.stem
+            scanned += 1
+            try:
+                df = pd.read_parquet(fp, columns=["日期", "成交额", "收盘价", "成交量"])
+            except Exception as exc:  # 单文件损坏/列缺失跳过
+                logger.warning("外生池跳过 %s: %s", sym, exc)
+                continue
+            if "日期" not in df.columns or df.empty:
+                continue
+            dates = pd.to_numeric(df["日期"], errors="coerce")
+            df = df.assign(_d=dates)
+            hist = df[df["_d"].notna() & (df["_d"] < cutoff)]
+            if hist.empty:
+                continue
+            win = hist.sort_values("_d").tail(liquidity_window_days)
+            if win.empty:
+                continue
+            if "成交额" in win.columns and pd.to_numeric(win["成交额"], errors="coerce").notna().any():
+                avg_amount = float(pd.to_numeric(win["成交额"], errors="coerce").mean())
+            else:
+                avg_amount = float(
+                    (
+                        pd.to_numeric(win["收盘价"], errors="coerce")
+                        * pd.to_numeric(win["成交量"], errors="coerce")
+                    ).mean()
+                )
+            if not avg_amount or avg_amount <= 0:
+                continue
+            scored.append((sym, avg_amount))
+        scored.sort(key=lambda x: -x[1])
+        n = len(scored)
+        if n == 0:
+            meta = {
+                "method": "exogenous_liquidity_stratified",
+                "window_days": liquidity_window_days,
+                "n_strata": n_strata,
+                "n_scanned": scanned,
+                "n_scored": 0,
+                "n_pool": 0,
+                "as_of": self.START_DATE,
+                "selection_bias_note": "processed 目录无可评分标的（窗口无历史数据），外生池为空。",
+            }
+            return [], meta
+        per = max(1, math.ceil(top_n / n_strata))
+        picked: List[str] = []
+        seen: set = set()
+        for s_idx in range(0, n, per):
+            for sym, _ in scored[s_idx:s_idx + per]:
+                if len(picked) >= top_n:
+                    break
+                if sym not in seen:
+                    seen.add(sym)
+                    picked.append(sym)
+            if len(picked) >= top_n:
+                break
+        for sym, _ in scored:
+            if sym not in seen and len(picked) < top_n:
+                seen.add(sym)
+                picked.append(sym)
+        meta = {
+            "method": "exogenous_liquidity_stratified",
+            "window_days": liquidity_window_days,
+            "n_strata": n_strata,
+            "n_scanned": scanned,
+            "n_scored": n,
+            "n_pool": len(picked),
+            "as_of": self.START_DATE,
+            "selection_bias_note": (
+                f"外生池：取 START_DATE 前 {liquidity_window_days} 个交易日日均成交额"
+                f"降序分层抽样 {n_strata} 层，覆盖流动性高/中/低，不再按回测成交笔数内生挑选。"
+                "注意：processed 池=清洗后存续池（未含退市/长期停牌），仍存在幸存者偏差，"
+                "缓解接入见 KP-P2-07（data_coverage 落盘）。"
+            ),
+        }
+        return picked, meta
 
     def load_active_symbols(self, top_n: int = 50, min_trades: int = 3) -> List[str]:
-        """从已有全池结果中挑选活跃标的（成交笔数 >= min_trades，取 top_n）。"""
-        with open(self._results_json, "r", encoding="utf-8") as f:
-            d = json.load(f)
-        rows = [
-            (s, v.get("trade_count") or 0)
-            for s, v in d["results"].items()
-            if v.get("status") == "completed" and (v.get("trade_count") or 0) >= min_trades
-        ]
-        rows.sort(key=lambda x: -x[1])
-        return [s for s, _ in rows[:top_n]]
+        """外生池兼容入口（KP-P2-06：不再读回测结果，min_trades 保留签名兼容已弃用）。"""
+        del min_trades  # 外生池无成交笔数口径
+        symbols, _ = self.build_exogenous_pool(top_n=top_n)
+        return symbols
 
     # ── 阶段2：数据加载 ──
 
@@ -189,12 +281,12 @@ class KunpengParamScanner:
         logger.info("  鲲鹏策略参数网格扫描（真实数据 / vectorized）")
         logger.info("=" * 72)
 
-        if not self._results_json.exists():
-            logger.error("全池回测结果缺失: %s（请先运行 run_鲲鹏批量回测.py 生成结果）", self._results_json)
+        symbols, pool_meta = self.build_exogenous_pool(top_n=top_n)
+        logger.info("[标的池] 外生池 %s 个（START_DATE 前 %s 日成交额分层抽样，覆盖高/中/低流动性）",
+                     len(symbols), pool_meta.get("window_days"))
+        if not symbols:
+            logger.error("[错误] 外生池为空（processed 无窗口历史数据）")
             return 2
-
-        symbols = self.load_active_symbols(top_n=top_n, min_trades=min_trades)
-        logger.info("[标的池] 成交>=%s 的活跃标的 top %s", min_trades, len(symbols))
         data = self.load_data(symbols)
         logger.info("[数据] 实际加载 %s 个标的（部分过滤后无数据被跳过）", len(data))
         if not data:
@@ -212,6 +304,7 @@ class KunpengParamScanner:
                 "start_date": self.START_DATE,
                 "end_date": None,
                 "n_symbols": len(data),
+                "pool": pool_meta,  # KP-P2-06 外生池构建依据 + selection_bias_note
             },
             "stages": {},
         }

@@ -535,6 +535,7 @@ Pythonwdhmm/
 │   │   ├── test_factor_validator.py # ✨【回写#89】F-02 因子有效性校验测试（RankIC/PearsonIC双口径、ICIR/t/胜率手算对拍、衰减曲线1/5/10/20、5层分层收益+换手、active/observe/eliminated三态、IC加权方向校正+下限约束+归一化、经济逻辑缺省拒绝、FactorProfile序列化往返、策略IC加权集成+默认零变化+extra因子缺逻辑拒绝，22项）✅已完成
 │   │   ├── test_factor_preprocessor.py # ✨【回写#90】F-03 因子预处理测试（对称/偏态分布判定、MAD截断、分位数截断、自适应方法选择、中性化后市值相关≈0、行业哑变量后行业均值差≈0、暴露t值、残差诊断告警、报告序列化往返、策略默认none零变化+neutralize集成+非法mode报错，25项）✅已完成
 │   │   ├── test_survivorship_bias.py # ✨【回写#91】F-04 幸存者偏差测试（审计字段齐全、折价数值合成数据对拍、逐期池as_of过滤、报告口径声明注入零变化、非法参数防御，15项）✅已完成
+│   │   ├── test_exogenous_pool.py      # ✨【回写#175】参数扫描外生池测试(KP-P2-06：分层抽样/窗口外剔除/meta selection_bias_note/空目录/load_active_symbols兼容/run meta pool，6项)✅已完成
 │   │   ├── test_model_monitor.py     # ✨【回写#92】F-05 模型失效监控测试（低IC连续3月检出/回升不失效/回撤超限判定/HealthReport序列化/from_config非法防御/降级切换/无候选清空/retired加载拒绝/win gate激活与拒绝/缺指标跳过/默认零变化回归/防未来序列，27项）✅已完成
 │   │   ├── test_ml_e2e.py            # ✨【回写#93】F-06 ML 端到端与负向测试（特征一致性全链路/时序切分日历化缓冲负向/标签无泄露+未来突变/registry读写+checksum篡改/推理兜底/未来函数负向：样本内预测strict拦截，23项）✅已完成
 │   │   ├── test_ml_registry_signature.py # ✨【回写#94】F-07 元数据补全+签名测试（补全字段齐全/runtime_env 版本解析/参数量防御/签名生成校验往返/密钥缺失降级零变化/元数据篡改→加载被拒/checksum 篡改仍拦截不回归/retired 拦截不回归/端到端训练→注册→加载签名链路/旧 metadata 兼容/canonical 稳定性/verify_model 签名篡改 False，18项）✅已完成
@@ -898,7 +899,7 @@ Pythonwdhmm/
 
     │   └── candidate_pool.py         # ✨【2026-09-09】双策略交叉验证候选池业务模块（第3批自 tests/ 段错位更正归位）：读批量回测results.json（completed）→各自硬过滤→交集双强→综合夏普降序→TopN标记→CSV导出（utf-8-sig）；供scripts/候选池交叉验证.py调用；✨【2026-09-12】新增CSV_HEADERS_ZH中文表头映射（导出时仅替换表头，内部列名保持英文）
 
-    │   ├── kunpeng_param_scanner.py # ✨【P3-6】鲲鹏策略参数网格扫描器（自 scripts/kunpeng_param_scan.py 下沉）：KunpengParamScanner类（BASE_PARAMS/SIGNAL_GRID/EXIT_GRID等常量 + load_active_symbols/load_data/run_one/expand_grid/run(stage,top_n,min_trades)），路径可注入默认 project_root=parents[2]；真实数据 vectorized 两阶段扫描、聚合口径与排序与原脚本一致；供 scripts/kunpeng_param_scan.py 薄入口调用（已重写）
+    │   ├── kunpeng_param_scanner.py # ✨【P3-6】鲲鹏策略参数网格扫描器（自 scripts/kunpeng_param_scan.py 下沉）：KunpengParamScanner类（BASE_PARAMS/SIGNAL_GRID/EXIT_GRID等常量 + load_active_symbols/load_data/run_one/expand_grid/run(stage,top_n,min_trades)），路径可注入默认 project_root=parents[2]；真实数据 vectorized 两阶段扫描、聚合口径与排序与原脚本一致；供 scripts/kunpeng_param_scan.py 薄入口调用（已重写）；✨【回写#175】build_exogenous_pool 外生池（START_DATE前60日成交额分层，消除内生挑选），run meta 记录 selection_bias_note（KP-P2-06）
 
     │   ├── config_builder.py         # ✨【回写#32】回测配置构建模块（L4修复：load_stock_pool_from_csv/apply_exclude_prefixes/build_backtest_config 自 run_回测入口.py 下沉，供入口与 scripts/生成回测报告.py 共用，消除脚本反向导入）
 
@@ -3057,6 +3058,17 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：缺基准不再静默/不伪造，回测基准不可比显式可追溯（extra/日志/配置三重声明）。
 - 验证结果：py_compile 通过；新增 tests/unit/test_benchmark_missing.py 6 项全绿（PerformanceMetrics 默认 None/无基准 metrics 置 None/performance_report 无基准 None/有基准数值/engine 标记与 extra 落盘/yaml benchmark_required）；回归 12 passed 无回归；ruff 干净（顺手清理 engine/metrics 既有未用变量、metrics/models/math_utils 既有导入与 demo f-string）。
 - 纪律遵守：改蓝图已标注文件（backtest/engine.py、backtest/metrics.py、models/backtest.py、utils/math_utils.py、config/backtest_config.example.yaml）+ tests/unit 新增 test_benchmark_missing.py（同步更新目录树）；无蓝图外文件；严格防未来。
+
+175. ✨【回写记录·2026-10-04·T-42 KP-P2-06 参数扫描池内生选择（残留已消除）】
+
+【发现】kunpeng_param_scanner.py:91-101 load_active_symbols 从全池回测结果按 trade_count（回测成交笔数）排序取 top_n——标的池由回测输出内生决定，入池与参数排序被系统性污染（内生挑选偏差）。
+- 修复：
+  a. **外生池**：新增 build_exogenous_pool(top_n, liquidity_window_days=60, n_strata=5)——扫描 processed 目录，取 START_DATE 前 60 个交易日日均成交额（'成交额'列，缺则收盘价×成交量兜底）降序分 n_strata 层抽样，覆盖流动性高/中/低，不再依赖回测成交笔数。
+  b. **run 接入**：移除 results_json 存在性检查（外生池不依赖全池回测结果），改调 build_exogenous_pool；meta 增 'pool' 段（method/window_days/n_strata/n_scanned/n_scored/n_pool/as_of/selection_bias_note）。
+  c. **兼容**：load_active_symbols 保留签名（min_trades 弃用），改为委托 build_exogenous_pool。
+- 防未来：池构建只用 START_DATE 前窗口已可得行情（as_of 口径），不引用窗口后/回测期数据；processed=清洗后存续池未含退市/长期停牌，幸存者偏差显式声明（selection_bias_note 指向 KP-P2-07）。
+- 验证结果：py_compile 通过；新增 tests/unit/test_exogenous_pool.py 6 项全绿（分层抽样含高流动性剔除窗口外标的/meta selection_bias_note 关键词/空目录空池/窗口无历史跳过/load_active_symbols 外生兼容/run meta 记录 pool）；ruff 干净。
+- 纪律遵守：改蓝图已标注文件（backtest/kunpeng_param_scanner.py）+ tests/unit 新增 test_exogenous_pool.py（同步更新目录树）；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】
