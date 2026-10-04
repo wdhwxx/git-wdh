@@ -184,7 +184,7 @@ Pythonwdhmm/
 
 ├── run_GUI入口.py                 # GUI入口（中文名）：启动桌面图形界面（可选依赖）
 
-├── run_实盘入口.py                # 实盘入口（中文名）：加载实盘配置 -> 初始化引擎与风控 -> 启动事件循环
+├── run_实盘入口.py                # 实盘入口（中文名）：加载实盘配置 -> 初始化引擎与风控 -> 启动事件循环；✨【回写#159】装配后注册真实 live 健康探针（KP-P5-02）
 
 ├── run_回测配置GUI.py             # ✨【回写】GUI子入口（中文名）：启动回测参数配置对话框（gui/backtest_config_dialog.py），可视化选择策略/标的池/参数后调起回测；回测与实盘配置同源
 
@@ -449,7 +449,8 @@ Pythonwdhmm/
 │   │   ├── test_backtest_not_placeholder.py # ✨【回写#155】回测API硬编码绩效常量测试(KP-P1-02：未注册50
 │   │   ├── test_env_auth_chain.py    # ✨【回写#156】.env与认证链路测试(KP-P1-04：env生效/settings兜
 │   │   ├── test_exception_swallowing.py # ✨【回写#157】异常吞噬测试(KP-P1-07：无fastapi raise/close_all异常warning/CI BLE001护栏，3项)✅已完成
-│   │   ├── test_api_docs_closed.py  # ✨【回写#158】API文档匿名开放测试(KP-P4-04：默认关docs/开启时存在/豁免仅健康，4项)✅已完成底/env优先/运行API.py bootstrap不崩，4项)✅已完成1/缺参422/成功取真实值/失败501/异常501，5项)✅已完成/关闭/CORS互斥/401/429逻辑）✅已完成
+│   │   ├── test_api_docs_closed.py  # ✨【回写#158】API文档匿名开放测试(KP-P4-04：默认关docs/开启时存在/豁免仅健康，4项)✅已完成
+│   │   ├── test_health_probe_registry.py # ✨【回写#159】健康探针注册表测试(KP-P5-02：unknown计入degraded/live探针注册，3项)✅已完成底/env优先/运行API.py bootstrap不崩，4项)✅已完成1/缺参422/成功取真实值/失败501/异常501，5项)✅已完成/关闭/CORS互斥/401/429逻辑）✅已完成
 
 │   │   ├── test_broker_platform_check.py # ✨【回写#25】券商适配器平台校验（审计疑点3：qmt/ptrade非Windows拦截、paper/sim放行、大小写不敏感）✅已完成
 
@@ -1041,7 +1042,7 @@ Pythonwdhmm/
 
     │   ├── __init__.py                 # API包统一导出：create_app/run_api/FASTAPI_AVAILABLE + 11个响应/请求模型 + APIKeyAuth + FixedWindowLimiter/TokenBucketLimiter/RateLimitResult + ServiceContainer（__all__全量导出，供运行API.py与外部导入）
 
-    │   ├── routes.py                 # 路由聚合；✨【回写#154】占位写端点改真 501（KP-P1-01）；✨【回写#155】回测端点接线真实引擎（KP-P1-02）；✨【回写#157】无 fastapi 启动 raise（KP-P1-07）；✨【回写#158】文档默认关闭+移除文档豁免（KP-P4-04）
+    │   ├── routes.py                 # 路由聚合；✨【回写#154】占位写端点改真 501（KP-P1-01）；✨【回写#155】回测端点接线真实引擎（KP-P1-02）；✨【回写#157】无 fastapi 启动 raise（KP-P1-07）；✨【回写#158】文档默认关闭+移除文档豁免（KP-P4-04）；✨【回写#159】health unknown 计入 degraded（KP-P5-02）
 
     │   │                             # ✅已实现：6个数据质量端点(/api/data/quality, /overview, /runs, /runs/{id}, /dirty, /metrics) + 告警管理端点
 
@@ -2873,6 +2874,16 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：API 文档默认不暴露、不做匿名豁免，杜绝接口结构泄露。
 - 验证结果：py_compile 通过；新增 tests/unit/test_api_docs_closed.py 4 项全绿（默认关文档/开启时文档存在/认证豁免仅健康/限流豁免无文档）；回归 17 passed 无回归；ruff 干净。
 - 纪律遵守：仅改蓝图已标注文件（api/routes.py、tests/unit/test_api_middleware.py）+ tests/unit 新增 test_api_docs_closed.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+159. ✨【回写记录·2026-10-04·T-25 KP-P5-02 健康探针注册表为空，恒 healthy】
+
+【发现】健康探针注册表（HealthChecker）无真实探针注册，`/api/health` 六个组件（data/strategy/backtest/live/risk/allocation）恒 unknown 但整体仍报 healthy（unknown 不计入降级），且 run_实盘入口.py 装配引擎后未注册真实引擎探针。
+- 修复：
+  a. **routes.py `/api/health`：unknown 计入 degraded**——未注入探针的组件标记 unknown 时 `degraded = True`，整体状态不再恒 healthy。
+  b. **run_实盘入口.py 注册真实 live 探针**：引擎装配后 `get_health_checker().add_check("live", _live_probe, critical=True)`——`_live_probe` 调 `engine.health_check()`（真实引擎状态 dict），映射 status→HealthStatus（healthy/degraded/down→UNHEALTHY），替代空注册表恒 healthy。
+- 防未来：健康状态如实反映组件探针注册与引擎运行状态，探针未注册即降级，杜绝恒 healthy 谎报。
+- 验证结果：py_compile 通过；新增 tests/unit/test_health_probe_registry.py 3 项全绿（无探针 /api/health=degraded+unknown/探针注册代码存在/HealthChecker 注册探针 run_all 可用）；routes 回归 3 passed；ruff：routes/test 干净（run_实盘入口.py 7 处既有 import 顺序非本次引入）。
+- 纪律遵守：仅改蓝图已标注文件（api/routes.py、run_实盘入口.py）+ tests/unit 新增 test_health_probe_registry.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】

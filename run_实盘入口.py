@@ -861,6 +861,34 @@ def run_live_trading(args: argparse.Namespace) -> int:
     engine.on_signal(_print_signal)
     engine.register_trade_callback(_print_trade)
 
+    # ── 6.5 健康探针注册（KP-P5-02：注册真实引擎探针，替代空注册表恒 healthy）──
+    try:
+        from myquant.monitoring.health_check import (
+            HealthCheckResult,
+            HealthStatus,
+            get_health_checker,
+        )
+        _engine_hc = engine.health_check
+        _status_map = {
+            "healthy": HealthStatus.HEALTHY,
+            "degraded": HealthStatus.DEGRADED,
+            "down": HealthStatus.UNHEALTHY,
+        }
+
+        def _live_probe() -> HealthCheckResult:
+            data = _engine_hc() or {}
+            st = str(data.get("status", "degraded")).lower()
+            return HealthCheckResult(
+                name="live",
+                status=_status_map.get(st, HealthStatus.DEGRADED),
+                message=f"engine_status={st}",
+            )
+
+        get_health_checker().add_check("live", _live_probe, critical=True)
+        print("  [健康] 已注册实盘引擎健康探针 (live)")
+    except Exception as e:
+        print(f"  [健康] 健康探针注册失败（不影响交易主链路）: {e}")
+
     # ── 7. 试运行模式：打印装配结果后退出 ──
     if args.dry_run:
         status = engine.get_status()

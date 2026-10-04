@@ -411,10 +411,12 @@ def create_app(
                 modules[name] = "down"
                 degraded = True
                 logger.error(f"[api] 健康检查器 {name} 异常: {e}")
-        # 未注入的组件模块标记 unknown（保持清单完整，但不谎报健康）
+        # 未注入的组件模块标记 unknown（保持清单完整，不谎报健康）
+        # KP-P5-02: unknown 计入 degraded——探针未注册即视为降级，不再恒 healthy
         for name in ("data", "strategy", "backtest", "live", "risk", "allocation"):
             if name not in modules:
                 modules[name] = "unknown"
+                degraded = True
         health = HealthResponse(
             status="degraded" if degraded else "healthy",
             version=version,
