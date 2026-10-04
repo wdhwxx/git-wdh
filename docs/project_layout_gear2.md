@@ -535,6 +535,7 @@ Pythonwdhmm/
 │   │   ├── test_factor_validator.py # ✨【回写#89】F-02 因子有效性校验测试（RankIC/PearsonIC双口径、ICIR/t/胜率手算对拍、衰减曲线1/5/10/20、5层分层收益+换手、active/observe/eliminated三态、IC加权方向校正+下限约束+归一化、经济逻辑缺省拒绝、FactorProfile序列化往返、策略IC加权集成+默认零变化+extra因子缺逻辑拒绝，22项）✅已完成
 │   │   ├── test_factor_preprocessor.py # ✨【回写#90】F-03 因子预处理测试（对称/偏态分布判定、MAD截断、分位数截断、自适应方法选择、中性化后市值相关≈0、行业哑变量后行业均值差≈0、暴露t值、残差诊断告警、报告序列化往返、策略默认none零变化+neutralize集成+非法mode报错，25项）✅已完成
 │   │   ├── test_survivorship_bias.py # ✨【回写#91】F-04 幸存者偏差测试（审计字段齐全、折价数值合成数据对拍、逐期池as_of过滤、报告口径声明注入零变化、非法参数防御，15项）✅已完成
+│   │   ├── test_rate_limit_redis.py    # ✨【回写#177】限流Redis后端测试(KP-P1-05：Redis限流至限额/重置/窗口桶隔离/memory默认/无redis降级/routes CORS缺省关闭源码断言，7项)✅已完成
 │   │   ├── test_data_coverage_mount.py # ✨【回写#176】幸存者偏差接入测试(KP-P2-07：audit+折价合并/折价样本不足降级/审计失败None/BatchBacktestResult字段/run注入/full_report强制渲染，7项)✅已完成
 │   │   ├── test_exogenous_pool.py      # ✨【回写#175】参数扫描外生池测试(KP-P2-06：分层抽样/窗口外剔除/meta selection_bias_note/空目录/load_active_symbols兼容/run meta pool，6项)✅已完成
 │   │   ├── test_model_monitor.py     # ✨【回写#92】F-05 模型失效监控测试（低IC连续3月检出/回升不失效/回撤超限判定/HealthReport序列化/from_config非法防御/降级切换/无候选清空/retired加载拒绝/win gate激活与拒绝/缺指标跳过/默认零变化回归/防未来序列，27项）✅已完成
@@ -1064,7 +1065,7 @@ Pythonwdhmm/
 
     │   ├── __init__.py                 # API包统一导出：create_app/run_api/FASTAPI_AVAILABLE + 11个响应/请求模型 + APIKeyAuth + FixedWindowLimiter/TokenBucketLimiter/RateLimitResult + ServiceContainer（__all__全量导出，供运行API.py与外部导入）
 
-    │   ├── routes.py                 # 路由聚合；✨【回写#154】占位写端点改真 501（KP-P1-01）；✨【回写#155】回测端点接线真实引擎（KP-P1-02）；✨【回写#157】无 fastapi 启动 raise（KP-P1-07）；✨【回写#158】文档默认关闭+移除文档豁免（KP-P4-04）；✨【回写#159】health unknown 计入 degraded（KP-P5-02）
+    │   ├── routes.py                 # 路由聚合；✨【回写#154】占位写端点改真 501（KP-P1-01）；✨【回写#155】回测端点接线真实引擎（KP-P1-02）；✨【回写#157】无 fastapi 启动 raise（KP-P1-07）；✨【回写#158】文档默认关闭+移除文档豁免（KP-P4-04）；✨【回写#159】health unknown 计入 degraded（KP-P5-02）；✨【回写#177】CORS 缺省不开放（KP-P1-05）
 
     │   │                             # ✅已实现：6个数据质量端点(/api/data/quality, /overview, /runs, /runs/{id}, /dirty, /metrics) + 告警管理端点
 
@@ -1076,7 +1077,7 @@ Pythonwdhmm/
 
     │   │   ├── auth.py                 # API Key认证中间件（v1基础骨架）：APIKeyAuth认证类（Header/Query；✨【回写#156】密钥加载经 settings 兜底 .env/config（KP-P1-04）取Key+恒时比较secrets.compare_digest）+ verify_api_key()/get_current_user()（FastAPI依赖注入）；多Key配置（环境变量/配置）；JWT/OAuth2/RBAC预留TODO；防未来函数：只验证当前凭证，不预测未来
 
-    │   │   └── rate_limit.py           # 限流中间件（v1基础骨架）：RateLimiter基类 + FixedWindowLimiter固定窗口 + TokenBucketLimiter令牌桶；按IP/APIKey/用户维度限流+状态查询（剩余次数/重置时间）；Redis分布式限流预留TODO；防未来函数：仅基于当前时间与历史请求计数
+    │   │   └── rate_limit.py           # 限流中间件（v1基础骨架）：RateLimiter基类 + FixedWindowLimiter固定窗口 + TokenBucketLimiter令牌桶 + RedisFixedWindowLimiter分布式后端（INCR+EXPIRE）；按IP/APIKey/用户维度限流+状态查询；create_rate_limiter 按 QUANT_RATE_LIMIT_BACKEND 切换；✨【回写#177】Redis 后端落地（KP-P1-05）；防未来函数：仅基于当前时间与历史请求计数
 
     │   ├── models/
 
@@ -3080,6 +3081,16 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：audit/折价均基于 ref_date/区间注入可测；审计失败降级不阻断回测结果，声明节缺失有日志可追溯。
 - 验证结果：py_compile batch_backtest/batch_report 通过；新增 tests/unit/test_data_coverage_mount.py 7 项全绿（audit+折价合并/折价样本不足降级/审计失败返回 None/BatchBacktestResult 默认 None 与传入生效/run 注入源码断言/full_report 强制渲染源码断言）；回归 19 passed 无回归；ruff 干净。
 - 纪律遵守：改蓝图已标注文件（backtest/batch_backtest.py、backtest/batch_report.py）+ tests/unit 新增 test_data_coverage_mount.py（同步更新目录树）；无蓝图外文件；严格防未来。
+
+177. ✨【回写记录·2026-10-04·T-44 KP-P1-05 CORS 缺省不开放 + 限流 Redis 后端（残留已消除）】
+
+【发现】routes.py:304-308 CORS 默认 QUANT_CORS_ORIGINS='*' 全开放；rate_limit.py:97 限流仅内存字典（单进程计数，多实例不共享）。
+- 修复：
+  a. **CORS 缺省不开放**：routes.py 未设置/为空 QUANT_CORS_ORIGINS 则不挂 CORSMiddleware（白名单设置才开放，allow_credentials 白名单恒 True、'*' 时 False）。
+  b. **Redis 限流后端**：rate_limit.py 新增 RedisFixedWindowLimiter（rl:{name}:{窗口桶}:{key}，INCR+EXPIRE 固定窗口，连接失败按拒绝处理）；新增 create_rate_limiter 按 QUANT_RATE_LIMIT_BACKEND（memory/redis）切换，Redis 后端初始化失败降级内存并显式告警。routes.py 改用 create_rate_limiter。
+- 防未来：限流仅基于当前时间与历史计数（窗口桶），无未来引用；Redis 计数失败 fail-closed（拒绝放行）。
+- 验证结果：py_compile rate_limit/routes 通过；新增 tests/unit/test_rate_limit_redis.py 7 项全绿（Redis 限流至限额/重置/窗口桶隔离/memory 默认/无 redis 降级内存/routes CORS 缺省关闭源码断言/routes 用 create_rate_limiter 源码断言）；ruff 干净（顺手清理既有 Tuple 导入）。
+- 纪律遵守：改蓝图已标注文件（api/middleware/rate_limit.py、api/routes.py）+ tests/unit 新增 test_rate_limit_redis.py（同步更新目录树）；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】

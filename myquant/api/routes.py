@@ -311,20 +311,18 @@ def create_app(
         return _di_get_alert_manager()
 
     # CORS配置（C1修复：通配符 * 与 allow_credentials=True 是无效组合，
-    # 改为环境变量白名单；默认全开放，生产建议设置 QUANT_CORS_ORIGINS）
-    cors_origins = [
-        o.strip()
-        for o in os.environ.get("QUANT_CORS_ORIGINS", "*").split(",")
-        if o.strip()
-    ]
-    cors_allow_credentials = cors_origins != ["*"]
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=cors_origins,
-        allow_credentials=cors_allow_credentials,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    # 改为环境变量白名单；KP-P1-05：缺省不开放——未设置/为空则不挂 CORS 中间件）
+    _cors_raw = os.environ.get("QUANT_CORS_ORIGINS", "")
+    cors_origins = [o.strip() for o in _cors_raw.split(",") if o.strip()]
+    if cors_origins:
+        cors_allow_credentials = cors_origins != ["*"]
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=cors_origins,
+            allow_credentials=cors_allow_credentials,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     # ── L3修复：健康检查注册表（组件可注入真实状态，未注入模块报 unknown）──
     app.state.health_checkers: Dict[str, Any] = {}
@@ -338,10 +336,10 @@ def create_app(
 
     # ── C1修复：认证/限流中间件真实接线（原 enable_auth/enable_rate_limit 参数悬空）──
     from myquant.api.middleware.auth import APIKeyAuth
-    from myquant.api.middleware.rate_limit import FixedWindowLimiter
+    from myquant.api.middleware.rate_limit import create_rate_limiter
 
     _auth = APIKeyAuth(enabled=enable_auth)
-    _limiter = FixedWindowLimiter(
+    _limiter = create_rate_limiter(
         max_requests=int(os.environ.get("QUANT_RATE_LIMIT_MAX", "100")),
         window_seconds=int(os.environ.get("QUANT_RATE_LIMIT_WINDOW", "60")),
     )

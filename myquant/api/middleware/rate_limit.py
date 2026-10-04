@@ -37,11 +37,12 @@ TODO(后续迭代):
 
 from __future__ import annotations
 
+import os
 import time
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 from myquant.core.logger import get_logger
 
@@ -352,6 +353,114 @@ class TokenBucketLimiter(RateLimiter):
         elapsed = now - last_refill
         tokens = min(self.capacity, self._tokens.get(key, self.capacity) + elapsed * self.rate)
         return int(tokens)
+
+
+# ═══════════════════════════════════════════════
+#  Redis 固定窗口限流器（KP-P1-05 分布式后端）
+# ═══════════════════════════════════════════════
+
+class RedisFixedWindowLimiter(RateLimiter):
+    """Redis 固定窗口限流器（KP-P1-05：分布式后端，多实例共享计数）。
+
+    键 = rl:{name}:{窗口桶}:{key}，INCR + EXPIRE 实现固定窗口；
+    redis 缺依赖/连接失败时由 create_rate_limiter 降级内存并显式告警。
+    """
+
+    def __init__(
+        self,
+        max_requests: int = 100,
+        window_seconds: int = 60,
+        name: str = "redis_fixed_window",
+        redis_client: Optional[Any] = None,
+    ) -> None:
+        super().__init__(name=name)
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        if redis_client is not None:
+            self._redis = redis_client
+        else:
+            try:
+                import redis
+            except ImportError as exc:
+                raise RuntimeError("Redis 限流后端需要安装: pip install redis") from exc
+            self._redis = redis.Redis(
+                host=os.environ.get("QUANT_REDIS_HOST", "localhost"),
+                port=int(os.environ.get("QUANT_REDIS_PORT", "6379")),
+                db=int(os.environ.get("QUANT_REDIS_DB", "0")),
+                socket_connect_timeout=5.0,
+                socket_timeout=5.0,
+                decode_responses=True,
+            )
+
+    def _bucket(self, now: float) -> str:
+        return str(int(now // self.window_seconds))
+
+    def _key(self, key: str, bucket: str) -> str:
+        return f"rl:{self.name}:{bucket}:{key}"
+
+    def allow(self, key: str) -> RateLimitResult:
+        now = time.time()
+        rkey = self._key(key, self._bucket(now))
+        try:
+            count = int(self._redis.incr(rkey))
+        except Exception as exc:
+            logger.error("[rate_limit] Redis 限流计数失败（按拒绝处理）: %s", exc)
+            return RateLimitResult(
+                allowed=False, remaining=0, limit=self.max_requests,
+                reset_time=now, retry_after=0.0,
+            )
+        if count == 1:
+            try:
+                self._redis.expire(rkey, self.window_seconds)
+            except Exception:
+                pass  # EXPIRE 失败不影响本次判定，窗口桶随 bucket 切换自然失效
+        reset_time = (int(now // self.window_seconds) + 1) * self.window_seconds
+        if count > self.max_requests:
+            return RateLimitResult(
+                allowed=False, remaining=0, limit=self.max_requests,
+                reset_time=reset_time, retry_after=reset_time - now,
+            )
+        return RateLimitResult(
+            allowed=True, remaining=self.max_requests - count,
+            limit=self.max_requests, reset_time=reset_time, retry_after=0.0,
+        )
+
+    def get_remaining(self, key: str) -> int:
+        now = time.time()
+        try:
+            val = self._redis.get(self._key(key, self._bucket(now)))
+        except Exception:
+            return 0
+        return max(0, self.max_requests - int(val or 0))
+
+    def reset(self, key: Optional[str] = None) -> None:
+        now = time.time()
+        try:
+            if key:
+                self._redis.delete(self._key(key, self._bucket(now)))
+            else:
+                logger.info("[rate_limit] Redis 全量重置 %s（当前窗口桶）", self.name)
+        except Exception as exc:
+            logger.error("[rate_limit] Redis 重置失败: %s", exc)
+
+
+def create_rate_limiter(
+    max_requests: int = 100,
+    window_seconds: int = 60,
+) -> RateLimiter:
+    """按 QUANT_RATE_LIMIT_BACKEND（memory/redis）创建固定窗口限流器（KP-P1-05）。
+
+    Redis 后端不可用（缺依赖/连接失败）→ 显式告警并降级内存，不崩 API。
+    """
+    backend = os.environ.get("QUANT_RATE_LIMIT_BACKEND", "memory").strip().lower()
+    if backend == "redis":
+        try:
+            return RedisFixedWindowLimiter(
+                max_requests=max_requests, window_seconds=window_seconds,
+            )
+        except Exception as exc:
+            logger.error("Redis 限流后端初始化失败，降级内存（KP-P1-05）: %s", exc)
+    return FixedWindowLimiter(max_requests=max_requests, window_seconds=window_seconds)
 
 
 # ═══════════════════════════════════════════════
