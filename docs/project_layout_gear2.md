@@ -353,11 +353,11 @@ Pythonwdhmm/
 
 │   ├── Dockerfile                    # 基于Python官方镜像，安装项目与依赖，设置工作目录；✨【回写#164】非 root 运行（USER appuser）+ pip 去 dev（KP-M01）
 
-│   ├── docker-compose.yml            # 编排服务：应用容器、数据库容器（可选）、监控容器；✨【回写#164】live 探针 pgrep 改业务健康接口（KP-M01：live_status.json 新鲜度）
+│   ├── docker-compose.yml            # 编排服务：应用容器、数据库容器（可选）、监控容器；✨【回写#164】live 探针 pgrep 改业务健康接口（KP-M01：live_status.json 新鲜度）；✨【回写#171】auth 口令改 docker secret + TLS 证书卷 + 8501:443 回环（KP-P4-06）
 
 │   └── nginx/
 
-│       └── dashboard_auth.conf       # ✨【回写补录】Nginx看板基础认证配置（htpasswd保护回测看板/API入口反代），第3批补录蓝图登记
+│       └── dashboard_auth.conf       # ✨【回写补录】Nginx看板基础认证配置（htpasswd保护回测看板/API入口反代），第3批补录蓝图登记；✨【回写#171】TLS+HSTS+明文HTTP跳HTTPS（KP-P4-06）
 
 │
 
@@ -516,6 +516,7 @@ Pythonwdhmm/
 │   │   ├── test_cleanup_service.py # ✨【回写#77】清理pattern保护语义测试（生产报告/真实备份不匹配、测试前缀匹配，4项）✅已完成
 │   │   ├── test_cleanup_dryrun.py   # ✨【回写#163】清理dry-run约束测试(KP-M05：dry-run不删除/execute删除，2项)✅已完成
 │   │   ├── test_docker_min_privilege.py # ✨【回写#164】镜像最小权限测试(KP-M01：dockerignore排除/非root/去dev/live探针业务化，6项)✅已完成
+│   │   ├── test_dashboard_auth.py         # ✨【回写#171】看板鉴权测试(KP-P4-06：TLS/HSTS/301跳转/BasicAuth/口令secret非env/证书卷+回环443，6项)✅已完成
 │   │   ├── test_backup_manifest.py    # ✨【回写#165】备份与恢复测试(KP-P5-06：MANIFEST/篡改判失败/restore/默认源含db+config+state/白名单，6项)✅已完成
 │   │   ├── test_dependency_security.py    # ✨【回写#170】依赖与CI安全测试(KP-M03：marker默认pyproject/参数覆盖/锁文件存在/锁含哈希/ci有安全扫描job，5项)✅已完成
 │   │   ├── test_financial_sync_service.py # ✨【回写#74】财务CSV增量同步测试（定位缺失标的14条排除/新旧合并去重17列头/无新记录None/增量流程/自动入库monkeypatch/无可拉取跳过，6项）✅已完成
@@ -3010,6 +3011,17 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：依赖完整性有哈希锁文件约束、CI 每次提交扫漏洞与密钥泄露、项目根探测与结果备份同源。
 - 验证结果：py_compile 通过；requirements.lock 生成成功且含哈希；ci.yml YAML 校验通过（8 job 含 security-scan）；新增 tests/unit/test_dependency_security.py 5 项全绿（marker 默认 pyproject/参数覆盖/锁文件存在/锁文件含哈希/ci 有安全扫描 job）；回归 11 passed 无回归；ruff 干净（file_utils L746 既有 demo f-string 非本次引入）。
 - 纪律遵守：新建根级 requirements.lock（本回写同步登记根目录树）+ 改蓝图已标注文件（utils/file_utils.py、.github/workflows/ci.yml）+ tests/unit 新增 test_dependency_security.py（同步更新目录树）；无蓝图外文件；严格防未来。
+
+171. ✨【回写记录·2026-10-04·T-38 KP-P4-06 看板鉴权（TLS+强认证+secret 注入）】
+
+【发现】dashboard_auth.conf 仅 listen 80 明文 HTTP 反代 Basic Auth（审计 :4），口令经容器环境变量 DASHBOARD_PASSWORD 明文注入（compose:207），无 TLS/HSTS，明文传输凭证可被嗅探。
+- 修复：
+  a. **TLS 强制**：docker/nginx/dashboard_auth.conf 改 443 ssl 服务块（证书/私钥经 docker/nginx/certs 卷挂载 /etc/nginx/certs，部署方提供不入库）+ ssl_protocols TLSv1.2/1.3 + HSTS（max-age=31536000; includeSubDomains）；明文 HTTP(80) 一律 301 跳转 HTTPS，杜绝明文口令。
+  b. **口令 docker secret 注入**：docker-compose.yml auth 服务删 DASHBOARD_PASSWORD 环境变量明文，顶层新增 secrets.dashboard_auth_password（file: ./nginx/.dashboard_auth_password，不入库）；auth 引用该 secret，command 从 /run/secrets/dashboard_auth_password 读口令生成 htpasswd，secret 缺失即 fail-closed 拒绝启动（杜绝弱口令/空口令静默降级）。
+  c. **证书卷 + 回环绑定**：auth 服务增 ./nginx/certs:/etc/nginx/certs:ro 卷；端口改 8501:443，默认回环绑定 127.0.0.1（非本机不可达），对外需显式 DASHBOARD_BIND=0.0.0.0。
+- 防未来：看板经 TLS+HSTS 强认证传输，口令走 docker secret 不入环境变量，端口回环绑定防非本机越权访问。
+- 验证结果：dashboard_auth.conf 静态校验含 443 ssl/证书/HSTS/301 跳转；docker-compose.yml YAML 校验通过（顶层 secrets、auth 引用 secret、证书卷、8501:443 回环）；新增 tests/unit/test_dashboard_auth.py 6 项全绿；回归 11 passed 无回归；ruff 干净。
+- 纪律遵守：改蓝图已标注文件（docker/nginx/dashboard_auth.conf、docker/docker-compose.yml）+ tests/unit 新增 test_dashboard_auth.py（同步更新目录树）；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】
