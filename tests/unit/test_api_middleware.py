@@ -123,10 +123,14 @@ class TestCorsFix:
     """C1: CORS 通配符与 credentials 互斥修正"""
 
     def test_默认通配不携带凭据(self) -> None:
-        app = create_app(enable_auth=False, enable_rate_limit=False)
-        kwargs = _middleware_kwargs(app, __import__("fastapi.middleware.cors", fromlist=["CORSMiddleware"]).CORSMiddleware)
-        assert kwargs["allow_origins"] == ["*"]
-        assert kwargs["allow_credentials"] is False  # 修复前为 True（无效组合）
+        """KP-P1-05: 缺省（未设 QUANT_CORS_ORIGINS）不挂 CORSMiddleware——CORS 不开放"""
+        os.environ.pop("QUANT_CORS_ORIGINS", None)
+        try:
+            app = create_app(enable_auth=False, enable_rate_limit=False)
+            from fastapi.middleware.cors import CORSMiddleware
+            assert _middleware_kwargs(app, CORSMiddleware) == {}  # 未挂中间件
+        finally:
+            os.environ.pop("QUANT_CORS_ORIGINS", None)
 
     def test_白名单时允许凭据(self) -> None:
         os.environ["QUANT_CORS_ORIGINS"] = "https://example.com"

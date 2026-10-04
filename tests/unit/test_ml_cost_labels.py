@@ -27,7 +27,7 @@ test_ml_cost_labels.py - F-09 训练目标纳入交易成本测试
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import numpy as np
 import pandas as pd
@@ -37,9 +37,7 @@ from myquant.ml.features import FeatureConfig, FeatureEngine, TradeCost
 from myquant.ml.model_registry import ModelRegistry
 from myquant.ml.training_pipeline import TrainingPipeline, evaluate_model
 from myquant.models.backtest import CommissionModel, SlippageModel
-
 from tests.conftest import make_ohlcv_df
-
 
 # ═══════════════════════════════════════════════
 #  常量 / 合成数据构造
@@ -258,7 +256,7 @@ def test_net_return_penalty_less_than_gross() -> None:
     y = np.array([0.02, -0.01, 0.015, 0.01])
     pred = np.array([0.9, -0.4, -0.2, -0.1])  # 方向 [1, -1, -1, -1]：一次反转
     X = np.arange(4.0).reshape(4, 1)
-    m = evaluate_model(
+    evaluate_model(
         _ConstModel(0.0), X, y, label_type="return",
         compute_net=True, roundtrip_rate=ROUNDTRIP_DEFAULT)
     # 用显式 pred 走 _net_strategy 等价路径（_ConstModel 无法表达变向信号，
@@ -331,11 +329,12 @@ def test_e2e_win_gate_net_return(tmp_path: Any) -> None:
     """win gate 用 win_metric="net_return"：更高净收益激活 / 更低 archived。"""
     registry = ModelRegistry(models_root=str(tmp_path / "models"))
     cfg = FeatureConfig()
-    # v1：基准（无门控）→ active
+    # v1：基准（无门控）→ 注册 pending_review，审批激活为 active（KP-P6-05）
     v1 = registry.register_model(
         "gate_model", _ConstModel(0.9),
         metadata={"metrics": {"net_return": 0.02, "turnover": 0.1}},
         feature_config=cfg)
+    registry.approve_version("gate_model", v1.version, approver="test")
     assert registry.get_model_metadata("gate_model", v1.version).status == "active"
     # v2：net_return 更低 → 门控拒绝，archived 不激活
     v2 = registry.register_model(

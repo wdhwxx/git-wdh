@@ -25,7 +25,7 @@ def _make_engine():
         "live": {"trade_mode": "paper", "name": "t15", "initial_capital": 100000},
         "broker": {"type": "paper"},
         "execution": {}, "market_data": {}, "strategy": {},
-        "position": {}, "risk_control": {}, "state_store": {},
+        "position": {}, "risk_control": {}, "state_store": {"auto_recover_on_start": False},  # KP-P5-08 显式必填对齐
         "scheduler": {}, "lookahead_guard": {},
     }
     return create_live_engine(config)

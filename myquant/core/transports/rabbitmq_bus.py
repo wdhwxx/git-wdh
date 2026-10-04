@@ -135,6 +135,7 @@ class RabbitMQTransport(Transport):
         if not self.is_connected:
             raise TransportError("RabbitMQ未连接")
 
+        import pika  # 函数内局部导入：随 sys.modules 动态解析，规避模块级绑定被测试 fake 污染
         msg = Message(topic=topic, payload=payload)
         try:
             # C3: mandatory=True——无匹配队列时 broker 拒绝并触发 confirm 失败
@@ -269,6 +270,7 @@ class RabbitMQTransport(Transport):
             if retry_count < self.max_retry:
                 # 有限重试：ack 当前投递，携带计数重投原队列（避免 requeue 无限循环）
                 try:
+                    import pika  # 函数内局部导入（同 publish，规避模块级绑定污染）
                     self._channel.basic_publish(
                         exchange=self._exchange_name,
                         routing_key=method.routing_key or topic,

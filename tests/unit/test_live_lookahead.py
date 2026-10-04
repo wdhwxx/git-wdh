@@ -18,18 +18,15 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import pytest
-
 from myquant.core.lookahead_guard import LookaheadGuard
-from myquant.live.engine import EngineState, LiveEngine, RiskConfig, create_live_engine
 from myquant.live.brokers.paper_broker import PaperBroker
+from myquant.live.engine import EngineState, LiveEngine, RiskConfig, create_live_engine
 from myquant.live.portfolio import LivePortfolio
 from myquant.live.state_store import StateStore
 from myquant.models.market_data import Bar
 from myquant.models.trade import OrderSide, Trade
 from myquant.strategies.base import Signal, SignalType
 from myquant.strategies.ma_strategy import MACrossStrategy
-
 
 # ═══════════════════════════════════════════
 #  辅助函数
@@ -288,7 +285,7 @@ class TestFactoryConfig:
             "strategy": {"name": "ma_cross"},
             "position": {},
             "risk_control": {"enabled": False},
-            "state_store": {"enabled": False},
+            "state_store": {"enabled": False, "auto_recover_on_start": False},  # KP-P5-08 显式必填对齐
         }
 
     def test_消费enabled_strict(self) -> None:

@@ -704,6 +704,15 @@ class ModelRegistry:
                 gate_passed = self._win_gate_passes(index, ver, metadata, win_metric)
             if not gate_passed:
                 meta.status = "archived"
+            elif require_win_gate:
+                # KP-P6-05：win_gate 门控即自动审批——通过则激活并留 approval 痕迹
+                # （默认 require_win_gate=False 保持 pending_review，未批准不 active）
+                meta.status = "active"
+                meta.approval = {
+                    "approver": "win_gate",
+                    "at": meta.created_at,
+                    "note": "win gate 自动审批（require_win_gate 通过）",
+                }
             # F-07 元数据签名（回写#94）：密钥可用时对完整元数据（剔除签名自字段）
             # 计算 HMAC-SHA256 并落盘；无密钥时降级=不签名+告警（默认零变化）。
             # 签名覆盖 checksum/status 等全部字段——篡改任意字段（含 checksum 字段）
@@ -720,16 +729,16 @@ class ModelRegistry:
                 )
             # metadata.json 落盘
             write_json(str(self._metadata_path(model_name, ver)), meta.to_dict())
-            # 索引双写（新增版本 + 该版本为最新；门控通过才激活）
+            # 索引双写（新增版本 + 该版本为最新；仅 active 状态激活）
             index.setdefault("versions", {})[str(ver)] = self._summary(meta)
             head = index.setdefault("head", {})
             head["latest"] = ver
-            if gate_passed:
+            if meta.status == "active":
                 head["active"] = ver
             else:
                 logger.warning(
-                    "[ml] 新版本 %s@v%d 未跑赢 active，注册为 archived 不激活",
-                    meta.model_name, ver,
+                    "[ml] 新版本 %s@v%d 注册为 %s 不激活（KP-P6-05 未批准不 active）",
+                    meta.model_name, ver, meta.status,
                 )
             self._write_index(model_name, index)
             logger.info(f"[ml] 模型注册成功: {meta.tag} ({meta.model_type})")

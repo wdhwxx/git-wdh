@@ -150,7 +150,7 @@ class TestEngineComplianceGate:
             "strategy": {},
             "position": {},
             "risk_control": {},
-            "state_store": {},
+            "state_store": {"auto_recover_on_start": False},  # KP-P5-08 显式必填对齐
             "scheduler": {},
             "lookahead_guard": {},
             **_empty_config(),
@@ -168,7 +168,7 @@ class TestEngineComplianceGate:
             "strategy": {},
             "position": {},
             "risk_control": {},
-            "state_store": {},
+            "state_store": {"auto_recover_on_start": False},  # KP-P5-08 显式必填对齐
             "scheduler": {},
             "lookahead_guard": {},
         }

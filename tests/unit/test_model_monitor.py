@@ -23,13 +23,13 @@ import numpy as np
 import pytest
 
 from myquant.ml.model_monitor import (
+    STATUS_DEGRADED,
+    STATUS_HEALTHY,
+    STATUS_RETIRED,
     HealthReport,
     ModelMonitor,
     ModelMonitorConfigError,
     ModelMonitorError,
-    STATUS_DEGRADED,
-    STATUS_HEALTHY,
-    STATUS_RETIRED,
 )
 from myquant.ml.model_registry import (
     ModelRegistry,
@@ -37,7 +37,6 @@ from myquant.ml.model_registry import (
     ModelVersion,
 )
 from myquant.ml.training_pipeline import _rank_ic, evaluate_model
-
 
 # ═══════════════════════════════════════════════
 #  测试辅助
@@ -68,13 +67,14 @@ def _make_meta(model_name: str = "m", version: int = 1,
 
 
 def _make_registry(tmp_path: Path, versions: int = 2) -> ModelRegistry:
-    """构造单一模型 m 的 versions 个版本（v1 最早，全部 active）。"""
+    """构造单一模型 m 的 versions 个版本（v1 最早，最新版本经审批 active）。"""
     reg = ModelRegistry(models_root=str(tmp_path / "models"))
     for v in range(1, versions + 1):
         reg.register_model(
             "m", _DummyModel([0.1, 0.2, 0.3]),
             metadata={"metrics": {"ic": 0.04 + v * 0.01}},
         )
+        reg.approve_version("m", v, approver="test")  # KP-P6-05: 审批激活
     return reg
 
 
@@ -235,6 +235,7 @@ def test_run_retire_no_candidate_clears_active(tmp_path: Path) -> None:
     """唯一版本失效且无更早候选 → active 置空"""
     reg = ModelRegistry(models_root=str(tmp_path / "models"))
     reg.register_model("solo", _DummyModel([0.1]), metadata={"metrics": {}})
+    reg.approve_version("solo", 1, approver="test")  # KP-P6-05: 审批激活
     mon = ModelMonitor()
     rep = mon.run("solo", reg, ic_series=[0.0, 0.0, 0.0, 0.0])
     assert rep.status == STATUS_RETIRED
@@ -291,6 +292,7 @@ def test_win_gate_rejects_lower_ic(tmp_path: Path) -> None:
     reg = ModelRegistry(models_root=str(tmp_path / "models"))
     reg.register_model("g", _DummyModel([0.1]),
                        metadata={"metrics": {"ic": 0.08}})
+    reg.approve_version("g", 1, approver="test")  # KP-P6-05: 审批激活基准版本
     new_meta = reg.register_model(
         "g", _DummyModel([0.2]),
         metadata={"metrics": {"ic": 0.03}},
@@ -330,7 +332,7 @@ def test_win_gate_missing_metric_skips(tmp_path: Path) -> None:
 
 
 def test_register_default_zero_change(tmp_path: Path) -> None:
-    """默认 require_win_gate=False → 新版本无条件激活（现有行为）"""
+    """默认 require_win_gate=False → 注册为 pending_review（KP-P6-05 未批准不 active）"""
     reg = ModelRegistry(models_root=str(tmp_path / "models"))
     reg.register_model("g", _DummyModel([0.1]),
                        metadata={"metrics": {"ic": 0.08}})
@@ -338,8 +340,8 @@ def test_register_default_zero_change(tmp_path: Path) -> None:
         "g", _DummyModel([0.2]),
         metadata={"metrics": {"ic": 0.03}},
     )
-    assert new_meta.status == "active"
-    assert reg.get_active_version("g").version == 2  # type: ignore[union-attr]
+    assert new_meta.status == "pending_review"
+    assert reg.get_active_version("g") is None  # 未批准不 active
 
 
 # ═══════════════════════════════════════════════

@@ -37,10 +37,39 @@ class _FakeBasicProperties:
 
 
 _pika.BasicProperties = _FakeBasicProperties
-sys.modules["pika"] = _pika
-sys.modules["pika.exceptions"] = _exc
+# 保存原始绑定（运行期 fixture 注入 fake，测试结束后恢复，避免收集期污染 sys.modules）
+_orig_pika = sys.modules.get("pika")
+_orig_pika_exc = sys.modules.get("pika.exceptions")
 
 import pytest  # noqa: E402
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _fake_pika_and_restore():
+    """运行期注入 fake pika（仅本模块测试期间）并重载 rabbitmq_bus；结束后恢复并重载。
+
+    说明：注入必须发生在运行期而非模块收集期——pytest 收集会 import 全部测试文件，
+    模块级注入会把 fake pika 残留到 sys.modules，污染其他测试文件（如
+    test_message_bus_credentials 的 connect 路径）。
+    """
+    import importlib
+    sys.modules["pika"] = _pika
+    sys.modules["pika.exceptions"] = _exc
+    bus = sys.modules.get("myquant.core.transports.rabbitmq_bus")
+    if bus is not None:
+        importlib.reload(bus)
+    yield
+    if _orig_pika is None:
+        sys.modules.pop("pika", None)
+    else:
+        sys.modules["pika"] = _orig_pika
+    if _orig_pika_exc is None:
+        sys.modules.pop("pika.exceptions", None)
+    else:
+        sys.modules["pika.exceptions"] = _orig_pika_exc
+    bus = sys.modules.get("myquant.core.transports.rabbitmq_bus")
+    if bus is not None:
+        importlib.reload(bus)
 
 from myquant.core.exceptions import TransportError  # noqa: E402
 from myquant.core.transports.base import (  # noqa: E402

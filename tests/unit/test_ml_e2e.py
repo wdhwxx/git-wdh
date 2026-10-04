@@ -51,9 +51,7 @@ from myquant.ml.training_pipeline import (
     TrainingPipeline,
     time_series_split,
 )
-
 from tests.conftest import make_ohlcv_df
-
 
 # ═══════════════════════════════════════════════
 #  合成数据（确定性随机游走，防未来）
@@ -256,7 +254,7 @@ def test_registry_register_list_load(tmp_path: Any) -> None:
     versions = registry.list_versions("rw_model")
     # 版本列表最新在前（降序）
     assert [v["version"] for v in versions] == [2, 1]
-    assert versions[0]["status"] == "active"
+    assert versions[0]["status"] == "pending_review"  # KP-P6-05: 未批准不 active
     loaded = registry.load_model("rw_model", version=2)
     assert loaded == {"tag": "v2"}
 
