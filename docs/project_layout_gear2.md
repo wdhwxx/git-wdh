@@ -171,6 +171,8 @@ Pythonwdhmm/
 ├── .dockerignore                       # ✨【回写#164】根级镜像构建排除（KP-M01：排除 .env*/database/logs/outputs/datasets/实盘状态/实盘信号/backups/.git 等，保留 .env.example）
 
 ├── pyproject.toml                    # 项目元信息、依赖分组（gui/web/live/dev/benchmark），3个插件入口点
+├── requirements.lock                 # ✨【回写#170】哈希锁文件(KP-M03：uv pip compile --generate-hashes 全量 sha256，--require-hashes 校验完整性)
+├── requirements.lock                 # ✨【回写#170】哈希锁文件(KP-M03：uv pip compile --generate-hashes 全量 sha256，--require-hashes 校验完整性)
 
 │                                     # entry-points: myquant.strategies（外部策略包注册）/ myquant.brokers（券商适配器注册）/ myquant.data_sources（行情数据源注册）；pytest配置含lookahead/slow/benchmark标记
 
@@ -363,7 +365,7 @@ Pythonwdhmm/
 
 │   └── workflows/
 
-│       └── ci.yml                    # ✨【V5·P3】CI流水线（重写为7-job）：lint → test（全量tests/u；✨【回写#157】lint 增 BLE001 专项护栏（KP-P1-07：新增裸 except 阻断）nit，gui extras 已装、offscreen 跑 GUI 测试）→ consistency-check（三模式一致性）→ backtest-smoke（回测冒烟）→ docker-build（构建镜像）→ live-config-check（实盘配置检查）→ data-clean（数据清洗单元测试）；任一job失败即阻断合并；✨【回写#166】live-config-check 增 example vs 生产键级 diff + docker-build 镜像打 git sha tag（KP-P5-07）
+│       └── ci.yml                    # ✨【V5·P3】CI流水线（重写为7-job）：lint → test（全量tests/u；✨【回写#157】lint 增 BLE001 专项护栏（KP-P1-07：新增裸 except 阻断）nit，gui extras 已装、offscreen 跑 GUI 测试）→ consistency-check（三模式一致性）→ backtest-smoke（回测冒烟）→ docker-build（构建镜像）→ live-config-check（实盘配置检查）→ data-clean（数据清洗单元测试）；任一job失败即阻断合并；✨【回写#166】live-config-check 增 example vs 生产键级 diff + docker-build 镜像打 git sha tag（KP-P5-07）；✨【回写#170】增 security-scan job（KP-M03：pip-audit 依赖漏洞 + gitleaks 密钥扫描）
 
 │
 
@@ -515,6 +517,7 @@ Pythonwdhmm/
 │   │   ├── test_cleanup_dryrun.py   # ✨【回写#163】清理dry-run约束测试(KP-M05：dry-run不删除/execute删除，2项)✅已完成
 │   │   ├── test_docker_min_privilege.py # ✨【回写#164】镜像最小权限测试(KP-M01：dockerignore排除/非root/去dev/live探针业务化，6项)✅已完成
 │   │   ├── test_backup_manifest.py    # ✨【回写#165】备份与恢复测试(KP-P5-06：MANIFEST/篡改判失败/restore/默认源含db+config+state/白名单，6项)✅已完成
+│   │   ├── test_dependency_security.py    # ✨【回写#170】依赖与CI安全测试(KP-M03：marker默认pyproject/参数覆盖/锁文件存在/锁含哈希/ci有安全扫描job，5项)✅已完成
 │   │   ├── test_financial_sync_service.py # ✨【回写#74】财务CSV增量同步测试（定位缺失标的14条排除/新旧合并去重17列头/无新记录None/增量流程/自动入库monkeypatch/无可拉取跳过，6项）✅已完成
 │   │   ├── test_data_download_finance_sync.py # ✨【回写#75】GUI财务CSV增量更新选项测试（选项注册完整/执行顺序在入库前/_entry_finance_sync调用服务返回同构汇总，3项）✅已完成
 │   │   ├── test_data_download_cli_incremental.py # ✨【回写#86】CLI数据下载增量链路测试（池过滤只进清洗池/写回走清洗链路复用records无二次拉取/写回失败逐只计数不阻断，3项）✅已完成
@@ -1109,7 +1112,7 @@ Pythonwdhmm/
 
         ├── time_utils.py             # 日期时间、时区、交易日历，清洗模块强依赖本工具
 
-        ├── file_utils.py             # 路径读写压缩；✨【回写#165】backup_files 写 MANIFEST.sha256 + verify_backup/restore_backup（KP-P5-06）
+        ├── file_utils.py             # 路径读写压缩；✨【回写#165】backup_files 写 MANIFEST.sha256 + verify_backup/restore_backup（KP-P5-06）；✨【回写#170】find_project_root 默认 marker 改 pyproject.toml（KP-M03）
 
         ├── math_utils.py             # 统计、数值格式化，用于异常值检测（3σ、四分位）
 
@@ -2996,6 +2999,17 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：事故有分级/时限/处置/复盘闭环，健康巡检 CRITICAL 可自动暂停开仓，杜绝『告警后无人处置』『事故无留痕』。
 - 验证结果：py_compile 通过；新增 tests/unit/test_incident_response.py 6 项全绿（CRITICAL+pause_on_critical 暂停/缺省不暂停/WARNING 不暂停/pause 异常不崩/制度文档要素/配置 on_unhealthy 声明）；回归 12 passed 无回归；ruff 干净；live_config.yaml YAML 校验通过。
 - 纪律遵守：新建 docs/实盘事故响应与复盘制度.md（本回写同步登记 docs 树）+ 改蓝图已标注文件（live/scheduler.py）+ 本地真实配置 live_config.yaml（不入库）+ tests/unit 新增 test_incident_response.py；无蓝图外文件；严格防未来。
+
+170. ✨【回写记录·2026-10-04·T-37 KP-M03 依赖与 CI 安全】
+
+【发现】依赖无哈希锁文件（pyproject 仅版本区间，无锁/无哈希校验，供应链篡改不可防）；CI 无安全扫描（无 pip-audit 漏洞扫描、无 gitleaks 密钥扫描）；file_utils.py find_project_root 默认 marker=requirements.txt（项目无该文件，与 scripts/结果备份.py 的 pyproject.toml 不一致）。
+- 修复：
+  a. **哈希锁文件**：`uv pip compile pyproject.toml --generate-hashes --all-extras` 生成根级 requirements.lock（含全部直接+传递依赖的 sha256 哈希，3222 行/2910 哈希）提交入库；CI/生产安装可 `--require-hashes` 校验完整性。
+  b. **CI 安全扫描**：.github/workflows/ci.yml 增 security-scan job（needs lint+test）：pip-audit 依赖漏洞扫描（有锁文件扫 requirements.lock）+ gitleaks 密钥泄露扫描（gitleaks-action），任一发现漏洞/密钥即阻断合并。
+  c. **marker 对齐**：myquant/utils/file_utils.py find_project_root 默认 marker 改 pyproject.toml（与 scripts/结果备份.py 一致），marker 参数仍可覆盖。
+- 防未来：依赖完整性有哈希锁文件约束、CI 每次提交扫漏洞与密钥泄露、项目根探测与结果备份同源。
+- 验证结果：py_compile 通过；requirements.lock 生成成功且含哈希；ci.yml YAML 校验通过（8 job 含 security-scan）；新增 tests/unit/test_dependency_security.py 5 项全绿（marker 默认 pyproject/参数覆盖/锁文件存在/锁文件含哈希/ci 有安全扫描 job）；回归 11 passed 无回归；ruff 干净（file_utils L746 既有 demo f-string 非本次引入）。
+- 纪律遵守：新建根级 requirements.lock（本回写同步登记根目录树）+ 改蓝图已标注文件（utils/file_utils.py、.github/workflows/ci.yml）+ tests/unit 新增 test_dependency_security.py（同步更新目录树）；无蓝图外文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】

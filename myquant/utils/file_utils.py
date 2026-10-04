@@ -34,10 +34,10 @@ from typing import Any, Dict, List, Optional, Union
 # 项目根路径探测
 # ─────────────────────────────────────────────
 
-def find_project_root(marker: str = "requirements.txt", max_depth: int = 5) -> Path:
+def find_project_root(marker: str = "pyproject.toml", max_depth: int = 5) -> Path:
     """
     从当前文件向上搜索项目根目录
-    通过 marker 文件识别 (默认 requirements.txt)
+    通过 marker 文件识别 (默认 pyproject.toml，与 scripts/结果备份.py 一致)
 
     Returns
     -------
