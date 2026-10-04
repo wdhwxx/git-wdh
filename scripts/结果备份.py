@@ -127,6 +127,20 @@ def setup_argument_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="列出所有备份并退出",
     )
+    parser.add_argument(
+        "--verify",
+        metavar="PATH",
+        nargs="?",
+        const="latest",
+        help="校验备份 MANIFEST.sha256 完整性（缺省校验最近备份）",
+    )
+    parser.add_argument(
+        "--restore",
+        metavar="PATH",
+        nargs="?",
+        const="latest",
+        help="按 MANIFEST 还原备份到项目根（缺省还原最近备份）",
+    )
 
     # 其他
     parser.add_argument(
@@ -179,6 +193,9 @@ def cleanup_old_backups(backup_dir: Path, keep: int) -> int:
 
     deleted = 0
     for item in items[keep:]:
+        # KP-P5-06: 白名单/锁定标记——含 .keep 标记的备份不清理（避免误删受保护备份）
+        if _is_locked_backup(item):
+            continue
         if item.is_dir():
             shutil.rmtree(item)
         else:
@@ -186,6 +203,26 @@ def cleanup_old_backups(backup_dir: Path, keep: int) -> int:
         deleted += 1
 
     return deleted
+
+
+def _is_locked_backup(item: Path) -> bool:
+    """KP-P5-06: 判断备份是否带锁定/白名单标记（.keep），带标记不参与自动清理。"""
+    if item.name.endswith(".keep"):
+        return True
+    if item.is_dir() and (item / ".keep").exists():
+        return True
+    return False
+
+
+def _resolve_backup(backup_dir: Path, spec: str) -> Optional[Path]:
+    """解析备份路径：'latest' 取最近备份，否则按给定路径。"""
+    if spec and spec != "latest":
+        p = Path(spec)
+        return p if p.exists() else None
+    if not backup_dir.exists():
+        return None
+    items = sorted(backup_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
+    return items[0] if items else None
 
 
 def collect_backup_sources(
@@ -211,20 +248,27 @@ def collect_backup_sources(
     if logs_dir.exists():
         sources.append((logs_dir, "logs"))
 
-    # 数据库（可选）
-    if include_db or all_mode:
-        db_path = project_root / "database" / "quant.db"
-        if db_path.exists():
-            sources.append((db_path, "database/quant.db"))
+    # 数据库（KP-P5-06：默认纳入，不再可选 gate）
+    db_path = project_root / "database" / "quant.db"
+    if db_path.exists():
+        sources.append((db_path, "database/quant.db"))
 
-    # 配置文件（可选，注意敏感信息）
-    if include_config or all_mode:
-        config_dir = project_root / "config"
-        if config_dir.exists():
-            # 只备份实际配置文件（.yaml），不备份 .example.yaml 模板
-            for yaml_file in config_dir.glob("*.yaml"):
-                if not yaml_file.name.endswith(".example.yaml"):
-                    sources.append((yaml_file, f"config/{yaml_file.name}"))
+    # 配置文件（KP-P5-06：默认纳入实际配置，跳过 example 模板）
+    config_dir = project_root / "config"
+    if config_dir.exists():
+        for yaml_file in config_dir.glob("*.yaml"):
+            if not yaml_file.name.endswith(".example.yaml"):
+                sources.append((yaml_file, f"config/{yaml_file.name}"))
+
+    # 实盘状态/信号（KP-P5-06：默认纳入 state，供崩溃恢复还原）
+    for state_dir, rel in (
+        ("实盘状态", "实盘状态"),
+        ("实盘信号", "实盘信号"),
+        ("datasets/live_state", "datasets/live_state"),
+    ):
+        sd = project_root / state_dir
+        if sd.exists():
+            sources.append((sd, rel))
 
     return sources
 
@@ -253,6 +297,32 @@ def run_backup(args: argparse.Namespace) -> int:
     if args.list:
         list_backups(backup_dir)
         return 0
+
+    # 校验备份模式（KP-P5-06）
+    if args.verify is not None:
+        target = _resolve_backup(backup_dir, args.verify)
+        if target is None:
+            print(f"[错误] 未找到待校验备份: {args.verify}")
+            return 1
+        from myquant.utils.file_utils import verify_backup as _vb
+        res = _vb(target)
+        print(f"[校验] {target.name}: 核对 {res['checked']} 项, ok={res['ok']}")
+        for m in res["mismatches"]:
+            print(f"  ✗ {m['path']}: {m['reason']}")
+        return 0 if res["ok"] else 2
+
+    # 还原备份模式（KP-P5-06）
+    if args.restore is not None:
+        target = _resolve_backup(backup_dir, args.restore)
+        if target is None:
+            print(f"[错误] 未找到待还原备份: {args.restore}")
+            return 1
+        from myquant.utils.file_utils import restore_backup as _rb
+        res = _rb(target, project_root)
+        print(f"[还原] {target.name}: 还原 {res['restored']} 项, ok={res['ok']}")
+        for e in res["errors"]:
+            print(f"  ✗ {e}")
+        return 0 if res["ok"] else 2
 
     # 收集备份源
     sources = collect_backup_sources(

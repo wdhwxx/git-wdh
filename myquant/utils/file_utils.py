@@ -361,6 +361,19 @@ def backup_files(
                             zf.write(file_path, arcname)
                 else:
                     zf.write(src, f"{backup_name}/{rel_path}")
+        # KP-P5-06: 备份内写 MANIFEST.sha256（每文件 sha256，供还原比对）
+        manifest_lines: List[str] = []
+        for src, rel_path in sources:
+            src = Path(src)
+            if src.is_dir():
+                for file_path in src.rglob("*"):
+                    if file_path.is_file():
+                        rel = f"{rel_path}/{file_path.relative_to(src).as_posix()}"
+                        manifest_lines.append(f"{file_sha256(file_path)}  {rel}")
+            else:
+                manifest_lines.append(f"{file_sha256(src)}  {rel_path}")
+        with zipfile.ZipFile(zip_path, "a", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(f"{backup_name}/MANIFEST.sha256", "\n".join(sorted(manifest_lines)))
         return {"path": zip_path, "size": zip_path.stat().st_size, "mode": "zip"}
     dest_dir = output_dir / backup_name
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -375,7 +388,147 @@ def backup_files(
         else:
             shutil.copy2(src, dest)
             total += dest.stat().st_size
+    # KP-P5-06: 备份内写 MANIFEST.sha256（每文件 sha256，供还原比对）
+    _write_manifest(dest_dir)
     return {"path": dest_dir, "size": total, "mode": "dir"}
+
+# ─────────────────────────────────────────────
+# 备份 MANIFEST / 校验 / 还原（KP-P5-06）
+# ─────────────────────────────────────────────
+
+def _write_manifest(backup_dir: Path) -> None:
+    """写备份目录 MANIFEST.sha256（备份内每文件 sha256）。"""
+    lines: List[str] = []
+    for f in sorted(backup_dir.rglob("*")):
+        if f.is_file() and f.name != "MANIFEST.sha256":
+            rel = f.relative_to(backup_dir).as_posix()
+            lines.append(f"{file_sha256(f)}  {rel}")
+    manifest_path = backup_dir / "MANIFEST.sha256"
+    manifest_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _manifest_digests(manifest_path: Path) -> List[tuple]:
+    """解析 MANIFEST.sha256 为 [(sha256, rel), ...]。"""
+    entries: List[tuple] = []
+    for line in manifest_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        digest, _, rel = line.partition("  ")
+        if digest and rel:
+            entries.append((digest, rel))
+    return entries
+
+
+def verify_backup(backup_path: Union[str, Path]) -> Dict[str, Any]:
+    """校验备份完整性：读 MANIFEST.sha256 逐文件比对 sha256（抽样还原比对）。
+
+    Parameters
+    ----------
+    backup_path : 备份目录（含 MANIFEST.sha256）或 zip 文件。
+
+    Returns
+    -------
+    Dict : {"ok": bool, "checked": int, "mismatches": [{"path", "reason"}]}
+    """
+    backup_path = Path(backup_path)
+    mismatches: List[Dict[str, str]] = []
+    checked = 0
+    if backup_path.is_dir():
+        manifest = backup_path / "MANIFEST.sha256"
+        if not manifest.exists():
+            return {"ok": False, "checked": 0, "mismatches": [{"path": "MANIFEST.sha256", "reason": "缺失"}]}
+        for digest, rel in _manifest_digests(manifest):
+            f = backup_path / rel
+            if not f.is_file():
+                mismatches.append({"path": rel, "reason": "文件缺失"})
+            elif file_sha256(f) != digest:
+                mismatches.append({"path": rel, "reason": "哈希不一致"})
+            checked += 1
+    elif backup_path.is_file() and zipfile.is_zipfile(backup_path):
+        with zipfile.ZipFile(backup_path) as zf:
+            names = zf.namelist()
+            mrel = next((n for n in names if n.endswith("MANIFEST.sha256")), None)
+            if mrel is None:
+                return {"ok": False, "checked": 0, "mismatches": [{"path": "MANIFEST.sha256", "reason": "缺失"}]}
+            base = mrel[: -len("MANIFEST.sha256")]
+            for digest, rel in _manifest_digests_from_text(zf.read(mrel).decode("utf-8")):
+                arc = f"{base}{rel}"
+                if arc not in names:
+                    mismatches.append({"path": rel, "reason": "文件缺失"})
+                elif hashlib.sha256(zf.read(arc)).hexdigest() != digest:
+                    mismatches.append({"path": rel, "reason": "哈希不一致"})
+                checked += 1
+    else:
+        return {"ok": False, "checked": 0, "mismatches": [{"path": str(backup_path), "reason": "非备份目录/zip"}]}
+    return {"ok": not mismatches, "checked": checked, "mismatches": mismatches}
+
+
+def _manifest_digests_from_text(text: str) -> List[tuple]:
+    """从 MANIFEST 文本解析 [(sha256, rel), ...]。"""
+    entries: List[tuple] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        digest, _, rel = line.partition("  ")
+        if digest and rel:
+            entries.append((digest, rel))
+    return entries
+
+
+def restore_backup(backup_path: Union[str, Path], target_root: Union[str, Path]) -> Dict[str, Any]:
+    """按 MANIFEST.sha256 将备份还原到目标根目录（相对路径回写）。
+
+    Parameters
+    ----------
+    backup_path : 备份目录或 zip 文件。
+    target_root : 还原目标根目录（如项目根）。
+
+    Returns
+    -------
+    Dict : {"ok": bool, "restored": int, "errors": [str]}
+    """
+    backup_path = Path(backup_path)
+    target_root = Path(target_root)
+    target_root.mkdir(parents=True, exist_ok=True)
+    restored = 0
+    errors: List[str] = []
+    if backup_path.is_dir():
+        manifest = backup_path / "MANIFEST.sha256"
+        if not manifest.exists():
+            return {"ok": False, "restored": 0, "errors": ["MANIFEST.sha256 缺失"]}
+        for digest, rel in _manifest_digests(manifest):
+            src = backup_path / rel
+            dst = target_root / rel
+            try:
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+                restored += 1
+            except Exception as e:
+                errors.append(f"{rel}: {e}")
+    elif backup_path.is_file() and zipfile.is_zipfile(backup_path):
+        with zipfile.ZipFile(backup_path) as zf:
+            mrel = next((n for n in zf.namelist() if n.endswith("MANIFEST.sha256")), None)
+            if mrel is None:
+                return {"ok": False, "restored": 0, "errors": ["MANIFEST.sha256 缺失"]}
+            base = mrel[: -len("MANIFEST.sha256")]
+            for digest, rel in _manifest_digests_from_text(zf.read(mrel).decode("utf-8")):
+                arc = f"{base}{rel}"
+                if arc not in zf.namelist():
+                    errors.append(f"{rel}: zip 内缺失")
+                    continue
+                dst = target_root / rel
+                try:
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    dst.write_bytes(zf.read(arc))
+                    restored += 1
+                except Exception as e:
+                    errors.append(f"{rel}: {e}")
+    else:
+        return {"ok": False, "restored": 0, "errors": ["非备份目录/zip"]}
+    return {"ok": not errors, "restored": restored, "errors": errors}
+
 
 # ─────────────────────────────────────────────
 # 文件哈希 / 校验
