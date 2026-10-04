@@ -108,7 +108,9 @@ def test_风险管理器订阅总线失败_订单风控仍生效(engine_factory)
         RiskManager, "subscribe_to_event_bus", side_effect=RuntimeError("sub fail")
     ):
         assert engine.start() is True
-    # 订单前置风控不依赖总线，仍可正常检查
+    # 订单前置风控不依赖总线，仍可正常检查（KP-P3-04 需昨收+现价基准，注入使放行）
+    engine._prev_close_map["000001.SZ"] = 10.0
+    engine._last_prices["000001.SZ"] = 10.5
     assert engine._risk_manager_check(_buy_order(), None) is True
     engine.stop()
 
@@ -181,8 +183,10 @@ def test_事件总线不可用_订单链路仍完整(engine_factory) -> None:
         "myquant.live.engine.get_event_bus", side_effect=RuntimeError("bus down")
     ):
         assert engine.start() is True
-    # 风控检查通过
+    # 风控检查通过（KP-P3-04 需昨收+现价基准，注入使放行）
     order = _buy_order()
+    engine._prev_close_map["000001.SZ"] = 10.0
+    engine._last_prices["000001.SZ"] = 10.5
     assert engine._risk_manager_check(order, None) is True
     # 订单正常提交至券商（先建立行情基准，市价单撮合需要）
     assert engine._broker_manager is not None

@@ -47,7 +47,8 @@ from __future__ import annotations
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, time as dtime
+from datetime import datetime
+from datetime import time as dtime
 from typing import Any, Dict, List, Optional, Set
 
 from myquant.core.logger import get_logger
@@ -220,7 +221,7 @@ class PositionLimitRule(RiskRule):
             pos = context.get_position(order.symbol)
             current_qty = pos.get("quantity", 0) if pos else 0
             if current_qty + order.quantity > self.max_quantity_per_symbol:
-                return self._reject(f"单票持仓数超限")
+                return self._reject("单票持仓数超限")
 
         return self._pass()
 
@@ -404,7 +405,11 @@ class PriceLimitRule(RiskRule):
         current_price = context.current_price.get(order.symbol, 0)
         prev_close = context.extra.get("prev_close", {}).get(order.symbol, 0)
         if current_price <= 0 or prev_close <= 0:
-            return self._pass(reason="价格信息不足，跳过涨跌停检查")
+            # KP-P3-04：缺价 fail-closed（无法判定涨跌停 → 拒绝下单，而非放行）
+            return self._reject(
+                f"价格信息不足，拒绝下单（fail-closed）: {order.symbol} "
+                f"current_price={current_price} prev_close={prev_close}"
+            )
         change_pct = (current_price - prev_close) / prev_close
         if order.side == OrderSide.BUY and change_pct >= self.limit_pct:
             return self._reject(f"涨停不能买入: {order.symbol} 涨幅{change_pct*100:.1f}%")

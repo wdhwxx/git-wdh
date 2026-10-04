@@ -353,6 +353,7 @@ class LiveEngine(BaseEngine):
         self._order_count_today: int = 0
         self._last_order_time: float = 0.0
         self._last_prices: Dict[str, float] = {}
+        self._prev_close_map: Dict[str, float] = {}  # KP-P3-04：昨收（行情快照前收字段，风控涨跌停用）
         # ── 任务46/P1：单日亏损上限（日初资产快照 + 当前交易日，跨日重置）──
         self._day_start_assets: float = 0.0
         self._active_trading_date: str = ""
@@ -945,6 +946,12 @@ class LiveEngine(BaseEngine):
 
             # 5.1 H2修复：记录最新价/峰值资产（风控上下文，仅"已发生"事实）
             self._last_prices[symbol] = float(bar_obj.close)
+            # KP-P3-04：捕获行情快照前收字段，注入风控上下文（涨跌停 fail-closed 判定）
+            _pc = bar.get("prev_close")
+            if _pc is not None:
+                _pcv = float(_pc or 0)
+                if _pcv > 0:
+                    self._prev_close_map[symbol] = _pcv
             if self._portfolio:
                 _total_assets = self._portfolio.get_total_assets()
                 if _total_assets > self._peak_assets:
@@ -1656,7 +1663,8 @@ class LiveEngine(BaseEngine):
             last_order_time=self._last_order_time,
             trading_date=today,
             day_start_assets=self._day_start_assets,
-            extra={"current_time": datetime.now().strftime("%H:%M:%S")},
+            extra={"current_time": datetime.now().strftime("%H:%M:%S"),
+                    "prev_close": dict(self._prev_close_map)},
         )
 
     def _risk_manager_check(self, order: Order, bar: Optional[Bar]) -> bool:

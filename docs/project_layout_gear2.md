@@ -540,6 +540,7 @@ Pythonwdhmm/
 │   │   ├── test_engine_benchmark.py  # ✨【V5·P3】三模式性能基准测试（吞吐/耗时阈值断言，15项）
 
 │   │   ├── test_live_guard_failover.py # ✨【回写#31】实盘保障组件故障注入（审计H2降级：事件总线断连/订阅失败/挂载失败/风控异常拒单/调度失败/巡检异常/快照失败/全组件关闭，10项）✅已完成
+│   │   ├── test_price_limit_fail_closed.py # ✨【回写#146】涨跌停硬拦截fail-closed测试(KP-P3-04：缺prev_close拒绝/涨停拒买/跌停拒卖/正常放行/engine注入prev_close，5项)✅已完成
 
 │   │   ├── test_qmt_broker_live.py  # ✨【回写#41】QMT实盘通道测试（fake SDK不连真实QMT：模式隔离/连接流程/委托撤单/成交回调/资金持仓/状态映射，23项）✅已完成
 │   │   ├── test_live_fee.py          # ✨【回写#143】LIVE费用计提测试（KP-P4-03：10万买单fee>0/卖单含印花税/佣金最低5元兜底/本地账本现金守恒/卖单回笼扣费/与回测FeeCalculator同构，6项）✅已完成
@@ -915,7 +916,7 @@ Pythonwdhmm/
 
     │   ├── guardian.py               # 风控守护进程：健康监控、强制平仓断开
 
-    │   └── rules.py                  # 风控规则库
+    │   └── rules.py                  # 风控规则库；✨【回写#146】PriceLimitRule 缺昨收/现价 fail-closed（KP-P3-04：拒绝下单而非跳过放行）
 
     │
 
@@ -963,7 +964,7 @@ Pythonwdhmm/
 
     │   ├── __init__.py
 
-    │   ├── engine.py                 # 实盘引擎继承BaseEngine，协调数据、策略、执行、风控；✨【回写#139】on_market_data 增 (symbol,date) bar级去重（KP-P3-02：_seen_bars集合，同根bar二次推送直接丢弃不达撮合，stats.bar_dedup_skipped计数，启动clear）；✨【回写#142】成交/订单关系账接线（KP-P4-02：可选 trade_ledger 注入，on_order_update 逐笔订单、on_trade 逐笔成交同步落库，长期归档）
+    │   ├── engine.py                 # 实盘引擎继承BaseEngine，协调数据、策略、执行、风控；✨【回写#139】on_market_data 增 (symbol,date) bar级去重（KP-P3-02：_seen_bars集合，同根bar二次推送直接丢弃不达撮合，stats.bar_dedup_skipped计数，启动clear）；✨【回写#142】成交/订单关系账接线（KP-P4-02：可选 trade_ledger 注入，on_order_update 逐笔订单、on_trade 逐笔成交同步落库，长期归档）；✨【回写#146】on_market_data 捕获行情前收字段注入风控上下文（KP-P3-04：_prev_close_map，_build_risk_context extra 注入 prev_close）
 
     │   │                             # 【任务27】接入 BrokerManager 多券商管理器：set_broker自动包装(单券商向后兼容)/set_broker_manager(多券商并行)
 
@@ -2722,3 +2723,15 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：昨收/撮合价均为已发生事实；不由首笔行情自推、不用当日收盘价撮合。
 - 验证结果：py_compile 通过；新增 tests/unit/test_qmt_prev_close.py 7 项全绿（update/set_market_price 注入且首笔不覆盖/set_prev_close 显式注入/跨日重置/缺昨收拒绝(DoD)/有昨收涨停跌停边界/manager 用 open 撮合+注入昨收(DoD)）；qmt/live 广回归 299 passed 无回归；ruff 测试通过（qmt_broker 4 处既有 F541/F821/F841 非本次引入，manager I001 导入排序随 ruff 整理）。
 - 纪律遵守：仅改蓝图已标注文件（live/brokers/qmt_broker.py、manager.py）+ tests/unit 新增 test_qmt_prev_close.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+
+146. ✨【回写记录·2026-10-04·T-12 KP-P3-04 涨跌停事前硬拦截恒失效（fail-open）】
+
+【发现】`risk/rules.py:406-407` PriceLimitRule 缺 prev_close/current_price 时 `_pass("价格信息不足，跳过")`（fail-open——无价也放行）；`engine.py` 构造风控上下文时未从行情快照注入 prev_close（data_feed 快照已含该字段，未接入）；`qmt_broker.py:1342` 缺昨收 `return True`（已在 T-11 改为 return False）。
+- 修复：
+  a. **rules.py PriceLimitRule fail-closed**：缺 prev_close 或 current_price → `_reject`（拒绝下单，不再跳过放行）。
+  b. **engine.py 注入 prev_close**：on_market_data 从 bar 快照捕获 prev_close 存入 `_prev_close_map`（>0 才存）；`_build_risk_context` 的 extra 注入 `prev_close=dict(self._prev_close_map)`，供 PriceLimitRule 涨跌停判定。
+  c. qmt_broker.py:1342 fail-closed 已在 T-11 完成。
+- 防未来：昨收/现价均为已发生事实，由行情快照注入，不预测。
+- 验证结果：py_compile 通过；新增 tests/unit/test_price_limit_fail_closed.py 5 项全绿（缺prev_close拒绝(DoD)/涨停拒买/跌停拒卖/正常放行/engine注入prev_close到extra(DoD)）；risk/live 广回归 251 passed（同步 test_live_guard_failover.py 两处注入 prev_close+现价以保持事件总线韧性语义）；ruff 全部通过。
+- 纪律遵守：仅改蓝图已标注文件（risk/rules.py、live/engine.py）+ tests/unit 新增 test_price_limit_fail_closed.py + 同步既有 test_live_guard_failover.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
