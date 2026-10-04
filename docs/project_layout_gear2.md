@@ -964,7 +964,7 @@ Pythonwdhmm/
 
     │   │                             # ✅已实现：DataQualityRiskConfig + SymbolDataQualityStatus + subscribe_to_event_bus(3类事件) + 脏数据自动暂停(单标的/全局) + 自动恢复
 
-    │   ├── guardian.py               # 风控守护进程：健康监控、强制平仓断开；✨【回写#152】force_close_all/symbol 无回调 return False（KP-M02：不假成功）
+    │   ├── guardian.py               # 风控守护进程：健康监控、强制平仓断开；✨【回写#152】force_close_all/symbol 无回调 return False（KP-M02：不假成功）；✨【回写#186】KP-M04(T-30)：force_close_all/symbol 高危写操作准入守卫（未审批拒绝，默认仅审计留痕）
 
     │   └── rules.py                  # 风控规则库；✨【回写#146】PriceLimitRule 缺昨收/现价 fail-closed（KP-P3-04：拒绝下单而非跳过放行）；✨【回写#148】StopLossRule 增 stop_price(avg_cost) 共享止损触发价口径（KP-P3-07，回测/混合引擎复用）；✨【回写#150】TradingHoursRule 增交易日维度（KP-P3-10：真实交易日历懒加载，非交易日拒绝下单）；✨【回写#153】异常交易类规则（KP-P3-06：SelfTrade 自成交互斥/CancelRate 撤单率/FatFinger 胖手指，注册 RULE_REGISTRY）
 
@@ -1026,7 +1026,7 @@ Pythonwdhmm/
 
     │   ├── data_feed.py              # 实时行情接入订阅重连分发；流式清洗(单条校验+跳变检测) + attach_event_bus事件总线联动 + 脏数据钩子；✨【回写#83】S2 live复权口径统一：_fetch_from_akshare 改拉不复权raw（adjust=""，与腾讯快照/本地历史同口径）/新增 adjust_out 参数（"qfq"按最新因子现算÷因子）+_stream_clean 除权跳变因子豁免（_live_jump_change_with_factor）+_clean_bars 注入 factor_lookup（config副本不污染共享配置）；✨【回写#139】_make_bar 的 timestamp 改 bar 周期归属时间 bar_date_to_epoch(formatted_date)（KP-P3-02，弃用墙钟 time.time()，避免同根bar因墙钟时刻不同被误判不同bar）
 
-    │   ├── portfolio.py              # 实时持仓、市值、可用冻结资金；✨【回写#141】账实对账 ReconciliationDiff + reconcile_vs_broker（KP-P4-01：本地 vs 券商只读 diff，现金容差0.01+持仓数量差）+ sync_from_broker 改先 diff 后重建，超阈值 critical 告警+__reconciliation_diff__ 回调，禁静默 clear 覆盖；✨【回写#149】增 diff_vs_broker 只读差异入口（KP-P3-08 风控基准券商权威账本）
+    │   ├── portfolio.py              # 实时持仓、市值、可用冻结资金；✨【回写#141】账实对账 ReconciliationDiff + reconcile_vs_broker（KP-P4-01：本地 vs 券商只读 diff，现金容差0.01+持仓数量差）+ sync_from_broker 改先 diff 后重建，超阈值 critical 告警+__reconciliation_diff__ 回调，禁静默 clear 覆盖；✨【回写#149】增 diff_vs_broker 只读差异入口（KP-P3-08 风控基准券商权威账本）；✨【回写#186】KP-M04(T-30)：transfer_cash 高危写操作准入守卫（未审批拒绝，默认仅审计留痕）
 
     │   ├── scheduler.py              # 定时任务、巡检、日报；✨【回写#169】健康巡检 CRITICAL 可执行处置（KP-P5-11：pause_on_critical 自动暂停开仓/降级）；✨【回写#141】attach_engine 增 enable_reconcile/reconcile_cron 盘后账实对账 cron（KP-P4-01：只对账不重建，超阈值 critical 告警）；✨【回写#160】巡检健康告警闭环（KP-P5-03：run_all 非 healthy → alert_mgr.alert）；✨【回写#161】告警升级检查周期任务（KP-P5-04：check_escalations 接入调用方）；✨【回写#182】月频模型治理任务（KP-P6-05：enable_monthly_governance+monthly_governance_cron 注册月频任务，run_monthly_model_governance 未批准不 active + 漂移告警）
 
@@ -1036,7 +1036,7 @@ Pythonwdhmm/
 
     │   ├── emergency_liquidation.py  # ✨【回写#47补录】紧急平仓服务（EmergencyLiquidationService：execute(confirm=False默认dry_run)生成撤单+平仓计划；先撤挂单再卖/优先可卖数量/单标异常不阻断/报告结构化）；被engine._setup_force_close与scripts/一键平仓.py调用；✨【回写#152】增 executed/planned 字段（KP-M02：dry-run 恒 executed=False、计划计 planned 不冒充 success、真实撤单/平仓置 executed）
 
-    │   ├── run_mode.py               # ✨【回写#52】运行模式切割接口：RunMode枚举(MONITOR/PAPER/SIM/LIVE)+describe+resolve(专先CLI>配置>默认paper)+apply_mode_to_config写回+validate_live实盘安全门(--confirm-live+证券qmt/ptrade+账户)+check_mode_consistency配置一致性；被run_实盘入口与create_live_engine消费；未来实盘切割 --mode sim→--mode live --confirm-live 一步切换；✨【回写#144】validate_live 增 KP-P6-01 报备合规门禁（LIVE 未备案拒绝启动）
+    │   ├── run_mode.py               # ✨【回写#52】运行模式切割接口：RunMode枚举(MONITOR/PAPER/SIM/LIVE)+describe+resolve(专先CLI>配置>默认paper)+apply_mode_to_config写回+validate_live实盘安全门(--confirm-live+证券qmt/ptrade+账户)+check_mode_consistency配置一致性；被run_实盘入口与create_live_engine消费；未来实盘切割 --mode sim→--mode live --confirm-live 一步切换；✨【回写#144】validate_live 增 KP-P6-01 报备合规门禁（LIVE 未备案拒绝启动）；✨【回写#186】KP-M04(T-30)：apply_mode_to_config->LIVE 实盘切换准入守卫（拒绝显式抛 ValueError）
 
     │   ├── acceptance.py             # ✨【回写#52】仿真绩效准入评估器(任务T10)：SimulationAcceptanceEvaluator对照表5阈值(DEFAULT_THRESHOLDS可覆盖)逐项判定8指标，缺数据判NA不误通过，产出AcceptanceReport(to_dict/to_text)；供scripts/仿真准入评估.py消费；✨【回写#144】增 ComplianceGate/ComplianceReport（KP-P6-01 程序化交易报备门禁：六字段齐全+开关+已备案+日期格式，exit_code 0/2，快照落盘）
 
