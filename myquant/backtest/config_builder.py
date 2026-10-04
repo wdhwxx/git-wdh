@@ -83,7 +83,10 @@ def build_backtest_config(
         BacktestConfig: 回测配置对象
     """
     from myquant.models.backtest import (
-        BacktestConfig, CommissionModel, CommissionType, SlippageModel,
+        BacktestConfig,
+        CommissionModel,
+        CommissionType,
+        SlippageModel,
     )
 
     bt_cfg = config_dict.get("backtest", {})
@@ -120,18 +123,18 @@ def build_backtest_config(
                     "请先运行 scripts/标的预筛选.py 或在窗口点击「预筛选标的」按钮生成标的清单。"
                 )
         elif pool_type == "three_factor":
-            # TODO(阶段3/4): 三因子交集选股，当前阶段降级为提示
-            print(
-                f"[提示] stock_pool.type=three_factor 三因子选股尚未实现，"
-                f"请使用 custom/preset_filtered 类型并在 codes 中指定股票列表，"
-                f"或使用 --symbols 参数"
+            # KP-P1-08：three_factor 三因子交集选股尚未接线，不再静默回退 codes
+            # （文档声明与实现一致，未实现即显式失败，不假装成功）
+            raise ValueError(
+                "stock_pool.type=three_factor 三因子交集选股尚未接线，"
+                "请使用 custom/preset_filtered 类型并在 codes 中指定股票列表，"
+                "或使用 --symbols 参数"
             )
-            symbols = stock_pool_cfg.get("codes", []) or []
         elif pool_type == "all":
             # 全市场：需要从数据目录扫描所有标的（当前阶段不推荐，回测慢）
             print(
-                f"[警告] stock_pool.type=all 全市场回测，将扫描数据目录所有标的，"
-                f"建议使用 preset_filtered 预筛选以提升速度"
+                "[警告] stock_pool.type=all 全市场回测，将扫描数据目录所有标的，"
+                "建议使用 preset_filtered 预筛选以提升速度"
             )
             # TODO: 从 HistoricalDataProvider 扫描全市场标的
             symbols = stock_pool_cfg.get("codes", []) or []

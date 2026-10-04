@@ -35,7 +35,9 @@ broker:
   adapter: "qmt_broker"               # 适配器名称：paper_broker / xtp_broker / qmt_broker / ptrade_broker
   # 运行模式：SIM=本地模拟撮合（默认，无QMT环境可验证） / LIVE=真实QMT下单
   # 注意：LIVE 模式会真实下单！先小额资金验证，再逐步放量。
-  mode: "LIVE"
+  # KP-P1-08：mode 默认 SIM，与 trade_mode: paper 一致；若设 LIVE 需同时 trade_mode: live，
+  # 否则 run_mode resolve 会保守降级 SIM（配置不一致由 check_mode_consistency 显式拦截）。
+  mode: "SIM"
   # QMT 连接配置（LIVE 必填；建议从环境变量读取，不写真实密钥）
   # 注意：引擎读取的字段名为 qmt_path / account / mode（见 engine.py build_broker_from_config）
   # qmt_path: "${QMT_PATH}"            # QMT安装目录下 userdata_mini 的绝对路径（极简模式）

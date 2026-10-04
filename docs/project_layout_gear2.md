@@ -326,9 +326,9 @@ Pythonwdhmm/
 
 ├── config/                           # 结构化配置文件目录（模板文件入库，真实yaml不提交）
 
-│   ├── backtest_config.example.yaml  # 回测参数模板：初始资金、手续费、滑点、时间范围等；✨【V5】新增engine.mode（event/vectorized/mixed三模式选择）+ performance段（workers/chunk_size/memory_pool/预取开关），由BatchBacktest与run_批量回测.py读取；✨【回写#174】增 benchmark_required（KP-P2-04）
+│   ├── backtest_config.example.yaml  # 回测参数模板：初始资金、手续费、滑点、时间范围等；✨【V5】新增engine.mode（event/vectorized/mixed三模式选择）+ performance段（workers/chunk_size/memory_pool/预取开关），由BatchBacktest与run_批量回测.py读取；✨【回写#174】增 benchmark_required（KP-P2-04）；✨【回写#178】type 默认 preset_filtered/three_factor 标预留（KP-P1-08）
 
-│   ├── live_config.example.yaml     # 实盘参数模板：券商连接、风控阈值、订阅合约等；✨【回写#144】增 compliance 报备段（enabled+filing六字段，口径待律师确认）
+│   ├── live_config.example.yaml     # 实盘参数模板：券商连接、风控阈值、订阅合约等；✨【回写#144】增 compliance 报备段（enabled+filing六字段，口径待律师确认）；✨【回写#178】broker.mode 默认 SIM 与 trade_mode 一致（KP-P1-08）
 
 │   ├── strategy_params.example.yaml # 策略参数模板：全部7策略参数块（ma_cross/rsrs/grid/momentum/mean_reversion/multi_factor/kunpeng）
 
@@ -599,7 +599,7 @@ Pythonwdhmm/
 │   │   ├── test_emergency_liquidation.py # ✨【回写#47】紧急平仓服务测试（预览不下单/预览列撤单计划/确认全仓市价卖出/先撤挂单再卖/优先可卖数量/可卖0跳过/无可卖字段回退全仓/连接失败安全返回/断线重连恢复/单标异常不阻断/拒单记录/指定标只平该标的/无匹配持仓/空仓成功/报告结构完整，15项）✅已完成
 │   │   ├── test_emergency_dryrun.py # ✨【回写#152】熔断强平 dry-run 假成功测试(KP-M02：dry-run 不标 executed/planned 计数不冒充 success/confirm 标 executed/空仓 ok 但 executed=False/guardian 无回调返回 False/engine dry-run CRITICAL，6项)✅已完成
 
-│   │   ├── test_config_live_check.py # ✨【回写#50】配置模板完整性+第4批配置死项修复验证（4 example可解析/risk_params已删除断言/结构完整/BUG-07开关四象限消费/预留·未消费标注存在，15项）✅已完成
+│   │   ├── test_config_live_check.py # ✨【回写#50】配置模板完整性+第4批配置死项修复验证（4 example可解析/risk_params已删除断言/结构完整/BUG-07开关四象限消费/预留·未消费标注存在，15项）✅已完成；✨【回写#178】KP-P1-08 对拍（three_factor raise/live mode/P2 Gate 状态，19项）
 
 │   │   ├── test_run_mode.py       # ✨【回写#52】运行模式切割接口测试(枚举/resolve优先级/apply写回/validate_live安全门/check一致性，19项)✅已完成
 
@@ -903,7 +903,7 @@ Pythonwdhmm/
 
     │   ├── kunpeng_param_scanner.py # ✨【P3-6】鲲鹏策略参数网格扫描器（自 scripts/kunpeng_param_scan.py 下沉）：KunpengParamScanner类（BASE_PARAMS/SIGNAL_GRID/EXIT_GRID等常量 + load_active_symbols/load_data/run_one/expand_grid/run(stage,top_n,min_trades)），路径可注入默认 project_root=parents[2]；真实数据 vectorized 两阶段扫描、聚合口径与排序与原脚本一致；供 scripts/kunpeng_param_scan.py 薄入口调用（已重写）；✨【回写#175】build_exogenous_pool 外生池（START_DATE前60日成交额分层，消除内生挑选），run meta 记录 selection_bias_note（KP-P2-06）
 
-    │   ├── config_builder.py         # ✨【回写#32】回测配置构建模块（L4修复：load_stock_pool_from_csv/apply_exclude_prefixes/build_backtest_config 自 run_回测入口.py 下沉，供入口与 scripts/生成回测报告.py 共用，消除脚本反向导入）
+    │   ├── config_builder.py         # ✨【回写#32】回测配置构建模块（L4修复：load_stock_pool_from_csv/apply_exclude_prefixes/build_backtest_config 自 run_回测入口.py 下沉，供入口与 scripts/生成回测报告.py 共用，消除脚本反向导入）；✨【回写#178】three_factor 未接线显式 raise（KP-P1-08）
 
     │   ├── dashboard_serializer.py   # ✨【2026-09-13】看板数据序列化器（V1瘦身版）：引擎输出→看板格式，含equity_curve/trades构建+commission拆分+timestamp规范化；✨【2026-09-14】新增 build_ohlcv()/ohlcv 注入通道（processed 清洗日线→看板 K线四窗格数据源，HistoricalDataProvider 读取 + end_date 严格过滤防未来）+ render_dashboard() 承担 §DATA 注入（占位符 __DASHBOARD_DATA_JSON__ 替换，仅替换代码行不动注释）
 
@@ -3091,6 +3091,17 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：限流仅基于当前时间与历史计数（窗口桶），无未来引用；Redis 计数失败 fail-closed（拒绝放行）。
 - 验证结果：py_compile rate_limit/routes 通过；新增 tests/unit/test_rate_limit_redis.py 7 项全绿（Redis 限流至限额/重置/窗口桶隔离/memory 默认/无 redis 降级内存/routes CORS 缺省关闭源码断言/routes 用 create_rate_limiter 源码断言）；ruff 干净（顺手清理既有 Tuple 导入）。
 - 纪律遵守：改蓝图已标注文件（api/middleware/rate_limit.py、api/routes.py）+ tests/unit 新增 test_rate_limit_redis.py（同步更新目录树）；无蓝图外文件；严格防未来。
+
+178. ✨【回写记录·2026-10-04·T-45 KP-P1-08 文档声明与代码实现矛盾三处（对拍一致性）】
+
+【发现】三处文档与实现矛盾：①backtest_config.example.yaml type='three_factor' 声明可用，config_builder.py:122-129 对 three_factor 静默回退 codes；②live_config.example.yaml broker.mode='LIVE' 但 trade_mode='paper'，run_mode.py:116-123 降级 SIM（配置不一致）；③P2整改任务清单 Gate 3 状态声称'全部完成✅等待验收'但附-A data_versioner 待提交、全量回归待跑。
+- 修复：
+  a. config_builder.py three_factor 分支改显式 raise ValueError（不再静默回退 codes），backtest_config.example.yaml type 默认改 preset_filtered、three_factor 注释标'预留·未接线'。
+  b. live_config.example.yaml broker.mode 改 'SIM'（与 trade_mode: paper 一致），注释注明设 LIVE 需同时 trade_mode: live 否则降级。
+  c. P2整改任务清单.md Gate 3 状态/口径改准确：附-A 待提交+回归待跑，观察期未进入。
+- 防未来：three_factor 未接线即显式失败，不假装成功；mode 声明与默认一致，消除隐性降级。
+- 验证结果：py_compile config_builder 通过；tests/unit/test_config_live_check.py 扩展 4 项（示例 type 与实现一致/three_factor raise 源码断言/live mode 一致/P2 Gate 状态准确）19 项全绿；ruff 干净（顺手清理既有 I001 import 排序）。
+- 纪律遵守：改蓝图已标注文件（backtest/config_builder.py、config/backtest_config.example.yaml、config/live_config.example.yaml）+ 同步修正 docs/因子与机器学习档案/P2整改任务清单.md Gate 状态 + tests/unit 扩展 test_config_live_check.py（同步更新目录树）；无蓝图外新文件；严格防未来。
 
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】

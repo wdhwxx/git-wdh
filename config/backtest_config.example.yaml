@@ -35,11 +35,13 @@ engine:
 stock_pool:
   # 股票池类型（4选1）：
   #   all             = 全市场（不推荐，回测慢且含僵尸股）
-  #   three_factor    = 三因子交集（动态选股，与实盘一致）
+  #   three_factor    = 三因子交集（预留·未接线，见下方注释）
   #   custom          = 自定义代码列表（codes 字段填写）
   #   preset_filtered = 标的预筛选结果（由 scripts/标的预筛选.py 或窗口生成，
   #                     codes 字段自动填入筛选后的标的清单，回测只跑这些标的）
-  type: "three_factor"
+  # KP-P1-08：type 默认改 preset_filtered（与 config_builder 实际支持一致）；
+  # three_factor 三因子交集尚未接线，config_builder 对 type=three_factor 显式 raise，不再静默回退。
+  type: "preset_filtered"
 
   # ★ 代码前缀排除（回测/实盘股票池过滤共用，窗口勾选后自动写入）
   # 30=创业板, 688=科创板, 4/8=老三板, 92=北交所新代码段

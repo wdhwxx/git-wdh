@@ -202,3 +202,39 @@ class TestReservedMarkers:
         for key in ["active_strategy:", "common:", "three_factor_pool:"]:
             assert key in text, f"strategy_params 缺少 {key} 键"
         assert text.count("【预留·未消费】") >= 3, "strategy_params 三键均需「预留·未消费」标注"
+
+
+
+# ═══════════════════════════════════════════════
+#  T-45 KP-P1-08：文档声明与代码实现一致性（对拍）
+# ═══════════════════════════════════════════════
+
+class TestKP1_08DocImplConsistency:
+    """KP-P1-08：文档声明与代码实现一致性（three_factor / run_mode / P2 Gate 状态）"""
+
+    def test_backtest_example_type_matches_impl(self) -> None:
+        """backtest_config 示例 type 用实际支持的 preset_filtered，three_factor 标预留未接线"""
+        text = (CONFIG_DIR / "backtest_config.example.yaml").read_text(encoding="utf-8")
+        assert 'type: "preset_filtered"' in text
+        assert "预留·未接线" in text
+
+    def test_config_builder_three_factor_raises(self) -> None:
+        """config_builder 对 three_factor 显式 raise，不再静默回退 codes"""
+        src = (PROJECT_ROOT / "myquant" / "backtest" / "config_builder.py").read_text(encoding="utf-8")
+        assert 'pool_type == "three_factor"' in src
+        assert "raise ValueError" in src
+        assert "尚未接线" in src
+        assert "不再静默回退" in src
+
+    def test_live_example_mode_consistent(self) -> None:
+        """live_config broker.mode=SIM 与 trade_mode=paper 一致（避免 LIVE 降级矛盾）"""
+        text = (CONFIG_DIR / "live_config.example.yaml").read_text(encoding="utf-8")
+        assert 'mode: "SIM"' in text
+        assert 'trade_mode: "paper"' in text
+
+    def test_p2_gate_status_accurate(self) -> None:
+        """P2整改任务清单 Gate 3 状态改准确：附-A 待闭环，观察期未进入"""
+        p = PROJECT_ROOT / "docs" / "因子与机器学习档案" / "P2整改任务清单.md"
+        text = p.read_text(encoding="utf-8")
+        assert "Gate 3 状态" in text
+        assert "尚未进入" in text
