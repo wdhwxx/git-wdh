@@ -1014,8 +1014,10 @@ class MixedBacktestEngine:
             self._lookahead_guard.assert_pass()
             logger.info("✅ 防未来函数校验通过：未发现未来函数违规")
             # P1-03：第二道防线——轻量时间线单调校验
-            self._run_light_guard_check()
-            return True
+            # KP-P2-11/T-03：保留返回值，不再无条件 return True——
+            # 否则 light guard 已 mark_failed 时 on_stop 仍会 mark_complete 覆盖失败态。
+            ok_light = self._run_light_guard_check()
+            return ok_light
         except Exception as exc:
             # P0-01修复：违规回测必须标记为失败，禁止以 completed / is_success=True 收尾
             logger.error("❌ 防未来函数校验未通过：%s", exc)

@@ -472,6 +472,8 @@ Pythonwdhmm/
 
 │   │   ├── test_price_limit_preclose.py # ✨【回写#136】涨跌停校验接线测试（KP-P2-10：标量fail-closed/涨停买拦/跌停卖拦/mixed+vectorized涨停样本买单0成交/provider前收盘价派生/跌停拦截联动，10项）✅已完成
 
+│   │   ├── test_p211_terminal_state.py # ✨【回写#137】防未来失败终态保护测试（KP-P2-11：mark_complete终态保护/mixed_engine保留light guard返回值/light guard违规on_stop以failed收尾，6项）✅已完成
+
 │   │   ├── test_models.py            # 数据模型校验、序列化（88项）✅已完成
 
 │   │   ├── test_execution.py         # 执行层接口与订单状态机（66项）✅已完成
@@ -662,7 +664,7 @@ Pythonwdhmm/
 
     │   ├── market_data.py            # Tick、Bar、Snapshot、MarketEvent；内置pydantic字段值域校验，原始数据先parse本模型
 
-    │   └── backtest.py               # BacktestConfig、BacktestResult绩效容器
+    │   └── backtest.py               # BacktestConfig、BacktestResult绩效容器；✨【回写#137】mark_complete 终态保护：status==failed 时抛 RuntimeError，禁止失败态被覆盖为 completed
 
     │
 
@@ -830,7 +832,7 @@ Pythonwdhmm/
 
     │   ├── vectorized_engine.py      # ✨【V5·P1】纯向量化引擎：整段numpy批量计算（无Python逐bar循环），参数扫描/大批量场景最快；防未来函数由light_lookahead_guard轻校验
 
-    │   ├── mixed_engine.py           # ✨【V5·P1】混合引擎（生产主力）：分块向量化+块内事件回调，精度接近event、速度接近vectorized，默认mode；✨【回写#136】_build_unified_bars 按标的前收盘价兜底派生（收盘价.shift(1)，防涨跌停校验 pre_close 恒 0 空转）
+    │   ├── mixed_engine.py           # ✨【V5·P1】混合引擎（生产主力）：分块向量化+块内事件回调，精度接近event、速度接近vectorized，默认mode；✨【回写#136】_build_unified_bars 按标的前收盘价兜底派生（收盘价.shift(1)，防涨跌停校验 pre_close 恒 0 空转）；✨【回写#137】_run_lookahead_assert 保留 _run_light_guard_check 返回值（不再无条件 return True，防 light guard 已 mark_failed 被 on_stop 的 mark_complete 覆盖）
 
     │   ├── batch_backtest.py         # ✨【V5·P2】批量回测调度器：数据指纹去重（同指纹跳过）+三模式复用+内存水位降级+失败续跑+汇总表，供run_批量回测.py调用；✨【2026-09-09】新增可选on_batch_done批次回调（GUI进度刷新用）；STRATEGY_REGISTRY扩为6策略（ma_cross/rsrs/grid/momentum/mean_reversion/multi_factor）
 
@@ -2603,3 +2605,14 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：只按【已发生】的收盘价派生前收盘价，不生成任何预测数据；vectorized 引擎本已派生 pre_closes，涨停拦截与标量路径一致。
 - 验证结果：py_compile 六文件 PASS；tests/unit/test_price_limit_preclose.py 10 项全绿（标量 fail-closed/涨停买拦/跌停卖拦/mixed+vectorized 涨停样本买单 0 成交/provider 前收盘价派生/跌停拦截联动）；test_data_export_columns 6 项全绿；backtest/数据加载相关回归 244 passed + 增量/清洗/因子 154 passed 无回归；order_matcher 模块自测 30 项全通过。
 - 纪律遵守：仅改蓝图已标注文件（order_matcher/mixed_engine/provider/数据导出脚本）+ tests/unit 新增 test_price_limit_preclose.py + 更新 test_data_export_columns.py CI 契约（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+137. ✨【回写记录·2026-10-04·T-03 KP-P2-11 防未来失败被 mark_complete 覆盖】
+
+【发现】混合引擎轻量防未来防线失效会被覆盖：`mixed_engine._run_lookahead_assert` 内 `_run_light_guard_check()` 返回值被丢弃后无条件 `return True`，light guard 检测到时间线倒退已 mark_failed 时，on_stop 仍因返回 True 调用 `mark_complete()`，把失败回测覆盖为 completed。
+- 修复（2 处代码 + 1 处验证确认）：
+  a. myquant/backtest/mixed_engine.py _run_lookahead_assert：`ok_light = self._run_light_guard_check()` 保留返回值并 `return ok_light`，不再无条件 return True——light guard 失败时 on_stop 跳过 mark_complete，回测保持 failed。
+  b. myquant/models/backtest.py mark_complete 终态保护：`if self.status == "failed": raise RuntimeError("failed 态禁止覆盖为 completed")`——任何调用方在 mark_failed 后误调 mark_complete 都会显式报错而非静默覆盖。
+  c. backtest/engine.py（台账所列"防未来违规保留返回值"）：核查确认其 `_run_lookahead_assert` 已正确返回 False 且 on_stop 以 `if _run_lookahead_assert(): mark_complete()` 守卫，**无丢返回值缺陷，无需改动**（event 引擎 light guard 接入属 KP-P2-08 范围）。
+- 防未来：仅保留并返回【已发生】的 guard 校验结果，不生成任何预测数据；mark_complete 的 raise 属编程错误显式化，不改变正常成功路径。
+- 验证结果：py_compile 3 文件 PASS；tests/unit/test_p211_terminal_state.py 6 项全绿（mark_complete pending可直接标记/mark_failed后mark_complete抛错/mark_complete后mark_failed失败态生效/light guard通过返回True且completed/light guard违规返回False且结果failed/light guard违规on_stop以failed收尾）；防未来+回测v5+序列化相关回归 166 passed + 批回测/调度/参数/优化器回测级 199 passed 无回归；ruff 新测试文件通过。
+- 纪律遵守：仅改蓝图已标注文件（mixed_engine.py/models/backtest.py）+ tests/unit 新增 test_p211_terminal_state.py（本回写同步更新目录树）；engine.py 核验无需改动；无蓝图外文件；严格防未来。
