@@ -376,7 +376,8 @@ class RiskParityAllocator(AllocatorBase):
         total_inv = sum(inv_vols.values())
         weights = [inv_vols[a] / total_inv for a in assets]
 
-        # 2. 迭代优化
+        # 2. 迭代优化（P3-17：max_iterations=0时循环不执行，预初始化避免 NameError）
+        iteration = -1
         for iteration in range(self.max_iterations):
             # 计算 Σw（协方差矩阵乘权重向量）
             sigma_w = [

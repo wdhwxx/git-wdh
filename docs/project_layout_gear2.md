@@ -2546,3 +2546,15 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
   config/risk_params.example.yaml 幽灵条目等在下次全量盘点时统一修订，不在本轮改代码。
 
 【验证】py_compile fetcher PASS；pytest全量2067 passed/0 failed（216s）。
+
+133. ✨【回写记录·2026-10-04·P3首批小修（P3批次第1项）】
+
+【P3-17｜risk_parity max_iterations=0时iteration未定义NameError】
+- 修复：循环前 iteration=-1 预初始化。
+【P3-04｜schema.py share_change键重复两行】
+- 修复：删除重复字典键行。
+【P3-15｜risk未导出DailyLossLimitRule】
+- 修复：rules导入与__all__补齐DailyLossLimitRule。
+其余P3（注释/文档/入口/锁文件清理等）属低危文档与环境清理，按需后续处理。
+
+【验证】py_compile三文件PASS；pytest全量2067 passed/0 failed（218s）。

@@ -35,7 +35,6 @@ TABLE_NAMES = {
     "factor_data": "factor_data",           # 因子数据表
     "adjust_factor": "adjust_factor",       # 复权因子表（除权除息事件，方案B #82）
     "share_change": "share_change",         # 股本变动表（真实总/流通股本事件，P1-② #83）
-    "share_change": "share_change",         # 股本变动表（真实总/流通股本事件，P1-② #83）
     "strategy_state": "strategy_state",     # 策略状态表
     "data_source": "data_source",           # 数据源注册表
     "sync_status": "sync_status",           # 数据同步状态表
