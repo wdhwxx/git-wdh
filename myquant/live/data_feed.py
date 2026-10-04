@@ -149,7 +149,7 @@ def _make_bar(
     Dict[str, Any] : 标准Bar字典
     """
     # #E1修复：按周期统一格式化 date 字段
-    from myquant.core.date_utils import format_bar_date
+    from myquant.core.date_utils import bar_date_to_epoch, format_bar_date
     formatted_date = format_bar_date(date, period) or str(date)
     return {
         "symbol": symbol,
@@ -160,7 +160,9 @@ def _make_bar(
         "close": float(close),
         "volume": float(volume),
         "amount": float(amount),
-        "timestamp": time.time(),
+        # #T-04(KP-P3-02)：timestamp 用 bar 周期归属时间（日线归属日 00:00:00），
+        # 不用墙钟 time.time()——避免同一根 bar 因墙钟时刻不同被判为不同 bar
+        "timestamp": bar_date_to_epoch(formatted_date),
     }
 
 

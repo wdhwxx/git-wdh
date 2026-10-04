@@ -546,6 +546,7 @@ Pythonwdhmm/
 │   │   ├── test_live_lookahead.py   # ✨【回写#42】实盘LookaheadGuard防未来校验测试（接线/信号记录/HOLD与风控拒绝不记录/T+1成交/同日跳过/早于信号日真违规/停止校验/工厂配置消费，19项）✅已完成
 
 │   │   ├── test_live_warmup.py       # ✨【回写#55】实盘本地parquet历史预热+context.data中文列测试（_load_local_history读取/升序限count/缺失缺列降级/_sync_context_data中文列/_warmup_history优先本地/降级akshare，7项）✅已完成
+│   │   ├── test_live_bar_dedup.py    # ✨【回写#139】日线bar去重测试（KP-P3-02：bar_date_to_epoch往返/解析失败0.0/make_bar时间戳确定性且还原日期/引擎同根bar二次推送丢弃且不达撮合/不同日期正常/不同标的同日不误删，7项）✅已完成
 
 │   │   ├── test_signal_idempotency.py # ✨【回写#43】幂等去重测试（Signal确定性ID/to_order映射/引擎去重/分钟线粒度/start重置/QMT端按订单ID去重/统计双计修复验证，19项）✅已完成
 
@@ -622,7 +623,7 @@ Pythonwdhmm/
 
     │   │                             # ✨【V5·P2】新增回测日志模式：--log-format=backtest输出三模式引擎（event/vectorized/mixed）阶段耗时流水线日志（get_timings_callback回调节点），与timer.py计时体系打通
 
-    │   ├── date_utils.py             # ✨【回写】bar数据日期格式化工具（日线/分钟线统一date字段格式）：实盘链路核心依赖，被live/engine.py与live/data_feed.py（3处）直接调用；与utils/time_utils.py分工：date_utils管bar日期字符串格式化，time_utils管时区/交易日历/时间戳转换
+    │   ├── date_utils.py             # ✨【回写】bar数据日期格式化工具（日线/分钟线统一date字段格式）：实盘链路核心依赖，被live/engine.py与live/data_feed.py（3处）直接调用；与utils/time_utils.py分工：date_utils管bar日期字符串格式化，time_utils管时区/交易日历/时间戳转换；✨【回写#139】新增 bar_date_to_epoch（KP-P3-02）：bar日期→周期归属epoch秒，与normalize_to_datetime严格互逆，供live/data_feed生成bar.timestamp
 
     │   ├── cache.py                  # 计算结果缓存：内存LRU / Redis
 
@@ -952,7 +953,7 @@ Pythonwdhmm/
 
     │   ├── __init__.py
 
-    │   ├── engine.py                 # 实盘引擎继承BaseEngine，协调数据、策略、执行、风控
+    │   ├── engine.py                 # 实盘引擎继承BaseEngine，协调数据、策略、执行、风控；✨【回写#139】on_market_data 增 (symbol,date) bar级去重（KP-P3-02：_seen_bars集合，同根bar二次推送直接丢弃不达撮合，stats.bar_dedup_skipped计数，启动clear）
 
     │   │                             # 【任务27】接入 BrokerManager 多券商管理器：set_broker自动包装(单券商向后兼容)/set_broker_manager(多券商并行)
 
@@ -962,7 +963,7 @@ Pythonwdhmm/
 
     │   │                             # 【回写#135】启动时对存量持仓做一次 T+1 解冻初始化（start() 调 broker_manager.settle_t1_all()，释放重启前残留内存冻结）
 
-    │   ├── data_feed.py              # 实时行情接入订阅重连分发；流式清洗(单条校验+跳变检测) + attach_event_bus事件总线联动 + 脏数据钩子；✨【回写#83】S2 live复权口径统一：_fetch_from_akshare 改拉不复权raw（adjust=""，与腾讯快照/本地历史同口径）/新增 adjust_out 参数（"qfq"按最新因子现算÷因子）+_stream_clean 除权跳变因子豁免（_live_jump_change_with_factor）+_clean_bars 注入 factor_lookup（config副本不污染共享配置）
+    │   ├── data_feed.py              # 实时行情接入订阅重连分发；流式清洗(单条校验+跳变检测) + attach_event_bus事件总线联动 + 脏数据钩子；✨【回写#83】S2 live复权口径统一：_fetch_from_akshare 改拉不复权raw（adjust=""，与腾讯快照/本地历史同口径）/新增 adjust_out 参数（"qfq"按最新因子现算÷因子）+_stream_clean 除权跳变因子豁免（_live_jump_change_with_factor）+_clean_bars 注入 factor_lookup（config副本不污染共享配置）；✨【回写#139】_make_bar 的 timestamp 改 bar 周期归属时间 bar_date_to_epoch(formatted_date)（KP-P3-02，弃用墙钟 time.time()，避免同根bar因墙钟时刻不同被误判不同bar）
 
     │   ├── portfolio.py              # 实时持仓、市值、可用冻结资金
 
@@ -2632,3 +2633,14 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 验证结果：py_compile 2 文件 PASS；tests/unit/test_param_split_in_out.py 10 项全绿（无分割兼容/best=ranked首位/in_sample_end介于区间与越界抛错/双区段指标与试验次数/best样本内选参样本外结论/ranked_in-out并存/summary双列与试验次数/walk_forward两折与折数校验/split字段透传）；回测+防未来+序列化回归 176 passed + 批回测/增量/参数/优化器回测级 136 passed 无回归；ruff 新测试文件通过、param_optimizer 清理既有 unused import（ParallelManager）。
 - 纪律遵守：仅改蓝图已标注文件（param_optimizer.py，台账 T-05 改动文件）+ tests/unit 新增 test_param_split_in_out.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
 - 备注：①台账编号——KP-P2-05 在台账为 T-05，用户指令标 T-04（该 T-04 实为 KP-P3-02，待办）；本回写落在 T-05 台账行。②既有 `make_demo_data`（英文列 open/high/low/close...）在 param_optimizer 引擎路径缺中文列导致 `KeyError: '收盘价'`，模块 __main__ 自测在 HEAD 即失败（改动前已存在，非本项引入），本次测试用自含中文列数据绕过；该演示数据列名问题与生产接线（scripts/参数优化.py 传 --in-sample-end）列为后续待处理项。
+
+139. ✨【回写记录·2026-10-04·T-04 KP-P3-02 日线 bar 时间戳语义错误（同根 bar 重复推送）】
+
+【发现】`myquant/live/data_feed.py:163` `_make_bar` 的 `timestamp=time.time()`（墙钟）；引擎去重仅单调校验（墙钟递增→恒过），同一根 bar 每轮重复推送并以当日开盘价重复成交——日线 bar 时间戳语义错误，重复撮合污染成交记录与绩效。
+- 修复（myquant/live/data_feed.py + myquant/live/engine.py + myquant/core/date_utils.py）：
+  a. date_utils.py 新增 `bar_date_to_epoch(date_value)`：bar 日期→周期归属 epoch 秒，与 normalize_to_datetime 严格互逆（日线归属日 00:00:00 本地时间戳），解析失败返回 0.0 并告警（防御式）。
+  b. data_feed.py `_make_bar` 的 `"timestamp"` 由 `time.time()` 改为 `bar_date_to_epoch(formatted_date)`——用 bar 周期归属时间而非墙钟，同一根 bar 时间戳确定性、可被 format_bar_date 往返还原同一交易日。
+  c. engine.py `on_market_data` 增 bar 级去重：`_seen_bars` 集合（键 `(symbol, formatted_date)`），命中即 `bar_dedup_skipped += 1` + return（在进入 broker 撮合前丢弃，不产生成交）；`__init__` 增 `_seen_bars`/`bar_dedup_skipped` 统计；`start()` 每次启动 clear。
+- 防未来：去重键基于 bar 周期归属日期（已发生行情），不依赖未来数据；不改变信号/成交的时点语义。
+- 验证结果：py_compile 3 文件 PASS；tests/unit/test_live_bar_dedup.py 7 项全绿（bar_date_to_epoch 往返还原/解析失败 0.0 防御/make_bar 时间戳确定性且还原日期/不同日期时间戳递增/引擎同根 bar 二次推送丢弃且不达 broker 撮合/不同日期均正常处理/不同标的同日不误删）；live 相关回归 151 + 7 passed 无新增失败；ruff：date_utils.py 与测试文件通过，data_feed.py/engine.py 顶层 import 排序为既有 I001（未改顶层块，非本次引入）。
+- 纪律遵守：仅改蓝图已标注文件（date_utils.py/data_feed.py/live engine.py）+ tests/unit 新增 test_live_bar_dedup.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。

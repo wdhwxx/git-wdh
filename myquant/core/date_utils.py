@@ -238,6 +238,33 @@ def format_bar_date(
         return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
+def bar_date_to_epoch(
+    date_value: Union[str, float, int, datetime, None],
+) -> float:
+    """
+    将 bar 的日期值转换为周期归属 epoch 秒（时间戳）。
+
+    与 normalize_to_datetime 严格互逆：bar_date_to_epoch 的产出可被
+    normalize_to_datetime 还原为同一日期（日线归属日 00:00:00 的本地时间戳）。
+    用于 live/data_feed 生成 bar.timestamp——用 bar 周期归属时间而非墙钟
+    time.time()，避免同一根 bar 因墙钟时刻不同被判为不同 bar（KP-P3-02）。
+
+    Parameters
+    ----------
+    date_value : str | float | int | datetime | None
+        bar 的日期值（"YYYY-MM-DD" 或 "YYYY-MM-DD HH:MM:SS"）。
+
+    Returns
+    -------
+    float : 周期归属 epoch 秒；解析失败返回 0.0 并告警（防御式，调用方据此丢弃/降级）。
+    """
+    dt = normalize_to_datetime(date_value)
+    if dt is None:
+        logger.warning("bar_date_to_epoch 解析失败，返回 0.0: %r", date_value)
+        return 0.0
+    return dt.timestamp()
+
+
 def get_date_part(date_value: Union[str, float, int, datetime, None]) -> str:
     """
     获取日期部分 "YYYY-MM-DD"（兼容两种格式）。

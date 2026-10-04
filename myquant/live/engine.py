@@ -319,6 +319,7 @@ class LiveEngine(BaseEngine):
             "total_trades": 0,
             "risk_rejected": 0,
             "dedup_skipped": 0,
+            "bar_dedup_skipped": 0,
             "last_bar_time": 0.0,
             "last_signal_time": 0.0,
             "errors": 0,
@@ -382,6 +383,10 @@ class LiveEngine(BaseEngine):
 
         # 2.6) 幂等去重（任务43）：已处理信号 ID 集合（确定性，防桥接重发）
         self._processed_signal_ids: Set[str] = set()
+
+        # #T-04(KP-P3-02)：bar 级去重集合——键 (symbol, formatted_date)，
+        # 同一根 bar 二次推送直接丢弃且不成交（不依赖墙钟单调，防同日重复撮合）
+        self._seen_bars: Set[str] = set()
 
         # 3) StateStore：崩溃恢复 / 定时快照
         self._state_store = None
@@ -638,6 +643,9 @@ class LiveEngine(BaseEngine):
             # ── 任务43：幂等去重集合重置（每次启动全新会话）──
             self._processed_signal_ids.clear()
 
+            # ── #T-04(KP-P3-02)：bar 级去重集合重置（每次启动全新会话）──
+            self._seen_bars.clear()
+
             # ── H2修复：事件总线联动（风控订阅数据质量事件，行情流式清洗联动）──
             self._setup_event_bus()
 
@@ -887,6 +895,21 @@ class LiveEngine(BaseEngine):
         """
         if self._state != EngineState.RUNNING:
             return
+
+        # #T-04(KP-P3-02)：bar 级去重——同一标的同一日期的 bar 只处理首根，
+        # 二次推送直接丢弃且不进入撮合（不产生成交）。键用 bar 周期归属日期
+        # （data_feed 已把 timestamp 改为周期归属时间，bar["date"] 即格式化日期）。
+        try:
+            _dedup_key = (symbol, bar["date"])
+        except (KeyError, TypeError):
+            _dedup_key = (symbol, None)
+        if _dedup_key in self._seen_bars:
+            self._stats["bar_dedup_skipped"] += 1
+            logger.debug(
+                f"[engine] 同根bar去重丢弃: {symbol} date={bar.get('date')}"
+            )
+            return
+        self._seen_bars.add(_dedup_key)
 
         try:
             # 1. bar dict 转 Bar 对象
