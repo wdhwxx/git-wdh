@@ -2511,3 +2511,14 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
   logger.error 并 return None 中止落盘，保留旧文件，杜绝静默截断历史。
 
 【验证】py_compile三文件PASS；pytest全量2067 passed/0 failed（215s）。
+
+130. ✨【回写记录·2026-10-04·P2-16/P2-13 fsync与Prom计数器类型（P2批次第4项）】
+
+【P2-16｜state_store原子写缺fsync】
+- 修复：live/state_store.py _atomic_write 由 write_text 改显式 open，写后 flush+os.fsync 再 os.replace，
+  消除掉电窗口快照不完整。
+【P2-13｜实时行情驱动COUNTER被注册成GAUGE】
+- 修复：scripts/实时行情驱动.py 由 MetricsCollector() 改 get_metrics_collector().register_builtin_metrics() 单例，
+  risk_pause_total 等按正确类型导出，rate()/increase()语义恢复。
+
+【验证】py_compile两文件PASS；pytest全量2067 passed/0 failed（214s）。

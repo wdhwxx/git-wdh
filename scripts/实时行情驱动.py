@@ -223,7 +223,9 @@ def setup_event_bus(feed: MarketDataFeed) -> Optional[dict]:
         alert_mgr = AlertManager()
         alert_mgr.subscribe_to_event_bus(bus)
 
-        metrics = MetricsCollector()
+        # P2-13：用单例并注册内置指标，否则 COUNTER 被自动注册成 GAUGE，rate()语义错
+        from myquant.monitoring.metrics_collector import get_metrics_collector
+        metrics = get_metrics_collector().register_builtin_metrics()
         metrics.subscribe_to_event_bus(bus)
 
         # B项：feed 挂载事件总线（窗口聚合 + 连续阈值升级）

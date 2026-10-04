@@ -260,10 +260,12 @@ class StateStore:
             待写入数据
         """
         tmp = path.with_name(path.name + ".tmp")
-        tmp.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2, default=str),
-            encoding="utf-8",
-        )
+        # P2-16：原子写补 flush+fsync，避免掉电窗口内 tmp 内容未落盘导致快照不完整
+        payload = json.dumps(data, ensure_ascii=False, indent=2, default=str)
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(payload)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
 
     # ─────────────────────────────────────────
