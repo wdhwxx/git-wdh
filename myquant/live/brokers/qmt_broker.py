@@ -242,7 +242,8 @@ class QmtBroker(BaseBroker):
         self._positions: Dict[str, Position] = {}
         self._t1_holdings: Dict[str, float] = {}   # 当日已成交买入（T+1 冻结）
         self._market_prices: Dict[str, float] = {}  # 已发生的最新行情价
-        self._prev_close: Dict[str, float] = {}     # 昨收（首次行情时记录，涨跌停基准）
+        self._prev_close: Dict[str, float] = {}     # 昨收（行情快照前收字段注入，涨跌停基准）
+        self._prev_close_day: Optional[str] = None   # 昨收所属交易日（跨日重置用）
 
         # QMT 环境状态
         self._qmt_session_id = int(time.time()) % 1000000  # 会话标识（LIVE 用）
@@ -1025,6 +1026,31 @@ class QmtBroker(BaseBroker):
     def get_subscribed_symbols(self) -> List[str]:
         return sorted(self._subscribed_symbols)
 
+    def set_prev_close(self, symbol: str, prev_close: float) -> None:
+        """注入昨收基准（KP-P3-09：由行情快照前收字段注入，供涨跌停计算）。
+
+        Args:
+            symbol: 标的代码。
+            prev_close: 前一交易日收盘价（必须 >0 才注入）。
+
+        防未来函数说明：昨收为已发生事实，由行情注入，不由首笔行情自推。
+        """
+        if prev_close > 0:
+            self._prev_close[symbol] = prev_close
+
+    def roll_prev_close_to_trading_day(self, trading_day: str) -> None:
+        """跨交易日重置昨收（KP-P3-09）。
+
+        交易日切换后清空昨收，等待当日行情快照重新注入；避免上一交易日
+        昨收残留导致涨跌停基准失真。
+
+        Args:
+            trading_day: 当前交易日（YYYY-MM-DD）。
+        """
+        if self._prev_close_day and self._prev_close_day != trading_day:
+            self._prev_close.clear()
+        self._prev_close_day = trading_day
+
     # ═══════════════════════════════════════════════
     #  模拟环境（SIM 模式撮合驱动）
     # ═══════════════════════════════════════════════
@@ -1035,6 +1061,7 @@ class QmtBroker(BaseBroker):
         symbol: str,
         price: float,
         timestamp: Optional[float] = None,
+        prev_close: Optional[float] = None,
     ) -> List[Trade]:
         """
         更新市场价（模拟实时行情），触发限价单撮合
@@ -1061,9 +1088,10 @@ class QmtBroker(BaseBroker):
         if timestamp is None:
             timestamp = time.time()
 
-        # 首次行情记录为昨收基准（涨跌停计算用）
-        if symbol not in self._prev_close or self._prev_close[symbol] <= 0:
-            self._prev_close[symbol] = price
+        # KP-P3-09：昨收一律由行情快照前收字段注入（set_prev_close / prev_close 参数），
+        # 不再以当日首笔行情价充当昨收基准（防未来 + 避免涨跌停基准失真）。
+        if prev_close is not None and prev_close > 0:
+            self.set_prev_close(symbol, prev_close)
 
         # 更新市场价
         self._market_prices[symbol] = price
@@ -1121,11 +1149,19 @@ class QmtBroker(BaseBroker):
         fill_qty = quantity if quantity is not None else order.remaining_qty
         return self._execute_fill(order, fill_price, time.time(), fill_qty)
 
-    def set_market_price(self, symbol: str, price: float) -> None:
-        """直接设置市场价（不触发撮合，初始化用）"""
+    def set_market_price(
+        self,
+        symbol: str,
+        price: float,
+        prev_close: Optional[float] = None,
+    ) -> None:
+        """直接设置市场价（不触发撮合，初始化用）
+
+        KP-P3-09：不再以首笔行情充当昨收；prev_close 由行情快照前收字段显式注入。
+        """
         self._market_prices[symbol] = price
-        if symbol not in self._prev_close or self._prev_close[symbol] <= 0:
-            self._prev_close[symbol] = price
+        if prev_close is not None and prev_close > 0:
+            self.set_prev_close(symbol, prev_close)
 
     # ═══════════════════════════════════════════════
     #  内部：撮合与成交回报（真实 QMT 回调同构）
@@ -1342,7 +1378,12 @@ class QmtBroker(BaseBroker):
         """
         prev_close = self._prev_close.get(symbol)
         if prev_close is None or prev_close <= 0:
-            return True
+            # KP-P3-09/04：缺昨收 fail-closed（无法判定涨跌停 → 拒绝成交，而非放行）
+            logger.warning(
+                "[qmt_broker] 缺昨收基准，涨跌停判定失败，拒绝成交: %s side=%s",
+                symbol, side.value,
+            )
+            return False
         limit_up = prev_close * (1 + self.price_limit_pct)
         limit_down = prev_close * (1 - self.price_limit_pct)
         if side == OrderSide.BUY:

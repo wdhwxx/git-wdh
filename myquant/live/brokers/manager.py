@@ -40,10 +40,10 @@ manager.py - 多券商管理器（双券商并行核心）
 
 from __future__ import annotations
 
+import copy
 import threading
 import time
-import copy
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
@@ -382,12 +382,18 @@ class BrokerManager:
                         trades = broker.on_bar(bar)
                         matched = len(trades) if trades else 0
                     elif hasattr(broker, "update_market_price"):
+                        # KP-P3-09：撮合价用当日 open（已发生事实，避免用当日 close 属防未来）；
+                        # 昨收由行情快照前收字段注入，供涨跌停 fail-closed 判定。
                         if isinstance(bar, dict):
-                            close = float(bar.get("close", 0) or 0)
+                            open_ = float(bar.get("open", 0) or 0)
+                            prev_close = float(bar.get("prev_close", 0) or 0)
                         else:
-                            close = float(getattr(bar, "close", 0) or 0)
-                        if close > 0:
-                            trades = broker.update_market_price(symbol, close)
+                            open_ = float(getattr(bar, "open", 0) or 0)
+                            prev_close = float(getattr(bar, "prev_close", 0) or 0)
+                        if hasattr(broker, "set_prev_close") and prev_close > 0:
+                            broker.set_prev_close(symbol, prev_close)
+                        if open_ > 0:
+                            trades = broker.update_market_price(symbol, open_)
                             matched = len(trades) if trades else 0
                     else:
                         continue

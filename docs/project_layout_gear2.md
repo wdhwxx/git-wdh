@@ -543,6 +543,7 @@ Pythonwdhmm/
 
 │   │   ├── test_qmt_broker_live.py  # ✨【回写#41】QMT实盘通道测试（fake SDK不连真实QMT：模式隔离/连接流程/委托撤单/成交回调/资金持仓/状态映射，23项）✅已完成
 │   │   ├── test_live_fee.py          # ✨【回写#143】LIVE费用计提测试（KP-P4-03：10万买单fee>0/卖单含印花税/佣金最低5元兜底/本地账本现金守恒/卖单回笼扣费/与回测FeeCalculator同构，6项）✅已完成
+│   │   ├── test_qmt_prev_close.py  # ✨【回写#145】昨收基准测试(KP-P3-09：注入且首笔不覆盖/跨日重置/缺昨收拒绝/涨停跌停边界/manager open撮合+注入，7项)✅已完成
 
 │   │   ├── test_live_lookahead.py   # ✨【回写#42】实盘LookaheadGuard防未来校验测试（接线/信号记录/HOLD与风控拒绝不记录/T+1成交/同日跳过/早于信号日真违规/停止校验/工厂配置消费，19项）✅已完成
 
@@ -996,11 +997,11 @@ Pythonwdhmm/
 
     │       ├── paper_broker.py       # 本地模拟券商（Paper Trading，模拟撮合）
 
-    │       ├── qmt_broker.py         # 迅投QMT适配器（SIM模拟撮合+LIVE SDK占位，第1项实盘对接）；✨【回写#143】LIVE 成交走 fee_common 唯一入口计提费用（KP-P4-03：佣金+过户费+印花税，与 SIM/回测同构，本地账本现金守恒）
+    │       ├── qmt_broker.py         # 迅投QMT适配器（SIM模拟撮合+LIVE SDK占位，第1项实盘对接）；✨【回写#143】LIVE 成交走 fee_common 唯一入口计提费用（KP-P4-03：佣金+过户费+印花税，与 SIM/回测同构，本地账本现金守恒）；✨【回写#145】昨收改前收字段注入+跨日重置（KP-P3-09，移除首笔=昨收），_check_price_limit 缺昨收 fail-closed
 
     │       ├── ptrade_broker.py      # 恒生Ptrade适配器（SIM模拟撮合+LIVE API占位，第1项实盘对接）
 
-    │       └── manager.py            # 多券商管理器（双券商并行：路由/主备切换/合并视图/健康监控）
+    │       └── manager.py            # 多券商管理器（双券商并行：路由/主备切换/合并视图/健康监控）；✨【回写#145】push_market_data 撮合改传当日 open（防未来）+ 经 set_prev_close 注入昨收
 
     │                                 # 【回写#135】BrokerManager.settle_t1_all()：遍历各券商逐个调用 settle_t1()（T+1 日终结算，无实现 skipped，异常不阻断）
 
@@ -2709,3 +2710,15 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 验证结果：py_compile 全通过；新增 tests/unit/test_compliance_gate.py 12 项全绿（缺字段拦截 exit2 / 放行 exit0 / 开关未开拦截 / 状态非approved拦截 / 日期非法拦截 / 自定义必需字段 / validate_live LIVE未备案含合规错误+已备案放行+非LIVE不校验 / engine live未备案 ValueError+非live放行 / 快照落盘 JSON）；live 广回归 309 passed 无回归（同步 test_run_mode.py::_cfg 增合规段）；ruff 全部通过（engine.py 导入排序随 ruff 自动整理，无逻辑改动）。
 - 纪律遵守：仅改蓝图已标注文件（myquant/live/acceptance.py、run_mode.py、engine.py、config/live_config.example.yaml）+ tests/unit 新增 test_compliance_gate.py（本回写同步更新目录树）+ 同步既有 test_run_mode.py；无新增蓝图外业务文件；严格防未来。
 - 未决项：补丁清单 §3.1.10「新增异常交易监控模块（撤单率/报单频次/自成交/频繁撤单占比）」属独立控制点，留待后续任务；条款映射最终以律师/合规官确认口径为准。
+
+
+145. ✨【回写记录·2026-10-04·T-11 KP-P3-09 QmtBroker 撮合价与昨收基准错误（两处"首笔=昨收"）】
+
+【发现】`qmt_broker.py:1064-1066`（update_market_price）与 `:1127-1128`（set_market_price）均以"当日首笔行情价"写入 `_prev_close`——昨收基准被首笔现价顶替，涨跌停判定失真；`manager.py:384-391` 用当日 close 撮合（盘中收盘价属未来信息）；`qmt_broker.py:1341-1343` 缺昨收 `return True`（fail-open）。
+- 修复：
+  a. **qmt_broker.py 昨收改由行情快照前收字段注入**：update_market_price/set_market_price 增 `prev_close` 可选参数，>0 才注入 `_prev_close`；**移除"首笔行情=昨收"逻辑**；新增 `set_prev_close()` 显式注入 + `roll_prev_close_to_trading_day()` 跨交易日重置（交易日切换清空昨收等待重新注入，`_prev_close_day` 跟踪所属交易日）。
+  b. **manager.py 撮合价口径**：push_market_data 对 update_market_price 型券商改传当日 `open`（已发生事实，避免用当日 close 属防未来），并从 bar 前收字段经 `set_prev_close` 注入昨收。
+  c. **qmt_broker.py `_check_price_limit` 缺昨收 fail-closed**：无法判定涨跌停 → `return False` 拒绝成交（原 `return True` 放行）。
+- 防未来：昨收/撮合价均为已发生事实；不由首笔行情自推、不用当日收盘价撮合。
+- 验证结果：py_compile 通过；新增 tests/unit/test_qmt_prev_close.py 7 项全绿（update/set_market_price 注入且首笔不覆盖/set_prev_close 显式注入/跨日重置/缺昨收拒绝(DoD)/有昨收涨停跌停边界/manager 用 open 撮合+注入昨收(DoD)）；qmt/live 广回归 299 passed 无回归；ruff 测试通过（qmt_broker 4 处既有 F541/F821/F841 非本次引入，manager I001 导入排序随 ruff 整理）。
+- 纪律遵守：仅改蓝图已标注文件（live/brokers/qmt_broker.py、manager.py）+ tests/unit 新增 test_qmt_prev_close.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
