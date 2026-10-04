@@ -568,6 +568,13 @@ class LivePortfolio:
         )
 
     @_locked
+    def diff_vs_broker(
+        self, broker: Any, cash_tolerance: float = _DEFAULT_CASH_TOLERANCE,
+    ) -> ReconciliationDiff:
+        """账实差异（KP-P3-08：风控基准券商权威账本时先取差异，只 diff 不重建）。"""
+        return self.reconcile_vs_broker(broker, cash_tolerance=cash_tolerance)
+
+    @_locked
     def sync_from_broker(
         self, broker: Any, cash_tolerance: float = _DEFAULT_CASH_TOLERANCE,
     ) -> ReconciliationDiff:

@@ -347,6 +347,7 @@ class LiveEngine(BaseEngine):
         self._auto_recover = bool(auto_recover)
         self._snapshot_interval = max(30.0, float(snapshot_interval))
         self._patrol_interval = max(10.0, float(patrol_interval))
+        self._accountability_interval = max(30.0, float(snapshot_interval))  # KP-P3-08: 券商账本对账周期
 
         # 风控上下文运行态（只记录"已发生"事实，严格防未来函数）
         self._peak_assets: float = 0.0
@@ -1945,10 +1946,38 @@ class LiveEngine(BaseEngine):
                     broker=self._broker_manager or self._broker,
                     snapshot_interval=self._snapshot_interval,
                 )
+            # KP-P3-08: 定时券商账本对账（sync_from_broker，超阈 pause+CRITICAL）
+            if self._portfolio is not None:
+                self._scheduler.add_interval_task(
+                    self._broker_accountability_patrol,
+                    name="券商账本对账",
+                    interval_seconds=self._accountability_interval,
+                    run_immediately=False,
+                )
             self._scheduler.start()
             logger.info("[engine] 调度器已启动（巡检/日报/守护/快照）")
         except Exception as e:
             logger.warning(f"[engine] 调度器挂载失败（不影响交易主链路）: {e}")
+
+    def _broker_accountability_patrol(self) -> None:
+        """
+        券商账本对账（KP-P3-08：定时 sync_from_broker，超阈值 pause+CRITICAL）。
+
+        风控基准须取券商权威账本：本地 portfolio 定时向券商同步，
+        账实差异超阈值 → 暂停引擎（避免在漂移账本上继续交易）。
+        """
+        broker = self._broker_manager or self._broker
+        if broker is None or self._portfolio is None:
+            return
+        try:
+            diff = self._portfolio.sync_from_broker(broker)
+            if diff.exceeds_threshold:
+                logger.critical(
+                    f"[engine] 券商账本差异超阈值，暂停引擎（风控基准非权威账本）: {diff}"
+                )
+                self.pause()
+        except Exception as e:
+            logger.warning(f"[engine] 券商账本对账失败: {e}")
 
     def _guardian_patrol(self) -> None:
         """

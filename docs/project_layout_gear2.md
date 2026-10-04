@@ -541,6 +541,7 @@ Pythonwdhmm/
 
 │   │   ├── test_live_guard_failover.py # ✨【回写#31】实盘保障组件故障注入（审计H2降级：事件总线断连/订阅失败/挂载失败/风控异常拒单/调度失败/巡检异常/快照失败/全组件关闭，10项）✅已完成
 │   │   ├── test_restore_broker_state.py # ✨【回写#147】重启恢复券商账本测试(KP-P3-03：paper/qmt restore_state重建在途+冻结+T1/终态不恢复/engine补传broker触发/对账未领回cancel/超阈值pause，6项)✅已完成
+│   │   ├── test_accountability_sync.py # ✨【回写#149】券商权威账本对账测试(KP-P3-08：diff_vs_broker只diff不重建/账实一致通过/patrol超阈CRITICAL+pause/无差异不暂停，4项)✅已完成
 │   │   ├── test_price_limit_fail_closed.py # ✨【回写#146】涨跌停硬拦截fail-closed测试(KP-P3-04：缺prev_close拒绝/涨停拒买/跌停拒卖/正常放行/engine注入prev_close，5项)✅已完成
 
 │   │   ├── test_qmt_broker_live.py  # ✨【回写#41】QMT实盘通道测试（fake SDK不连真实QMT：模式隔离/连接流程/委托撤单/成交回调/资金持仓/状态映射，23项）✅已完成
@@ -965,7 +966,7 @@ Pythonwdhmm/
 
     │   ├── __init__.py
 
-    │   ├── engine.py                 # 实盘引擎继承BaseEngine，协调数据、策略、执行、风控；✨【回写#139】on_market_data 增 (symbol,date) bar级去重（KP-P3-02：_seen_bars集合，同根bar二次推送直接丢弃不达撮合，stats.bar_dedup_skipped计数，启动clear）；✨【回写#142】成交/订单关系账接线（KP-P4-02：可选 trade_ledger 注入，on_order_update 逐笔订单、on_trade 逐笔成交同步落库，长期归档）；✨【回写#146】on_market_data 捕获行情前收字段注入风控上下文（KP-P3-04：_prev_close_map，_build_risk_context extra 注入 prev_close）
+    │   ├── engine.py                 # 实盘引擎继承BaseEngine，协调数据、策略、执行、风控；✨【回写#139】on_market_data 增 (symbol,date) bar级去重（KP-P3-02：_seen_bars集合，同根bar二次推送直接丢弃不达撮合，stats.bar_dedup_skipped计数，启动clear）；✨【回写#142】成交/订单关系账接线（KP-P4-02：可选 trade_ledger 注入，on_order_update 逐笔订单、on_trade 逐笔成交同步落库，长期归档）；✨【回写#146】on_market_data 捕获行情前收字段注入风控上下文（KP-P3-04：_prev_close_map，_build_risk_context extra 注入 prev_close）；✨【回写#149】定时券商账本对账（KP-P3-08：_setup_scheduler 注册 _broker_accountability_patrol，sync_from_broker 超阈 diff → CRITICAL+pause）
 
     │   │                             # 【任务27】接入 BrokerManager 多券商管理器：set_broker自动包装(单券商向后兼容)/set_broker_manager(多券商并行)
 
@@ -977,7 +978,7 @@ Pythonwdhmm/
 
     │   ├── data_feed.py              # 实时行情接入订阅重连分发；流式清洗(单条校验+跳变检测) + attach_event_bus事件总线联动 + 脏数据钩子；✨【回写#83】S2 live复权口径统一：_fetch_from_akshare 改拉不复权raw（adjust=""，与腾讯快照/本地历史同口径）/新增 adjust_out 参数（"qfq"按最新因子现算÷因子）+_stream_clean 除权跳变因子豁免（_live_jump_change_with_factor）+_clean_bars 注入 factor_lookup（config副本不污染共享配置）；✨【回写#139】_make_bar 的 timestamp 改 bar 周期归属时间 bar_date_to_epoch(formatted_date)（KP-P3-02，弃用墙钟 time.time()，避免同根bar因墙钟时刻不同被误判不同bar）
 
-    │   ├── portfolio.py              # 实时持仓、市值、可用冻结资金；✨【回写#141】账实对账 ReconciliationDiff + reconcile_vs_broker（KP-P4-01：本地 vs 券商只读 diff，现金容差0.01+持仓数量差）+ sync_from_broker 改先 diff 后重建，超阈值 critical 告警+__reconciliation_diff__ 回调，禁静默 clear 覆盖
+    │   ├── portfolio.py              # 实时持仓、市值、可用冻结资金；✨【回写#141】账实对账 ReconciliationDiff + reconcile_vs_broker（KP-P4-01：本地 vs 券商只读 diff，现金容差0.01+持仓数量差）+ sync_from_broker 改先 diff 后重建，超阈值 critical 告警+__reconciliation_diff__ 回调，禁静默 clear 覆盖；✨【回写#149】增 diff_vs_broker 只读差异入口（KP-P3-08 风控基准券商权威账本）
 
     │   ├── scheduler.py              # 定时任务、巡检、日报；✨【回写#141】attach_engine 增 enable_reconcile/reconcile_cron 盘后账实对账 cron（KP-P4-01：只对账不重建，超阈值 critical 告警）
 
@@ -2750,6 +2751,19 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：只恢复快照中的已发生事实（在途订单/冻结），不生成新信号。
 - 验证结果：py_compile 通过；新增 tests/unit/test_restore_broker_state.py 6 项全绿（paper/qmt restore_state 重建在途+冻结+T1回写(DoD)/终态订单不恢复/engine 补传 broker 触发 restore_state(DoD)/对账未领回挂单 cancel(DoD)/超阈值 pause+CRITICAL）；live 广回归 302 passed 无回归；ruff 测试通过（3 处既有 F821/F841 非本次引入）。
 - 纪律遵守：仅改蓝图已标注文件（live/engine.py、live/brokers/paper_broker.py、qmt_broker.py、manager.py、live/state_store.py）+ tests/unit 新增 test_restore_broker_state.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+149. ✨【回写记录·2026-10-04·T-15 KP-P3-08 风控基准非券商权威账本，定时同步缺失】
+
+【发现】`engine.py` 风控上下文取本地 portfolio（可能与券商账本漂移），无定时向券商权威账本同步；`portfolio.py` 有 sync_from_broker/reconcile_vs_broker 但无 diff_vs_broker 命名方法，引擎无对账巡检任务。
+- 修复：
+  a. **portfolio.py 增 `diff_vs_broker()`**：@_locked，只 diff 不重建（复用以 reconcile_vs_broker 为纯只读差异，KP-P3-08 命名入口）。
+  b. **engine.py `_setup_scheduler` 增定时券商账本对账**：注册 `_broker_accountability_patrol`（周期=_accountability_interval=快照周期，默认 300s）。
+  c. **engine.py 新增 `_broker_accountability_patrol()`**：`sync_from_broker(self._broker_manager or self._broker)` 同步本地账本向券商权威；`diff.exceeds_threshold` → CRITICAL + `pause()`（避免在漂移账本上继续交易）。
+  d. **engine.py __init__ 增 `_accountability_interval`**（默认与快照周期一致，min 30s）。
+- 防未来：对账只依据"已发生"的券商权威账本快照（当前现金/持仓），不假设未来。
+- 验证结果：py_compile 通过；新增 tests/unit/test_accountability_sync.py 4 项全绿（diff_vs_broker 只 diff 不重建/账实一致通过/patrol 超阈 CRITICAL+pause/patrol 无差异不暂停）；live 广回归 301 passed 无回归；ruff 全部通过。
+- 纪律遵守：仅改蓝图已标注文件（live/engine.py、live/portfolio.py）+ tests/unit 新增 test_accountability_sync.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
 
 148. ✨【回写记录·2026-10-04·T-14 KP-P3-07 回测未执行实盘风控，撮合规则不一致】
 
