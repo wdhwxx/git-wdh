@@ -40,6 +40,9 @@ TABLE_NAMES = {
     "sync_status": "sync_status",           # 数据同步状态表
     "clean_run_meta": "clean_run_meta",     # 清洗运行元信息表（任务13新增）
     "dirty_data_stats": "dirty_data_stats", # 脏数据统计表（任务13新增）
+    "orders": "orders",                     # 订单关系账（KP-P4-02）
+    "fills": "fills",                       # 成交关系账（KP-P4-02）
+    "positions_daily": "positions_daily",   # 持仓日快照账（KP-P4-02）
 }
 
 
@@ -304,6 +307,80 @@ CREATE_DIRTY_INDEX_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_dirty_severity ON dirty_data_stats(severity);",
 ]
 
+# 订单关系账表（KP-P4-02：逐笔订单持久化，长期归档）
+CREATE_ORDERS_SQL = """
+CREATE TABLE IF NOT EXISTS orders (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id     TEXT    NOT NULL UNIQUE,   -- 订单ID（券商端可去重的确定性ID）
+    symbol       TEXT    NOT NULL,          -- 标的代码
+    side         TEXT    NOT NULL,          -- 方向：buy/sell
+    order_type   TEXT,                      -- 订单类型：market/limit
+    quantity     REAL,                       -- 委托数量
+    price        REAL,                       -- 委托价格（市价单为0）
+    status       TEXT    NOT NULL,          -- 状态：submitted/filled/rejected/cancelled
+    strategy_id  TEXT,                       -- 策略ID
+    engine_id    TEXT,                       -- 引擎ID
+    submitted_at REAL,                       -- 提交时间（epoch秒）
+    created_at   TEXT    DEFAULT (datetime('now'))  -- 记录创建时间（UTC）
+);
+"""
+
+CREATE_ORDERS_INDEX_SQL = [
+    "CREATE INDEX IF NOT EXISTS idx_orders_symbol ON orders(symbol);",
+    "CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);",
+    "CREATE INDEX IF NOT EXISTS idx_orders_strategy ON orders(strategy_id);",
+]
+
+# 成交关系账表（KP-P4-02：逐笔成交持久化，与broker逐笔一致）
+CREATE_FILLS_SQL = """
+CREATE TABLE IF NOT EXISTS fills (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    trade_id     TEXT    NOT NULL UNIQUE,   -- 成交ID
+    order_id     TEXT    NOT NULL,          -- 关联订单ID
+    symbol       TEXT    NOT NULL,          -- 标的代码
+    side         TEXT    NOT NULL,          -- 方向：buy/sell
+    quantity     REAL,                       -- 成交数量
+    price        REAL,                       -- 成交价格
+    commission   REAL    DEFAULT 0,         -- 手续费
+    slippage     REAL    DEFAULT 0,         -- 滑点
+    trade_time   REAL,                       -- 成交时间（epoch秒）
+    strategy_id  TEXT,                       -- 策略ID
+    engine_id    TEXT,                       -- 引擎ID
+    created_at   TEXT    DEFAULT (datetime('now'))  -- 记录创建时间（UTC）
+);
+"""
+
+CREATE_FILLS_INDEX_SQL = [
+    "CREATE INDEX IF NOT EXISTS idx_fills_order_id ON fills(order_id);",
+    "CREATE INDEX IF NOT EXISTS idx_fills_symbol ON fills(symbol);",
+    "CREATE INDEX IF NOT EXISTS idx_fills_trade_time ON fills(trade_time);",
+]
+
+# 持仓日快照账表（KP-P4-02：逐日持仓快照，删除当前快照不影响历史查询）
+CREATE_POSITIONS_DAILY_SQL = """
+CREATE TABLE IF NOT EXISTS positions_daily (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_date  TEXT    NOT NULL,        -- 快照日期 YYYY-MM-DD
+    symbol         TEXT    NOT NULL,        -- 标的代码
+    quantity       REAL,                     -- 持仓数量
+    avg_cost       REAL,                     -- 持仓均价
+    market_price   REAL,                     -- 最新市场价
+    market_value   REAL,                     -- 市值
+    realized_pnl   REAL,                     -- 已实现盈亏
+    unrealized_pnl REAL,                     -- 未实现盈亏
+    cash           REAL,                     -- 当日现金
+    account_id     TEXT    DEFAULT 'default', -- 账户ID
+    created_at     TEXT    DEFAULT (datetime('now')),
+    UNIQUE(snapshot_date, symbol, account_id)
+);
+"""
+
+CREATE_POSITIONS_DAILY_INDEX_SQL = [
+    "CREATE INDEX IF NOT EXISTS idx_positions_date ON positions_daily(snapshot_date);",
+    "CREATE INDEX IF NOT EXISTS idx_positions_symbol ON positions_daily(symbol);",
+    "CREATE INDEX IF NOT EXISTS idx_positions_date_symbol ON positions_daily(snapshot_date, symbol);",
+]
+
 
 # ─────────────────────────────────────────────
 # 所有建表SQL汇总
@@ -320,6 +397,9 @@ ALL_CREATE_TABLE_SQL = [
     CREATE_SYNC_STATUS_SQL,
     CREATE_CLEAN_RUN_META_SQL,
     CREATE_DIRTY_DATA_STATS_SQL,
+    CREATE_ORDERS_SQL,
+    CREATE_FILLS_SQL,
+    CREATE_POSITIONS_DAILY_SQL,
 ]
 
 ALL_CREATE_INDEX_SQL = (
@@ -332,6 +412,9 @@ ALL_CREATE_INDEX_SQL = (
     + CREATE_SYNC_INDEX_SQL
     + CREATE_CLEAN_RUN_INDEX_SQL
     + CREATE_DIRTY_INDEX_SQL
+    + CREATE_ORDERS_INDEX_SQL
+    + CREATE_FILLS_INDEX_SQL
+    + CREATE_POSITIONS_DAILY_INDEX_SQL
 )
 
 
@@ -524,6 +607,9 @@ def drop_all_tables(connection) -> None:
         TABLE_NAMES["adjust_factor"],
         TABLE_NAMES["share_change"],
         TABLE_NAMES["financial_data"],
+        TABLE_NAMES["positions_daily"],
+        TABLE_NAMES["fills"],
+        TABLE_NAMES["orders"],
         TABLE_NAMES["market_data"],
     ]
     with connection.transaction():

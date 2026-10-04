@@ -551,6 +551,7 @@ Pythonwdhmm/
 │   │   ├── test_signal_idempotency.py # ✨【回写#43】幂等去重测试（Signal确定性ID/to_order映射/引擎去重/分钟线粒度/start重置/QMT端按订单ID去重/统计双计修复验证，19项）✅已完成
 │   │   ├── test_guard_mounting.py    # ✨【回写#140】防未来铁律1/2/4挂载测试（KP-P2-08：indicators_recorded>0/钩子因果口径/T+1指标桩抛错/T+1信号桩引擎标记失败/止损UPDATE早于CHECK抛错/数据访问未来抛错/无guard注入退化为无操作，10项）✅已完成
 │   │   ├── test_portfolio_reconciliation.py # ✨【回写#141】账实对账测试（KP-P4-01：一致快照exceeds_false/现金容差内不误报/现金超容差告警+回调/持仓数量不一致差异清单/券商多仓本地缺失计入差异/reconcile只读/sync先diff后重建且记录stats/to_dict序列化/attach_engine注册盘后cron/显式关闭不注册/缺组件不注册/对账job不重建，12项）✅已完成
+│   │   ├── test_trade_ledger.py     # ✨【回写#142】订单/成交/持仓关系账测试（KP-P4-02：alembic upgrade head 建三表/逐笔订单落库查询一致/逐笔成交与broker一致/重复上报幂等/按状态过滤/删除当前快照不影响历史/同日覆盖不堆积/create_all_tables含三表/engine on_order_update与on_trade落库，10项）✅已完成
 
 │   │   ├── test_broker_manager_failover.py # ✨【回写#44】failover盲目重试约束化测试（业务拒单不failover/通道故障副本重试/冷却熔断/健康恢复/手动切换清除恢复记忆/统计摘要，27项）✅已完成
 
@@ -679,11 +680,13 @@ Pythonwdhmm/
 
     │   ├── connection.py             # SQLite连接管理上下文管理器
 
-    │   ├── schema.py                 # 表结构总览DDL；✨【回写#87】drop_all_tables 顺序 share_change 重复行清理（L502-503 双行→单行，幂等不变）
+    │   ├── schema.py                 # 表结构总览DDL；✨【回写#87】drop_all_tables 顺序 share_change 重复行清理（L502-503 双行→单行，幂等不变）；✨【回写#142】TABLE_NAMES 10→13 张（KP-P4-02：orders/fills/positions_daily 三关系账 + DDL/索引/ALL_CREATE/drop_all 同步）
 
     │   │                             # ✅已实现：clean_run_meta(清洗运行元信息) + dirty_data_stats(脏数据统计14种类型) 两表 + CleanRunMetaSchema/DirtyDataStatsSchema + 9索引
 
     │   ├── queries.py               # 类型安全SQL封装CRUD
+
+    │   ├── trade_log.py             # ✨【回写#142】订单/成交/持仓关系账（KP-P4-02）：TradeLedger 逐笔落库+查询
 
     │   └── migrations/               # ✨【第6项】Alembic数据库迁移
 
@@ -699,6 +702,8 @@ Pythonwdhmm/
     │           ├── 0001_initial_schema.py  # 初始建表：8表(6业务+2清洗元信息)+21索引，从schema.py完整转换（链上经0002后22；schema.py 已同步 22，P2-D10-001 整改）
 
     │           └── 0002_add_market_data_composite_index.py  # 增量迁移：market_data(symbol,period,trade_date)复合索引
+
+    │           └── 0004_add_trade_ledger.py  # ✨【回写#142】增量迁移：KP-P4-02 orders/fills/positions_daily 三关系账 + 9 索引（幂等 CREATE IF NOT EXISTS）
 
     │
 
@@ -955,7 +960,7 @@ Pythonwdhmm/
 
     │   ├── __init__.py
 
-    │   ├── engine.py                 # 实盘引擎继承BaseEngine，协调数据、策略、执行、风控；✨【回写#139】on_market_data 增 (symbol,date) bar级去重（KP-P3-02：_seen_bars集合，同根bar二次推送直接丢弃不达撮合，stats.bar_dedup_skipped计数，启动clear）
+    │   ├── engine.py                 # 实盘引擎继承BaseEngine，协调数据、策略、执行、风控；✨【回写#139】on_market_data 增 (symbol,date) bar级去重（KP-P3-02：_seen_bars集合，同根bar二次推送直接丢弃不达撮合，stats.bar_dedup_skipped计数，启动clear）；✨【回写#142】成交/订单关系账接线（KP-P4-02：可选 trade_ledger 注入，on_order_update 逐笔订单、on_trade 逐笔成交同步落库，长期归档）
 
     │   │                             # 【任务27】接入 BrokerManager 多券商管理器：set_broker自动包装(单券商向后兼容)/set_broker_manager(多券商并行)
 
@@ -2668,3 +2673,15 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 防未来：对账仅比较已成交持仓与当前资金，不使用未来行情。
 - 验证结果：py_compile 3 文件 PASS；tests/unit/test_portfolio_reconciliation.py 12 项全绿（一致快照/容差内不误报/超容差告警+回调/持仓差异清单/券商多仓计入差异/reconcile 只读/sync 先 diff 后重建+stats 留痕/to_dict 可落库/attach_engine 注册盘后 cron/显式关闭不注册/缺组件不注册/对账 job 不重建）；live 相关回归 65 passed 无回归；ruff：portfolio.py/scheduler.py/测试文件通过。
 - 纪律遵守：仅改蓝图已标注文件（live/portfolio.py、live/scheduler.py）+ tests/unit 新增 test_portfolio_reconciliation.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+142. ✨【回写记录·2026-10-04·T-08 KP-P4-02 无订单/成交/持仓关系账（TABLE_NAMES 仅 10 张表）】
+
+【发现】`schema.py:32` TABLE_NAMES 10 张表无 order/fill/position 表；成交只存内存（broker._trades），无长期归档，审计无法按笔追查。
+- 修复（myquant/database/schema.py + migrations/versions/0004 + database/trade_log.py + live/engine.py）：
+  a. schema.py TABLE_NAMES 10→13 张：新增 orders（逐笔订单，order_id 唯一）/fills（逐笔成交，trade_id 唯一）/positions_daily（持仓日快照，snapshot_date+symbol+account 唯一）三关系账 + DDL + 9 索引 + ALL_CREATE_TABLE/INDEX + drop_all_tables 顺序同步（test_database 表数断言 10→13）。
+  b. Alembic 迁移 0004_add_trade_ledger.py（down=0003）：幂等 CREATE IF NOT EXISTS 三表 + 9 索引。
+  c. 新增 myquant/database/trade_log.py（TradeLedger）：record_order/record_fill/record_position_snapshot（INSERT OR IGNORE/REPLACE 幂等）+ query_orders/query_fills/query_positions_on（按标的/状态/订单/日期过滤）。
+  d. live/engine.py 成交回调同步落库：__init__ 增可选 trade_ledger 注入；on_order_update 逐笔订单、on_trade 逐笔成交落库（try/except 失败不中断，None 时仅内存不落库向后兼容）。
+- 防未来：落库/查询仅消费已发生订单与成交事实，不使用未来行情。
+- 验证结果：py_compile 5 文件 PASS；tests/unit/test_trade_ledger.py 10 项全绿（alembic upgrade head 真实跑通建三表/逐笔订单查询一致/逐笔成交与 broker 一致/重复上报幂等/按状态过滤/删除当前快照不影响历史查询/same-day 覆盖不堆积/create_all_tables 含三表/engine on_order_update 与 on_trade 落库）；database+live 广回归 328 passed + 1 skipped 无回归；ruff：trade_log.py/0004/测试文件通过（schema.py/engine.py 顶层 import 排序为既有 I001，非本次引入）。
+- 纪律遵守：仅改蓝图已标注文件（database/schema.py、migrations/versions/0004、live/engine.py）+ 蓝图新增 database/trade_log.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。

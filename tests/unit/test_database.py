@@ -257,7 +257,7 @@ class TestSchema:
         expected = {"market_data", "financial_data", "factor_data",
                     "strategy_state", "data_source", "sync_status",
                     "clean_run_meta", "dirty_data_stats", "adjust_factor",
-                    "share_change"}
+                    "share_change", "orders", "fills", "positions_daily"}
         assert set(TABLE_NAMES.keys()) == expected
         assert set(TABLE_NAMES.values()) == expected
 

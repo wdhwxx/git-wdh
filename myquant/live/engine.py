@@ -215,6 +215,8 @@ class LiveEngine(BaseEngine):
         snapshot_interval: float = 300.0,
         patrol_interval: float = 60.0,
         trade_mode: str = "paper",
+        # ── KP-P4-02：订单/成交关系账（可选注入，None 时成交仅内存，不落库）──
+        trade_ledger: Optional[Any] = None,
     ):
         """
         初始化实盘引擎
@@ -259,6 +261,9 @@ class LiveEngine(BaseEngine):
             状态快照间隔秒数（默认300）
         patrol_interval : float
             巡检/守护间隔秒数（默认60）
+        trade_ledger : TradeLedger | None
+            KP-P4-02：订单/成交关系账（None 时成交仅存内存不落库；
+            注入后 on_order_update 逐笔订单、on_trade 逐笔成交同步落库，长期归档）
         """
         # 初始化 BaseEngine（统一生命周期状态：_initialized/_running/_stopped/_event_count）
         super().__init__(name=f"live_{engine_id}")
@@ -329,6 +334,9 @@ class LiveEngine(BaseEngine):
         self._on_signal_callbacks: List[Callable[[Signal], None]] = []
         self._on_order_callbacks: List[Callable[[Order], None]] = []
         self._on_trade_callbacks: List[Callable[[Trade], None]] = []
+
+        # KP-P4-02：订单/成交关系账（可选；None 时成交仅内存，不落库）
+        self._trade_ledger: Optional[Any] = trade_ledger
 
         # ═══════════════════════════════════════
         #  H2修复：实盘保障组件（风控/守护/状态/调度/事件总线）
@@ -2082,6 +2090,13 @@ class LiveEngine(BaseEngine):
             with self._order_lock:
                 self._pending_buy_order_ids.discard(order.order_id)
 
+        # KP-P4-02：逐笔订单落库（长期归档；注入 trade_ledger 时生效，失败不中断）
+        if self._trade_ledger is not None:
+            try:
+                self._trade_ledger.record_order(order, engine_id=self._engine_id)
+            except Exception as e:
+                logger.error(f"[engine] 订单落库失败: {e}")
+
     def on_trade(self, trade: Trade) -> None:
         """
         成交回报回调（供broker调用）
@@ -2102,6 +2117,13 @@ class LiveEngine(BaseEngine):
             # 更新portfolio
             if self._portfolio:
                 self._portfolio.apply_trade(trade)
+
+            # KP-P4-02：逐笔成交落库（与 broker 逐笔一致，长期归档；失败不中断）
+            if self._trade_ledger is not None:
+                try:
+                    self._trade_ledger.record_fill(trade, engine_id=self._engine_id)
+                except Exception as e:
+                    logger.error(f"[engine] 成交落库失败: {e}")
 
             # ── 任务42：成交回报记录防未来校验（铁律3：信号T日→T+1成交）──
             # 实盘/paper模式下信号当日收盘生成、撮合可能在同日（trade_date==signal_date），
