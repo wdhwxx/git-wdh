@@ -17,6 +17,12 @@ rabbitmq_bus.py - RabbitMQ 传输实现
   - 有限重试: 消费失败按 x-retry-count 计数重投（默认 3 次），避免无限循环
   - 死信队列: 超过重试上限的消息进入 {prefix}.dlx / {queue}.dlq，可人工恢复
 
+L1 中间件监控（A-2）:
+  - subscribe 登记已声明队列（主队列 + DLQ）至 _declared_queues
+  - get_queue_stats() 通过 RabbitMQ Management HTTP API 采集队列深度/DLQ 积压
+    （TransportConfig.extra: management_url / management_username / management_password）
+  - 未配置 management 或采集失败返回 None（fail-closed，不伪装健康）
+
 Usage:
     from myquant.core.transports import get_rabbitmq_transport
 
@@ -73,6 +79,9 @@ class RabbitMQTransport(Transport):
         self.max_retry = config.max_retry
         # C3: 死信交换机/队列命名
         self._dlx_name = f"{config.queue_prefix}.dlx"
+        # A-2 L1 中间件监控：已声明队列注册表（subscribe 时登记主队列 + DLQ，
+        # 供 get_queue_stats() 通过 Management HTTP API 采集队列深度）
+        self._declared_queues: set = set()
 
     def connect(self) -> None:
         # KP-P4-07：空凭据拒绝 guest/guest 静默回退，显式抛错（防御性补丁，当前未启用）
@@ -192,6 +201,9 @@ class RabbitMQTransport(Transport):
             exchange=self._dlx_name,
             routing_key=queue_name,
         )
+        # A-2 L1 中间件监控：登记主队列 + DLQ，供 get_queue_stats() 采集队列深度
+        self._declared_queues.add(queue_name)
+        self._declared_queues.add(dlq_name)
         logger.info(
             f"RabbitMQ queue={queue_name} 已绑定 DLX={self._dlx_name}, DLQ={dlq_name}"
         )
@@ -226,6 +238,65 @@ class RabbitMQTransport(Transport):
 
     def unsubscribe(self, topic: str) -> None:
         self._handlers.pop(topic, None)
+
+    def get_queue_stats(self) -> Optional[Dict[str, int]]:
+        """
+        采集队列深度 / 死信队列（DLQ）积压计数（A-2 L1 中间件监控）
+
+        通过 RabbitMQ Management HTTP API（/api/queues）拉取各已声明队列的
+        消息深度（ready + unacknowledged）。Management 配置走 TransportConfig.extra
+        （配置外置，不写死代码）：
+          - management_url: Management 插件 HTTP 地址（如 http://localhost:15672）
+          - management_username / management_password: 缺省回退到 config.username/password
+
+        Returns
+        -------
+        Optional[Dict[str, int]] : 队列名 → 消息深度；未配置 management_url、
+            采集失败或未连接时返回 None（fail-closed，上层不得假装健康）
+        """
+        if not self._declared_queues:
+            return {}
+        extra = self.config.extra or {}
+        mgmt_url = str(extra.get("management_url", "") or "").rstrip("/")
+        if not mgmt_url:
+            logger.warning(
+                "RabbitMQ 未配置 management_url，无法采集队列深度/DLQ 计数"
+                "（TransportConfig.extra['management_url']）"
+            )
+            return None
+
+        # 函数内局部导入：规避模块级绑定被测试 fake 锁死（同 #184 约束）
+        import base64
+        import json
+        import urllib.parse
+        import urllib.request
+
+        username = str(extra.get("management_username") or self.config.username or "")
+        password = str(extra.get("management_password") or self.config.password or "")
+        auth_header = "Basic " + base64.b64encode(
+            f"{username}:{password}".encode("utf-8")
+        ).decode("utf-8")
+
+        vhost_enc = urllib.parse.quote(self.config.vhost or "/", safe="")
+        result: Dict[str, int] = {}
+        for queue_name in sorted(self._declared_queues):
+            try:
+                q_enc = urllib.parse.quote(queue_name, safe="")
+                url = f"{mgmt_url}/api/queues/{vhost_enc}/{q_enc}"
+                req = urllib.request.Request(
+                    url, headers={"Authorization": auth_header}
+                )
+                with urllib.request.urlopen(req, timeout=5.0) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                ready = int(data.get("messages_ready", 0) or 0)
+                unacked = int(data.get("messages_unacknowledged", 0) or 0)
+                result[queue_name] = ready + unacked
+            except Exception as e:
+                # 任一队列采集失败即整体降级为 None：深度数据不可信时
+                # 不得用部分结果伪装健康（fail-closed）
+                logger.warning(f"RabbitMQ 队列深度采集失败 queue={queue_name}: {e}")
+                return None
+        return result
 
     def _consume(self) -> None:
         """后台消费线程"""

@@ -526,6 +526,8 @@ Pythonwdhmm/
     │   │   ├── test_heartbeat.py # ✨【回写#203】BASE-8 外部兜底心跳测试（23 项，临时目录不碰 quant.db）：载体（文件写/读/原子覆盖/空目录校验/注册表 file/webhook/非法名/webhook 校验与失败不抛）；HeartbeatWriter（周期写 seq 递增/幂等/收尾心跳/状态与 pid/参数校验）；ExternalHeartbeatGuard（新鲜 alive/单次超时 degraded 不判死（R-08 网络抖动）/连续超时判 dead/恢复清零/无心跳 dead/reset/阈值>=2 校验）；MetaMonitor 集成（attach_heartbeat 随巡检发心跳 seq/pid/ts 防未来、绑定校验、未绑定不发）✅已完成
     │   │   ├── test_field_crypto.py # ✨【回写#204】BASE-9 敏感字段加密与访问审计测试（27 项，临时库不碰 quant.db）：FieldCrypto（密钥文件生成/复用、环境变量密钥、加密解密往返、密文非明文、错误密钥拒绝 try_decrypt 返回 None）；敏感判定（equity/balance/position/capital/asset/pnl 命中、普通指标不命中、自定义 patterns 覆盖）；metrics_history 集成（敏感密文落盘 value 占位+value_encrypted 非空+密文非明文、query 解密回读真实值、普通指标明文不受影响、未绑定加密器拒绝敏感明文落盘、敏感指标拒绝降采样、自定义 patterns 覆盖、save_batch 敏感分支）；访问审计（query record_access 留痕、export_csv 导出留痕、审计链完整、审计失败不阻断查询）；connection 权限收紧（connect 不抛异常）✅已完成
 
+    │   │   ├── test_middleware_monitoring.py # ✨【回写#206】A-2 L1 中间件监控测试（19 项）：middleware_queue_depth/middleware_dlq_count/middleware_event_bus_backlog(_ratio) 注册与标签；collect_from_event_bus 积压采集（条数/积压率/容量封顶/无容量不崩/总线异常返回 0）；collect_from_rabbitmq_bus（.dlq 后缀进 DLQ 计数、普通队列进队列深度、不可用返回 0 不伪造、transport 异常返回 0）；check_middleware_backlog 判定（无数据 fail-closed DEGRADED/正常 HEALTHY/队列深度超 DEGRADED/DLQ 超 UNHEALTHY/积压率超 DEGRADED）；RabbitMQTransport.get_queue_stats（空注册表 {}、未配置 management_url None、HTTP 拉取 ready+unacked 深度、任一队列失败 None）；subscribe 登记主队列+DLQ ✅已完成
+
 │   │   ├── test_broker_platform_check.py # ✨【回写#25】券商适配器平台校验（审计疑点3：qmt/ptrade非Windows拦截、paper/sim放行、大小写不敏感）✅已完成
 
 │   │   ├── test_dashboard_serializer.py  # ✨【回写#25】回测看板数据序列化器测试（build_dashboard_json全链路/成本反向拆分/买卖配对/exit_reason_class/pool派生）✅已完成
@@ -758,7 +760,7 @@ Pythonwdhmm/
 
     │       ├── redis_bus.py          # Redis Pub/Sub实现（可选）
 
-    │       └── rabbitmq_bus.py       # RabbitMQ实现（可选）；✨【回写#172】空凭据拒绝 guest/guest 静默回退，fail-closed（KP-P4-07）；✨【回写#184】publish/_handle_message 改函数内局部 import pika（规避模块级绑定被测试 fake 锁死，全量回归修复）
+    │       └── rabbitmq_bus.py       # RabbitMQ实现（可选）；✨【回写#172】空凭据拒绝 guest/guest 静默回退，fail-closed（KP-P4-07）；✨【回写#184】publish/_handle_message 改函数内局部 import pika（规避模块级绑定被测试 fake 锁死，全量回归修复）；✨【回写#206】A-2 L1 中间件监控——subscribe 登记主队列+DLQ 至 _declared_queues；get_queue_stats() 经 Management HTTP API 采集队列深度（ready+unacked）/DLQ 积压（TransportConfig.extra: management_url/management_username/management_password 配置外置），未配置/任一队列失败返回 None fail-closed（同 #172 风格）
 
     │
 
@@ -1122,7 +1124,7 @@ Pythonwdhmm/
 
     │   │                             # ✅已实现：AlertManager.subscribe_to_event_bus(5类事件) + DataQualityEvent自动聚合告警 + Console/Log/Email/Webhook四通道
 
-    │   ├── metrics_collector.py      # 运行指标采集
+    │   ├── metrics_collector.py      # 运行指标采集；✨【回写#206】A-2 L1 中间件监控——新增内置指标 middleware_queue_depth/middleware_dlq_count（GAUGE×queue）/middleware_event_bus_backlog(_ratio)（GAUGE）；collect_from_event_bus 增补总线积压条数+积压率（handler 错误/调用已有）；collect_from_rabbitmq_bus() 从 transport.get_queue_stats() 采集队列深度/DLQ（.dlq 后缀分流，None 记 warning 返回 0 不伪造）；check_middleware_backlog() 积压健康判定（队列深度超→DEGRADED、DLQ 超→UNHEALTHY、总线积压率超→DEGRADED、无数据 fail-closed→DEGRADED），供 HealthPatrol/scheduler 注册巡检
 
     │   │                             # ✅已实现：11个内置数据质量指标(dirty_count/ratio/grade/repair等) + collect_from_data_quality_event + subscribe_to_event_bus自动采集 + Prometheus导出
 
@@ -3395,3 +3397,18 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
     c. 新增 tests/unit/test_health_check.py（36 项，不依赖外网：10.255.255.1 不可达地址验证失败/降级分支、localhost 验证正常分支）：注册 7 项/run_all/汇总计数/与默认 3 项共存/链式；防御式校验 14 项（阈值倒挂、tls 语义、非法端点/端口/域名/超时/空服务器）；行为 16 项；集成 3 项。
     d. 验证结果：py_compile 通过；health_check __main__ 自测 26 项全绿；test_health_check.py 36 passed；全量 pytest tests/unit 2598 passed + 2 skipped（基线 2562 + 36，无回归）。
     e. 纪律遵守：先更新蓝图再创建文件（#205 目录树登记先行）；无蓝图外文件；业务逻辑归 myquant；配置外置（默认端点可覆盖，不硬编码业务标的）；防未来（七项检查只读当前状态，无预测）；任务后 git 提交。
+
+201. ✨【回写记录·2026-10-05·A-2 L1 中间件监控】【回写#206】
+    事实来源：本次落地，代码级核验：《量化系统监控模块施工总清单_V1.2.md》A-2 行验收口径（落点 core/event_bus.py + core/transports/rabbitmq_bus.py + monitoring/metrics_collector.py；事件总线 handler 错误/积压（已有部分）；RabbitMQ 队列深度、死信队列（DLQ）积压指标；指标名：middleware_queue_depth / middleware_dlq_count；验收=队列深度/DLQ 计数进入 /api/metrics，积压超阈值告警）。
+    a. 登记 tests/unit/test_middleware_monitoring.py 至蓝图目录树（tests/unit 段）；rabbitmq_bus.py / metrics_collector.py 条目追加 #206（event_bus.py 为既有能力复用——handler 错误/积压 stats 已有，BASE-4/BASE-5 已定稿，本次不重复改造，仅由 metrics_collector 采集总线积压指标）。
+    b. 改造 myquant/core/transports/rabbitmq_bus.py（A-2 两块）：
+       ① subscribe 登记已声明队列——主队列 + DLQ（{queue}.dlq）加入 _declared_queues 注册表（get_queue_stats 的采集数据源）；
+       ② get_queue_stats()——经 RabbitMQ Management HTTP API（/api/queues/{vhost}/{queue}）拉取消息深度（messages_ready + messages_unacknowledged），Management 配置走 TransportConfig.extra（management_url / management_username / management_password 缺省回退 username/password，配置外置）；空注册表返回 {}；未配置 management_url 或任一队列采集失败返回 None（fail-closed，不伪装健康，同 #172 风格）；函数内局部 import urllib（同 #184 规避模块级绑定被 fake 锁死）。
+    c. 扩展 myquant/monitoring/metrics_collector.py（A-2 四块）：
+       ① 新增内置指标常量 + register_builtin_metrics 注册：middleware_queue_depth（GAUGE×queue，队列深度）、middleware_dlq_count（GAUGE×queue，死信积压）、middleware_event_bus_backlog（GAUGE，总线历史积压条数）、middleware_event_bus_backlog_ratio（GAUGE 0~1，总线积压率=history_size/maxlen 封顶 1.0）——四指标随 get_metrics_collector 单例进入 /api/metrics 数据源；
+       ② collect_from_event_bus 增补——总线积压条数 + 积压率（容量经 _history.maxlen 探测，不可得只设条数不阻断；handler 错误/调用为既有采集不动）；
+       ③ collect_from_rabbitmq_bus()——transport.get_queue_stats() 结果按 .dlq 后缀分流（.dlq→middleware_dlq_count，普通队列→middleware_queue_depth）；None/异常记 warning 返回 0 不伪造指标；
+       ④ check_middleware_backlog()——积压超阈值告警判定（供 HealthPatrol/scheduler 注册巡检）：队列深度超阈值→DEGRADED（处理延迟风险）、DLQ 超阈值→UNHEALTHY（消息丢失风险）、总线积压率超阈值→DEGRADED（handler 跟不上）、4 类指标均无数据点→DEGRADED（fail-closed 不可评估不伪装健康）；HealthCheckResult 含超限队列明细。
+    d. 新增 tests/unit/test_middleware_monitoring.py（19 项）：指标注册与标签；collect_from_event_bus 积压（条数/积压率/容量封顶/无容量不崩/总线异常返回 0）；collect_from_rabbitmq_bus（.dlq 分流、不可用返回 0 不伪造、transport 异常返回 0）；check_middleware_backlog（无数据 DEGRADED/正常 HEALTHY/深度超 DEGRADED/DLQ 超 UNHEALTHY/积压率超 DEGRADED）；RabbitMQTransport.get_queue_stats（空注册表 {}、未配置 None、HTTP 拉取 ready+unacked、任一队列失败 None）；subscribe 登记主队列+DLQ。
+    e. 验证结果：py_compile 2 文件通过；新增单测 19 passed；全量 pytest tests/unit 2617 passed + 2 skipped 无回归（基线 2598 + 19）。
+    f. 纪律遵守：先更新蓝图再创建文件（#206 目录树登记先行）；无蓝图外文件；业务逻辑归 myquant；配置外置（Management 地址/凭据走 TransportConfig.extra，不硬编码）；防未来（采集/判定只读当前已发生状态，无预测）；任务后 git 提交。

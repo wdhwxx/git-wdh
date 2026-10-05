@@ -27,6 +27,18 @@ metrics_collector.py - 运行指标采集（阶段9任务11增强：数据质量
   - 新增内置指标：risk_pause_total / risk_resume_total / risk_paused
   - subscribe_to_event_bus() 增订阅 RISK_PAUSED / RISK_RESUMED（实盘下单开关状态可观测）
 
+A-2 L1 中间件监控增强:
+  - 新增内置指标：middleware_queue_depth（RabbitMQ 队列深度，GAUGE×queue）/
+    middleware_dlq_count（死信队列积压，GAUGE×queue）/
+    middleware_event_bus_backlog（事件总线历史积压条数，GAUGE）/
+    middleware_event_bus_backlog_ratio（事件总线积压率 0~1，GAUGE）
+  - collect_from_event_bus() 增补事件总线积压/积压率采集（handler 错误/调用已有）
+  - collect_from_rabbitmq_bus() 从 RabbitMQ 传输采集队列深度/DLQ 计数
+    （transport.get_queue_stats()，未配置 Management 或失败返回 None 不伪造数据）
+  - check_middleware_backlog() 积压健康判定：队列深度超阈值→DEGRADED、
+    DLQ 超阈值→UNHEALTHY、总线积压率超阈值→DEGRADED、
+    无采集数据→DEGRADED（fail-closed），供 HealthPatrol/scheduler 注册巡检
+
 为实盘无缝对接预留:
   - /metrics 端点供 Prometheus 抓取（任务16 API 将集成 to_prometheus()）
   - 实时指标更新（流式清洗时逐条 collect_from_data_quality_event）
@@ -214,6 +226,12 @@ class BuiltinMetrics:
     RISK_PAUSE_TOTAL = "risk_pause_total"
     RISK_RESUME_TOTAL = "risk_resume_total"
     RISK_PAUSED = "risk_paused"
+
+    # 中间件指标（A-2 L1 中间件监控）
+    MIDDLEWARE_QUEUE_DEPTH = "middleware_queue_depth"
+    MIDDLEWARE_DLQ_COUNT = "middleware_dlq_count"
+    MIDDLEWARE_EVENT_BUS_BACKLOG = "middleware_event_bus_backlog"
+    MIDDLEWARE_EVENT_BUS_BACKLOG_RATIO = "middleware_event_bus_backlog_ratio"
 
     # 质量等级数值映射（0=excellent, 1=good, 2=fair, 3=poor, 4=critical）
     QUALITY_GRADE_MAP = {
@@ -414,6 +432,18 @@ class MetricsCollector:
         self.register(BuiltinMetrics.RISK_PAUSED, MetricType.GAUGE,
                       "Current strategy paused state (1=paused, 0=resumed)",
                       label_names=["pause_level", "symbol"])
+
+        # 中间件指标（A-2 L1 中间件监控）
+        self.register(BuiltinMetrics.MIDDLEWARE_QUEUE_DEPTH, MetricType.GAUGE,
+                      "RabbitMQ queue message depth (ready + unacknowledged)",
+                      label_names=["queue"])
+        self.register(BuiltinMetrics.MIDDLEWARE_DLQ_COUNT, MetricType.GAUGE,
+                      "RabbitMQ dead-letter queue backlog count",
+                      label_names=["queue"])
+        self.register(BuiltinMetrics.MIDDLEWARE_EVENT_BUS_BACKLOG, MetricType.GAUGE,
+                      "Event bus history backlog size (events retained)")
+        self.register(BuiltinMetrics.MIDDLEWARE_EVENT_BUS_BACKLOG_RATIO, MetricType.GAUGE,
+                      "Event bus history backlog ratio (0.0 ~ 1.0, 1.0 = ring full)")
 
         return self
 
@@ -765,6 +795,23 @@ class MetricsCollector:
                            float(stats.get("async_handlers", 0)))
             count += 3
 
+            # A-2 L1 中间件监控：事件总线积压（历史环形缓冲占用条数 + 积压率）
+            history_size = int(stats.get("history_size", 0) or 0)
+            self.set_gauge(BuiltinMetrics.MIDDLEWARE_EVENT_BUS_BACKLOG,
+                           float(history_size))
+            count += 1
+            try:
+                history = getattr(bus, "_history", None)
+                maxlen = getattr(history, "maxlen", None) if history is not None else None
+                if maxlen and maxlen > 0:
+                    ratio = min(1.0, history_size / float(maxlen))
+                    self.set_gauge(BuiltinMetrics.MIDDLEWARE_EVENT_BUS_BACKLOG_RATIO,
+                                   float(ratio))
+                    count += 1
+            except Exception as e:
+                # 容量不可得时只保留积压条数，不阻断主链路
+                logger.debug(f"事件总线积压率采集异常: {e}")
+
             # 处理器级别统计
             try:
                 all_stats = bus.get_handler_stats()
@@ -784,6 +831,149 @@ class MetricsCollector:
         except Exception as e:
             logger.error(f"从事件总线采集指标失败: {e}", exc_info=True)
         return count
+
+    # ═══════════════════════════════════════════
+    #  A-2 L1 中间件监控：RabbitMQ 队列深度/DLQ 采集
+    # ═══════════════════════════════════════════
+
+    def collect_from_rabbitmq_bus(self, transport: Any) -> int:
+        """
+        从 RabbitMQ 传输采集队列深度 / 死信队列（DLQ）积压计数（A-2）
+
+        依赖 transport.get_queue_stats()：未配置 Management HTTP API 或采集失败
+        返回 None——本方法记 warning 并返回 0，不伪造指标（fail-closed）。
+
+        Parameters
+        ----------
+        transport : RabbitMQTransport
+            RabbitMQ 传输实例（需实现 get_queue_stats()）
+
+        Returns
+        -------
+        int : 采集的指标数量（不可用时为 0）
+        """
+        count = 0
+        try:
+            stats = transport.get_queue_stats()
+            if stats is None:
+                logger.warning(
+                    "RabbitMQ 队列深度采集不可用（未配置 management_url 或采集失败），"
+                    "middleware_queue_depth / middleware_dlq_count 不更新"
+                )
+                return 0
+            for queue_name, depth in stats.items():
+                if queue_name.endswith(".dlq"):
+                    self.set_gauge(BuiltinMetrics.MIDDLEWARE_DLQ_COUNT,
+                                   float(depth), labels={"queue": queue_name})
+                else:
+                    self.set_gauge(BuiltinMetrics.MIDDLEWARE_QUEUE_DEPTH,
+                                   float(depth), labels={"queue": queue_name})
+                count += 1
+            self._collect_count += 1
+            logger.debug(f"从 RabbitMQ 采集了 {count} 个中间件指标")
+        except Exception as e:
+            logger.error(f"从 RabbitMQ 采集指标失败: {e}", exc_info=True)
+        return count
+
+    # ═══════════════════════════════════════════
+    #  A-2 L1 中间件监控：积压健康判定（超阈值告警）
+    # ═══════════════════════════════════════════
+
+    def check_middleware_backlog(
+        self,
+        queue_depth_threshold: float = 1000.0,
+        dlq_threshold: float = 100.0,
+        backlog_ratio_threshold: float = 0.9,
+    ) -> Any:
+        """
+        中间件积压健康检查（A-2，供 HealthPatrol / scheduler 注册为巡检项）
+
+        判定规则：
+          - 任一 RabbitMQ 队列深度 > queue_depth_threshold → DEGRADED（处理延迟风险）
+          - 任一 DLQ 积压计数 > dlq_threshold → UNHEALTHY（消息丢失风险，需人工介入）
+          - 事件总线积压率 > backlog_ratio_threshold → DEGRADED（handler 跟不上）
+          - 4 类中间件指标均无数据点 → DEGRADED（无采集数据不得伪装健康，fail-closed）
+
+        Parameters
+        ----------
+        queue_depth_threshold : float
+            队列深度告警阈值（默认 1000 条）
+        dlq_threshold : float
+            DLQ 积压告警阈值（默认 100 条）
+        backlog_ratio_threshold : float
+            事件总线积压率告警阈值（默认 0.9）
+
+        Returns
+        -------
+        HealthCheckResult : 判定结果（message 汇总超限项，details 含明细）
+        """
+        from myquant.monitoring.health_check import HealthCheckResult, HealthStatus
+
+        problems: List[str] = []
+        unhealthy = False
+        details: Dict[str, Any] = {}
+
+        depth_metrics = self.get_all(BuiltinMetrics.MIDDLEWARE_QUEUE_DEPTH)
+        dlq_metrics = self.get_all(BuiltinMetrics.MIDDLEWARE_DLQ_COUNT)
+        backlog_metrics = self.get_all(BuiltinMetrics.MIDDLEWARE_EVENT_BUS_BACKLOG)
+        backlog_ratio_metrics = self.get_all(BuiltinMetrics.MIDDLEWARE_EVENT_BUS_BACKLOG_RATIO)
+
+        # 无任何中间件数据点：不可评估，fail-closed 判降级
+        if not (depth_metrics or dlq_metrics or backlog_metrics or backlog_ratio_metrics):
+            return HealthCheckResult(
+                name="middleware_backlog",
+                status=HealthStatus.DEGRADED,
+                message="中间件指标未采集（无数据点），无法确认健康",
+                details={"queues": [], "dlq_over": [], "backlog_ratio_over": []},
+            )
+
+        # 1. 队列深度
+        depth_over = []
+        for m in depth_metrics:
+            if m.value > queue_depth_threshold:
+                depth_over.append(m.labels.get("queue", "?"))
+                problems.append(
+                    f"队列 {m.labels.get('queue', '?')} 深度 {m.value:.0f} > "
+                    f"阈值 {queue_depth_threshold:.0f}"
+                )
+        details["queues"] = depth_over
+
+        # 2. DLQ 积压（更严重：消息可能已丢失）
+        dlq_over = []
+        for m in dlq_metrics:
+            if m.value > dlq_threshold:
+                dlq_over.append(m.labels.get("queue", "?"))
+                problems.append(
+                    f"DLQ {m.labels.get('queue', '?')} 积压 {m.value:.0f} > "
+                    f"阈值 {dlq_threshold:.0f}"
+                )
+                unhealthy = True
+        details["dlq_over"] = dlq_over
+
+        # 3. 事件总线积压率
+        ratio_over = []
+        for m in backlog_ratio_metrics:
+            if m.value > backlog_ratio_threshold:
+                ratio_over.append(round(m.value, 4))
+                problems.append(
+                    f"事件总线积压率 {m.value:.2%} > 阈值 {backlog_ratio_threshold:.0%}"
+                )
+        details["backlog_ratio_over"] = ratio_over
+
+        if unhealthy:
+            status = HealthStatus.UNHEALTHY
+        elif problems:
+            status = HealthStatus.DEGRADED
+        else:
+            status = HealthStatus.HEALTHY
+
+        message = "; ".join(problems) if problems else "中间件积压正常"
+        return HealthCheckResult(
+            name="middleware_backlog",
+            status=status,
+            message=message,
+            details=details,
+        )
 
     # ═══════════════════════════════════════════
     #  任务11核心：数据质量指标自动采集
