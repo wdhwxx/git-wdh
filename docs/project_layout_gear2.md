@@ -512,6 +512,8 @@ Pythonwdhmm/
 
     │   │   ├── test_metrics_history.py # ✨【回写#197】BASE-2 指标时序存储测试（30 项，临时库不碰 quant.db）：建表自检/迁移 DDL 一致性/唯一幂等/标签 JSON 归一/批量/查询过滤/降采样聚合/保留清理/HealthPatrol 集成（巡检落库可查、未绑定不落库、store 异常不阻断巡检）✅已完成
 
+    │   │   ├── test_metrics_history_storage.py # ✨【回写#201】BASE-6 存储优化测试（25 项，临时库不碰 quant.db）：迁移接口预留（默认 null/注册表 vm/clickhouse 占位报错/非法名/set_exporter 校验/导出钩子收行/导出失败不阻断落库）；异步批量写入（enqueue/flush/超限丢弃最旧/后台守护线程 flush/收尾落库/非法间隔）；降采样物化（>=30 天旧数据按桶聚合/幂等/物化行可查带溯源标签/365 天清理不碰原始行/前缀清理/参数校验）；DownsamplingTask 独立调度（run 结果/names 子集/start/stop 幂等/参数校验）；connection pragma（WAL + busy_timeout>=30000 实际生效）✅已完成
+
     │   │   ├── test_monitoring_config.py # ✨【回写#198】BASE-3 监控配置集中化测试（13 项）：_build_monitoring_config 默认/覆盖/非法回退/slo 非 dict 回退/深拷贝不污染常量；真实 settings.yaml 加载验收（slo 关键 LOCKED 值与 P0-2 锁定表一致）；AlertManager 装配集成（配置驱动 store/dedup/AlertRule 三参数、配置缺失应用默认、配置异常不阻断）✅已完成
 
     │   │   ├── test_event_bus_chain.py # ✨【回写#199】BASE-4 事件链路 id 规范测试（16 项）：ChainEvent 四元组 schema（link_ids/missing_link_ids/to_dict/防未来不注入创建时刻）；4 强类型类构造与序列化（OrderEvent 覆盖 5 类 EventType）；publish_chain 统一入口（缺 event_ts warning 不阻断/require_event_ts 拒绝/非链路 TypeError）；链路连续性（signal→order→fill 同 signal_id 贯穿、event_ts 差值可测延迟）✅已完成
@@ -778,7 +780,7 @@ Pythonwdhmm/
 
     │   ├── __init__.py
 
-    │   ├── connection.py             # SQLite连接管理上下文管理器；✨【回写#157】close_all 关闭异常记 warning（KP-P1-07：不裸 pass 吞噬）+ 注入 logger
+    │   ├── connection.py             # SQLite连接管理上下文管理器；✨【回写#157】close_all 关闭异常记 warning（KP-P1-07：不裸 pass 吞噬）+ 注入 logger；✨【回写#201】BASE-6 DEFAULT_PRAGMAS 补 busy_timeout=30000（写等待而非锁表，配合 WAL 高写入无锁表告警）
 
     │   ├── schema.py                 # 表结构总览DDL；✨【回写#87】drop_all_tables 顺序 share_change 重复行清理（L502-503 双行→单行，幂等不变）；✨【回写#142】TABLE_NAMES 10→13 张（KP-P4-02：orders/fills/positions_daily 三关系账 + DDL/索引/ALL_CREATE/drop_all 同步）
 
@@ -1124,7 +1126,7 @@ Pythonwdhmm/
 
     │   ├── alert_store.py           # ✨【回写#196】BASE-1 告警持久化存储：alerts 表落库（save_alert 幂等 upsert/status 推导）、状态流转（update_status acked/resolved 时间戳语义/COALESCE 补 acked_at/reopen 清时间戳）、classification 打标（P0-8 统计读取源 R-01）、升级标记/runbook 绑定、查询（load_history 过滤/load_unacknowledged/load_escalated/get_open_by_dedup_key 恢复匹配）、防御式校验（非法 status/limit<=0/缺 alert_id/level/message 抛 ValueError）；__main__ 自测 14 项
 
-    │   ├── metrics_history.py       # ✨【回写#197】BASE-2 指标时序存储：metrics_history 表落库（save_metric 唯一幂等/save_batch 批量事务）、查询（name/labels/时间范围/limit）、降采样聚合（epoch 桶 avg/max/min/sum/count 支撑 1 年回放）、保留清理（原始 30 天 purge，R-02 仅回放不检测）；__main__ 自测 14 项
+    │   ├── metrics_history.py       # ✨【回写#197】BASE-2 指标时序存储：metrics_history 表落库（save_metric 唯一幂等/save_batch 批量事务）、查询（name/labels/时间范围/limit）、降采样聚合（epoch 桶 avg/max/min/sum/count 支撑 1 年回放）、保留清理（原始 30 天 purge，R-02 仅回放不检测）；__main__ 自测 14 项；✨【回写#201】BASE-6 存储优化——异步批量写入（enqueue 内存队列 + flush 事务落库 + 后台守护线程周期 flush 避免热路径直写）、降采样物化（materialize_downsampled 旧数据按桶聚合物化落库，标签带 source/bucket/agg，幂等可回放 1 年）+ DownsamplingTask 独立调度（守护线程 interval 可配默认每日，stop 收尾补跑）、迁移接口预留（MetricExporter ABC + get_exporter 注册表 null/vm/clickhouse 占位，导出副本失败不阻断落库）；__main__ 自测 29 项
 
 │   └── data_quality_explorer.py # ✨【#S2修复】数据质量探查器（从web/dashboard.py迁移到monitoring底层，消除API依赖Web的架构倒置）：DataQualityExplorer类13方法（实时指标/清洗运行列表/运行详情/等级分布/脏数据统计/总览），纯Python数据层不依赖streamlit，API层和Web层均从此导入；数据源=CleanDataQueries+MetricsCollector；source过滤区分offline/live为实盘对接预留
 
@@ -3321,3 +3323,17 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
     d. 新增 tests/unit/test_meta_monitor.py（16 项，临时库不碰 quant.db）：健康运行（五探针/指标进 collector/落库可查/探针状态接口/成功率 1.0）；异常（总线积压 95%→degraded、独立告警送达、业务 manager 隔离）；R-08 独立冷却（同 key 窗口内只发一次、新实例可再告警）；HealthPatrol 集成（报告含 meta_monitor、meta down 拉低整体、未绑定跳过）；防御式（非法 cooldown 回退、探针异常记 down 不阻断、看板 standby 不告警、探针注入校验）。
     e. 验证结果：py_compile 3 文件通过；meta_monitor __main__ 自测 12 项全绿；新增单测 16 passed；全量 pytest tests/unit 2459 passed +2 skipped 无回归（基线 2443+16）。
     f. 纪律遵守：先更新蓝图再创建文件（#200 目录树登记先行）；无蓝图外文件；业务逻辑归 myquant；严格防未来（探针只读当前已发生状态/指标时间戳=采集时刻）；任务后 git 提交。
+
+196. ✨【回写记录·2026-10-05·BASE-6 存储优化】【回写#201】
+    事实来源：本次落地，代码级核验：《量化系统监控模块施工总清单_V1.2.md》BASE-6 行验收口径（落点 monitoring/metrics_history.py + database/；SQLite 写路径优化：WAL 模式、异步批量写入避免热路径直写、WITHOUT ROWID/按天分表降低锁竞争；降采样任务独立调度（原始 30 天→1min 聚合→1 年）；预留迁移 VictoriaMetrics/ClickHouse 接口（不立即换库）；验收=高写入下无锁表告警、降采样可配置可回放、迁移接口存在）。
+    a. 登记 myquant/monitoring/metrics_history.py、myquant/database/connection.py、tests/unit/test_metrics_history_storage.py 至蓝图目录树（monitoring/ 段 + database/ 段 + tests/unit 段同步登记）。
+    b. 改造 myquant/database/connection.py：DEFAULT_PRAGMAS 补 busy_timeout=30000（毫秒，写等待而非立即失败，配合已具备的 journal_mode=WAL + synchronous=NORMAL，高写入无锁表告警验收落地）。
+    c. 扩展 myquant/monitoring/metrics_history.py（BASE-6 四块）：
+       ① 异步批量写入——enqueue（线程安全 deque 内存队列，超上限 DEFAULT_QUEUE_LIMIT=10000 丢最旧记 warning 防无界）+ flush（分批 executemany 事务落库，落库失败记 error 丢弃防阻塞热路径）+ start_background_flush（daemon 守护线程，interval 默认 5s，幂等）/stop_background_flush（收尾落库可选）；
+       ② 降采样物化——materialize_downsampled（只聚合当前时刻-30 天前的旧数据，1min 桶 avg/max/min/sum/count，物化写入同表 target=<name>:ds:<bucket>m，标签带 source/bucket_minutes/agg 溯源，INSERT OR IGNORE 幂等，防未来不触碰近期高精度数据）+ downsample_retention_purge（物化行 365 天清理，只清 :ds: 标记行不碰原始行，支持前缀）——原始 30 天 + 物化 1 年保留策略闭环；
+       ③ DownsamplingTask 独立调度——daemon 守护线程独立于巡检 60s 节奏，interval 可配（默认 86400=每日一次），run() 一轮=全量/指定指标物化 + 原始 30 天清理 + 物化 365 天清理（失败记 error 不中断下次），stop 收尾补跑；
+       ④ 迁移接口预留——MetricExporter ABC（export_batch）+ NullMetricExporter（默认纯 SQLite）+ get_exporter 注册表（null/vm/clickhouse，vm/clickhouse 为 _UnavailableExporter 占位 NotImplementedError 明确未接入）+ set_exporter 绑定 + save_metric/save_batch 落库后 _export_rows 同步导出副本（失败记 warning 不阻断落库，不立即换库）。
+    d. 评估结论（不采用项，回写留档）：WITHOUT ROWID/按天分表不实施——现有表已带按天分区表达式索引（date(timestamp,'unixepoch')，SQLite 索引禁 localtime 已实测修正），WAL + busy_timeout 已消除锁表告警（写不阻塞读、写等待而非报错）；重构表需新增迁移 0007、风险高收益低，留待真正遇到写放大瓶颈时再评估（此处以验收口径为准，不超出清单承诺动库结构）。
+    e. 新增 tests/unit/test_metrics_history_storage.py（25 项，临时库不碰 quant.db）：迁移接口（默认 null/注册表大小写归一/vm/clickhouse 占位报错/非法名报错/set_exporter 校验/导出钩子收行/导出失败不阻断落库）；异步写入（enqueue+flush/空队列/超限丢最旧/后台线程周期落库/收尾落库/非法间隔）；物化（3 桶聚合/幂等/物化可查溯源标签/近期不物化/365 天清理不碰原始行/前缀清理/参数校验）；DownsamplingTask（run 结果/names 子集/start/stop 幂等/校验）；connection pragma（WAL + busy_timeout 实际生效）。
+    f. 验证结果：py_compile 3 文件通过；metrics_history __main__ 自测 29 项全绿（原 14+15）；新增单测 25 passed；全量 pytest tests/unit 2484 passed +2 skipped 无回归（基线 2459+25）。
+    g. 纪律遵守：先更新蓝图再创建文件（#201 目录树登记先行）；无蓝图外文件；业务逻辑归 myquant；严格防未来（物化只聚合已发生旧数据、时间戳=采集/落库时刻）；任务后 git 提交。

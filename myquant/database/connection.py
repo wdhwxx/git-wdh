@@ -44,6 +44,9 @@ DEFAULT_PRAGMAS = {
     # M9修复: 默认 FILE——MEMORY 在大查询(排序/临时表)时占满内存导致 OOM；
     # FILE 使用磁盘临时文件，超大查询安全；需极速小查询可显式传 pragmas 覆盖
     "temp_store": "FILE",            # 临时表存磁盘（防 OOM，可覆盖）
+    # BASE-6: busy_timeout 显式化（毫秒；与 sqlite3.connect(timeout=30) 一致，
+    # 高写入/锁竞争时写等待而非立即失败，配合 WAL 消除锁表）
+    "busy_timeout": "30000",
 }
 
 

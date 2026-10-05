@@ -1,8 +1,8 @@
 # 文件名：myquant/monitoring/metrics_history.py
 """
-metrics_history.py - 指标时序存储层（BASE-2 指标时序存储）
+metrics_history.py - 指标时序存储层（BASE-2 指标时序存储 + BASE-6 存储优化）
 ========================================================================
-依据《量化系统监控模块施工总清单_V1.2》BASE-2：
+依据《量化系统监控模块施工总清单_V1.2》BASE-2 / BASE-6：
   - metrics_history 表（name/labels_json/value/timestamp + 按天分区索引）
   - scheduler 周期落库（默认 60s，巡检/指标快照写入）
   - 保留策略（原始 30 天、降采样 1 年：原始行定期清理，降采样查询
@@ -10,27 +10,32 @@ metrics_history.py - 指标时序存储层（BASE-2 指标时序存储）
   - 约束（R-02）：本表仅服务趋势/基线/看板回放，不得作为任何 P0 实时
     告警的检测来源；P0 实时告警一律走事件订阅。
 
-本模块职责：
-  1. 建表自检（幂等，DDL 从 myquant.database.schema 导入，与迁移 0006 逐字一致）
-  2. 指标写入（INSERT OR IGNORE，name+labels_json+timestamp 唯一防重复）
-  3. 批量写入（executemany，事务包裹，scheduler 周期落库用）
-  4. 查询（name/labels/时间范围/limit 过滤，趋势与基线回放）
-  5. 降采样聚合（按 epoch 时间桶 avg/max/min/sum/count，支撑 1 年回放）
-  6. 保留清理（purge 超过保留期的原始行）
+BASE-6 存储优化新增职责：
+  7. 异步批量写入（enqueue/flush/后台守护线程周期落库，避免热路径直写）
+  8. 降采样物化（materialize_downsampled：旧数据按桶聚合物化落库，可回放
+     1 年；DownsamplingTask 独立调度，interval 可配，默认每日）
+  9. 迁移接口预留（MetricExporter ABC + 注册表 vm/clickhouse 占位，
+     不立即换库；导出副本失败不阻断落库）
+  10. WAL 模式 + busy_timeout 显式化（database/connection.py，高写入
+     下写等待而非锁表）
 
 防未来铁律：timestamp 一律取"采集/落库时刻"（scheduler 巡检时刻或调用方
 注入的时间戳），只记录已发生的数据，不预测未来；落库失败不阻断巡检/
-告警主流程（记 error 留痕）。
+告警主流程（记 error 留痕）；降采样物化只聚合当前时刻之前已发生的数据。
 
-依赖: json, time, logging, typing, myquant.database.connection / schema
+依赖: json, time, logging, threading, collections, abc, typing,
+      myquant.database.connection / schema
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
-from typing import Any, Dict, List, Optional, Union
+from abc import ABC, abstractmethod
+from collections import deque
+from typing import Any, Callable, Deque, Dict, List, Optional, Union
 
 from myquant.database.connection import DatabaseConnection, get_connection
 from myquant.database.schema import (
@@ -42,7 +47,7 @@ logger = logging.getLogger("myquant.monitoring.metrics_history")
 
 
 # ═══════════════════════════════════════════════
-#  保留策略常量（与施工清单 BASE-2 对齐）
+#  保留策略常量（与施工清单 BASE-2/BASE-6 对齐）
 # ═══════════════════════════════════════════════
 
 DEFAULT_RETENTION_DAYS: int = 30       # 原始数据保留天数
@@ -50,6 +55,91 @@ DEFAULT_DOWNSAMPLE_DAYS: int = 365     # 降采样查询可回放天数（1 年�
 DEFAULT_BUCKET_MINUTES: int = 60       # 降采样默认时间桶（分钟）
 MAX_BATCH_SIZE: int = 1000             # 单次批量写入上限（防超大事务）
 _AGG_WHITELIST: tuple = ("avg", "max", "min", "sum", "count")
+
+# BASE-6：异步批量写入默认参数
+DEFAULT_FLUSH_INTERVAL_SECONDS: float = 5.0   # 后台 flush 间隔（秒）
+DEFAULT_QUEUE_LIMIT: int = 10_000             # 内存队列上限（防无界增长）
+# BASE-6：降采样独立调度默认参数
+DEFAULT_DOWNSAMPLE_INTERVAL_SECONDS: float = 86400.0  # 独立调度默认每日一次
+DEFAULT_MATERIALIZE_OLDER_THAN_DAYS: int = 30         # 物化门槛：>=30 天前的旧数据
+DEFAULT_DOWNSAMPLE_AGG: str = "avg"                   # 物化聚合函数
+
+
+# ═══════════════════════════════════════════════
+#  迁移接口预留（BASE-6：VictoriaMetrics/ClickHouse，不立即换库）
+# ═══════════════════════════════════════════════
+
+class MetricExporter(ABC):
+    """
+    指标迁移导出接口（BASE-6 预留）。
+
+    预留语义：现系统 SQLite 为主存储；未来迁往 VictoriaMetrics/ClickHouse
+    时，实现本接口并在 __init__/set_exporter 绑定，save 路径同步导出副本，
+    平滑切换（不立即换库）。
+
+    实现要求（防未来）：
+      - export_batch 只接收已落库的数据（导出副本，不影响主存储事务）
+      - 导出失败不得阻断主落库（调用方在 except 中记 warning）
+    """
+
+    @abstractmethod
+    def export_batch(self, rows: List[Dict[str, Any]]) -> int:
+        """导出一批指标点（返回导出成功条数）。"""
+
+    def connect(self) -> None:
+        """建立外部存储连接（可选实现）。"""
+
+    def close(self) -> None:
+        """关闭外部存储连接（可选实现）。"""
+
+
+class NullMetricExporter(MetricExporter):
+    """空导出器（默认）：导出即成功计数，不写外部存储（纯 SQLite 模式）。"""
+
+    def export_batch(self, rows: List[Dict[str, Any]]) -> int:
+        return len(rows)
+
+
+class _UnavailableExporter(MetricExporter):
+    """占位导出器（vm/clickhouse 预留）：调用时明确报错，说明未接入。"""
+
+    def __init__(self, target: str):
+        self._target = target
+
+    def export_batch(self, rows: List[Dict[str, Any]]) -> int:
+        raise NotImplementedError(
+            f"{self._target} 导出器为 BASE-6 预留占位，尚未接入；"
+            f"如需迁移请实现 MetricExporter 接口并注册"
+        )
+
+
+_EXPORTER_REGISTRY: Dict[str, Any] = {
+    "null": NullMetricExporter,
+    "vm": lambda: _UnavailableExporter("vm"),
+    "clickhouse": lambda: _UnavailableExporter("clickhouse"),
+}
+
+
+def get_exporter(name: str) -> MetricExporter:
+    """
+    按名称获取导出器实例（BASE-6 迁移接口注册表）。
+
+    Parameters
+    ----------
+    name : str
+        "null"（默认，纯 SQLite）/"vm"（VictoriaMetrics 预留）/"clickhouse"（预留）
+
+    Raises
+    ------
+    ValueError: 未注册的导出器名称
+    """
+    key = (name or "null").strip().lower()
+    if key not in _EXPORTER_REGISTRY:
+        raise ValueError(
+            f"未注册的导出器: {name!r}（可选: {sorted(_EXPORTER_REGISTRY)}）"
+        )
+    factory = _EXPORTER_REGISTRY[key]
+    return factory()
 
 
 class MetricsHistoryStore:
@@ -85,6 +175,16 @@ class MetricsHistoryStore:
         else:
             self._conn = get_connection(db_path)
         self._ensure_schema()
+        # BASE-6：迁移导出器（默认空导出，纯 SQLite）
+        self._exporter: MetricExporter = NullMetricExporter()
+        # BASE-6：异步批量写入队列（内存缓冲，后台线程周期 flush，避免热路径直写）
+        self._queue: Deque[Dict[str, Any]] = deque()
+        self._queue_limit: int = DEFAULT_QUEUE_LIMIT
+        self._queue_lock = threading.Lock()
+        self._flush_thread: Optional[threading.Thread] = None
+        self._flush_interval: float = DEFAULT_FLUSH_INTERVAL_SECONDS
+        self._flush_stop = threading.Event()
+        self._flush_running = False
 
     # ── 建表自检（幂等，与迁移 DDL 逐字一致）──
 
@@ -155,6 +255,10 @@ class MetricsHistoryStore:
                 """,
                 (name, labels_json, num_value, ts),
             )
+        if affected > 0:
+            self._export_rows(
+                [{"name": name, "labels": labels or {}, "value": num_value, "timestamp": ts}]
+            )
         return affected > 0
 
     def save_batch(self, rows: List[Dict[str, Any]]) -> int:
@@ -212,6 +316,13 @@ class MetricsHistoryStore:
                 VALUES (?, ?, ?, ?)
                 """,
                 prepared,
+            )
+        if affected > 0:
+            self._export_rows(
+                [
+                    {"name": n, "labels": json.loads(lj or "{}"), "value": v, "timestamp": t}
+                    for (n, lj, v, t) in prepared
+                ]
             )
         return affected
 
@@ -374,6 +485,497 @@ class MetricsHistoryStore:
         cutoff = time.time() - retention_days * 86400.0
         return self.purge_before(cutoff)
 
+    # ═══════════════════════════════════════════════
+    #  BASE-6：迁移导出接口
+    # ═══════════════════════════════════════════════
+
+    def set_exporter(self, exporter: Optional[MetricExporter]) -> "MetricsHistoryStore":
+        """
+        绑定迁移导出器（BASE-6 预留；默认 NullMetricExporter 纯 SQLite）。
+
+        Parameters
+        ----------
+        exporter : MetricExporter | None
+            导出器实例（或 get_exporter("vm"/"clickhouse") 占位）；None 重置为空导出
+
+        Returns
+        -------
+        MetricsHistoryStore : self
+        """
+        if exporter is not None and not isinstance(exporter, MetricExporter):
+            raise ValueError(
+                f"exporter 必须为 MetricExporter 实例，收到 {type(exporter).__name__}"
+            )
+        self._exporter = exporter if exporter is not None else NullMetricExporter()
+        logger.info(f"[metrics] 导出器绑定: {type(self._exporter).__name__}")
+        return self
+
+    def _export_rows(self, rows: List[Dict[str, Any]]) -> None:
+        """导出已落库副本（迁移预留；导出失败记 warning 不阻断主落库）。"""
+        if not rows:
+            return
+        try:
+            self._exporter.export_batch(rows)
+        except NotImplementedError:
+            logger.debug("导出器为预留占位（未接入），跳过导出")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"指标导出失败（不阻断落库）: {e}")
+
+    # ═══════════════════════════════════════════════
+    #  BASE-6：异步批量写入（避免热路径直写）
+    # ═══════════════════════════════════════════════
+
+    def enqueue(self, row: Dict[str, Any]) -> int:
+        """
+        入队一个指标点（内存缓冲，后台线程周期批量落库；热路径用）。
+
+        队列超上限时丢弃最旧并记 warning（防无界增长，宁可丢最旧快照
+        也不阻塞主流程）。
+
+        Parameters
+        ----------
+        row : dict
+            与 save_batch 行结构一致（name/value，可选 labels/timestamp）
+
+        Returns
+        -------
+        int : 当前队列长度
+        """
+        with self._queue_lock:
+            if len(self._queue) >= self._queue_limit:
+                self._queue.popleft()
+                logger.warning(
+                    f"指标队列超上限 {self._queue_limit}，丢弃最旧 1 条（防内存无界）"
+                )
+            self._queue.append(dict(row))
+            return len(self._queue)
+
+    def queue_size(self) -> int:
+        """当前内存队列长度。"""
+        with self._queue_lock:
+            return len(self._queue)
+
+    def flush(self) -> int:
+        """
+        把内存队列批量落库（executemany 事务包裹）。
+
+        Returns
+        -------
+        int : 本次实际新增行数（重复点忽略不计入）
+        """
+        with self._queue_lock:
+            if not self._queue:
+                return 0
+            pending = list(self._queue)
+            self._queue.clear()
+        if not pending:
+            return 0
+        # 分批（防单事务超上限）
+        inserted = 0
+        for i in range(0, len(pending), MAX_BATCH_SIZE):
+            chunk = pending[i : i + MAX_BATCH_SIZE]
+            try:
+                inserted += self.save_batch(chunk)
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"异步批量落库失败（{len(chunk)} 条丢弃）: {e}")
+                # 落库失败的批次不再重试（快照类数据，防阻塞热路径）
+        return inserted
+
+    def start_background_flush(self, interval_seconds: float = DEFAULT_FLUSH_INTERVAL_SECONDS) -> bool:
+        """
+        启动后台 flush 守护线程（BASE-6：避免热路径直写）。
+
+        线程为 daemon，随进程退出自动终止；重复启动幂等。
+
+        Parameters
+        ----------
+        interval_seconds : float
+            flush 间隔（秒，>0）
+
+        Returns
+        -------
+        bool : True=已启动（或已在运行）
+        """
+        try:
+            interval = float(interval_seconds)
+            if interval <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise ValueError(f"interval_seconds 必须为正数，收到 {interval_seconds!r}")
+        with self._queue_lock:
+            if self._flush_running:
+                return True
+            self._flush_stop.clear()
+            self._flush_interval = interval
+
+            def _loop() -> None:
+                while not self._flush_stop.wait(self._flush_interval):
+                    try:
+                        self.flush()
+                    except Exception as e:  # noqa: BLE001
+                        logger.error(f"后台 flush 异常: {e}")
+
+            self._flush_thread = threading.Thread(
+                target=_loop, name="metrics-history-flush", daemon=True
+            )
+            self._flush_running = True
+            self._flush_thread.start()
+        logger.info(f"[metrics] 后台批量落库线程启动（间隔 {interval:.0f}s）")
+        return True
+
+    def stop_background_flush(self, final_flush: bool = True) -> int:
+        """
+        停止后台 flush 线程（可选收尾落库）。
+
+        Parameters
+        ----------
+        final_flush : bool
+            停止前是否把队列剩余数据落库（默认 True）
+
+        Returns
+        -------
+        int : 收尾落库条数
+        """
+        with self._queue_lock:
+            if not self._flush_running:
+                return 0 if not final_flush else self.flush()
+            self._flush_running = False
+        self._flush_stop.set()
+        if self._flush_thread is not None and self._flush_thread.is_alive():
+            self._flush_thread.join(timeout=5.0)
+        self._flush_thread = None
+        inserted = 0
+        if final_flush:
+            inserted = self.flush()
+        logger.info(f"[metrics] 后台批量落库线程已停止（收尾落库 {inserted} 条）")
+        return inserted
+
+    # ═══════════════════════════════════════════════
+    #  BASE-6：降采样物化（原始 30 天 → 1min 聚合 → 1 年）
+    # ═══════════════════════════════════════════════
+
+    def materialize_downsampled(
+        self,
+        name: str,
+        bucket_minutes: int = DEFAULT_BUCKET_MINUTES,
+        older_than_days: int = DEFAULT_MATERIALIZE_OLDER_THAN_DAYS,
+        agg: str = DEFAULT_DOWNSAMPLE_AGG,
+        target_name: Optional[str] = None,
+    ) -> int:
+        """
+        把过期原始数据按时间桶聚合物化落库（降采样 1 年可回放）。
+
+        物化目标写入同表（target_name 默认 ``<name>:ds:<bucket_minutes>m``），
+        与原始行共存；保留策略为：原始 30 天（retention_purge 清理）+ 物化
+        1 年（downsample_retention_purge 清理）。
+
+        防未来：物化只聚合 ``当前时刻 - older_than_days`` 之前已发生的数据，
+        不触碰近期（仍为原始高精度）数据；同桶幂等（INSERT OR IGNORE，
+        重复执行不产生重复行）。
+
+        Parameters
+        ----------
+        name : str
+            源指标名
+        bucket_minutes : int
+            时间桶（分钟，>0）
+        older_than_days : int
+            只物化 >= 该天数之前的旧数据（>0）
+        agg : str
+            聚合函数（avg/max/min/sum/count）
+        target_name : str | None
+            物化目标指标名；None 用默认命名
+
+        Returns
+        -------
+        int : 物化写入行数
+
+        Raises
+        ------
+        ValueError: 参数非法时抛出
+        """
+        src = (name or "").strip()
+        if not src:
+            raise ValueError("物化失败: 源指标名 name 不能为空")
+        if bucket_minutes <= 0:
+            raise ValueError(f"bucket_minutes 必须为正整数，收到 {bucket_minutes}")
+        if older_than_days <= 0:
+            raise ValueError(f"older_than_days 必须为正整数，收到 {older_than_days}")
+        if agg not in _AGG_WHITELIST:
+            raise ValueError(f"非法聚合函数: {agg!r}（须为 {list(_AGG_WHITELIST)}）")
+        target = (target_name or f"{src}:ds:{int(bucket_minutes)}m").strip()
+        if not target:
+            raise ValueError("物化失败: target_name 不能为空")
+
+        cutoff = time.time() - older_than_days * 86400.0
+        bucket_seconds = int(bucket_minutes) * 60
+        agg_expr = "COUNT(*)" if agg == "count" else f"{agg}(value)"
+        sql = (
+            "SELECT CAST(timestamp / ? AS INTEGER) * ? AS bucket, "
+            f"{agg_expr} AS value, COUNT(*) AS cnt "
+            "FROM metrics_history "
+            "WHERE name = ? AND timestamp < ? "
+            "GROUP BY bucket"
+        )
+        with self._conn.transaction():
+            buckets = self._conn.execute(
+                sql, (bucket_seconds, bucket_seconds, src, cutoff)
+            )
+            if not buckets:
+                return 0
+            prepared = [
+                (
+                    target,
+                    self._dump_labels(
+                        {
+                            "source": src,
+                            "bucket_minutes": int(bucket_minutes),
+                            "agg": agg,
+                        }
+                    ),
+                    float(r["value"]),
+                    float(r["bucket"]),
+                )
+                for r in buckets
+            ]
+            affected = self._conn.executemany(
+                """
+                INSERT OR IGNORE INTO metrics_history (name, labels_json, value, timestamp)
+                VALUES (?, ?, ?, ?)
+                """,
+                prepared,
+            )
+        if affected > 0:
+            self._export_rows(
+                [
+                    {"name": target, "labels": {}, "value": v, "timestamp": t}
+                    for (_n, _lj, v, t) in prepared
+                ]
+            )
+        logger.info(
+            f"[metrics] 降采样物化完成: {src} → {target} "
+            f"({agg}/{bucket_minutes}m, >= {older_than_days}天前)，{affected} 行"
+        )
+        return affected
+
+    def downsample_retention_purge(
+        self,
+        downsample_days: int = DEFAULT_DOWNSAMPLE_DAYS,
+        name_prefix: Optional[str] = None,
+    ) -> int:
+        """
+        清理超过保留期的降采样物化行（默认 1 年；保留原始行策略不受影响）。
+
+        Parameters
+        ----------
+        downsample_days : int
+            物化数据保留天数（>0）
+        name_prefix : str | None
+            只清理该前缀的物化行（如 "patrol_status:ds:"）；None 清理全部
+            含 ":ds:" 命名标记的物化行
+
+        Returns
+        -------
+        int : 删除行数
+        """
+        if downsample_days <= 0:
+            raise ValueError(f"downsample_days 必须为正整数，收到 {downsample_days}")
+        cutoff = time.time() - downsample_days * 86400.0
+        if name_prefix:
+            where = "name LIKE ? AND timestamp < ?"
+            params: List[Any] = [f"{name_prefix}%", cutoff]
+        else:
+            where = "name LIKE ? AND timestamp < ?"
+            params = ["%:ds:%", cutoff]
+        with self._conn.transaction():
+            affected = self._conn.execute_update(
+                f"DELETE FROM metrics_history WHERE {where}",
+                params,
+            )
+        logger.info(f"[metrics] 降采样物化清理完成（>= {downsample_days} 天前）: {affected} 行")
+        return affected
+
+
+# ═══════════════════════════════════════════════
+#  BASE-6：降采样独立调度器（原始 30 天 → 1min 聚合 → 1 年）
+# ═══════════════════════════════════════════════
+
+class DownsamplingTask:
+    """
+    降采样独立调度（守护线程，与巡检/告警调度完全隔离）。
+
+    BASE-6 语义：原始数据保留 30 天（高精度），>=30 天前的旧数据按
+    时间桶聚合物化为降采样行（默认 1 分钟桶 → 可回放 1 年），随后原始
+    过期行由 retention_purge 清理；物化行由 downsample_retention_purge
+    清理（默认 365 天）。整个周期独立于巡检 60s 节奏，默认每日一次，
+    interval 可配（降采样"可配置可回放"）。
+
+    Usage:
+        task = DownsamplingTask(store)
+        task.start(interval_seconds=86400)   # 独立守护线程
+        ...
+        task.stop()                          # 收尾并清理
+
+    防未来：run() 只处理当前时刻之前已发生的数据；失败不中断下次调度。
+    """
+
+    def __init__(
+        self,
+        store: MetricsHistoryStore,
+        bucket_minutes: int = DEFAULT_BUCKET_MINUTES,
+        older_than_days: int = DEFAULT_MATERIALIZE_OLDER_THAN_DAYS,
+        agg: str = DEFAULT_DOWNSAMPLE_AGG,
+        names: Optional[List[str]] = None,
+        enable_purge: bool = True,
+    ):
+        if bucket_minutes <= 0:
+            raise ValueError(f"bucket_minutes 必须为正整数，收到 {bucket_minutes}")
+        if older_than_days <= 0:
+            raise ValueError(f"older_than_days 必须为正整数，收到 {older_than_days}")
+        if agg not in _AGG_WHITELIST:
+            raise ValueError(f"非法聚合函数: {agg!r}（须为 {list(_AGG_WHITELIST)}）")
+        self._store = store
+        self._bucket_minutes = bucket_minutes
+        self._older_than_days = older_than_days
+        self._agg = agg
+        self._names: List[str] = names or []  # 空=全部指标物化（按名聚合）
+        self._enable_purge = enable_purge
+        self._thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
+        self._interval: float = DEFAULT_DOWNSAMPLE_INTERVAL_SECONDS
+        self._running = False
+        self._lock = threading.Lock()
+        self._last_run: Optional[float] = None
+        self._last_result: Optional[Dict[str, int]] = None
+
+    # ── 调度控制 ──
+
+    def start(
+        self,
+        interval_seconds: float = DEFAULT_DOWNSAMPLE_INTERVAL_SECONDS,
+    ) -> bool:
+        """
+        启动独立调度守护线程（daemon，进程退出自动终止；幂等）。
+
+        Parameters
+        ----------
+        interval_seconds : float
+            调度间隔（秒，>0；默认 86400=每日一次）
+
+        Returns
+        -------
+        bool : True=已启动（或已在运行）
+        """
+        try:
+            interval = float(interval_seconds)
+            if interval <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise ValueError(f"interval_seconds 必须为正数，收到 {interval_seconds!r}")
+        with self._lock:
+            if self._running:
+                return True
+            self._interval = interval
+            self._stop_event.clear()
+
+            def _loop() -> None:
+                while not self._stop_event.wait(self._interval):
+                    self.run()
+
+            self._thread = threading.Thread(
+                target=_loop, name="metrics-downsample-task", daemon=True
+            )
+            self._running = True
+            self._thread.start()
+        logger.info(f"[metrics] 降采样调度线程启动（间隔 {interval:.0f}s）")
+        return True
+
+    def stop(self, run_once: bool = True) -> bool:
+        """
+        停止调度线程。
+
+        Parameters
+        ----------
+        run_once : bool
+            停止前是否补跑一轮（默认 True，防收尾遗留旧数据未物化）
+
+        Returns
+        -------
+        bool : True=已停止
+        """
+        with self._lock:
+            if not self._running:
+                return True
+            self._running = False
+        self._stop_event.set()
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(timeout=5.0)
+        self._thread = None
+        if run_once:
+            self.run()
+        logger.info("[metrics] 降采样调度线程已停止")
+        return True
+
+    # ── 执行 ──
+
+    def run(self) -> Dict[str, int]:
+        """
+        执行一轮降采样：物化旧数据 → （可选）清理过期原始行与物化行。
+
+        Returns
+        -------
+        dict : {"materialized": 物化行数, "purged_raw": 清理原始行数,
+                "purged_downsample": 清理物化行数}
+
+        失败不抛异常：单指标物化失败记 error，不影响其余指标与下次调度。
+        """
+        result: Dict[str, int] = {"materialized": 0, "purged_raw": 0, "purged_downsample": 0}
+        if self._names:
+            targets = self._names
+        else:
+            # 全量模式：物化所有原始指标（排除已有 :ds: 物化行）
+            try:
+                with self._store._conn.transaction():
+                    rows = self._store._conn.execute(
+                        "SELECT DISTINCT name FROM metrics_history WHERE name NOT LIKE ?",
+                        ("%:ds:%",),
+                    )
+                targets = [r["name"] for r in rows]
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"降采样枚举指标失败: {e}")
+                targets = []
+        for src in targets:
+            try:
+                result["materialized"] += self._store.materialize_downsampled(
+                    src,
+                    bucket_minutes=self._bucket_minutes,
+                    older_than_days=self._older_than_days,
+                    agg=self._agg,
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"降采样物化失败（{src}）: {e}")
+        if self._enable_purge:
+            try:
+                result["purged_raw"] = self._store.retention_purge(
+                    DEFAULT_RETENTION_DAYS
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"原始数据清理失败: {e}")
+            try:
+                result["purged_downsample"] = self._store.downsample_retention_purge(
+                    DEFAULT_DOWNSAMPLE_DAYS
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"物化数据清理失败: {e}")
+        self._last_run = time.time()
+        self._last_result = result
+        return result
+
+    @property
+    def last_result(self) -> Optional[Dict[str, int]]:
+        """最近一轮执行结果（未跑过为 None）。"""
+        return self._last_result
+
 
 # ═══════════════════════════════════════════════
 #  自测（python -m myquant.monitoring.metrics_history）
@@ -461,8 +1063,76 @@ def _run_self_test() -> int:
                 check("limit=0 报错", False)
             except ValueError:
                 check("limit=0 报错", True)
+
+            # ══════════════════════════════════
+            #  BASE-6 自测
+            # ══════════════════════════════════
+
+            # 迁移导出器：默认空导出 + 占位注册表
+            check("默认导出器为空导出", isinstance(store._exporter, NullMetricExporter))
+            store.set_exporter(get_exporter("null"))
+            check("set_exporter(null) 重绑定", isinstance(store._exporter, NullMetricExporter))
+            try:
+                get_exporter("vm").export_batch([{"name": "x", "value": 1.0}])
+                check("vm 占位导出器未接入报错", False)
+            except NotImplementedError:
+                check("vm 占位导出器未接入报错", True)
+            try:
+                get_exporter("unknown")
+                check("未注册导出器报错", False)
+            except ValueError:
+                check("未注册导出器报错", True)
+
+            # 异步批量写入（enqueue/flush）
+            for i in range(3):
+                store.enqueue({"name": "async_q", "value": float(i), "timestamp": base + 300 + i})
+            check("enqueue 队列长度", store.queue_size() == 3)
+            inserted = store.flush()
+            check("flush 落库", inserted == 3 and len(store.query("async_q", limit=10)) == 3)
+            check("flush 后队列清空", store.queue_size() == 0)
+
+            # 后台 flush 守护线程（避免热路径直写）
+            store.start_background_flush(interval_seconds=0.2)
+            store.enqueue({"name": "async_bg", "value": 7.0, "timestamp": base + 400})
+            time.sleep(0.6)  # 等后台线程落库
+            check("后台 flush 落库", len(store.query("async_bg", limit=5)) == 1)
+            store.enqueue({"name": "async_bg2", "value": 8.0, "timestamp": base + 401})
+            tail = store.stop_background_flush(final_flush=True)
+            check("后台线程收尾落库", tail >= 1 and len(store.query("async_bg2", limit=5)) == 1)
+
+            # 降采样物化（>=30 天前的旧数据 → 1min 桶 → 可回放 1 年）
+            old_ts = time.time() - 31 * 86400.0
+            for i in range(3):  # 31 天前的三个 1min 桶
+                store.save_metric("ds_source", float(i), timestamp=old_ts + 60 * i)
+            mat = store.materialize_downsampled(
+                "ds_source", bucket_minutes=1, older_than_days=30, agg="avg"
+            )
+            check("物化 3 桶", mat == 3)
+            ds_rows = store.query("ds_source:ds:1m", limit=10)
+            check("物化可查询", len(ds_rows) == 3 and ds_rows[0]["value"] in (0.0, 1.0, 2.0))
+            mat2 = store.materialize_downsampled(
+                "ds_source", bucket_minutes=1, older_than_days=30, agg="avg"
+            )
+            check("物化幂等（同桶不重复）", mat2 == 0 and len(store.query("ds_source:ds:1m", limit=10)) == 3)
+            store.save_metric("ds_old_material:ds:1m", 1.0, timestamp=time.time() - 366 * 86400.0)
+            purged_ds = store.downsample_retention_purge(downsample_days=365)
+            check("物化 365 天清理", purged_ds >= 1)
+
+            # 降采样独立调度（DownsamplingTask）
+            task = DownsamplingTask(store, bucket_minutes=1, older_than_days=30)
+            res = task.run()
+            check(
+                "调度器一轮执行（物化+双清理）",
+                res["materialized"] >= 0 and "purged_raw" in res and "purged_downsample" in res,
+            )
+            task.start(interval_seconds=0.2)
+            time.sleep(0.5)
+            task.stop(run_once=False)
+            check("调度器 start/stop 周期执行", task.last_result is not None)
         finally:
-            conn.close()
+            # BASE-6：后台 flush/降采样线程可能持有独立线程连接，
+            # 须 close_all 跨线程关闭（close() 只关主线程连接）
+            conn.close_all()
 
     logger.info("自测结果: %d 通过, %d 失败", passed, failed)
     return 0 if failed == 0 else 1
