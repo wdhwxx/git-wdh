@@ -1,0 +1,76 @@
+# config/monitoring.example.yaml
+# ══════════════════════════════════════════════════════════════════
+# 监控配置模板（P0-2 数值阈值锁定 · R-04 阈值单一真源雏形）
+# 依据：《量化系统监控模块施工总清单_V1.2.md》§10 数值阈值锁定表
+# 使用：
+#   1. 复制本文件为 config/monitoring.yaml（真实配置，不入库，被 config/*.yaml 忽略）
+#   2. 各包实现只引用 monitoring.slo 配置块，禁止在各自代码/文档内自定义阈值
+#   3. 后续 BASE-3 配置集中化时，本 slo 块并入 config/settings.yaml（不迁移数值）
+# 状态标注：
+#   LOCKED      = 已锁定（施工清单 §10 明确约束，实盘后不得改动）
+#   PENDING_CAL = 待实盘校准后填死（本模板保留空占位，不编造数值）
+# ══════════════════════════════════════════════════════════════════
+
+monitoring:
+  slo:
+    # ── 行情 ──
+    market:
+      quote_delay_p99_ms: 5          # 行情延迟 P99（本地），LOCKED(初值，实盘校准复核)
+      exchange_ts_bias: ~            # 交易所时间戳偏差上限，PENDING_CAL
+
+    # ── 数据 ──
+    data:
+      freshness_max_seconds: 60      # 数据新鲜度 <1min，LOCKED
+      gap_allowed: 0                 # 数据缺口 =0，LOCKED
+      factor_sync_delay_max_seconds: ~      # 因子同步延迟上限（分别设值），PENDING_CAL
+      financial_sync_delay_max_seconds: ~   # 财务同步延迟上限（分别设值），PENDING_CAL
+
+    # ── 信号 ──
+    signal:
+      generation_delay_p99_ms: 50    # 信号生成延迟 P99 <50ms，LOCKED(初值)
+
+    # ── 交易 ──
+    trading:
+      order_ack_delay_p99_ms: 20     # 订单发送到 ACK P99 <20ms，LOCKED(初值)
+      order_reject_rate_max: 0.001   # 订单拒绝率 <0.1%，LOCKED(初值)
+      reject_rate_surge_multiple: ~  # 拒单率飙升倍数 N（窗口内超阈值），PENDING_CAL
+      reject_rate_surge_window_seconds: ~  # 飙升计算窗口长度，PENDING_CAL
+
+    # ── 风控 ──
+    risk:
+      position_limit_usage_warn: 0.80   # 限额使用率 <80% 预警，LOCKED
+      position_limit_usage_alert: 0.95  # 限额使用率 >95% 强告警，LOCKED
+      concentration_limit: ~            # 集中度限额（分别设值），PENDING_CAL
+      leverage_limit: ~                 # 杠杆限额（分别设值），PENDING_CAL
+      single_stock_position_limit: ~    # 单票仓位限额（分别设值），PENDING_CAL
+
+    # ── 对账（金额精确到分，容差=0；A-7/B-1 统一引用，禁止两处分别定义）──
+    reconciliation:
+      realtime_diff_tolerance: 0     # 实时对账差异容差 =0，LOCKED
+      t1_diff_tolerance: 0           # T+1 终局对账差异容差 =0，LOCKED
+
+    # ── 策略 ──
+    strategy:
+      intraday_drawdown_limit: ~     # 日内回撤/亏损阈值（按策略锁定），PENDING_CAL
+
+    # ── 模型 ──
+    model:
+      psi_threshold: ~               # PSI 分布漂移基线，PENDING_CAL
+      ks_threshold: ~                # KS 分布漂移基线，PENDING_CAL
+      ic_threshold: ~                # 滚动 IC 漂移基线，PENDING_CAL
+
+    # ── 回测一致性 ──
+    backtest_consistency:
+      signal_deviation_rate_max: ~   # 回测实盘信号偏差率上限 X%（按策略风格设定），PENDING_CAL
+      deviation_window: ~            # 偏差率计算窗口，PENDING_CAL
+
+    # ── 引擎心跳（R-02 硬约束：N×心跳间隔必须 <60s 才能保住 MTTD<1min）──
+    engine_heartbeat:
+      hang_judge_window_seconds: 60  # 判定窗口上限 <60s，LOCKED
+      probe_interval_seconds: 10     # 心跳探测间隔（N×间隔<60s 的建议组态），LOCKED
+      consecutive_misses: 5          # 连续 N 次无响应判定僵死（5×10s=50s<60s），LOCKED
+
+    # ── 资金/保证金 ──
+    margin:
+      strong_flat_distance_pct: ~    # 强平价距离百分比（接近强平 → P0 告警），PENDING_CAL
+      funding_rate_threshold: ~      # 资金费率阈值（持仓隔夜成本），PENDING_CAL

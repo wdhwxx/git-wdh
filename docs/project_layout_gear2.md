@@ -330,6 +330,14 @@ Pythonwdhmm/
 
 │   ├── mockups/                      # ✨【回写】GUI设计稿目录（5文件）：数据下载对话框设计稿与渲染图、用户面板参考图、预览页、看板生成板面预览（2026-09-13并入）；对应gui/data_download_dialog.py/backtest_config_dialog.py等已实现对话框，设计存档
 
+│   ├── 监控档案/                # ✨【回写#187】监控模块施工落点（源自《量化系统监控模块施工总清单_V1.2.md》）：P0-1 链路盘点清单 / 告警分级 / Runbook / 指标规范 / 安全合规 / 可测量性与故障注入 等施工文档
+
+│   │   ├── 链路盘点清单_P0-1.md     # ✨【回写#187】P0-1 交付物：行情→数据→因子→信号→组合→风控→订单→成交→持仓→资金→PnL 全链路逐环盘点（现有埋点/缺口/负责人 + 策略风格画像）
+
+│   │   ├── SLO与阈值锁定清单_P0-2.md  # ✨【回写#188】P0-2 交付物：SLI/SLO 初稿表 + 数值阈值锁定清单（§10 升格定稿，待实盘校准项如实标注）；与 config/monitoring.example.yaml 的 monitoring.slo 块同源
+
+│   │   └── 可测量性与故障注入规范_P0-8.md # ✨【回写#189】P0-8 交付物：①TP/FP/FN ground-truth 判定规则 ②MTTx 计时起止点定义（系统时间戳）③FI-01~07 标准故障注入用例集（与 D-6 共用）；§9 KPI-2/KPI-3 唯一权威测量依据
+
 │   └── archive_20260905/             # ✨【回写·2026-09-05】历史存档目录（29文件）：26个交接摘要+交接文档_20260830+根目录早期文档2个（项目交接文档/优化后期迭代项目结构图）；仅追溯历史，不参与当前蓝图主结构
 
 │
@@ -355,6 +363,8 @@ Pythonwdhmm/
 │   ├── st_blacklist.example.yaml # ✨【回写#70】ST/*ST/S*ST/SST 风险警示股名单模板（真实名单 config/st_blacklist.yaml 不入库，由 GUI「刷新名单」联网生成或人工编辑；full_clean_service.load_st_blacklist 离线读取，resolve_symbols 按 symbol 命中剔除，与代码前缀规则正交串联）
 
 │   ├── dashboard_targets.yaml    # ✨【2026-09-13】看板快速生成标的配置文件：defaults段（start/end/output_dir/strategy）+ targets列表（name/symbol/start/end/enabled开关，symbol支持逗号分隔多只）；供根目录看板快速生成.py交互式菜单读取；编辑此文件即可增删常用标的，无需记忆命令行参数；已废弃，见回写记录·2026-09-13（随 看板快速生成.py 一并删除，标的改由 GUI 直接输入）
+
+│   ├── monitoring.example.yaml     # ✨【回写#188】监控配置模板（P0-2 阈值单一真源雏形）：monitoring.slo 承载数值阈值锁定表（对账容差/限额使用率/拒单率/数据新鲜度/引擎心跳/保证金强平距离/回测实盘偏差率等），各包只引用不自定义；真实配置 config/monitoring.yaml 不入库；后续 BASE-3 配置集中化并入 settings.yaml
 
 │   └── features/                     # 特征工程配置目录（预留）：因子参数、特征列表、特征工程流水线配置；当前为空目录占位(.gitkeep)，后续迭代实现特征配置时直接补yaml
 
@@ -397,6 +407,8 @@ Pythonwdhmm/
 │   ├── 性能基准测试.py                # ✨【第5项】性能基准与优化验证入口：运行benchmarks指标基准 + A-E五项164项统一验证；V5新增--engine-benchmark-only直跑三模式引擎基准；支持--benchmark-only/--verify-only/--quick
 
 │   ├── 推理延迟基准.py                # ✨【回写#93】F-06 推理延迟基准薄入口：argparse（--lengths/--out/--model-name/--repeat）+ find_project_root + 调 myquant/ml/inference_benchmark.py InferenceBenchmark，报告 JSON+Markdown 入档 docs/因子与机器学习档案/；只读合成数据，不连实盘
+
+│   ├── 监控可测量性统计.py            # ✨【回写#189】P0-8 可测量性统计薄入口：argparse（--alerts/--fi/--list-fi）+ find_project_root + 调 myquant/monitoring/measurability.py（MTTx/TPFPFN 统计 + FI 用例库打印），输出 JSON 统计报告；业务逻辑零写入脚本
 
 │   ├── 数据库迁移.py                  # ✨【第6项】Alembic迁移中文入口：upgrade/downgrade/current/history/stamp/check/init，支持--db指定数据库路径
 
@@ -1072,7 +1084,9 @@ Pythonwdhmm/
 
     │   │                             # ✅已实现：11个内置数据质量指标(dirty_count/ratio/grade/repair等) + collect_from_data_quality_event + subscribe_to_event_bus自动采集 + Prometheus导出
 
-    │   └── data_quality_explorer.py # ✨【#S2修复】数据质量探查器（从web/dashboard.py迁移到monitoring底层，消除API依赖Web的架构倒置）：DataQualityExplorer类13方法（实时指标/清洗运行列表/运行详情/等级分布/脏数据统计/总览），纯Python数据层不依赖streamlit，API层和Web层均从此导入；数据源=CleanDataQueries+MetricsCollector；source过滤区分offline/live为实盘对接预留
+    │   ├── measurability.py         # ✨【回写#189】P0-8 可测量性统计模块：MTTx（MTTD/MTTA/MTTR）系统时间戳口径计算 + TP/FP/FN ground-truth 分类与准确率/误报率/检出率自动统计 + FI-01~07 标准故障注入用例库（与 D-6 混沌工程共用）；只消费已发生时间戳与告警记录，严格防未来
+
+│   └── data_quality_explorer.py # ✨【#S2修复】数据质量探查器（从web/dashboard.py迁移到monitoring底层，消除API依赖Web的架构倒置）：DataQualityExplorer类13方法（实时指标/清洗运行列表/运行详情/等级分布/脏数据统计/总览），纯Python数据层不依赖streamlit，API层和Web层均从此导入；数据源=CleanDataQueries+MetricsCollector；source过滤区分offline/live为实盘对接预留
 
     │
 
@@ -3162,3 +3176,22 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
   c. **mixed_engine.py 止损复用实盘 StopLossRule**：`StopLossRule` 新增 `stop_price(avg_cost)` 共享口径；mixed `_check_stop_loss` 改调 `self._stop_loss_rule.stop_price(pos.avg_cost)`（同一实现，消除分叉）。
 - 验证结果：py_compile 通过；新增 tests/unit/test_backtest_risk.py 5 项全绿（回测装配实盘RiskManager/风控拒绝单记录skip无成交/风控上下文prev_close防未来/StopLossRule.stop_price同源公式/mixed止损复用）；backtest 广回归 170 passed +1 skipped 无回归（较基线 165 净增 5）；ruff 通过（2 处既有 F841 非本次引入）。
 - 纪律遵守：仅改蓝图已标注文件（backtest/engine.py、backtest/mixed_engine.py、risk/rules.py）+ tests/unit 新增 test_backtest_risk.py（本回写同步更新目录树）；无蓝图外文件；严格防未来。
+
+182. ✨【回写记录·2026-10-05·P0-1 链路盘点·登记 docs/监控档案/ 目录】【回写#187】
+    事实来源：本次落地，代码级核验：myquant/ 各链路模块埋点现状探查（event_bus/metrics_collector/alerting/engine/portfolio/qmt_broker/data_feed/cleaner 逐文件核验）。
+    a. 登记 docs/监控档案/ 目录至蓝图 docs/ 段目录树（与 data层档案/因子与机器学习档案/审计档案/系统性审核 并列的监控施工文档档案区）。
+    b. 创建 docs/监控档案/链路盘点清单_P0-1.md：P0-1 交易/数据/策略链路盘点交付物（行情→数据→因子→信号→组合→风控→订单→成交→持仓→资金→PnL 全链路，逐环标注现有埋点/缺口/负责人 + 策略风格画像）。
+    c. 纪律遵守：先更新蓝图再创建文档（#187 目录树登记先行）；文档归入 docs/监控档案/ 蓝图标注范围，无蓝图外文件；全程仅读代码未改动任何业务代码；严格防未来（盘点仅记录已实现现状，不引入未来数据）。
+
+183. ✨【回写记录·2026-10-05·P0-2 SLI/SLO 数值阈值锁定】【回写#188】
+    事实来源：本次落地，代码级核验：无（纯规范/配置定稿，阈值取值来自《量化系统监控模块施工总清单_V1.2.md》§10 数值阈值锁定表，实盘校准前不编造数值）。
+    a. 登记 config/monitoring.example.yaml 至蓝图 config/ 段（monitoring.slo 阈值单一真源雏形，R-04）；真实配置 monitoring.yaml 不入库（对齐 config/*.yaml 忽略约定）。
+    b. 创建 docs/监控档案/SLO与阈值锁定清单_P0-2.md：SLI/SLO 初稿表 + 数值阈值锁定清单定稿（对账容差=0、限额 80%/95%、心跳窗口<60s 等硬约束锁定；行情延迟/拒单率/偏差率等标注"待实盘校准"占位，不编默认值）。
+    c. 纪律遵守：先更新蓝图再创建文件（#188 目录树登记先行，config/ 段 + docs/ 段同步登记）；无蓝图外文件；无业务代码改动；防未来（阈值仅锁定已确认约束，待校准项显式留占位）。
+
+184. ✨【回写记录·2026-10-05·P0-8 可测量性与故障注入规范】【回写#189】
+    事实来源：本次落地，代码级核验：口径定义（TP/FP/FN ground-truth、MTTx 计时起止点、FI-01~07 用例）全部取自《量化系统监控模块施工总清单_V1.2.md》P0-8 展开，未自行定义。
+    a. 新增 myquant/monitoring/measurability.py（业务逻辑，已登记 monitoring/ 段）：MttxCalculator（MTTD/MTTA/MTTR 系统时间戳口径）、ClassificationStats（TP/FP/FN 分类 + 准确率/误报率/检出率自动统计）、FICase + FI_CASES（FI-01~07 标准故障注入用例库，与 D-6 共用）；全量类型注解 + Google docstring + 防御式校验 + 严格防未来（只消费已发生时间戳）。
+    b. 新增 scripts/监控可测量性统计.py（薄入口，已登记 scripts/ 段）：argparse（--alerts/--fi/--list-fi）+ find_project_root + 调 measurability 模块，输出 JSON 统计报告；业务逻辑零写入。
+    c. 新增 docs/监控档案/可测量性与故障注入规范_P0-8.md（已登记 docs/ 段）：三项定义定稿（①ground-truth 判定规则 ②MTTx 计时起止点 ③FI-01~07 用例集），为 §9 KPI-2/KPI-3 唯一权威测量依据。
+    d. 纪律遵守：先更新蓝图再创建文件（#189 目录树登记先行，monitoring/ 段 + scripts/ 段 + docs/ 段同步登记）；无蓝图外文件；业务逻辑归 myquant，scripts 薄入口；严格防未来。
