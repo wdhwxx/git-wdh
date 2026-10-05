@@ -874,16 +874,27 @@ class HealthPatrol:
         # report["status"] == "healthy" | "degraded" | "down"
     """
 
-    def __init__(self, metrics_history: Optional[Any] = None):
+    def __init__(
+        self,
+        metrics_history: Optional[Any] = None,
+        meta_monitor: Optional[Any] = None,
+    ):
         self._extra_checks: Dict[str, Callable[[], Any]] = {}
         # BASE-2 指标时序落库（可选绑定；R-02：本存储仅服务趋势/基线/看板
         # 回放，不参与任何 P0 实时告警检测，P0 实时告警一律走事件订阅）
         self._metrics_history: Optional[Any] = metrics_history
+        # BASE-5 元监控（可选绑定：监控自身可观测性，异常走独立告警通道 R-08）
+        self._meta_monitor: Optional[Any] = meta_monitor
         logger.debug("巡检器初始化")
 
     def attach_metrics_history(self, store: Any) -> "HealthPatrol":
         """绑定指标时序存储（BASE-2 周期落库，随巡检 60s 一次）。"""
         self._metrics_history = store
+        return self
+
+    def attach_meta_monitor(self, meta: Any) -> "HealthPatrol":
+        """绑定元监控（BASE-5：随巡检采集监控自身指标，异常独立告警 R-08）。"""
+        self._meta_monitor = meta
         return self
 
     def add_check(self, name: str, func: Callable[[], Any]) -> None:
@@ -1096,7 +1107,29 @@ class HealthPatrol:
         )
         # BASE-2：巡检指标周期落库（随巡检节奏，默认 60s；失败不阻断巡检）
         self._record_report_metrics(report)
+        # BASE-5：元监控随巡检采集（监控自身健康；未绑定跳过；失败记 down 不阻断）
+        self._run_meta_monitor(report)
         return report
+
+    def _run_meta_monitor(self, report: Dict[str, Any]) -> None:
+        """
+        BASE-5：随巡检运行元监控（监控自身可观测性）。
+
+        采集器健康/事件总线积压/存储写入延迟/告警发送成功率/看板可用性
+        五项元指标；异常走独立告警通道（R-08 独立冷却窗口，与业务告警隔离）。
+        元监控状态并入巡检报告 checks（down 优先汇总），失败记 down 不阻断巡检。
+        """
+        if self._meta_monitor is None:
+            return
+        try:
+            status, detail = self._meta_monitor.probe_status()
+            report["checks"]["meta_monitor"] = {"status": status, "detail": detail}
+        except Exception as e:  # noqa: BLE001
+            report["checks"]["meta_monitor"] = {
+                "status": PATROL_DOWN,
+                "detail": {"error": f"{type(e).__name__}: {e}"},
+            }
+            logger.error(f"元监控运行失败（巡检降级）: {e}")
 
     def _record_report_metrics(self, report: Dict[str, Any]) -> None:
         """
@@ -1688,6 +1721,20 @@ def attach_engine(
             patrol.attach_metrics_history(MetricsHistoryStore())
         except Exception as e:  # noqa: BLE001
             logger.warning(f"指标时序存储初始化失败（巡检不落库，仅内存回放）: {e}")
+
+        # BASE-5：元监控随巡检装配（监控自身可观测性；失败降级为不采集，不阻断）
+        try:
+            from myquant.core.event_bus import get_event_bus
+            from myquant.monitoring.meta_monitor import MetaMonitor
+            from myquant.monitoring.metrics_collector import get_metrics_collector
+            meta = MetaMonitor(
+                collector=get_metrics_collector(),
+                metrics_history=patrol._metrics_history,  # 复用巡检时序库（同一趋势回放源）
+                event_bus=get_event_bus(),
+            )
+            patrol.attach_meta_monitor(meta)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"元监控初始化失败（巡检不含元监控检查项）: {e}")
 
         def _patrol_job(**kw) -> None:  # noqa: ARG001
             report = patrol.build_report(

@@ -516,6 +516,8 @@ Pythonwdhmm/
 
     │   │   ├── test_event_bus_chain.py # ✨【回写#199】BASE-4 事件链路 id 规范测试（16 项）：ChainEvent 四元组 schema（link_ids/missing_link_ids/to_dict/防未来不注入创建时刻）；4 强类型类构造与序列化（OrderEvent 覆盖 5 类 EventType）；publish_chain 统一入口（缺 event_ts warning 不阻断/require_event_ts 拒绝/非链路 TypeError）；链路连续性（signal→order→fill 同 signal_id 贯穿、event_ts 差值可测延迟）✅已完成
 
+    │   │   ├── test_meta_monitor.py # ✨【回写#200】BASE-5 元监控测试（16 项）：五探针健康运行/指标进 collector/落库可查/探针状态接口；总线积压→degraded+独立告警送达+业务 manager 隔离；R-08 独立冷却 dedup（同 key 窗口内只发一次、新实例可再告警）；HealthPatrol 集成（巡检报告含 meta_monitor、meta down 拉低整体、未绑定跳过）；防御式（非法 cooldown 回退/探针异常记 down 不阻断/看板 standby 不告警/探针注入校验）✅已完成
+
 │   │   ├── test_broker_platform_check.py # ✨【回写#25】券商适配器平台校验（审计疑点3：qmt/ptrade非Windows拦截、paper/sim放行、大小写不敏感）✅已完成
 
 │   │   ├── test_dashboard_serializer.py  # ✨【回写#25】回测看板数据序列化器测试（build_dashboard_json全链路/成本反向拆分/买卖配对/exit_reason_class/pool派生）✅已完成
@@ -1072,7 +1074,7 @@ Pythonwdhmm/
 
     │   ├── portfolio.py              # 实时持仓、市值、可用冻结资金；✨【回写#141】账实对账 ReconciliationDiff + reconcile_vs_broker（KP-P4-01：本地 vs 券商只读 diff，现金容差0.01+持仓数量差）+ sync_from_broker 改先 diff 后重建，超阈值 critical 告警+__reconciliation_diff__ 回调，禁静默 clear 覆盖；✨【回写#149】增 diff_vs_broker 只读差异入口（KP-P3-08 风控基准券商权威账本）；✨【回写#186】KP-M04(T-30)：transfer_cash 高危写操作准入守卫（未审批拒绝，默认仅审计留痕）
 
-    │   ├── scheduler.py              # 定时任务、巡检、日报；✨【回写#169】健康巡检 CRITICAL 可执行处置（KP-P5-11：pause_on_critical 自动暂停开仓/降级）；✨【回写#141】attach_engine 增 enable_reconcile/reconcile_cron 盘后账实对账 cron（KP-P4-01：只对账不重建，超阈值 critical 告警）；✨【回写#160】巡检健康告警闭环（KP-P5-03：run_all 非 healthy → alert_mgr.alert）；✨【回写#161】告警升级检查周期任务（KP-P5-04：check_escalations 接入调用方）；✨【回写#182】月频模型治理任务（KP-P6-05：enable_monthly_governance+monthly_governance_cron 注册月频任务，run_monthly_model_governance 未批准不 active + 漂移告警）
+    │   ├── scheduler.py              # 定时任务、巡检、日报；✨【回写#169】健康巡检 CRITICAL 可执行处置（KP-P5-11：pause_on_critical 自动暂停开仓/降级）；✨【回写#141】attach_engine 增 enable_reconcile/reconcile_cron 盘后账实对账 cron（KP-P4-01：只对账不重建，超阈值 critical 告警）；✨【回写#160】巡检健康告警闭环（KP-P5-03：run_all 非 healthy → alert_mgr.alert）；✨【回写#161】告警升级检查周期任务（KP-P5-04：check_escalations 接入调用方）；✨【回写#182】月频模型治理任务（KP-P6-05：enable_monthly_governance+monthly_governance_cron 注册月频任务，run_monthly_model_governance 未批准不 active + 漂移告警）；✨【回写#200】BASE-5 元监控接入——HealthPatrol 加 meta_monitor 参数/attach_meta_monitor/_run_meta_monitor（元监控随巡检采集并并入 checks，down 优先汇总，失败降级不阻断），attach_engine 自动装配 MetaMonitor（复用巡检时序库 + 全局 collector/bus）
 
     │   │                             # 【回写#135】attach_engine 注册日终 T+1 日切结算 cron（enable_t1_settle 默认 True，15:30 调 broker.settle_t1_all()/settle_t1()）
 
@@ -1115,6 +1117,8 @@ Pythonwdhmm/
     │   ├── metrics_collector.py      # 运行指标采集
 
     │   │                             # ✅已实现：11个内置数据质量指标(dirty_count/ratio/grade/repair等) + collect_from_data_quality_event + subscribe_to_event_bus自动采集 + Prometheus导出
+
+    │   ├── meta_monitor.py          # ✨【回写#200】BASE-5 元监控（监控自身可观测性）：五类探针（采集器健康/事件总线积压/存储写入延迟/告警发送成功率/看板可用性）→ MetricsCollector（meta_* 进 /api/metrics）+ MetricsHistoryStore（R-02 仅回放）+ 独立告警通道（R-08 独立冷却窗口，dedup_key=meta:* 与业务告警隔离）；探针可注入覆盖；probe_status 供 HealthPatrol 集成；__main__ 自测 12 项全绿
 
     │   ├── measurability.py         # ✨【回写#189】P0-8 可测量性统计模块：MTTx（MTTD/MTTA/MTTR）系统时间戳口径计算 + TP/FP/FN ground-truth 分类与准确率/误报率/检出率自动统计 + FI-01~07 标准故障注入用例库（与 D-6 混沌工程共用）；只消费已发生时间戳与告警记录，严格防未来
 
@@ -3308,3 +3312,12 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
     c. 新增 tests/unit/test_event_bus_chain.py（16 项）：ChainEvent 四元组 schema（默认空/四缺/部分缺失/to_dict）；4 强类型类（OrderEvent 覆盖 5 类、reject_reason、SystemError 带四元组）；publish_chain（送达/缺 event_ts warning 不阻断/require 拒绝/TypeError/通配符）；链路连续性（signal→order→fill 同 signal_id 贯穿、event_ts 单调递增、延迟差值可算= B-4 打底）。
     d. 验证结果：py_compile 通过；event_bus __main__ 自测 24 项全绿（原 17+新 7）；新增单测 16 passed；全量 pytest tests/unit 2443 passed +2 skipped 无回归（基线 2427+16）。
     e. 纪律遵守：先更新蓝图再创建文件（#199 目录树登记先行）；无蓝图外文件；业务逻辑归 myquant；严格防未来（event_ts 防未来红线明示）；任务后 git 提交。
+
+195. ✨【回写记录·2026-10-05·BASE-5 监控自身可观测性（元监控）】【回写#200】
+    事实来源：本次落地，代码级核验：《量化系统监控模块施工总清单_V1.2.md》BASE-5 行验收口径（monitoring/meta_monitor.py + scheduler 落点；采集器健康/事件总线积压/存储写入延迟/告警发送成功率/看板可用性；监控自身异常走独立通道；约束 R-08：元监控告警纳入 C-9 降噪框架（单 key 冷却 + 聚合），设独立冷却窗口避免元监控抖动刷屏掩盖业务告警；验收=元监控指标进入 /api/metrics、异常有独立告警通道、受独立冷却窗口约束）。
+    a. 登记 myquant/monitoring/meta_monitor.py + tests/unit/test_meta_monitor.py 至蓝图目录树（monitoring/ 段 + tests/unit 段同步登记）；scheduler.py 条目追加 #200 说明。
+    b. 新建 myquant/monitoring/meta_monitor.py（业务逻辑，monitoring/ 段登记）：MetaMonitor 五类内置探针（collector_health 用 MetricsCollector.get_stale_metrics 检测采集链路中断；event_bus_backlog 用总线历史缓冲占比+handler 错误（从 _history.maxlen 取容量）；storage_write_latency 实测元指标落库耗时；alert_send_success 用业务 AlertManager.stats.channels 的 sent/error 算成功率；dashboard_availability 可注入 probe、默认 standby 不触发告警防占位刷屏）；探针可 set_probe/remove_probe 覆盖；run() 一轮采集 = 探针 → MetricsCollector 写入 meta_* 六指标（进 /api/metrics 数据源）→ MetricsHistoryStore 落库（R-02 仅回放不检测，实测耗时）→ 异常项走独立告警通道（内部自建 AlertManager，Console/Log 通道，dedup_key=meta:name，dedup_window=独立冷却窗口默认 120s，R-08 与业务 300s 去重完全隔离）；防御式（正数/非负参数校验回退、探针异常记 down 不阻断、落库/告警失败记 error 不阻断）；probe_status() 供 HealthPatrol.add_check 集成；__main__ 自测 12 项全绿。
+    c. 改造 myquant/live/scheduler.py：HealthPatrol.__init__ 加 meta_monitor 参数 + attach_meta_monitor；build_report 末尾 _run_meta_monitor（未绑定跳过；元监控状态并入 report["checks"] 参与整体汇总，异常记 PATROL_DOWN 不阻断巡检）；attach_engine 巡检分支自动装配 MetaMonitor（复用巡检 metrics_history 时序库 + 全局 get_metrics_collector/get_event_bus，初始化失败降级为不采集不阻断）。
+    d. 新增 tests/unit/test_meta_monitor.py（16 项，临时库不碰 quant.db）：健康运行（五探针/指标进 collector/落库可查/探针状态接口/成功率 1.0）；异常（总线积压 95%→degraded、独立告警送达、业务 manager 隔离）；R-08 独立冷却（同 key 窗口内只发一次、新实例可再告警）；HealthPatrol 集成（报告含 meta_monitor、meta down 拉低整体、未绑定跳过）；防御式（非法 cooldown 回退、探针异常记 down 不阻断、看板 standby 不告警、探针注入校验）。
+    e. 验证结果：py_compile 3 文件通过；meta_monitor __main__ 自测 12 项全绿；新增单测 16 passed；全量 pytest tests/unit 2459 passed +2 skipped 无回归（基线 2443+16）。
+    f. 纪律遵守：先更新蓝图再创建文件（#200 目录树登记先行）；无蓝图外文件；业务逻辑归 myquant；严格防未来（探针只读当前已发生状态/指标时间戳=采集时刻）；任务后 git 提交。
