@@ -528,6 +528,8 @@ Pythonwdhmm/
 
     │   │   ├── test_middleware_monitoring.py # ✨【回写#206】A-2 L1 中间件监控测试（19 项）：middleware_queue_depth/middleware_dlq_count/middleware_event_bus_backlog(_ratio) 注册与标签；collect_from_event_bus 积压采集（条数/积压率/容量封顶/无容量不崩/总线异常返回 0）；collect_from_rabbitmq_bus（.dlq 后缀进 DLQ 计数、普通队列进队列深度、不可用返回 0 不伪造、transport 异常返回 0）；check_middleware_backlog 判定（无数据 fail-closed DEGRADED/正常 HEALTHY/队列深度超 DEGRADED/DLQ 超 UNHEALTHY/积压率超 DEGRADED）；RabbitMQTransport.get_queue_stats（空注册表 {}、未配置 management_url None、HTTP 拉取 ready+unacked 深度、任一队列失败 None）；subscribe 登记主队列+DLQ ✅已完成
 
+    │   │   ├── test_engine_events.py # ✨【回写#207】A-3 引擎统一埋点测试（16 项，fake bus 注入不依赖真实总线/券商）：_publish_engine_event 辅助（未装配总线跳过不崩、publish_chain 异常不阻断交易）；_process_signal→SIGNAL 事件（signal_id 归一化非空、四元组齐全、event_ts 防未来非未来）；链路贯穿（ORDER_SUBMIT 的 order_id 与 SIGNAL 的 signal_id 幂等同源）；_submit_order（SUBMITTED→ORDER_SUBMIT、REJECTED→ORDER_REJECTED+占位回滚、异常→SystemErrorEvent component=engine.submit）；on_order_update（FILLED/PARTIAL_FILLED/CANCELLED/REJECTED 参数化 4 态事件、PENDING 不发布）；on_trade（成交级 ORDER_FILLED trade_id + POSITION_UPDATE avg_cost 均价、无 portfolio 均价 0 不崩）；collect_from_engine（engine_* 7 指标 + LIVE_POSITIONS_COUNT/LIVE_PNL_TOTAL、引擎状态异常返回 0）✅已完成
+
 │   │   ├── test_broker_platform_check.py # ✨【回写#25】券商适配器平台校验（审计疑点3：qmt/ptrade非Windows拦截、paper/sim放行、大小写不敏感）✅已完成
 
 │   │   ├── test_dashboard_serializer.py  # ✨【回写#25】回测看板数据序列化器测试（build_dashboard_json全链路/成本反向拆分/买卖配对/exit_reason_class/pool派生）✅已完成
@@ -1070,7 +1072,7 @@ Pythonwdhmm/
 
     │   ├── __init__.py
 
-    │   ├── engine.py                 # 实盘引擎继承BaseEngine，协调数据、策略、执行、风控；✨【回写#166】config_version 落快照+启动日志（KP-P5-07：create_live_engine 装配 engine._config_version）；✨【回写#167】auto_recover_on_start 显式必填（KP-P5-08：_require_auto_recover 缺失即 ValueError）✨【回写#139】on_market_data 增 (symbol,date) bar级去重（KP-P3-02：_seen_bars集合，同根bar二次推送直接丢弃不达撮合，stats.bar_dedup_skipped计数，启动clear）；✨【回写#142】成交/订单关系账接线（KP-P4-02：可选 trade_ledger 注入，on_order_update 逐笔订单、on_trade 逐笔成交同步落库，长期归档）；✨【回写#146】on_market_data 捕获行情前收字段注入风控上下文（KP-P3-04：_prev_close_map，_build_risk_context extra 注入 prev_close）；✨【回写#149】定时券商账本对账（KP-P3-08：_setup_scheduler 注册 _broker_accountability_patrol，sync_from_broker 超阈 diff → CRITICAL+pause）；✨【回写#152】_on_force_close 消费 executed（KP-M02：dry-run 恒未真实执行 → 显式 CRITICAL 需人工 confirm 平仓）
+    │   ├── engine.py                 # 实盘引擎继承BaseEngine，协调数据、策略、执行、风控；✨【回写#166】config_version 落快照+启动日志（KP-P5-07：create_live_engine 装配 engine._config_version）；✨【回写#167】auto_recover_on_start 显式必填（KP-P5-08：_require_auto_recover 缺失即 ValueError）✨【回写#139】on_market_data 增 (symbol,date) bar级去重（KP-P3-02：_seen_bars集合，同根bar二次推送直接丢弃不达撮合，stats.bar_dedup_skipped计数，启动clear）；✨【回写#142】成交/订单关系账接线（KP-P4-02：可选 trade_ledger 注入，on_order_update 逐笔订单、on_trade 逐笔成交同步落库，长期归档）；✨【回写#146】on_market_data 捕获行情前收字段注入风控上下文（KP-P3-04：_prev_close_map，_build_risk_context extra 注入 prev_close）；✨【回写#149】定时券商账本对账（KP-P3-08：_setup_scheduler 注册 _broker_accountability_patrol，sync_from_broker 超阈 diff → CRITICAL+pause）；✨【回写#152】_on_force_close 消费 executed（KP-M02：dry-run 恒未真实执行 → 显式 CRITICAL 需人工 confirm 平仓）；✨【回写#207】A-3 引擎统一埋点——_publish_engine_event 统一出口（总线未装配跳过/publish_chain 失败记 warning 不阻断交易/event_ts=业务发生时刻防未来）；_process_signal 发布 SignalEvent（signal_id 归一化后）；_submit_order 发布 ORDER_SUBMIT/ORDER_REJECTED（拒单原因取券商返回 result.extra 回退原单）/SystemErrorEvent（提交异常 component=engine.submit）；on_order_update 按 FILLED/PARTIAL_FILLED/CANCELLED/REJECTED 发布订单级 OrderEvent；on_trade 发布成交级 ORDER_FILLED（trade_id）+ PositionUpdateEvent（apply_trade 后均价 avg_cost）+ 异常 SystemErrorEvent（component=engine.trade）；链路贯穿：order_id 与 signal_id 幂等同源（Signal.to_order）
 
     │   │                             # 【任务27】接入 BrokerManager 多券商管理器：set_broker自动包装(单券商向后兼容)/set_broker_manager(多券商并行)
 
@@ -1124,7 +1126,7 @@ Pythonwdhmm/
 
     │   │                             # ✅已实现：AlertManager.subscribe_to_event_bus(5类事件) + DataQualityEvent自动聚合告警 + Console/Log/Email/Webhook四通道
 
-    │   ├── metrics_collector.py      # 运行指标采集；✨【回写#206】A-2 L1 中间件监控——新增内置指标 middleware_queue_depth/middleware_dlq_count（GAUGE×queue）/middleware_event_bus_backlog(_ratio)（GAUGE）；collect_from_event_bus 增补总线积压条数+积压率（handler 错误/调用已有）；collect_from_rabbitmq_bus() 从 transport.get_queue_stats() 采集队列深度/DLQ（.dlq 后缀分流，None 记 warning 返回 0 不伪造）；check_middleware_backlog() 积压健康判定（队列深度超→DEGRADED、DLQ 超→UNHEALTHY、总线积压率超→DEGRADED、无数据 fail-closed→DEGRADED），供 HealthPatrol/scheduler 注册巡检
+    │   ├── metrics_collector.py      # 运行指标采集；✨【回写#206】A-2 L1 中间件监控——新增内置指标 middleware_queue_depth/middleware_dlq_count（GAUGE×queue）/middleware_event_bus_backlog(_ratio)（GAUGE）；collect_from_event_bus 增补总线积压条数+积压率（handler 错误/调用已有）；collect_from_rabbitmq_bus() 从 transport.get_queue_stats() 采集队列深度/DLQ（.dlq 后缀分流，None 记 warning 返回 0 不伪造）；check_middleware_backlog() 积压健康判定（队列深度超→DEGRADED、DLQ 超→UNHEALTHY、总线积压率超→DEGRADED、无数据 fail-closed→DEGRADED），供 HealthPatrol/scheduler 注册巡检；✨【回写#207】A-3 引擎统一埋点——新增 engine_orders_total/engine_filled_total/engine_rejected_total/engine_trades_total/engine_signals_total/engine_risk_rejected_total/engine_errors_total 内置指标（GAUGE 快照）；collect_from_engine() 从 LiveEngine.get_status() 采集引擎累计统计（只读已发生事实）+ 联动 LIVE_POSITIONS_COUNT/LIVE_PNL_TOTAL（portfolio 注入时），/api/metrics 可见实盘指标随状态变化
 
     │   │                             # ✅已实现：11个内置数据质量指标(dirty_count/ratio/grade/repair等) + collect_from_data_quality_event + subscribe_to_event_bus自动采集 + Prometheus导出
 
@@ -3412,3 +3414,20 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
     d. 新增 tests/unit/test_middleware_monitoring.py（19 项）：指标注册与标签；collect_from_event_bus 积压（条数/积压率/容量封顶/无容量不崩/总线异常返回 0）；collect_from_rabbitmq_bus（.dlq 分流、不可用返回 0 不伪造、transport 异常返回 0）；check_middleware_backlog（无数据 DEGRADED/正常 HEALTHY/深度超 DEGRADED/DLQ 超 UNHEALTHY/积压率超 DEGRADED）；RabbitMQTransport.get_queue_stats（空注册表 {}、未配置 None、HTTP 拉取 ready+unacked、任一队列失败 None）；subscribe 登记主队列+DLQ。
     e. 验证结果：py_compile 2 文件通过；新增单测 19 passed；全量 pytest tests/unit 2617 passed + 2 skipped 无回归（基线 2598 + 19）。
     f. 纪律遵守：先更新蓝图再创建文件（#206 目录树登记先行）；无蓝图外文件；业务逻辑归 myquant；配置外置（Management 地址/凭据走 TransportConfig.extra，不硬编码）；防未来（采集/判定只读当前已发生状态，无预测）；任务后 git 提交。
+
+202. ✨【回写记录·2026-10-05·A-3 引擎统一埋点】【回写#207】
+    事实来源：本次落地，代码级核验：《量化系统监控模块施工总清单_V1.2.md》A-3 行验收口径（落点 live/engine.py + core/event_bus.py + monitoring/metrics_collector.py；引擎发布已定义未使用的 8 类事件：ORDER_SUBMIT/FILLED/PARTIAL/CANCELLED/REJECTED/POSITION_UPDATE/SIGNAL/SYSTEM_ERROR，全部带链路 id（BASE-4）；MetricsCollector 新增 collect_from_engine()；为 M1-Min 保底项：无事件流则 EVENT 类检测全部落空；验收=引擎每笔订单/成交/拒单均发布事件；/api/metrics 可见实盘指标随状态变化）。
+    a. 登记 tests/unit/test_engine_events.py 至蓝图目录树（tests/unit 段）；live/engine.py、metrics_collector.py 条目追加 #207（core/event_bus.py 为 BASE-4 既有能力复用——8 类 EventType 与 SignalEvent/OrderEvent/PositionUpdateEvent/SystemErrorEvent 强类型类及 publish_chain 统一入口已定稿，本次不重复改造，仅由引擎侧调用发布）。
+    b. 改造 myquant/live/engine.py（A-3 五块埋点，全部只读已发生事实、event_ts=time.time() 业务发生时刻防未来）：
+       ① _publish_engine_event() 统一出口——总线未装配（_event_bus=None）静默跳过；publish_chain 异常记 warning 不阻断交易主链路（埋点是增强能力）；
+       ② _process_signal 幂等去重后发布 SignalEvent（signal_id 归一化非空、strategy_id/symbol/signal_type；监控模式同样发布——信号已生成是事实）；
+       ③ _submit_order 提交后发布 OrderEvent（SUBMITTED/PENDING→ORDER_SUBMIT；REJECTED→ORDER_REJECTED，拒单原因取券商返回 result.extra 回退原单 order.extra）；提交异常发布 SystemErrorEvent（component=engine.submit，携带 order_id）；
+       ④ on_order_update 按订单终态/部分成交发布订单级 OrderEvent（FILLED→ORDER_FILLED、PARTIAL_FILLED→ORDER_PARTIAL、CANCELLED→ORDER_CANCELLED、REJECTED→ORDER_REJECTED 带 reject_reason；PENDING 不发布）；
+       ⑤ on_trade 成交回报发布成交级 ORDER_FILLED（trade_id 链路）+ PositionUpdateEvent（apply_trade 后取持仓 avg_cost 均价，取不到记 debug 用 0 占位不阻断）；成交处理异常发布 SystemErrorEvent（component=engine.trade，携带 order_id/trade_id）。
+       链路贯穿：Signal.to_order 幂等——有 signal_id 时 order_id=signal_id，signal→order→fill 全链路同源。
+    c. 扩展 myquant/monitoring/metrics_collector.py（A-3 两块）：
+       ① 新增内置指标常量 + register_builtin_metrics 注册（GAUGE 快照，只读已发生统计）：engine_orders_total / engine_filled_total / engine_rejected_total / engine_trades_total / engine_signals_total / engine_risk_rejected_total / engine_errors_total；
+       ② collect_from_engine()——从 engine.get_status()["stats"] 采集 7 个 engine_* 指标（set_gauge 复制当前值，与 EVENT_BUS_TOTAL_EVENTS 既有行为一致），portfolio 注入时联动 LIVE_POSITIONS_COUNT / LIVE_PNL_TOTAL；get_status 异常记 error 返回 0 不伪造——配合引擎 8 类链路事件，/api/metrics 可见实盘指标随状态变化（A-3 验收）。
+    d. 新增 tests/unit/test_engine_events.py（16 项，fake bus 注入不依赖真实总线/券商）：辅助（未装配跳过/publish_chain 异常不阻断）；SIGNAL（四元组齐全/防未来 event_ts/链路贯穿 order_id==signal_id）；_submit_order（SUBMITTED/REJECTED+占位回滚/异常→SYSTEM_ERROR）；on_order_update（参数化 4 态/PENDING 不发布）；on_trade（成交级 FILLED trade_id + POSITION_UPDATE avg_cost、无 portfolio 均价 0）；collect_from_engine（9 指标/异常返回 0）。
+    e. 验证结果：py_compile 2 文件通过；新增单测 16 passed；全量 pytest tests/unit 2633 passed + 2 skipped 无回归（基线 2617 + 16）。
+    f. 纪律遵守：先更新蓝图再创建文件（#207 目录树登记先行）；无蓝图外文件；业务逻辑归 myquant；防未来（埋点 event_ts=业务发生时刻、collect 只读已发生统计）；任务后 git 提交。

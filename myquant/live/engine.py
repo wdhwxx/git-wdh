@@ -72,7 +72,15 @@ from typing import Any, Callable, Dict, List, Optional, Set
 import pandas as pd
 
 from myquant.core.date_utils import format_bar_date, get_date_part
-from myquant.core.event_bus import get_event_bus
+from myquant.core.event_bus import (
+    ChainEvent,
+    EventType,
+    OrderEvent,
+    PositionUpdateEvent,
+    SignalEvent,
+    SystemErrorEvent,
+    get_event_bus,
+)
 from myquant.core.logger import get_logger
 from myquant.core.lookahead_guard import LookaheadGuard
 from myquant.engine.base import BaseEngine
@@ -1449,6 +1457,20 @@ class LiveEngine(BaseEngine):
             return
         self._processed_signal_ids.add(signal.signal_id)
 
+        # A-3 引擎统一埋点：策略信号事件（signal_id 已归一化，监控模式同样发布——
+        # 信号已生成是已发生事实；链路 id 贯穿：signal_id 即后续 order_id 幂等源）
+        self._publish_engine_event(SignalEvent(
+            signal_id=signal.signal_id,
+            event_ts=time.time(),
+            strategy_id=signal.strategy_id or self._engine_id,
+            symbol=signal.symbol,
+            signal_type=(
+                signal.signal_type.value
+                if hasattr(signal.signal_type, "value")
+                else str(signal.signal_type)
+            ),
+        ))
+
         # 监控模式（H2修复）：生成并记录信号，但不提交订单
         if self._monitor_only:
             logger.info(
@@ -1715,6 +1737,34 @@ class LiveEngine(BaseEngine):
     # ═══════════════════════════════════════════
     #  H2修复：事件总线 / 状态持久化 / 调度 / 守护
     # ═══════════════════════════════════════════
+
+    # ═══════════════════════════════════════════
+    #  A-3 引擎统一埋点：交易链路事件发布
+    # ═══════════════════════════════════════════
+
+    def _publish_engine_event(self, event: ChainEvent) -> None:
+        """
+        A-3 引擎统一埋点出口：发布交易链路事件（BASE-4 四元组链路 id）
+
+        埋点纪律（埋点绝不影响交易主链路）：
+          - 事件总线未启用/未装配（_event_bus=None）→ 静默跳过（埋点是增强）
+          - publish_chain 失败（总线故障/回调异常）→ 记 warning，不阻断交易
+          - event_ts 由发布方填 time.time() 业务发生时刻（防未来红线，
+            禁止用未来时间戳；缺失不阻断，require_event_ts=False 过渡期语义）
+
+        Parameters
+        ----------
+        event : ChainEvent
+            交易链路事件（SignalEvent/OrderEvent/PositionUpdateEvent/SystemErrorEvent）
+        """
+        bus = self._event_bus
+        if bus is None:
+            return
+        try:
+            bus.publish_chain(event)
+        except Exception as e:
+            # 埋点是增强能力：总线故障时交易主链路必须继续，只记 warning
+            logger.warning(f"[engine] 链路事件发布失败 {event.type_name}: {e}")
 
     def _setup_event_bus(self) -> None:
         """
@@ -2113,6 +2163,35 @@ class LiveEngine(BaseEngine):
             # 提交到 broker_manager（路由主券商 + 主备 failover 统一处理）
             result = self._broker_manager.submit_order(order)
 
+            # A-3 引擎统一埋点：订单提交/拒单事件（SUBMITTED/PENDING→submit，
+            # REJECTED→rejected；链路 id：order_id 与 signal_id 幂等同源）
+            result_status = getattr(result, "status", None)
+            if result_status == OrderStatus.REJECTED:
+                self._publish_engine_event(OrderEvent(
+                    event_type=EventType.ORDER_REJECTED,
+                    order_id=order.order_id,
+                    event_ts=time.time(),
+                    symbol=order.symbol,
+                    status="rejected",
+                    reject_reason=str(
+                        (getattr(result, "extra", None) or {}).get("reject_reason", "")
+                        or (order.extra or {}).get("reject_reason", "")
+                        or ""
+                    ),
+                ))
+            else:
+                self._publish_engine_event(OrderEvent(
+                    event_type=EventType.ORDER_SUBMIT,
+                    order_id=order.order_id,
+                    event_ts=time.time(),
+                    symbol=order.symbol,
+                    status=(
+                        result_status.value.lower()
+                        if hasattr(result_status, "value")
+                        else str(result_status or "submitted")
+                    ),
+                ))
+
             # ── BUG-03：提交被拒（REJECTED）时回滚 BUY 待成交占位
             # （锁外回滚与锁内登记互斥，避免"在途占位"永久悬挂）──
             if order.side == OrderSide.BUY and getattr(result, "status", None) == OrderStatus.REJECTED:
@@ -2137,6 +2216,13 @@ class LiveEngine(BaseEngine):
             logger.error(f"[engine] 订单提交失败: {e}")
             self._stats["errors"] += 1
             self._stats["rejected_orders"] += 1
+            # A-3 引擎统一埋点：系统错误事件（订单提交异常，携带订单链路 id）
+            self._publish_engine_event(SystemErrorEvent(
+                error=str(e),
+                component="engine.submit",
+                order_id=order.order_id,
+                event_ts=time.time(),
+            ))
 
     # ═══════════════════════════════════════════
     #  断线补单对账（任务45 / T3：重连后仅补发未成交订单）
@@ -2179,6 +2265,28 @@ class LiveEngine(BaseEngine):
         order : Order
             更新后的订单
         """
+        # A-3 引擎统一埋点：订单状态事件（FILLED/PARTIAL_FILLED/CANCELLED/REJECTED
+        # ——订单级终态/部分成交回报；逐笔成交另由 on_trade 发布成交级事件）
+        _status_event_map = {
+            OrderStatus.FILLED: EventType.ORDER_FILLED,
+            OrderStatus.PARTIAL_FILLED: EventType.ORDER_PARTIAL,
+            OrderStatus.CANCELLED: EventType.ORDER_CANCELLED,
+            OrderStatus.REJECTED: EventType.ORDER_REJECTED,
+        }
+        if order.status in _status_event_map:
+            self._publish_engine_event(OrderEvent(
+                event_type=_status_event_map[order.status],
+                order_id=order.order_id,
+                event_ts=time.time(),
+                symbol=order.symbol,
+                status=order.status.value.lower(),
+                reject_reason=(
+                    str((order.extra or {}).get("reject_reason", "") or "")
+                    if order.status == OrderStatus.REJECTED
+                    else ""
+                ),
+            ))
+
         if order.status == OrderStatus.FILLED:
             self._stats["filled_orders"] += 1
             price = order.price if order.price is not None else 0.0
@@ -2215,6 +2323,34 @@ class LiveEngine(BaseEngine):
             # 更新portfolio
             if self._portfolio:
                 self._portfolio.apply_trade(trade)
+
+            # A-3 引擎统一埋点：成交事件（逐笔 FILLED，成交级链路 trade_id）+ 持仓更新
+            # （apply_trade 后取更新后均价 avg_cost；链路 id：order_id 与 signal_id 幂等同源）
+            self._publish_engine_event(OrderEvent(
+                event_type=EventType.ORDER_FILLED,
+                order_id=trade.order_id,
+                trade_id=trade.trade_id,
+                event_ts=time.time(),
+                symbol=trade.symbol,
+                status="filled",
+            ))
+            avg_price = 0.0
+            try:
+                if self._portfolio is not None:
+                    pos = self._portfolio.get_position(trade.symbol)
+                    avg_price = float(getattr(pos, "avg_cost", 0.0) or 0.0)
+            except Exception as e:
+                # 均价取不到时用 0 占位（不阻断成交链路）
+                logger.debug(f"[engine] 持仓均价读取失败: {e}")
+            self._publish_engine_event(PositionUpdateEvent(
+                order_id=trade.order_id,
+                trade_id=trade.trade_id,
+                event_ts=time.time(),
+                symbol=trade.symbol,
+                side=trade.side.value.lower() if hasattr(trade.side, "value") else str(trade.side),
+                quantity=trade.quantity,
+                avg_price=avg_price,
+            ))
 
             # KP-P4-02：逐笔成交落库（与 broker 逐笔一致，长期归档；失败不中断）
             if self._trade_ledger is not None:
@@ -2258,6 +2394,14 @@ class LiveEngine(BaseEngine):
         except Exception as e:
             logger.error(f"[engine] 成交回报处理失败: {e}")
             self._stats["errors"] += 1
+            # A-3 引擎统一埋点：系统错误事件（成交处理异常，携带成交链路 id）
+            self._publish_engine_event(SystemErrorEvent(
+                error=str(e),
+                component="engine.trade",
+                order_id=trade.order_id,
+                trade_id=trade.trade_id,
+                event_ts=time.time(),
+            ))
 
     # ═══════════════════════════════════════════
     #  回调注册
