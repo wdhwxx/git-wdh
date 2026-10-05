@@ -503,6 +503,7 @@ Pythonwdhmm/
 │   │   ├── test_exception_swallowing.py # ✨【回写#157】异常吞噬测试(KP-P1-07：无fastapi raise/close_all异常warning/CI BLE001护栏，3项)✅已完成
 │   │   ├── test_api_docs_closed.py  # ✨【回写#158】API文档匿名开放测试(KP-P4-04：默认关docs/开启时存在/豁免仅健康，4项)✅已完成
 │   │   ├── test_health_probe_registry.py # ✨【回写#159】健康探针注册表测试(KP-P5-02：unknown计入degraded/live探针注册，3项)✅已完成
+│   │   ├── test_health_check.py # ✨【回写#205】A-1 L0 基础设施监控补全测试（36 项，不依赖外网：不可达地址验证失败/降级分支，本机验证正常分支）：register_l0_checks 7 项注册/run_all/汇总计数/与默认共存/链式；防御式校验（阈值倒挂、tls 语义 warning>critical、非法端点/域名/超时/空服务器抛 ValueError）；各检查项行为（latency 不可达不崩溃/空 targets 跳过、clock NTP 不可达 DEGRADED 不误判、cpu/memory 可执行、tls 空跳过+不可达 DEGRADED、dns 本机解析 HEALTHY、partition 全失败 UNHEALTHY）；HealthChecker 集成（单项 run/disable 后 6 项/未知项 None）✅已完成
 │   │   ├── test_scheduler_health_alert.py # ✨【回写#160】监控阈值告警闭环测试(KP-P5-03：巡检注册/非healthy告警/healthy不告警，3项)✅已完成
 │   │   ├── test_scheduler_escalation.py    # ✨【回写#161】告警升级检查测试(KP-P5-04：任务注册/被调用/可禁用，3项)✅已完成
 │   │   ├── test_incident_response.py          # ✨【回写#169】事故响应测试(KP-P5-11：CRITICAL暂停/缺省不暂停/WARNING不暂停/pause异常不崩/制度文档/配置on_unhealthy，6项)✅已完成
@@ -1115,7 +1116,7 @@ Pythonwdhmm/
 
     │   ├── __init__.py
 
-    │   ├── health_check.py           # 健康检查：数据源连通性、磁盘、进程
+    │   ├── health_check.py           # 健康检查：数据源连通性、磁盘、进程；✨【回写#205】A-1 L0 基础设施监控补全——新增 7 项检查（network_latency TCP 延迟/clock_skew NTP 校时（标准库 UDP 123，不可达降级不误判时钟损坏）/cpu_usage+memory_usage（psutil 采样）/tls_certificate（peer cert 剩余天数，语义 warning>critical）/dns_resolution（getaddrinfo）/network_partition（多端点可达性））+ register_l0_checks 批量注册（critical 标记：时钟/DNS/分区 True，延迟/CPU/内存/证书 False）；全部只读当前状态防未来、阈值/端点防御式校验、默认端点可配置外置；__main__ 自测 26 项
 
     │   ├── alerting.py               # 告警通道，支持分级去重；✨【回写#162】按 notification.channels 装配 Email/Webhook + 未投递回退 logs/alerts_undelivered.log（KP-P5-05）
 
@@ -3380,3 +3381,17 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
     e. 新增 tests/unit/test_field_crypto.py（27 项，临时库不碰 quant.db）：FieldCrypto（密钥文件生成/复用、环境变量密钥、加解密往返、密文非明文、错误密钥拒绝）；敏感判定（参数化命中/不命中/自定义覆盖）；metrics_history 集成（密文落盘 value 占位+value_encrypted 非空、解密回读、普通指标明文、未绑定拒绝明文、降采样拒绝、自定义 patterns、save_batch）；访问审计（read/export 留痕、链完整、审计失败不阻断）；connection 权限收紧。既有 test_metrics_history.py 更新：equity 系列（敏感名）改 metric/sample_large_value 非敏感名；test_migration_ddl_executable 断言更新（0006=历史快照无新列、0008 注入 alembic Operations.context 真实执行幂等补列）。
     f. 验证结果：py_compile 通过；field_crypto __main__ 自测 10 项全绿、metrics_history __main__ 自测 38 项全绿；相关单测 177 passed/1 skipped；全量 pytest tests/unit 2562 passed + 2 skipped（基线 2535 + 27，无回归）。
     g. 纪律遵守：先更新蓝图再创建文件（#204 目录树登记先行）；无蓝图外文件；业务逻辑归 myquant；敏感名未绑定加密器宁拒不明文；防未来（加解密只作用已发生数据落盘/回读，不做预测）；任务后 git 提交。
+200. ✨【回写记录·2026-10-05·A-1 L0 基础设施监控补全】【回写#205】
+    事实来源：本次落地，代码级核验：《量化系统监控模块施工总清单_V1.2.md》A-1 行验收口径（落点 monitoring/health_check.py；在磁盘/进程基础上补：网络延迟、时钟偏差（NTP）、CPU/内存（psutil）检查项；补证书/DNS/网络分区检查；全部可 add_check 注册；验收=基础检查全部可巡检，网络/时钟/证书/DNS 异常产生告警）。
+    a. 登记 tests/unit/test_health_check.py 至蓝图目录树（tests/unit 段）；health_check.py 条目追加 #205。
+    b. 扩展 myquant/monitoring/health_check.py（A-1 七项 L0 检查，全部只读当前时刻状态防未来）：
+       ① check_network_latency（TCP create_connection 延迟毫秒，默认目标 223.5.5.5:53 可配置外置；warning/critical 阈值 + 端点结构防御式校验；部分端点失败 DEGRADED、全失败 UNHEALTHY、空 targets 跳过 HEALTHY）；
+       ② check_clock_skew（NTP 协议标准库 UDP 123 + struct 解析，偏移=(T2-T1+T3-T4)/2；NTP 不可达/响应解析失败 → DEGRADED（网络问题不误判时钟损坏），偏差超阈值 → UNHEALTHY，默认服务器 ntp.aliyun.com）；
+       ③ check_cpu_usage / check_memory_usage（psutil 采样，CPU interval<=0 用 0.05s 短采样避免阻塞巡检；psutil 缺失 → DEGRADED 不可评估不崩溃）；
+       ④ check_tls_certificate（ssl peer cert notAfter 剩余天数，语义独立校验 warning_days > critical_days（剩余越少越严重），默认 www.aliyun.com:443 可覆盖；端点不可达 → DEGRADED 不判证书失效）；
+       ⑤ check_dns_resolution（socket.getaddrinfo 解析，失败 → UNHEALTHY，空域名/非 list 校验）；
+       ⑥ check_network_partition（多关键端点 TCP 可达性，全失败 UNHEALTHY 疑似分区/部分 DEGRADED/空跳过）；
+       ⑦ register_l0_checks 批量 add_check 注册（critical=True：clock_skew/dns_resolution/network_partition；False：network_latency/cpu/memory/tls）；默认端点/阈值常量模块顶部（DEFAULT_*），配置外置不硬编码业务端点；__main__ 自测 26 项全绿。
+    c. 新增 tests/unit/test_health_check.py（36 项，不依赖外网：10.255.255.1 不可达地址验证失败/降级分支、localhost 验证正常分支）：注册 7 项/run_all/汇总计数/与默认 3 项共存/链式；防御式校验 14 项（阈值倒挂、tls 语义、非法端点/端口/域名/超时/空服务器）；行为 16 项；集成 3 项。
+    d. 验证结果：py_compile 通过；health_check __main__ 自测 26 项全绿；test_health_check.py 36 passed；全量 pytest tests/unit 2598 passed + 2 skipped（基线 2562 + 36，无回归）。
+    e. 纪律遵守：先更新蓝图再创建文件（#205 目录树登记先行）；无蓝图外文件；业务逻辑归 myquant；配置外置（默认端点可覆盖，不硬编码业务标的）；防未来（七项检查只读当前状态，无预测）；任务后 git 提交。
