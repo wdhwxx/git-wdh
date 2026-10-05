@@ -522,6 +522,8 @@ Pythonwdhmm/
 
     │   │   ├── test_audit_log.py # ✨【回写#202】BASE-7 审计只追加测试（28 项，临时库不碰 quant.db）：建表三表自检/迁移 DDL 一致性；追加与哈希链（seq 递增/prev_hash 链尾衔接/GENESIS/同内容异 seq 异 hash）；只读查询（kind/actor/时间/limit/order/detail 反序列化）；篡改检测（干净链/行内容篡改/链衔接破坏/删行断链）；归档与校验（归档原哈希不改写/verify_archive 通过/归档篡改检出/空归档/清单不存在）；防御式（空 kind/action/actor、detail 非 dict/超限、limit/before_ts 非法）；AlertStore 集成（attach_audit_log 落库与状态流转留痕、审计失败不阻断告警、未绑定无留痕）✅已完成
 
+    │   │   ├── test_heartbeat.py # ✨【回写#203】BASE-8 外部兜底心跳测试（23 项，临时目录不碰 quant.db）：载体（文件写/读/原子覆盖/空目录校验/注册表 file/webhook/非法名/webhook 校验与失败不抛）；HeartbeatWriter（周期写 seq 递增/幂等/收尾心跳/状态与 pid/参数校验）；ExternalHeartbeatGuard（新鲜 alive/单次超时 degraded 不判死（R-08 网络抖动）/连续超时判 dead/恢复清零/无心跳 dead/reset/阈值>=2 校验）；MetaMonitor 集成（attach_heartbeat 随巡检发心跳 seq/pid/ts 防未来、绑定校验、未绑定不发）✅已完成
+
 │   │   ├── test_broker_platform_check.py # ✨【回写#25】券商适配器平台校验（审计疑点3：qmt/ptrade非Windows拦截、paper/sim放行、大小写不敏感）✅已完成
 
 │   │   ├── test_dashboard_serializer.py  # ✨【回写#25】回测看板数据序列化器测试（build_dashboard_json全链路/成本反向拆分/买卖配对/exit_reason_class/pool派生）✅已完成
@@ -1122,7 +1124,7 @@ Pythonwdhmm/
 
     │   │                             # ✅已实现：11个内置数据质量指标(dirty_count/ratio/grade/repair等) + collect_from_data_quality_event + subscribe_to_event_bus自动采集 + Prometheus导出
 
-    │   ├── meta_monitor.py          # ✨【回写#200】BASE-5 元监控（监控自身可观测性）：五类探针（采集器健康/事件总线积压/存储写入延迟/告警发送成功率/看板可用性）→ MetricsCollector（meta_* 进 /api/metrics）+ MetricsHistoryStore（R-02 仅回放）+ 独立告警通道（R-08 独立冷却窗口，dedup_key=meta:* 与业务告警隔离）；探针可注入覆盖；probe_status 供 HealthPatrol 集成；__main__ 自测 12 项全绿
+    │   ├── meta_monitor.py          # ✨【回写#200】BASE-5 元监控（监控自身可观测性）：五类探针（采集器健康/事件总线积压/存储写入延迟/告警发送成功率/看板可用性）→ MetricsCollector（meta_* 进 /api/metrics）+ MetricsHistoryStore（R-02 仅回放）+ 独立告警通道（R-08 独立冷却窗口，dedup_key=meta:* 与业务告警隔离）；探针可注入覆盖；probe_status 供 HealthPatrol 集成；__main__ 自测 12 项全绿；✨【回写#203】BASE-8 外部兜底心跳——HeartbeatCarrier ABC + FileHeartbeatCarrier（外部目录原子写 heartbeat.json）/WebhookHeartbeatCarrier（手机推送/云函数预留）+ get_heartbeat_carrier 注册表 + HeartbeatWriter（守护线程周期写）+ ExternalHeartbeatGuard（R-08 连续多次超时>=2 才判死，单次超时 degraded 不误判临界网络抖动，心跳恢复计数清零）+ MetaMonitor.attach_heartbeat 随巡检发心跳（单机故障=run 停=心跳停，外部看门狗判死）；__main__ 自测 25 项
 
     │   ├── measurability.py         # ✨【回写#189】P0-8 可测量性统计模块：MTTx（MTTD/MTTA/MTTR）系统时间戳口径计算 + TP/FP/FN ground-truth 分类与准确率/误报率/检出率自动统计 + FI-01~07 标准故障注入用例库（与 D-6 混沌工程共用）；只消费已发生时间戳与告警记录，严格防未来
 
@@ -3353,3 +3355,15 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
     e. 新增 tests/unit/test_audit_log.py（28 项，临时库不碰 quant.db）+ 更新 tests/unit/test_database.py（test_table_names_complete 15→18 表集合；drop_all_tables 覆盖三表）。
     f. 验证结果：py_compile 5 文件通过；audit_log __main__ 自测 19 项全绿；新增单测 28 passed + test_alert_store 31 passed（回归）；全量 pytest tests/unit 2512 passed +2 skipped 无回归（基线 2484+28）。
     g. 纪律遵守：先更新蓝图再创建文件（#202 目录树登记先行）；无蓝图外文件；业务逻辑归 myquant；严格防未来（created_ts=记录时刻只记已发生事件）；任务后 git 提交。
+
+198. ✨【回写记录·2026-10-05·BASE-8 元监控外部兜底通道】【回写#203】
+    事实来源：本次落地，代码级核验：《量化系统监控模块施工总清单_V1.2.md》BASE-8 行验收口径（落点 monitoring/meta_monitor.py；元监控心跳写到外部独立载体（云函数/另一台低配机器/手机推送），单机故障时仍能自报警；判定优化 R-08：外部心跳采用连续多次超时（而非单次）才升级，规避临界网络误报"主进程死"；验收=停掉主进程→外部通道在 ≤2 周期内收到存活告警；临界网络抖动不误判）。
+    a. 登记 myquant/monitoring/meta_monitor.py 追加 #203 + tests/unit/test_heartbeat.py 至蓝图目录树（monitoring/ 段 + tests/unit 段同步登记）。
+    b. 扩展 myquant/monitoring/meta_monitor.py（BASE-8 四块）：
+       ① HeartbeatCarrier ABC（send_heartbeat/read_last_heartbeat/close）+ FileHeartbeatCarrier（外部目录/另一台低配机器挂载目录，heartbeat.json 原子写 temp+rename 防半写，读回最近心跳）+ WebhookHeartbeatCarrier（手机推送/云函数回调 HTTP POST，失败记 warning 不阻断，推送单向读回 None）+ get_heartbeat_carrier 注册表（file/webhook，缺参/非法名抛 ValueError）；
+       ② HeartbeatWriter（守护线程周期写外部载体，payload 带 seq/ts=当前时刻/pid/最近 status，start/stop 幂等、stop 收尾心跳防误判）；
+       ③ ExternalHeartbeatGuard（外部看门狗判定器，R-08：超时窗口=interval×2，最近心跳新鲜→alive；超时记 1 次→连续 missed>=consecutive_timeout（默认 3，须 >=2）才判 dead；单次超时判 degraded 不误判"主进程死"（临界网络抖动）；心跳恢复计数清零；外部载体从无心跳→dead；reset 供演练复位）；
+       ④ MetaMonitor.attach_heartbeat(carrier, interval_seconds) + run() 尾部 _send_heartbeat（心跳携带最近元监控状态；未绑定跳过；写失败记 warning 不阻断元监控）——停主进程=run 停止=心跳停，外部看门狗 ≤2 周期（consecutive_timeout=2 时）收到存活告警。
+    c. 新增 tests/unit/test_heartbeat.py（23 项，临时目录不碰 quant.db）：载体（写/读/原子覆盖/空目录/注册表/非法名/webhook 校验与失败不抛）；HeartbeatWriter（周期写 seq 递增/幂等/收尾/状态与 pid/校验）；ExternalHeartbeatGuard（新鲜 alive/单次超时 degraded 不判死/连续超时 dead/恢复清零/无心跳 dead/reset/阈值 >=2 校验）；MetaMonitor 集成（attach 后 run 发心跳 seq/pid/ts 防未来、绑定校验、未绑定不发）。
+    d. 验证结果：py_compile 通过；meta_monitor __main__ 自测 25 项全绿（原 12+13）；新增单测 23 passed + test_meta_monitor 16 passed（回归）；全量 pytest tests/unit 2535 passed +2 skipped 无回归（基线 2512+23）。
+    e. 纪律遵守：先更新蓝图再创建文件（#203 目录树登记先行）；无蓝图外文件；业务逻辑归 myquant；严格防未来（心跳 ts=当前时刻只报已发生状态）；任务后 git 提交。

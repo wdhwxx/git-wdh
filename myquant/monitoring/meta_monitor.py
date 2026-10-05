@@ -26,7 +26,13 @@ meta_monitor.py - 监控自身可观测性（BASE-5 元监控）
 
 from __future__ import annotations
 
+import json
+import logging
+import os
+import threading
 import time
+from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from myquant.core.logger import get_logger
@@ -54,6 +60,12 @@ DEFAULT_ALERT_ERROR_RATIO_WARN = 0.05
 # R-08：元监控告警独立冷却窗口（秒），独立于业务告警 dedup（默认 300s）
 DEFAULT_META_COOLDOWN_SECONDS = 120.0
 
+# BASE-8 外部兜底心跳：默认参数（可调，不硬编码魔法数字）
+DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 60.0   # 心跳写入间隔（秒）
+DEFAULT_HEARTBEAT_CONSECUTIVE_TIMEOUT = 3   # R-08：连续超时次数才判死（>=2，规避临界网络误报）
+DEFAULT_HEARTBEAT_TIMEOUT_FACTOR = 2.0      # 超时窗口 = interval * 该因子
+_HEARTBEAT_FILENAME = "heartbeat.json"      # 外部载体心跳文件（FileHeartbeatCarrier）
+
 # 元指标命名（P0-5 命名规范：领域_对象_动作_单位；领域=meta）
 META_INDICATORS: Tuple[str, ...] = (
     "meta_status",                    # 元监控汇总（0/1/2）
@@ -63,6 +75,327 @@ META_INDICATORS: Tuple[str, ...] = (
     "meta_alert_send_success_rate",   # 告警发送成功率（0~1）
     "meta_dashboard_availability",    # 看板可用性（0/1/2）
 )
+
+
+# ═══════════════════════════════════════════════
+#  BASE-8 外部兜底心跳（元监控心跳写到外部独立载体）
+# ═══════════════════════════════════════════════
+#
+# 语义：元监控心跳写到外部独立载体（个人系统降级版=另一台低配机器挂载
+# 目录/云函数/手机推送），单机故障（进程被杀/主机宕机）时外部看门狗仍能
+# 依据心跳超时自报警——"监控自身故障可自报警"闭环。
+# R-08 判定优化：外部看门狗采用**连续多次超时**（而非单次）才判
+# "主进程死"，规避临界网络抖动误报；单次超时后心跳恢复不误判。
+
+class HeartbeatCarrier(ABC):
+    """
+    外部心跳载体抽象（BASE-8 预留多载体）。
+
+    send_heartbeat : 本机把存活心跳写入外部载体（幂等覆盖最近一次）
+    read_last_heartbeat : 外部看门狗读取最近心跳（本机不可读回也允许）
+    """
+
+    @abstractmethod
+    def send_heartbeat(self, payload: Dict[str, Any]) -> bool:
+        """写入一次存活心跳；True=写入成功。"""
+
+    @abstractmethod
+    def read_last_heartbeat(self) -> Optional[Dict[str, Any]]:
+        """读取最近一次心跳（无记录返回 None）。"""
+
+    def close(self) -> None:
+        """释放外部载体资源（可选实现）。"""
+
+
+class FileHeartbeatCarrier(HeartbeatCarrier):
+    """
+    文件心跳载体（个人系统降级版首选：外部目录/另一台低配机器挂载目录）。
+
+    心跳文件写入目标目录的 heartbeat.json（原子写：temp + rename，
+    防半写损坏）；外部看门狗读该文件判存活。目录权限收紧由 BASE-9
+    监控库文件权限收紧统一处理。
+    """
+
+    def __init__(self, directory: str, filename: str = _HEARTBEAT_FILENAME):
+        directory_s = (directory or "").strip()
+        if not directory_s:
+            raise ValueError("心跳载体失败: directory 不能为空")
+        self._directory = Path(directory_s)
+        self._directory.mkdir(parents=True, exist_ok=True)
+        self._file = self._directory / (filename or _HEARTBEAT_FILENAME)
+
+    def send_heartbeat(self, payload: Dict[str, Any]) -> bool:
+        try:
+            tmp = self._file.with_suffix(".tmp")
+            tmp.write_text(
+                json.dumps(payload, sort_keys=True, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            tmp.replace(self._file)  # 原子替换（防外部读半写）
+            return True
+        except OSError as e:
+            logger.error(f"心跳写入失败（{self._file}）: {e}")
+            return False
+
+    def read_last_heartbeat(self) -> Optional[Dict[str, Any]]:
+        try:
+            if not self._file.exists():
+                return None
+            return json.loads(self._file.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            logger.error(f"心跳读取失败（{self._file}）: {e}")
+            return None
+
+
+class WebhookHeartbeatCarrier(HeartbeatCarrier):
+    """
+    Webhook 心跳载体（手机推送/云函数回调：HTTP POST 存活心跳）。
+
+    预留实现：无外部服务时调用即失败（记 warning 不阻断主流程），
+    外部服务就绪后同接口可用；读回不支持（推送单向），返回 None。
+    """
+
+    def __init__(self, url: str, timeout_seconds: float = 5.0):
+        if not (url or "").strip():
+            raise ValueError("心跳载体失败: url 不能为空")
+        self._url = url
+        try:
+            self._timeout = float(timeout_seconds)
+            if self._timeout <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise ValueError(f"timeout_seconds 必须为正数，收到 {timeout_seconds!r}")
+
+    def send_heartbeat(self, payload: Dict[str, Any]) -> bool:
+        try:
+            import urllib.request
+
+            req = urllib.request.Request(
+                self._url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=self._timeout) as resp:  # noqa: S310
+                return resp.status < 400
+        except Exception as e:  # noqa: BLE001（网络失败记 warning，不阻断主流程）
+            logger.warning(f"Webhook 心跳发送失败: {e}")
+            return False
+
+    def read_last_heartbeat(self) -> Optional[Dict[str, Any]]:
+        return None  # 推送单向，外部服务侧留存，本机不可读回
+
+
+_HEARTBEAT_CARRIER_REGISTRY: Dict[str, Callable[..., HeartbeatCarrier]] = {
+    "file": FileHeartbeatCarrier,
+    "webhook": WebhookHeartbeatCarrier,
+}
+
+
+def get_heartbeat_carrier(name: str, **kwargs: Any) -> HeartbeatCarrier:
+    """
+    按名称获取心跳载体实例（BASE-8 注册表）。
+
+    Parameters
+    ----------
+    name : str
+        "file"（外部目录心跳文件，个人系统首选）/ "webhook"（手机推送/云函数预留）
+    kwargs : dict
+        载体构造参数（file: directory；webhook: url）
+
+    Raises
+    ------
+    ValueError: 未注册载体名或缺少必选参数
+    """
+    key = (name or "").strip().lower()
+    if key not in _HEARTBEAT_CARRIER_REGISTRY:
+        raise ValueError(
+            f"未注册的心跳载体: {name!r}（可选: {sorted(_HEARTBEAT_CARRIER_REGISTRY)}）"
+        )
+    return _HEARTBEAT_CARRIER_REGISTRY[key](**kwargs)
+
+
+class HeartbeatWriter:
+    """
+    心跳写入器（守护线程周期写外部载体；单机故障=进程死=心跳停）。
+
+    Usage:
+        writer = HeartbeatWriter(carrier, interval_seconds=60)
+        writer.start(status_callable)   # 每次心跳携带当前元监控状态
+        ...
+        writer.stop(final_heartbeat=True)
+    """
+
+    def __init__(
+        self,
+        carrier: HeartbeatCarrier,
+        interval_seconds: float = DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
+    ):
+        if not isinstance(carrier, HeartbeatCarrier):
+            raise ValueError(
+                f"carrier 必须为 HeartbeatCarrier 实例，收到 {type(carrier).__name__}"
+            )
+        try:
+            interval = float(interval_seconds)
+            if interval <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise ValueError(f"interval_seconds 必须为正数，收到 {interval_seconds!r}")
+        self._carrier = carrier
+        self._interval = interval
+        self._thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
+        self._running = False
+        self._lock = threading.Lock()
+        self._seq = 0
+        self._last_written_ts: Optional[float] = None
+
+    def _build_payload(self, status_callable: Optional[Callable[[], Any]]) -> Dict[str, Any]:
+        with self._lock:
+            self._seq += 1
+            seq = self._seq
+        status = "ok"
+        if status_callable is not None:
+            try:
+                st = status_callable()
+                if isinstance(st, dict):
+                    status = str(st.get("status", "ok"))
+                elif st:
+                    status = str(st)
+            except Exception as e:  # noqa: BLE001
+                status = f"error:{type(e).__name__}"
+        return {
+            "seq": seq,
+            "ts": time.time(),          # 心跳时刻（当前时点，防未来）
+            "pid": int(os.getpid()),
+            "status": status,
+            "msg": "meta-heartbeat",
+        }
+
+    def start(self, status_callable: Optional[Callable[[], Any]] = None) -> bool:
+        """启动心跳守护线程（daemon，幂等；每次心跳携带当前状态）。"""
+        with self._lock:
+            if self._running:
+                return True
+            self._stop_event.clear()
+            self._seq = 0
+
+            def _loop() -> None:
+                while not self._stop_event.wait(self._interval):
+                    try:
+                        payload = self._build_payload(status_callable)
+                        self._carrier.send_heartbeat(payload)
+                        self._last_written_ts = payload["ts"]
+                    except Exception as e:  # noqa: BLE001
+                        logger.error(f"心跳发送异常: {e}")
+
+            self._thread = threading.Thread(
+                target=_loop, name="meta-heartbeat-writer", daemon=True
+            )
+            self._running = True
+            self._thread.start()
+        logger.info(f"[meta] 外部心跳写入启动（载体={type(self._carrier).__name__}，间隔 {self._interval:.0f}s）")
+        return True
+
+    def stop(self, final_heartbeat: bool = True) -> bool:
+        """
+        停止心跳线程（可选收尾写一次，防收尾前心跳中断误判）。
+
+        Returns
+        -------
+        bool : True=已停止
+        """
+        with self._lock:
+            if not self._running:
+                return True
+            self._running = False
+        self._stop_event.set()
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(timeout=5.0)
+        self._thread = None
+        if final_heartbeat:
+            payload = self._build_payload(None)
+            self._carrier.send_heartbeat(payload)
+        logger.info("[meta] 外部心跳写入已停止")
+        return True
+
+    @property
+    def last_written_ts(self) -> Optional[float]:
+        """最近一次成功写入的心跳时刻（未写过 None）。"""
+        return self._last_written_ts
+
+
+class ExternalHeartbeatGuard:
+    """
+    外部看门狗判定器（R-08：连续多次超时而非单次，规避临界网络误报）。
+
+    Usage（外部载体侧/演练/单测）:
+        guard = ExternalHeartbeatGuard(interval_seconds=60, consecutive_timeout=3)
+        alive, reason, missed = guard.check_alive(carrier)
+
+    判定规则：
+      - 最近心跳新鲜（now - ts <= interval*2）→ alive，missed=0
+      - 最近心跳超时（now - ts > interval*2）→ 记 1 次超时；**连续
+        missed >= consecutive_timeout 才判 dead**；单次/少量超时判
+        degraded（不误判"主进程死"，规避临界网络抖动）
+      - 完全无心跳记录 → dead（外部载体从无心跳=主进程从未存活）
+      - 心跳恢复 → missed 清零，重新计数
+    """
+
+    def __init__(
+        self,
+        interval_seconds: float = DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
+        consecutive_timeout: int = DEFAULT_HEARTBEAT_CONSECUTIVE_TIMEOUT,
+        timeout_factor: float = DEFAULT_HEARTBEAT_TIMEOUT_FACTOR,
+    ):
+        try:
+            interval = float(interval_seconds)
+            if interval <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise ValueError(f"interval_seconds 必须为正数，收到 {interval_seconds!r}")
+        if not isinstance(consecutive_timeout, int) or consecutive_timeout < 2:
+            raise ValueError(
+                f"consecutive_timeout 必须为 >=2 的整数（R-08 连续多次才判死），收到 {consecutive_timeout!r}"
+            )
+        try:
+            factor = float(timeout_factor)
+            if factor <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise ValueError(f"timeout_factor 必须为正数，收到 {timeout_factor!r}")
+        self._interval = interval
+        self._consecutive_timeout = consecutive_timeout
+        self._timeout_window = interval * factor
+        self._missed = 0
+
+    def check_alive(self, carrier: HeartbeatCarrier, now: Optional[float] = None) -> tuple:
+        """
+        依据最近心跳判定主进程存活。
+
+        Returns
+        -------
+        tuple : (alive: bool, status: str, missed: int)
+            alive=True 存活；status="alive"/"degraded"（超时未达阈值）/
+            "dead"（连续超时达阈值或无任何心跳）；missed=当前连续超时次数
+        """
+        now_ts = time.time() if now is None else float(now)
+        hb = carrier.read_last_heartbeat()
+        if hb is None:
+            self._missed = self._consecutive_timeout  # 从无心跳=判死
+            return False, "dead", self._missed
+        hb_ts = float(hb.get("ts", 0.0))
+        if now_ts - hb_ts <= self._timeout_window:
+            self._missed = 0  # 心跳恢复/新鲜，重新计数
+            return True, "alive", 0
+        self._missed += 1  # 超时（临界网络抖动：单次不判死）
+        if self._missed >= self._consecutive_timeout:
+            return False, "dead", self._missed
+        return True, "degraded", self._missed
+
+    def reset(self) -> None:
+        """重置超时计数（外部看门狗周期起始/演练复位）。"""
+        self._missed = 0
 
 
 # ═══════════════════════════════════════════════
@@ -151,7 +484,76 @@ class MetaMonitor:
         self._last_report: Dict[str, Any] = {}     # 最近一轮探针结果
         self._dashboard_probe: Optional[Callable[[], Tuple[bool, Dict[str, Any]]]] = None
 
+        # BASE-8 外部兜底心跳（可选绑定：随巡检发心跳，单机故障外部看门狗判死）
+        self._heartbeat_carrier: Optional[HeartbeatCarrier] = None
+        self._heartbeat_interval: float = DEFAULT_HEARTBEAT_INTERVAL_SECONDS
+        self._last_heartbeat_ts: float = 0.0
+        self._heartbeat_seq: int = 0
+
         logger.debug("元监控初始化（R-08 独立冷却窗口 %.0fs）", self._cooldown_seconds)
+
+    def attach_heartbeat(
+        self,
+        carrier: HeartbeatCarrier,
+        interval_seconds: float = DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
+    ) -> "MetaMonitor":
+        """
+        绑定外部心跳载体（BASE-8：随巡检发心跳；单机故障=run 停止=心跳停，
+        外部看门狗按 R-08 连续多次超时判死）。
+
+        Parameters
+        ----------
+        carrier : HeartbeatCarrier
+            外部载体（FileHeartbeatCarrier 目录 / WebhookHeartbeatCarrier）
+        interval_seconds : float
+            心跳间隔（秒，>0；随巡检节奏或独立节拍）
+
+        Returns
+        -------
+        MetaMonitor : self
+        """
+        if not isinstance(carrier, HeartbeatCarrier):
+            raise ValueError(
+                f"carrier 必须为 HeartbeatCarrier 实例，收到 {type(carrier).__name__}"
+            )
+        try:
+            interval = float(interval_seconds)
+            if interval <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise ValueError(f"interval_seconds 必须为正数，收到 {interval_seconds!r}")
+        self._heartbeat_carrier = carrier
+        self._heartbeat_interval = interval
+        logger.info(
+            f"[meta] 外部心跳载体绑定: {type(carrier).__name__}（间隔 {interval:.0f}s）"
+        )
+        return self
+
+    def _send_heartbeat(self) -> None:
+        """
+        写一次外部存活心跳（BASE-8；心跳携带最近元监控状态与时刻）。
+
+        防未来：心跳 ts=当前时刻（只报告已发生状态）；写失败记 warning
+        不阻断元监控主流程。
+        """
+        if self._heartbeat_carrier is None:
+            return
+        self._heartbeat_seq += 1
+        payload: Dict[str, Any] = {
+            "seq": self._heartbeat_seq,
+            "ts": time.time(),
+            "pid": int(os.getpid()),
+            "status": str(self._last_report.get("status", "ok")),
+            "msg": "meta-heartbeat",
+        }
+        try:
+            ok = self._heartbeat_carrier.send_heartbeat(payload)
+            if ok:
+                self._last_heartbeat_ts = payload["ts"]
+            else:
+                logger.warning(f"[meta] 外部心跳写入失败（seq={payload['seq']}）")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[meta] 外部心跳异常（不阻断元监控）: {e}")
 
     # ─────────────────────────────────────────
     #  防御式校验工具
@@ -403,6 +805,8 @@ class MetaMonitor:
         self._persist_indicators(report)
         # 异常 → 独立告警通道（R-08 独立冷却窗口）
         self._alert_if_unhealthy(report)
+        # BASE-8：外部兜底心跳随巡检写（单机故障=run 停=心跳停，外部看门狗判死）
+        self._send_heartbeat()
         return report
 
     def _evaluate_status(self, checks: Dict[str, Dict[str, Any]]) -> str:
@@ -583,6 +987,7 @@ def _run_self_test() -> int:
     collector = MetricsCollector().register_builtin_metrics()
     _tmp_db = Path(tempfile.mkdtemp(prefix="meta_test_")) / "meta_test.db"
     store = MetricsHistoryStore(db_path=_tmp_db)
+    tmp_dir = str(Path(_tmp_db).parent)
     business = AlertManager()
     business.add_channel(LogAlertChannel(name="test-log", logger_name="test.business"))
 
@@ -662,6 +1067,90 @@ def _run_self_test() -> int:
         meta2._get_meta_manager().stats["history_size"] >= 1,
         f"history={meta2._get_meta_manager().stats['history_size']}",
     )
+
+    # ══════════════════════════════════════
+    #  BASE-8 自测（外部兜底心跳）
+    # ══════════════════════════════════════
+
+    # 载体：文件心跳（外部目录载体，原子写）
+    hb_dir = Path(tmp_dir) / "heartbeat"
+    carrier = FileHeartbeatCarrier(str(hb_dir))
+    ok = carrier.send_heartbeat({"seq": 1, "ts": time.time(), "status": "ok"})
+    check("文件载体写入", ok and (hb_dir / "heartbeat.json").exists())
+    read_back = carrier.read_last_heartbeat()
+    check("文件载体读回", read_back is not None and read_back["seq"] == 1)
+
+    # 载体注册表
+    check(
+        "载体注册表 file/webhook",
+        isinstance(get_heartbeat_carrier("file", directory=str(hb_dir)), FileHeartbeatCarrier),
+    )
+    try:
+        get_heartbeat_carrier("unknown")
+        check("未注册载体报错", False)
+    except ValueError:
+        check("未注册载体报错", True)
+
+    # MetaMonitor 集成：attach_heartbeat → run 后心跳落载体
+    meta3 = MetaMonitor(
+        collector=collector,
+        metrics_history=store,
+        event_bus=bus,
+        business_alert_manager=business,
+    )
+    meta3.attach_heartbeat(carrier, interval_seconds=60.0)
+    meta3.run()
+    hb = carrier.read_last_heartbeat()
+    check(
+        "元监控随巡检发心跳",
+        hb is not None and int(hb.get("seq", 0)) >= 1 and "status" in hb,
+    )
+    check(
+        "心跳带 pid/时刻（防未来=当前时刻）",
+        int(hb.get("pid", 0)) > 0 and float(hb.get("ts", 0)) <= time.time(),
+    )
+
+    # R-08 外部看门狗：连续多次超时才判死（临界网络抖动不误判）
+    guard = ExternalHeartbeatGuard(interval_seconds=60.0, consecutive_timeout=2)
+    now = time.time()
+    carrier.send_heartbeat({"seq": 99, "ts": now, "status": "ok"})
+    alive, st, missed = guard.check_alive(carrier, now=now)
+    check("新鲜心跳 alive", alive and st == "alive" and missed == 0)
+    alive, st, missed = guard.check_alive(carrier, now=now + 121.0)  # 1 次超时
+    check(
+        "单次超时不判死（R-08 规避网络抖动）",
+        alive and st == "degraded" and missed == 1,
+        f"alive={alive}, st={st}, missed={missed}",
+    )
+    alive, st, missed = guard.check_alive(carrier, now=now + 181.0)  # 连续 2 次
+    check(
+        "连续 2 次超时判死",
+        (not alive) and st == "dead" and missed == 2,
+        f"alive={alive}, st={st}, missed={missed}",
+    )
+    # 心跳恢复 → 重新计数
+    carrier.send_heartbeat({"seq": 100, "ts": now + 182.0, "status": "ok"})
+    alive, st, missed = guard.check_alive(carrier, now=now + 182.0)
+    check("心跳恢复不误判（计数清零）", alive and st == "alive" and missed == 0)
+
+    # 完全无心跳 → dead
+    empty_carrier = FileHeartbeatCarrier(str(Path(tmp_dir) / "empty_hb"))
+    alive, st, missed = guard.check_alive(empty_carrier, now=time.time())
+    check("外部载体从无心跳 → dead", (not alive) and st == "dead")
+
+    # HeartbeatWriter 守护线程周期写
+    writer_carrier = FileHeartbeatCarrier(str(Path(tmp_dir) / "writer_hb"))
+    writer = HeartbeatWriter(writer_carrier, interval_seconds=0.2)
+    writer.start(status_callable=lambda: {"status": "healthy"})
+    time.sleep(0.6)
+    writer_hb = writer_carrier.read_last_heartbeat()
+    check(
+        "HeartbeatWriter 周期写心跳",
+        writer_hb is not None and int(writer_hb.get("seq", 0)) >= 2,
+    )
+    writer.stop(final_heartbeat=True)
+    writer_hb2 = writer_carrier.read_last_heartbeat()
+    check("HeartbeatWriter 收尾心跳", writer_hb2 is not None)
 
     # 5. 防御：非法冷却参数回退
     meta_bad = MetaMonitor(cooldown_seconds=-5)
