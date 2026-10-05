@@ -15,6 +15,7 @@ settings.py - 全局配置管理器
 
 from __future__ import annotations
 
+import copy
 import os
 import threading
 from pathlib import Path
@@ -273,3 +274,167 @@ class Settings:
 def get_settings(**kwargs) -> Settings:
     """获取全局配置单例"""
     return Settings(**kwargs)
+
+
+# ═══════════════════════════════════════════════
+#  监控配置集中化（BASE-3：改 settings.yaml 调全部阈值，无需改代码）
+# ═══════════════════════════════════════════════
+
+DEFAULT_MONITORING: Dict[str, Any] = {
+    "patrol_interval": 60,                       # 巡检周期（秒）
+    "watchdog": {                                # 引擎心跳 watchdog（A-5 消费）
+        "enabled": False,
+        "bar_timeout_seconds": 300,
+        "session_grace_minutes": 5,
+        "order_pending_timeout_seconds": 300,
+    },
+    "alerts": {                                  # 告警行为（BASE-1 落库/去重/冷却/规则）
+        "store_enabled": True,
+        "dedup_window_seconds": 300.0,
+        "cooldown_seconds": 60.0,
+        "aggregation_window_seconds": 60.0,
+        "escalation_time_seconds": 300.0,
+        "escalation_enabled": True,
+    },
+    "slo": {},                                   # SLO 阈值由 settings.yaml 提供；缺省为空（不编造阈值）
+}
+
+
+def _build_monitoring_config(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    由配置原文构建完整 monitoring 配置（默认深合并 + 防御式校验）。
+
+    Parameters
+    ----------
+    raw : dict
+        settings.yaml 的 monitoring 块原文（可为空 dict）
+
+    Returns
+    -------
+    dict :
+        完整 monitoring 配置：未配置项回退默认值；非法值（非正数/非布尔）
+        记 warning 并回退默认，不静默使用脏值。
+
+    防未来：本函数只消费"当前配置"静态值，不涉及任何时间序列或预测。
+    """
+    result: Dict[str, Any] = {}
+
+    def _deep_merge_default(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+        for key, value in override.items():
+            if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+                Settings._deep_merge(base[key], value)
+            else:
+                base[key] = value
+        return base
+
+    result = _deep_merge_default(copy.deepcopy(DEFAULT_MONITORING), dict(raw or {}))
+
+    # 防御式校验：非正数/非布尔回退默认（记 warning 留痕，不静默吞）
+    def _positive_float(key: str, fallback: float) -> float:
+        try:
+            val = Settings._get_nested(result, key)
+            val = float(val)
+            if val > 0:
+                return val
+            logger.warning(f"monitoring.{key} 非法（须 >0）：{val!r}，回退默认 {fallback}")
+            return fallback
+        except (TypeError, ValueError):
+            logger.warning(f"monitoring.{key} 非法：{val!r}，回退默认 {fallback}")
+            return fallback
+
+    def _positive_int(key: str, fallback: int) -> int:
+        try:
+            val = Settings._get_nested(result, key)
+            val = int(val)
+            if val > 0:
+                return val
+            logger.warning(f"monitoring.{key} 非法（须 >0）：{val!r}，回退默认 {fallback}")
+            return fallback
+        except (TypeError, ValueError):
+            logger.warning(f"monitoring.{key} 非法：{val!r}，回退默认 {fallback}")
+            return fallback
+
+    def _bool(key: str, fallback: bool) -> bool:
+        val = Settings._get_nested(result, key)
+        if isinstance(val, bool):
+            return val
+        if isinstance(val, str):
+            if val.lower() in ("true", "1", "yes", "on"):
+                return True
+            if val.lower() in ("false", "0", "no", "off"):
+                return False
+        logger.warning(f"monitoring.{key} 非法：{val!r}，回退默认 {fallback}")
+        return fallback
+
+    result["patrol_interval"] = _positive_int(
+        "patrol_interval", DEFAULT_MONITORING["patrol_interval"]
+    )
+    wd = result.get("watchdog") or {}
+    result["watchdog"] = {
+        "enabled": _bool("watchdog.enabled", DEFAULT_MONITORING["watchdog"]["enabled"]),
+        "bar_timeout_seconds": _positive_float(
+            "watchdog.bar_timeout_seconds",
+            DEFAULT_MONITORING["watchdog"]["bar_timeout_seconds"],
+        ),
+        "session_grace_minutes": _positive_float(
+            "watchdog.session_grace_minutes",
+            DEFAULT_MONITORING["watchdog"]["session_grace_minutes"],
+        ),
+        "order_pending_timeout_seconds": _positive_float(
+            "watchdog.order_pending_timeout_seconds",
+            DEFAULT_MONITORING["watchdog"]["order_pending_timeout_seconds"],
+        ),
+    }
+    al = result.get("alerts") or {}
+    result["alerts"] = {
+        "store_enabled": _bool("alerts.store_enabled", DEFAULT_MONITORING["alerts"]["store_enabled"]),
+        "dedup_window_seconds": _positive_float(
+            "alerts.dedup_window_seconds", DEFAULT_MONITORING["alerts"]["dedup_window_seconds"]
+        ),
+        "cooldown_seconds": _positive_float(
+            "alerts.cooldown_seconds", DEFAULT_MONITORING["alerts"]["cooldown_seconds"]
+        ),
+        "aggregation_window_seconds": _positive_float(
+            "alerts.aggregation_window_seconds",
+            DEFAULT_MONITORING["alerts"]["aggregation_window_seconds"],
+        ),
+        "escalation_time_seconds": _positive_float(
+            "alerts.escalation_time_seconds",
+            DEFAULT_MONITORING["alerts"]["escalation_time_seconds"],
+        ),
+        "escalation_enabled": _bool(
+            "alerts.escalation_enabled", DEFAULT_MONITORING["alerts"]["escalation_enabled"]
+        ),
+    }
+    slo = result.get("slo")
+    if slo is not None and not isinstance(slo, dict):
+        logger.warning("monitoring.slo 非法（须为 dict），回退空")
+        slo = {}
+    result["slo"] = slo or {}
+    return result
+
+
+def get_monitoring_config(settings: Optional[Settings] = None) -> Dict[str, Any]:
+    """
+    读取集中化监控配置（BASE-3 唯一真源入口）。
+
+    Parameters
+    ----------
+    settings : Settings | None
+        配置单例；None 用全局 get_settings()
+
+    Returns
+    -------
+    dict :
+        完整 monitoring 配置（patrol_interval / watchdog / alerts / slo），
+        由 settings.yaml 原文 + 默认值合并 + 防御式校验得到。
+
+    用法:
+        cfg = get_monitoring_config()
+        patrol_interval = cfg["patrol_interval"]
+        alerts_cfg = cfg["alerts"]          # store_enabled / dedup_window_seconds / ...
+        slo = cfg["slo"]                    # R-04 阈值真源（LOCKED 项不改动）
+    """
+    s = settings if settings is not None else get_settings()
+    raw = s.get_dict("monitoring", {})
+    return _build_monitoring_config(raw)

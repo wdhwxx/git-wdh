@@ -2229,8 +2229,16 @@ def get_alert_manager() -> AlertManager:
 
 
 def configure_notification_channels(manager: AlertManager) -> int:
-    """KP-P5-05: 按配置 notification.channels 装配 Email/Webhook 告警通道。"""
+    """KP-P5-05 + BASE-3: 按配置装配告警通道与告警行为（改 settings.yaml 生效）。
+
+    BASE-3 扩展：
+      - monitoring.alerts 装配 AlertManager（store_enabled 落库开关、
+        dedup_window_seconds 去重窗口、AlertRule 聚合/升级参数）
+      - monitoring.notification 装配 Email/Webhook 通道（原有）
+    """
     added = 0
+    # BASE-3：告警行为装配（独立 try，失败不阻断通道装配）
+    added += _apply_alert_config(manager)
     try:
         from myquant.core.settings import get_settings
         notif = get_settings().get("notification", None) or {}
@@ -2269,6 +2277,72 @@ def configure_notification_channels(manager: AlertManager) -> int:
     except Exception as e:
         logger.warning(f"告警通道装配失败: {e}")
     return added
+
+
+def _apply_alert_config(manager: AlertManager) -> int:
+    """
+    BASE-3：按 monitoring.alerts 装配告警行为（改 settings.yaml 生效，无需改代码）。
+
+    装配项：
+      1. store_enabled      → 告警落库开关（BASE-1；false 时纯内存不落库）
+      2. dedup_window_seconds → 去重窗口（AlertManager._dedup_window）
+      3. aggregation/escalation 三参数 → AlertRule（聚合窗口/升级时限/升级开关）
+
+    失败记 warning 不阻断（装配是增强项，告警主功能优先）。
+
+    Returns
+    -------
+    int : 成功装配的项数（0~6）
+    """
+    applied = 0
+    try:
+        from myquant.core.settings import get_monitoring_config
+        alerts_cfg = get_monitoring_config().get("alerts") or {}
+    except Exception as e:
+        logger.warning(f"监控配置读取失败（保持默认告警行为）: {e}")
+        return 0
+
+    try:
+        # 1. 落库开关
+        store_enabled = alerts_cfg.get("store_enabled", True)
+        if isinstance(store_enabled, bool):
+            manager._store_enabled = store_enabled
+            applied += 1
+        # 2. 去重窗口
+        dedup = alerts_cfg.get("dedup_window_seconds")
+        if isinstance(dedup, (int, float)) and dedup > 0:
+            manager._dedup_window = float(dedup)
+            applied += 1
+        # 3. AlertRule 聚合/升级参数
+        rule = AlertRule.default_rule()
+        rule_changed = False
+        agg = alerts_cfg.get("aggregation_window_seconds")
+        if isinstance(agg, (int, float)) and agg > 0:
+            rule.aggregation_window = float(agg)
+            rule_changed = True
+        esc_t = alerts_cfg.get("escalation_time_seconds")
+        if isinstance(esc_t, (int, float)) and esc_t > 0:
+            rule.escalation_time = float(esc_t)
+            rule_changed = True
+        esc_on = alerts_cfg.get("escalation_enabled")
+        if isinstance(esc_on, bool):
+            rule.escalation_enabled = esc_on
+            rule_changed = True
+        if rule_changed:
+            manager.set_alert_rule(rule)
+            applied += 1
+        if applied:
+            logger.info(
+                f"[config] 告警行为已按 monitoring.alerts 装配: "
+                f"store_enabled={manager._store_enabled}, "
+                f"dedup_window={manager._dedup_window:.0f}s, "
+                f"aggregation={rule.aggregation_window:.0f}s, "
+                f"escalation_time={rule.escalation_time:.0f}s, "
+                f"escalation_enabled={rule.escalation_enabled}"
+            )
+    except Exception as e:
+        logger.warning(f"告警行为装配失败（保持默认）: {e}")
+    return applied
 
 
 def _write_undelivered(alert: Alert) -> None:

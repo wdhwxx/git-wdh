@@ -129,6 +129,9 @@ Desktop.ini
 # ===== 实际配置文件（不入库，只保留.example模板）=====
 config/*.yaml
 !config/*.example.yaml
+# ✨【BASE-3 #198】settings.yaml 例外入库：monitoring 阈值真源（R-04 slo 锁定表，
+#   无敏感信息；notification 仍在 live_config.yaml 不入库），阈值修改可追溯、版本化
+!config/settings.yaml
 # L6修复: 运行时状态文件（data_clean_run.json 等），防误提交
 config/*.json
 

@@ -376,7 +376,9 @@ Pythonwdhmm/
 
 │   ├── dashboard_targets.yaml    # ✨【2026-09-13】看板快速生成标的配置文件：defaults段（start/end/output_dir/strategy）+ targets列表（name/symbol/start/end/enabled开关，symbol支持逗号分隔多只）；供根目录看板快速生成.py交互式菜单读取；编辑此文件即可增删常用标的，无需记忆命令行参数；已废弃，见回写记录·2026-09-13（随 看板快速生成.py 一并删除，标的改由 GUI 直接输入）
 
-│   ├── monitoring.example.yaml     # ✨【回写#188】监控配置模板（P0-2 阈值单一真源雏形）：monitoring.slo 承载数值阈值锁定表（对账容差/限额使用率/拒单率/数据新鲜度/引擎心跳/保证金强平距离/回测实盘偏差率等），各包只引用不自定义；真实配置 config/monitoring.yaml 不入库；后续 BASE-3 配置集中化并入 settings.yaml
+│   ├── monitoring.example.yaml     # ✨【回写#188】监控配置模板（P0-2 阈值单一真源雏形）：monitoring.slo 承载数值阈值锁定表（对账容差/限额使用率/拒单率/数据新鲜度/引擎心跳/保证金强平距离/回测实盘偏差率等），各包只引用不自定义；真实配置 config/monitoring.yaml 不入库；✨【回写#198】BASE-3 已把 monitoring.slo 块原样并入 config/settings.yaml（不迁移数值），本文件退化为参考模板
+
+│   ├── settings.yaml            # ✨【回写#198】BASE-3 全局配置主文件（.gitignore !config/settings.yaml 例外入库）：monitoring 块集中承载监控阈值真源——patrol_interval 巡检周期 / watchdog 引擎心跳组态 / alerts 告警行为（store_enabled 落库开关、dedup_window_seconds 去重、cooldown_seconds 冷却、aggregation_window_seconds/escalation_time_seconds/escalation_enabled 装配 AlertRule）/ slo R-04 阈值锁定表（数值与 monitoring.example.yaml 原样并入不迁移）；settings.py 自动加载 config/*.yaml（settings.yaml 排序在前）；改本文件即调全部阈值无需改代码（BASE-3 验收）；无敏感信息（notification 仍在 live_config.yaml 不入库）
 
 │   ├── monitoring/                  # ✨【回写#194】P0-6 监控即代码配置目录（模板入库，真实配置不入库）：仪表盘/告警规则/Runbook/采集配置全部落 yaml 版本化管理
 
@@ -509,6 +511,8 @@ Pythonwdhmm/
     │   │   ├── test_alert_store.py # ✨【回写#196】BASE-1 告警持久化测试（31 项，临时库不碰 quant.db）：建表自检/迁移 DDL 一致性/落库与状态流转/classification 打标/升级与 runbook/查询过滤/AlertManager 集成（重启后历史可查、确认/解决同步库、恢复成对记录、failed 不触发恢复）✅已完成
 
     │   │   ├── test_metrics_history.py # ✨【回写#197】BASE-2 指标时序存储测试（30 项，临时库不碰 quant.db）：建表自检/迁移 DDL 一致性/唯一幂等/标签 JSON 归一/批量/查询过滤/降采样聚合/保留清理/HealthPatrol 集成（巡检落库可查、未绑定不落库、store 异常不阻断巡检）✅已完成
+
+    │   │   ├── test_monitoring_config.py # ✨【回写#198】BASE-3 监控配置集中化测试（13 项）：_build_monitoring_config 默认/覆盖/非法回退/slo 非 dict 回退/深拷贝不污染常量；真实 settings.yaml 加载验收（slo 关键 LOCKED 值与 P0-2 锁定表一致）；AlertManager 装配集成（配置驱动 store/dedup/AlertRule 三参数、配置缺失应用默认、配置异常不阻断）✅已完成
 
 │   │   ├── test_broker_platform_check.py # ✨【回写#25】券商适配器平台校验（审计疑点3：qmt/ptrade非Windows拦截、paper/sim放行、大小写不敏感）✅已完成
 
@@ -3280,3 +3284,13 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
     e. 新增 tests/unit/test_metrics_history.py（30 项，临时库不碰 quant.db）：建表自检/迁移 DDL 一致性/唯一幂等/标签 JSON 归一/批量/查询过滤/降采样聚合/保留清理/HealthPatrol 集成（全 down 与全 healthy 巡检落库可查、未绑定不落库、store 异常不阻断巡检）；同步更新 test_database.py test_table_names_complete（metrics_history 加入 15 表集合）。
     f. 验证结果：py_compile 6 文件通过；MetricsHistoryStore __main__ 自测 14 项全绿；新增单测 + 数据库测试 97 passed +1 skipped；全量 pytest tests/unit 2414 passed +2 skipped 无回归。
     g. 纪律遵守：先更新蓝图再创建文件（#197 目录树登记先行）；无蓝图外文件；业务逻辑归 myquant、scripts 薄入口；严格防未来；任务后 git 提交。
+
+193. ✨【回写记录·2026-10-05·BASE-3 监控配置集中化】【回写#198】
+    事实来源：本次落地，代码级核验：《量化系统监控模块施工总清单_V1.2.md》BASE-3 行验收口径（config/settings.yaml + core/settings.py + monitoring/alerting.py 落点；monitoring 块 = patrol_interval/watchdog/alerts/slo/notification(已有)；configure_notification_channels 扩展为同时装配 AlertRule；验收=改 yaml 调全部阈值无需改代码、slo 块与 P0-2 锁定表一致）。
+    a. 登记 config/settings.yaml 至蓝图目录树 config/ 段（settings.yaml 例外入库条目）；登记 tests/unit/test_monitoring_config.py 至 tests/unit 段（见 a' 补登）；用户经 interaction.ask 拍板"settings.yaml 入库（推荐）"，.gitignore 追加 !config/settings.yaml（阈值真源版本化可追溯；文件无敏感信息，notification 仍在 live_config.yaml 不入库）。
+    b. 新建 config/settings.yaml（真实配置真源）：monitoring 块 = patrol_interval 60 / watchdog{enabled:false（A-5 接线时开启）,bar_timeout_seconds:300,session_grace_minutes:5,order_pending_timeout_seconds:300} / alerts{store_enabled:true,dedup_window_seconds:300,cooldown_seconds:60,aggregation_window_seconds:60,escalation_time_seconds:300,escalation_enabled:true} / slo 全块从 config/monitoring.example.yaml 原样并入（R-04 不迁移数值：LOCKED 值 + PENDING_CAL 空占位 ~ 一律保留，禁止编造）；notification 不重复定义（已有 live_config.yaml）。
+    c. 改造 myquant/core/settings.py：新增 DEFAULT_MONITORING 常量 + _build_monitoring_config 纯函数（默认深合并 copy.deepcopy 防污染 + 防御式校验：patrol_interval/watchdog/alerts 各字段非正数/非布尔记 warning 回退默认，slo 非 dict 回退空）+ get_monitoring_config(settings=None) 集中化读取入口（settings.yaml 原文 + 默认 + 校验）。
+    d. 改造 myquant/monitoring/alerting.py：configure_notification_channels 扩展——先调 _apply_alert_config（monitoring.alerts 装配 AlertManager：store_enabled→_store_enabled 落库开关、dedup_window_seconds→_dedup_window、aggregation_window_seconds/escalation_time_seconds/escalation_enabled→AlertRule.default_rule() 覆盖三参数后 set_alert_rule），再装配 Email/Webhook 通道（原有）；配置读取/装配失败记 warning 不阻断（告警主功能优先）。
+    e. 新增 tests/unit/test_monitoring_config.py（13 项）：_build_monitoring_config 空/None→默认、覆盖生效、非法值回退、slo 非 dict 回退、深拷贝不污染 DEFAULT_MONITORING；真实 config/settings.yaml 加载验收（slo 关键 LOCKED 值与 P0-2 锁定表一致：freshness_max_seconds=60/gap_allowed=0/对账容差=0/限额 0.80-0.95/心跳窗口 60/连续 5 次；alerts 字段生效；patrol_interval=60）；AlertManager 装配集成（配置驱动 store/dedup/AlertRule 三参数生效、配置缺失应用默认、配置读取异常不阻断）。
+    f. 验证结果：py_compile 3 文件通过；新增单测 13 passed；全量 pytest tests/unit 2427 passed +2 skipped 无回归（基线 2414+13）。
+    g. 纪律遵守：先更新蓝图再创建文件（#198 目录树登记先行）；无蓝图外文件；业务逻辑归 myquant、scripts 薄入口；严格防未来；任务后 git 提交。

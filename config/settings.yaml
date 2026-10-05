@@ -1,0 +1,97 @@
+# config/settings.yaml
+# ══════════════════════════════════════════════════════════════════
+# 全局配置主文件（BASE-3 监控配置集中化 · 阈值单一真源 R-04）
+# 依据：《量化系统监控模块施工总清单_V1.2.md》BASE-3
+# 加载：myquant/core/settings.py 自动加载 config/*.yaml（settings.yaml 排序在前）
+# 原则：
+#   1. 改本文件即可调监控全部阈值，无需改代码（BASE-3 验收）
+#   2. monitoring.slo 数值与 P0-2《SLO与阈值锁定清单》逐项一致（R-04），
+#      由 config/monitoring.example.yaml 原样并入（不迁移数值）
+#   3. monitoring.notification 已有（config/live_config.yaml），此处不重复定义
+#   4. 真实配置不入库（git 忽略约定）；本文件为真实配置真源
+# ══════════════════════════════════════════════════════════════════
+
+monitoring:
+  # ── 巡检周期（秒）：scheduler 健康巡检周期（BASE-2 落库随此节奏）──
+  patrol_interval: 60
+
+  # ── 引擎心跳 watchdog（A-5 接线时消费；此处定义默认组态，可调）──
+  watchdog:
+    enabled: false                     # 默认关闭（A-5 接线时开启）
+    bar_timeout_seconds: 300           # bar 超时判定窗口（初始默认，A-5 按实盘校准）
+    session_grace_minutes: 5           # 会话宽限期（分钟，初始默认）
+    order_pending_timeout_seconds: 300 # 订单挂起超时判定（初始默认）
+
+  # ── 告警行为（BASE-1 落库 / 去重 / 冷却 / 规则参数）──
+  alerts:
+    store_enabled: true                # 告警落库开关（BASE-1；false 时纯内存）
+    dedup_window_seconds: 300          # 去重窗口（秒，AlertManager._dedup_window）
+    cooldown_seconds: 60               # 冷却窗口（秒，防刷屏，C-9 降噪预留）
+    aggregation_window_seconds: 60     # 聚合窗口（秒，AlertRule.aggregation_window）
+    escalation_time_seconds: 300       # 升级时限（秒，WARNING 未确认升级 ERROR，对齐 P0-3 P1=5min）
+    escalation_enabled: true           # 升级开关（AlertRule.escalation_enabled）
+
+  # ── SLO 数值阈值锁定表（R-04 唯一真源；LOCKED 项实盘后不得改动，
+  #    PENDING_CAL 项待实盘校准后填死，禁止编造）──
+  slo:
+    # ── 行情 ──
+    market:
+      quote_delay_p99_ms: 5            # 行情延迟 P99（本地），LOCKED(初值，实盘校准复核)
+      exchange_ts_bias: ~              # 交易所时间戳偏差上限，PENDING_CAL
+
+    # ── 数据 ──
+    data:
+      freshness_max_seconds: 60        # 数据新鲜度 <1min，LOCKED
+      gap_allowed: 0                   # 数据缺口 =0，LOCKED
+      factor_sync_delay_max_seconds: ~         # 因子同步延迟上限（分别设值），PENDING_CAL
+      financial_sync_delay_max_seconds: ~      # 财务同步延迟上限（分别设值），PENDING_CAL
+
+    # ── 信号 ──
+    signal:
+      generation_delay_p99_ms: 50      # 信号生成延迟 P99 <50ms，LOCKED(初值)
+
+    # ── 交易 ──
+    trading:
+      order_ack_delay_p99_ms: 20       # 订单发送到 ACK P99 <20ms，LOCKED(初值)
+      order_reject_rate_max: 0.001     # 订单拒绝率 <0.1%，LOCKED(初值)
+      reject_rate_surge_multiple: ~    # 拒单率飙升倍数 N（窗口内超阈值），PENDING_CAL
+      reject_rate_surge_window_seconds: ~  # 飙升计算窗口长度，PENDING_CAL
+
+    # ── 风控 ──
+    risk:
+      position_limit_usage_warn: 0.80  # 限额使用率 <80% 预警，LOCKED
+      position_limit_usage_alert: 0.95 # 限额使用率 >95% 强告警，LOCKED
+      concentration_limit: ~           # 集中度限额（分别设值），PENDING_CAL
+      leverage_limit: ~                # 杠杆限额（分别设值），PENDING_CAL
+      single_stock_position_limit: ~   # 单票仓位限额（分别设值），PENDING_CAL
+
+    # ── 对账（金额精确到分，容差=0；A-7/B-1 统一引用，禁止两处分别定义）──
+    reconciliation:
+      realtime_diff_tolerance: 0       # 实时对账差异容差 =0，LOCKED
+      t1_diff_tolerance: 0             # T+1 终局对账差异容差 =0，LOCKED
+
+    # ── 策略 ──
+    strategy:
+      intraday_drawdown_limit: ~       # 日内回撤/亏损阈值（按策略锁定），PENDING_CAL
+
+    # ── 模型 ──
+    model:
+      psi_threshold: ~                 # PSI 分布漂移基线，PENDING_CAL
+      ks_threshold: ~                  # KS 分布漂移基线，PENDING_CAL
+      ic_threshold: ~                  # 滚动 IC 漂移基线，PENDING_CAL
+
+    # ── 回测一致性 ──
+    backtest_consistency:
+      signal_deviation_rate_max: ~     # 回测实盘信号偏差率上限 X%（按策略风格设定），PENDING_CAL
+      deviation_window: ~              # 偏差率计算窗口，PENDING_CAL
+
+    # ── 引擎心跳（R-02 硬约束：N×心跳间隔必须 <60s 才能保住 MTTD<1min）──
+    engine_heartbeat:
+      hang_judge_window_seconds: 60    # 判定窗口上限 <60s，LOCKED
+      probe_interval_seconds: 10       # 心跳探测间隔（N×间隔<60s 的建议组态），LOCKED
+      consecutive_misses: 5            # 连续 N 次无响应判定僵死（5×10s=50s<60s），LOCKED
+
+    # ── 资金/保证金 ──
+    margin:
+      strong_flat_distance_pct: ~      # 强平价距离百分比（接近强平 → P0 告警），PENDING_CAL
+      funding_rate_threshold: ~        # 资金费率阈值（持仓隔夜成本），PENDING_CAL
