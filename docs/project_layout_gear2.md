@@ -520,6 +520,8 @@ Pythonwdhmm/
 
     │   │   ├── test_meta_monitor.py # ✨【回写#200】BASE-5 元监控测试（16 项）：五探针健康运行/指标进 collector/落库可查/探针状态接口；总线积压→degraded+独立告警送达+业务 manager 隔离；R-08 独立冷却 dedup（同 key 窗口内只发一次、新实例可再告警）；HealthPatrol 集成（巡检报告含 meta_monitor、meta down 拉低整体、未绑定跳过）；防御式（非法 cooldown 回退/探针异常记 down 不阻断/看板 standby 不告警/探针注入校验）✅已完成
 
+    │   │   ├── test_audit_log.py # ✨【回写#202】BASE-7 审计只追加测试（28 项，临时库不碰 quant.db）：建表三表自检/迁移 DDL 一致性；追加与哈希链（seq 递增/prev_hash 链尾衔接/GENESIS/同内容异 seq 异 hash）；只读查询（kind/actor/时间/limit/order/detail 反序列化）；篡改检测（干净链/行内容篡改/链衔接破坏/删行断链）；归档与校验（归档原哈希不改写/verify_archive 通过/归档篡改检出/空归档/清单不存在）；防御式（空 kind/action/actor、detail 非 dict/超限、limit/before_ts 非法）；AlertStore 集成（attach_audit_log 落库与状态流转留痕、审计失败不阻断告警、未绑定无留痕）✅已完成
+
 │   │   ├── test_broker_platform_check.py # ✨【回写#25】券商适配器平台校验（审计疑点3：qmt/ptrade非Windows拦截、paper/sim放行、大小写不敏感）✅已完成
 
 │   │   ├── test_dashboard_serializer.py  # ✨【回写#25】回测看板数据序列化器测试（build_dashboard_json全链路/成本反向拆分/买卖配对/exit_reason_class/pool派生）✅已完成
@@ -1124,9 +1126,11 @@ Pythonwdhmm/
 
     │   ├── measurability.py         # ✨【回写#189】P0-8 可测量性统计模块：MTTx（MTTD/MTTA/MTTR）系统时间戳口径计算 + TP/FP/FN ground-truth 分类与准确率/误报率/检出率自动统计 + FI-01~07 标准故障注入用例库（与 D-6 混沌工程共用）；只消费已发生时间戳与告警记录，严格防未来
 
-    │   ├── alert_store.py           # ✨【回写#196】BASE-1 告警持久化存储：alerts 表落库（save_alert 幂等 upsert/status 推导）、状态流转（update_status acked/resolved 时间戳语义/COALESCE 补 acked_at/reopen 清时间戳）、classification 打标（P0-8 统计读取源 R-01）、升级标记/runbook 绑定、查询（load_history 过滤/load_unacknowledged/load_escalated/get_open_by_dedup_key 恢复匹配）、防御式校验（非法 status/limit<=0/缺 alert_id/level/message 抛 ValueError）；__main__ 自测 14 项
+    │   ├── alert_store.py           # ✨【回写#196】BASE-1 告警持久化存储：alerts 表落库（save_alert 幂等 upsert/status 推导）、状态流转（update_status acked/resolved 时间戳语义/COALESCE 补 acked_at/reopen 清时间戳）、classification 打标（P0-8 统计读取源 R-01）、升级标记/runbook 绑定、查询（load_history 过滤/load_unacknowledged/load_escalated/get_open_by_dedup_key 恢复匹配）、防御式校验（非法 status/limit<=0/缺 alert_id/level/message 抛 ValueError）；__main__ 自测 14 项；✨【回写#202】BASE-7 审计接入——audit_log 参数/attach_audit_log/_audit_trail（save/status_change 落库留痕，失败记 error 不阻断告警主流程）
 
     │   ├── metrics_history.py       # ✨【回写#197】BASE-2 指标时序存储：metrics_history 表落库（save_metric 唯一幂等/save_batch 批量事务）、查询（name/labels/时间范围/limit）、降采样聚合（epoch 桶 avg/max/min/sum/count 支撑 1 年回放）、保留清理（原始 30 天 purge，R-02 仅回放不检测）；__main__ 自测 14 项；✨【回写#201】BASE-6 存储优化——异步批量写入（enqueue 内存队列 + flush 事务落库 + 后台守护线程周期 flush 避免热路径直写）、降采样物化（materialize_downsampled 旧数据按桶聚合物化落库，标签带 source/bucket/agg，幂等可回放 1 年）+ DownsamplingTask 独立调度（守护线程 interval 可配默认每日，stop 收尾补跑）、迁移接口预留（MetricExporter ABC + get_exporter 注册表 null/vm/clickhouse 占位，导出副本失败不阻断落库）；__main__ 自测 29 项
+
+    │   ├── audit_log.py            # ✨【回写#202】BASE-7 审计只追加存储：降级哈希链（seq 递增 + row_hash=SHA-256(kind|action|actor|detail_json|created_ts|seq) + prev_hash 链尾衔接，首条 GENESIS 64 个 '0'）；append 只追加（业务层无 UPDATE/DELETE API）、只读查询（kind/actor/时间/limit/order，detail 反序列化）、verify_chain 篡改检测（行内容/链衔接/删行均断链可检出）、archive 归档（旧行按原 seq/prev_hash/row_hash COPY 到 audit_archive 哈希不改写 + manifest checksum=归档行 row_hash 按序聚合 SHA-256）+ verify_archive 归档校验；orders/fills/alerts 全落库留痕语义（AlertStore 真实接入；交易域落库调 append(kind=...)）；防御式校验（空 kind/action/actor、detail 非 dict/超限、limit/before_ts 非法抛 ValueError）；__main__ 自测 19 项
 
 │   └── data_quality_explorer.py # ✨【#S2修复】数据质量探查器（从web/dashboard.py迁移到monitoring底层，消除API依赖Web的架构倒置）：DataQualityExplorer类13方法（实时指标/清洗运行列表/运行详情/等级分布/脏数据统计/总览），纯Python数据层不依赖streamlit，API层和Web层均从此导入；数据源=CleanDataQueries+MetricsCollector；source过滤区分offline/live为实盘对接预留
 
@@ -2794,6 +2798,8 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
     │           ├── 0005_add_alerts.py  # ✨【回写#196】BASE-1 增量迁移：alerts 告警持久化表（15 字段：id/alert_id UNIQUE/level/category/source/message/details_json/dedup_key/status/classification/created_at/acked_at/resolved_at/escalated/runbook_id + 3 索引），DDL 与 schema.py 逐字一致（幂等 CREATE IF NOT EXISTS），down_revision=0004
 
     │           └── 0006_add_metrics_history.py  # ✨【回写#197】BASE-2 增量迁移：metrics_history 指标时序表（name/labels_json/value/timestamp 唯一幂等 + 3 索引含按天分区表达式索引），DDL 与 schema.py 逐字一致（幂等 CREATE IF NOT EXISTS），down_revision=0005
+
+    │           └── 0007_add_audit_log.py  # ✨【回写#202】BASE-7 增量迁移：审计只追加三表（audit_log 主表降级哈希链 + audit_archive 归档表 + audit_archive_manifest 归档清单），DDL 与 schema.py 逐字一致（幂等 CREATE IF NOT EXISTS），down_revision=0006
   c. 新增 myquant/database/trade_log.py（TradeLedger）：record_order/record_fill/record_position_snapshot（INSERT OR IGNORE/REPLACE 幂等）+ query_orders/query_fills/query_positions_on（按标的/状态/订单/日期过滤）。
   d. live/engine.py 成交回调同步落库：__init__ 增可选 trade_ledger 注入；on_order_update 逐笔订单、on_trade 逐笔成交落库（try/except 失败不中断，None 时仅内存不落库向后兼容）。
 - 防未来：落库/查询仅消费已发生订单与成交事实，不使用未来行情。
@@ -3337,3 +3343,13 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
     e. 新增 tests/unit/test_metrics_history_storage.py（25 项，临时库不碰 quant.db）：迁移接口（默认 null/注册表大小写归一/vm/clickhouse 占位报错/非法名报错/set_exporter 校验/导出钩子收行/导出失败不阻断落库）；异步写入（enqueue+flush/空队列/超限丢最旧/后台线程周期落库/收尾落库/非法间隔）；物化（3 桶聚合/幂等/物化可查溯源标签/近期不物化/365 天清理不碰原始行/前缀清理/参数校验）；DownsamplingTask（run 结果/names 子集/start/stop 幂等/校验）；connection pragma（WAL + busy_timeout 实际生效）。
     f. 验证结果：py_compile 3 文件通过；metrics_history __main__ 自测 29 项全绿（原 14+15）；新增单测 25 passed；全量 pytest tests/unit 2484 passed +2 skipped 无回归（基线 2459+25）。
     g. 纪律遵守：先更新蓝图再创建文件（#201 目录树登记先行）；无蓝图外文件；业务逻辑归 myquant；严格防未来（物化只聚合已发生旧数据、时间戳=采集/落库时刻）；任务后 git 提交。
+
+197. ✨【回写记录·2026-10-05·BASE-7 审计只追加与归档校验】【回写#202】
+    事实来源：本次落地，代码级核验：《量化系统监控模块施工总清单_V1.2.md》BASE-7 行验收口径（落点 database/ + monitoring/audit_log.py；审计日志只追加 append-only，定期归档并计算校验和，防篡改（个人系统降级版，非完整哈希链）；orders/fills/alerts 全落库留痕；验收=审计日志不可被常规改写、归档校验通过）。
+    a. 登记 myquant/monitoring/audit_log.py + database/migrations/versions/0007_add_audit_log.py + tests/unit/test_audit_log.py 至蓝图目录树（monitoring/ 段 + migrations/versions 段 + tests/unit 段同步登记）；alert_store.py 条目追加 #202。
+    b. 扩展 myquant/database/schema.py：TABLE_NAMES 登记 audit_log/audit_archive/audit_archive_manifest 三表（15→18 表）；新建 CREATE_AUDIT_LOG_SQL（kind/action/actor/detail_json/seq/prev_hash/row_hash/created_ts，seq+row_hash 双 UNIQUE）+ 索引、CREATE_AUDIT_ARCHIVE_SQL（保留原 seq/prev_hash/row_hash + archived_ts）、CREATE_AUDIT_ARCHIVE_MANIFEST_SQL（archive_cutoff_ts/row_count/first_seq/last_seq/checksum/created_ts）；ALL_CREATE_TABLE_SQL/ALL_CREATE_INDEX_SQL 追加；drop_all_tables 追加三表（无外键最后删）。
+    c. 新建 myquant/monitoring/audit_log.py（业务逻辑，monitoring/ 段登记）：AuditLogStore——降级哈希链（row_hash = SHA-256(kind|action|actor|detail_json|created_ts|seq) 规范化序列，prev_hash=上一条 row_hash，首条 GENESIS='0'*64，同内容异 seq 异 hash）；append 只追加（空 kind/action/actor、detail 非 dict、detail 序列化 >8192 字节抛 ValueError；created_ts=time.time() 记录时刻防未来）；query 只读（kind/actor/时间范围/limit<=10000/order，detail 反序列化坏 JSON 记 error）；verify_chain 篡改检测（行内容篡改/prev_hash 衔接破坏/删中间行均断链，返回首断 seq；删链尾为降级版已知边界——外部事件总数核对兜底，回写留档）；archive（单事务：旧行按 seq 序 COPY 到 audit_archive 原哈希不改写 → manifest（checksum=归档行 row_hash 按序聚合 SHA-256）→ 删主表链头段；空归档返回 row_count=0）+ verify_archive（重算聚合校验和比对，清单不存在抛 ValueError）；__main__ 自测 19 项全绿。
+    d. 改造 myquant/monitoring/alert_store.py：__init__ 加 audit_log 参数 + attach_audit_log + _audit_trail（kind=alert，actor=alerting）；save_alert 落库后 append "save"、update_status 状态流转后 append "status_change"（detail 带 alert_id/status）；审计失败记 error 不阻断告警落库（alerts 全落库留痕真实接入；orders/fills 属交易账，交易域落库时调 audit.append(kind="order"/"fill")，本次只建库+接入点说明）。
+    e. 新增 tests/unit/test_audit_log.py（28 项，临时库不碰 quant.db）+ 更新 tests/unit/test_database.py（test_table_names_complete 15→18 表集合；drop_all_tables 覆盖三表）。
+    f. 验证结果：py_compile 5 文件通过；audit_log __main__ 自测 19 项全绿；新增单测 28 passed + test_alert_store 31 passed（回归）；全量 pytest tests/unit 2512 passed +2 skipped 无回归（基线 2484+28）。
+    g. 纪律遵守：先更新蓝图再创建文件（#202 目录树登记先行）；无蓝图外文件；业务逻辑归 myquant；严格防未来（created_ts=记录时刻只记已发生事件）；任务后 git 提交。

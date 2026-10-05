@@ -59,6 +59,7 @@ class AlertStore:
         self,
         db_path: Optional[Union[str, Any]] = None,
         connection: Optional[DatabaseConnection] = None,
+        audit_log: Optional[Any] = None,
     ):
         """
         Parameters
@@ -67,12 +68,30 @@ class AlertStore:
             数据库路径；None 则用全局默认（项目根/database/quant.db）
         connection : DatabaseConnection | None
             注入连接（测试用临时库）；与 db_path 互斥，优先 connection
+        audit_log : AuditLogStore | None
+            BASE-7 审计只追加存储（alerts 落库留痕）；None 默认不审计
         """
         if connection is not None:
             self._conn: DatabaseConnection = connection
         else:
             self._conn = get_connection(db_path)
         self._ensure_schema()
+        # BASE-7：审计只追加（alerts 全落库留痕；审计失败不阻断告警主流程）
+        self._audit: Optional[Any] = audit_log
+
+    def attach_audit_log(self, audit: Any) -> "AlertStore":
+        """绑定审计只追加存储（BASE-7：alerts 落库/状态流转全留痕）。"""
+        self._audit = audit
+        return self
+
+    def _audit_trail(self, action: str, detail: Dict[str, Any]) -> None:
+        """告警审计留痕（kind=alert；失败记 error 不阻断告警落库）。"""
+        if self._audit is None:
+            return
+        try:
+            self._audit.append("alert", action, actor="alerting", detail=detail)
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"告警审计留痕失败（不阻断落库）: {e}")
 
     # ── 建表自检（幂等，与迁移 DDL 逐字一致）──
 
@@ -158,6 +177,14 @@ class AlertStore:
                     None,
                 ),
             )
+        self._audit_trail(
+            "save",
+            {
+                "alert_id": alert_id,
+                "level": level.value,
+                "classification": classification,
+            },
+        )
         return alert_id
 
     # ── 写：状态流转（确认/解决，同步库）──
@@ -206,6 +233,11 @@ class AlertStore:
 
         with self._conn.transaction():
             affected = self._conn.execute_update(sql, params)
+        if affected > 0:
+            self._audit_trail(
+                "status_change",
+                {"alert_id": alert_id, "status": status},
+            )
         return affected > 0
 
     def set_classification(self, alert_id: str, classification: str) -> bool:

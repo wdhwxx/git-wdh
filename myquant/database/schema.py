@@ -45,6 +45,9 @@ TABLE_NAMES = {
     "positions_daily": "positions_daily",   # 持仓日快照账（KP-P4-02）
     "alerts": "alerts",                     # 告警持久化表（BASE-1 告警落库）
     "metrics_history": "metrics_history",   # 指标时序存储表（BASE-2 周期落库）
+    "audit_log": "audit_log",               # 审计日志只追加表（BASE-7 哈希链）
+    "audit_archive": "audit_archive",       # 审计归档表（BASE-7 定期归档）
+    "audit_archive_manifest": "audit_archive_manifest",  # 审计归档校验清单（BASE-7）
 }
 
 
@@ -440,6 +443,71 @@ CREATE_METRICS_HISTORY_INDEX_SQL = [
 
 
 # ─────────────────────────────────────────────
+# 审计只追加表（BASE-7 审计只追加与归档校验）
+# ─────────────────────────────────────────────
+
+# 降级哈希链设计（个人系统版，非完整哈希链）：
+#   - audit_log 每行含 seq（链序号，从 1 递增，UNIQUE）
+#   - row_hash = SHA-256(kind|action|actor|detail_json|created_ts|seq)（规范化序列）
+#   - prev_hash = 上一条 row_hash（首条为 64 个 '0'）
+#   - verify_chain() 按 seq 顺序重算并比对 → 常规 UPDATE/DELETE 或中间篡改
+#     立即断链可检出
+# 归档（archive）：旧行按原 seq/prev_hash/row_hash 整体 COPY 到 audit_archive
+#   （哈希不重算，保持原链不可变），主表删除；manifest 记录归档批 row_count/
+#   first_seq/last_seq/checksum（= 归档行 row_hash 按序聚合 SHA-256），
+#   verify_archive() 重算聚合校验和比对 → 归档校验通过
+CREATE_AUDIT_LOG_SQL = """
+CREATE TABLE IF NOT EXISTS audit_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind        TEXT    NOT NULL,           -- 审计类别：alert/order/fill/metric/config
+    action      TEXT    NOT NULL,           -- 动作：create/update/ack/resolve/archive 等
+    actor       TEXT    NOT NULL DEFAULT 'system',  -- 操作者（系统/用户标识）
+    detail_json TEXT    NOT NULL DEFAULT '{}',      -- 明细（dict 序列化，排序 key）
+    seq         INTEGER NOT NULL,           -- 链序号（从 1 递增，UNIQUE）
+    prev_hash   TEXT    NOT NULL,           -- 上一条 row_hash（首条 64 个 '0'）
+    row_hash    TEXT    NOT NULL,           -- 本条规范化序列 SHA-256
+    created_ts  REAL    NOT NULL,           -- 记录时刻（epoch 秒，当前时点）
+    UNIQUE (seq),
+    UNIQUE (row_hash)
+);
+"""
+
+CREATE_AUDIT_LOG_INDEX_SQL = [
+    "CREATE INDEX IF NOT EXISTS idx_audit_log_kind_ts ON audit_log(kind, created_ts);",
+    "CREATE INDEX IF NOT EXISTS idx_audit_log_ts ON audit_log(created_ts);",
+]
+
+CREATE_AUDIT_ARCHIVE_SQL = """
+CREATE TABLE IF NOT EXISTS audit_archive (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind        TEXT    NOT NULL,
+    action      TEXT    NOT NULL,
+    actor       TEXT    NOT NULL DEFAULT 'system',
+    detail_json TEXT    NOT NULL DEFAULT '{}',
+    seq         INTEGER NOT NULL,           -- 原链序号（保持与主表一致）
+    prev_hash   TEXT    NOT NULL,           -- 原 prev_hash（不改写）
+    row_hash    TEXT    NOT NULL,           -- 原 row_hash（不改写）
+    created_ts  REAL    NOT NULL,
+    archived_ts REAL    NOT NULL,           -- 归档时刻（当前时点）
+    UNIQUE (seq),
+    UNIQUE (row_hash)
+);
+"""
+
+CREATE_AUDIT_ARCHIVE_MANIFEST_SQL = """
+CREATE TABLE IF NOT EXISTS audit_archive_manifest (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    archive_cutoff_ts REAL  NOT NULL,       -- 归档截止（< 该时间戳的行）
+    row_count       INTEGER NOT NULL,       -- 归档行数
+    first_seq       INTEGER NOT NULL,       -- 归档批起始 seq
+    last_seq        INTEGER NOT NULL,       -- 归档批结束 seq
+    checksum        TEXT    NOT NULL,       -- 归档行 row_hash 按序聚合 SHA-256
+    created_ts      REAL    NOT NULL        -- 归档时刻（当前时点）
+);
+"""
+
+
+# ─────────────────────────────────────────────
 # 所有建表SQL汇总
 # ─────────────────────────────────────────────
 
@@ -459,6 +527,9 @@ ALL_CREATE_TABLE_SQL = [
     CREATE_POSITIONS_DAILY_SQL,
     CREATE_ALERTS_SQL,
     CREATE_METRICS_HISTORY_SQL,
+    CREATE_AUDIT_LOG_SQL,
+    CREATE_AUDIT_ARCHIVE_SQL,
+    CREATE_AUDIT_ARCHIVE_MANIFEST_SQL,
 ]
 
 ALL_CREATE_INDEX_SQL = (
@@ -476,6 +547,7 @@ ALL_CREATE_INDEX_SQL = (
     + CREATE_POSITIONS_DAILY_INDEX_SQL
     + CREATE_ALERTS_INDEX_SQL
     + CREATE_METRICS_HISTORY_INDEX_SQL
+    + CREATE_AUDIT_LOG_INDEX_SQL
 )
 
 
@@ -674,6 +746,9 @@ def drop_all_tables(connection) -> None:
         TABLE_NAMES["market_data"],
         TABLE_NAMES["alerts"],
         TABLE_NAMES["metrics_history"],
+        TABLE_NAMES["audit_archive_manifest"],  # BASE-7 审计三表（无外键，最后删）
+        TABLE_NAMES["audit_archive"],
+        TABLE_NAMES["audit_log"],
     ]
     with connection.transaction():
         for table in table_order:
