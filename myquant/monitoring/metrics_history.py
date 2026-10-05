@@ -35,12 +35,18 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from collections import deque
+from pathlib import Path
 from typing import Any, Callable, Deque, Dict, List, Optional, Union
 
 from myquant.database.connection import DatabaseConnection, get_connection
 from myquant.database.schema import (
     CREATE_METRICS_HISTORY_INDEX_SQL,
     CREATE_METRICS_HISTORY_SQL,
+)
+from myquant.monitoring.field_crypto import (
+    _SENSITIVE_NAME_PATTERNS as _SENSITIVE_NAME_PATTERNS_DEFAULT,
+    is_sensitive_name,
+    mask_value,
 )
 
 logger = logging.getLogger("myquant.monitoring.metrics_history")
@@ -177,6 +183,12 @@ class MetricsHistoryStore:
         self._ensure_schema()
         # BASE-6：迁移导出器（默认空导出，纯 SQLite）
         self._exporter: MetricExporter = NullMetricExporter()
+        # BASE-9：敏感字段加密（命中敏感名 → 密文落库 value_encrypted，
+        # value 列存占位 0.0；未绑定且写入敏感名 → 拒绝明文落盘）
+        self._field_crypto: Optional[Any] = None
+        self._sensitive_patterns: tuple = _SENSITIVE_NAME_PATTERNS_DEFAULT
+        # BASE-9：访问审计（读取/导出留痕，kind=access）
+        self._access_audit: Optional[Any] = None
         # BASE-6：异步批量写入队列（内存缓冲，后台线程周期 flush，避免热路径直写）
         self._queue: Deque[Dict[str, Any]] = deque()
         self._queue_limit: int = DEFAULT_QUEUE_LIMIT
@@ -185,6 +197,80 @@ class MetricsHistoryStore:
         self._flush_interval: float = DEFAULT_FLUSH_INTERVAL_SECONDS
         self._flush_stop = threading.Event()
         self._flush_running = False
+
+    def attach_field_crypto(
+        self,
+        crypto: Any,
+        sensitive_patterns: Optional[tuple] = None,
+    ) -> "MetricsHistoryStore":
+        """
+        绑定敏感字段加密器（BASE-9：关键字段密文落盘，防泄露）。
+
+        Parameters
+        ----------
+        crypto : FieldCrypto
+            加密器（Fernet；密钥见 field_crypto 模块）
+        sensitive_patterns : tuple | None
+            敏感关键字集合覆盖；None 用默认（equity/balance/position/...）
+
+        Returns
+        -------
+        MetricsHistoryStore : self
+        """
+        if crypto is None or not hasattr(crypto, "encrypt") or not hasattr(crypto, "try_decrypt"):
+            raise ValueError("crypto 必须为 FieldCrypto 实例（含 encrypt/try_decrypt）")
+        self._field_crypto = crypto
+        if sensitive_patterns is not None:
+            self._sensitive_patterns = tuple(sensitive_patterns)
+        logger.info("[metrics] 敏感字段加密已绑定（关键字段密文落盘）")
+        return self
+
+    def attach_access_audit(self, audit: Any) -> "MetricsHistoryStore":
+        """
+        绑定访问审计（BASE-9：监控库读取/导出留痕，kind=access）。
+
+        Parameters
+        ----------
+        audit : AuditLogStore
+            BASE-7 审计只追加存储
+
+        Returns
+        -------
+        MetricsHistoryStore : self
+        """
+        if audit is None or not hasattr(audit, "append"):
+            raise ValueError("audit 必须为 AuditLogStore 实例（含 append）")
+        self._access_audit = audit
+        return self
+
+    def _audit_access(self, action: str, detail: Dict[str, Any]) -> None:
+        """监控库读取/导出访问留痕（kind=access；失败记 warning 不阻断）。"""
+        if self._access_audit is None:
+            return
+        try:
+            self._access_audit.append("access", action, actor="metrics_query", detail=detail)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"访问审计留痕失败（不阻断查询）: {e}")
+
+    def _is_sensitive(self, name: str) -> bool:
+        """敏感指标判定（可配置 patterns）。"""
+        return is_sensitive_name(name, patterns=self._sensitive_patterns)
+
+    def _encrypt_sensitive_value(self, name: str, value: float) -> Optional[str]:
+        """
+        敏感值加密（命中敏感名时）：未绑定加密器 → 拒绝明文落盘。
+
+        Returns
+        -------
+        str | None : 密文（非敏感名为 None）；敏感名但无加密器时抛 ValueError
+        """
+        if not self._is_sensitive(name):
+            return None
+        if self._field_crypto is None:
+            raise ValueError(
+                f"拒绝明文落盘: 指标 {name!r} 命中敏感名但未绑定 FieldCrypto（BASE-9）"
+            )
+        return self._field_crypto.encrypt(value)
 
     # ── 建表自检（幂等，与迁移 DDL 逐字一致）──
 
@@ -247,13 +333,17 @@ class MetricsHistoryStore:
 
         ts = time.time() if timestamp is None else float(timestamp)
         labels_json = self._dump_labels(labels)
+        # BASE-9：敏感指标密文落盘（value 列存占位 0.0，密文存 value_encrypted；
+        # 未绑定加密器时拒绝明文落盘）
+        encrypted = self._encrypt_sensitive_value(name, num_value)
+        store_value = 0.0 if encrypted is not None else num_value
         with self._conn.transaction():
             affected = self._conn.execute_update(
                 """
-                INSERT OR IGNORE INTO metrics_history (name, labels_json, value, timestamp)
-                VALUES (?, ?, ?, ?)
+                INSERT OR IGNORE INTO metrics_history (name, labels_json, value, timestamp, value_encrypted)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (name, labels_json, num_value, ts),
+                (name, labels_json, store_value, ts, encrypted),
             )
         if affected > 0:
             self._export_rows(
@@ -307,21 +397,29 @@ class MetricsHistoryStore:
                 ts = float(ts)
             except (TypeError, ValueError):
                 raise ValueError(f"批量写入失败: 第 {i} 项 timestamp 非法")
-            prepared.append((name, self._dump_labels(labels), value, ts))
+            # BASE-9：敏感指标密文落盘（未绑定加密器时拒绝明文）
+            encrypted = self._encrypt_sensitive_value(name, value)
+            store_value = 0.0 if encrypted is not None else value
+            prepared.append((name, self._dump_labels(labels), store_value, ts, encrypted))
 
         with self._conn.transaction():
             affected = self._conn.executemany(
                 """
-                INSERT OR IGNORE INTO metrics_history (name, labels_json, value, timestamp)
-                VALUES (?, ?, ?, ?)
+                INSERT OR IGNORE INTO metrics_history (name, labels_json, value, timestamp, value_encrypted)
+                VALUES (?, ?, ?, ?, ?)
                 """,
                 prepared,
             )
         if affected > 0:
             self._export_rows(
                 [
-                    {"name": n, "labels": json.loads(lj or "{}"), "value": v, "timestamp": t}
-                    for (n, lj, v, t) in prepared
+                    {
+                        "name": n,
+                        "labels": json.loads(lj or "{}"),
+                        "value": v if e is None else float(self._field_crypto.decrypt(e)),
+                        "timestamp": t,
+                    }
+                    for (n, lj, v, t, e) in prepared
                 ]
             )
         return affected
@@ -344,6 +442,25 @@ class MetricsHistoryStore:
             "timestamp": row["timestamp"],
         }
 
+    def _row_to_dict_decrypted(self, row: Any) -> Dict[str, Any]:
+        """sqlite3.Row → dict；敏感行（value_encrypted 非空）解密回读真实值。"""
+        out = self._row_to_dict(row)
+        token = row["value_encrypted"]
+        if token:
+            if self._field_crypto is not None:
+                plain = self._field_crypto.try_decrypt(token)
+                if plain is not None:
+                    try:
+                        out["value"] = float(plain)
+                    except (TypeError, ValueError):
+                        out["value"] = plain
+                else:
+                    out["value"] = mask_value(out["value"])  # 解密失败脱敏
+            else:
+                # 库里有密文但未绑定加密器：脱敏（不泄露，不崩溃）
+                out["value"] = mask_value(out["value"])
+        return out
+
     def query(
         self,
         name: Optional[str] = None,
@@ -352,6 +469,7 @@ class MetricsHistoryStore:
         end_ts: Optional[float] = None,
         limit: int = 1000,
         order: str = "desc",
+        record_access: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         查询指标点（趋势/基线/看板回放；R-02：不用于 P0 实时告警检测）。
@@ -368,10 +486,14 @@ class MetricsHistoryStore:
             返回条数上限（>0，默认 1000）
         order : str
             "desc"=按时间倒序（最新在前，默认）；"asc"=升序
+        record_access : bool
+            BASE-9：True 时本次读取写入访问审计（kind=access，绑定
+            AuditLogStore 后生效；失败记 warning 不阻断查询）
 
         Returns
         -------
-        list[dict] : 每项 {id/name/labels/value/timestamp}
+        list[dict] : 每项 {id/name/labels/value/timestamp}；敏感行 value
+        为解密回读真实值（解密失败脱敏 "****"）
         """
         if limit <= 0:
             raise ValueError(f"limit 必须为正整数，收到 {limit}")
@@ -396,13 +518,28 @@ class MetricsHistoryStore:
             params.append(float(end_ts))
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         sql = (
-            f"SELECT id, name, labels_json, value, timestamp FROM metrics_history{where}"
+            f"SELECT id, name, labels_json, value, timestamp, value_encrypted "
+            f"FROM metrics_history{where}"
             f" ORDER BY timestamp {order} LIMIT ?"
         )
         params.append(limit)
         with self._conn.transaction():
             rows = self._conn.execute(sql, params)
-        return [self._row_to_dict(r) for r in rows]
+        if record_access:
+            self._audit_access(
+                "read",
+                {
+                    "resource": "metrics_history",
+                    "filter": {
+                        "name": name,
+                        "labels": labels,
+                        "start_ts": start_ts,
+                        "end_ts": end_ts,
+                    },
+                    "rows": len(rows),
+                },
+            )
+        return [self._row_to_dict_decrypted(r) for r in rows]
 
     def query_downsampled(
         self,
@@ -436,6 +573,12 @@ class MetricsHistoryStore:
             raise ValueError(f"bucket_minutes 必须为正整数，收到 {bucket_minutes}")
         if agg not in _AGG_WHITELIST:
             raise ValueError(f"非法聚合函数: {agg!r}（须为 {list(_AGG_WHITELIST)}）")
+        # BASE-9：敏感指标密文不可聚合（value 列为占位 0.0），拒绝并提示用 query 回读
+        if self._is_sensitive(name):
+            raise ValueError(
+                f"降采样拒绝聚合敏感指标 {name!r}（密文落盘不可聚合）；"
+                f"请用 query(name=..., record_access=True) 解密回读"
+            )
 
         bucket_seconds = int(bucket_minutes) * 60
         agg_expr = "COUNT(*)" if agg == "count" else f"{agg}(value)"
@@ -462,6 +605,61 @@ class MetricsHistoryStore:
         with self._conn.transaction():
             rows = self._conn.execute(sql, params)
         return [{"bucket": r["bucket"], "value": r["value"], "count": r["count"]} for r in rows]
+
+    # ── BASE-9：导出（留痕）──
+
+    def export_csv(self, path: str, name: Optional[str] = None, limit: int = 100_000) -> int:
+        """
+        导出指标点到 CSV（BASE-9：导出纳入访问审计，kind=access/export）。
+
+        Parameters
+        ----------
+        path : str
+            导出文件路径（父目录不存在则创建）
+        name : str | None
+            只导出该指标；None=全部
+        limit : int
+            导出条数上限（>0）
+
+        Returns
+        -------
+        int : 导出行数
+
+        Raises
+        ------
+        ValueError: path 为空/limit 非法时抛出
+        """
+        if not (path or "").strip():
+            raise ValueError("导出失败: path 不能为空")
+        if limit <= 0:
+            raise ValueError(f"limit 必须为正整数，收到 {limit}")
+        rows = self.query(name=name, limit=limit, order="asc", record_access=False)
+        out_path = Path(path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        import csv
+
+        with out_path.open("w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(
+                f, fieldnames=["id", "name", "labels", "value", "timestamp"]
+            )
+            writer.writeheader()
+            for r in rows:
+                writer.writerow(
+                    {
+                        "id": r["id"],
+                        "name": r["name"],
+                        "labels": json.dumps(r["labels"], ensure_ascii=False, sort_keys=True),
+                        "value": r["value"],
+                        "timestamp": r["timestamp"],
+                    }
+                )
+        # 导出留痕（强制；失败记 warning 不阻断导出）
+        self._audit_access(
+            "export",
+            {"resource": "metrics_history", "name": name, "rows": len(rows), "path": str(out_path)},
+        )
+        logger.info(f"[metrics] 导出完成: {len(rows)} 行 → {out_path}")
+        return len(rows)
 
     # ── 保留清理 ──
 
@@ -1010,15 +1208,15 @@ def _run_self_test() -> int:
 
             check("建表自检", table_exists(conn, TABLE_NAMES["metrics_history"]))
 
-            # 写入 + 唯一幂等
+            # 写入 + 唯一幂等（BASE-2 用例用非敏感名；敏感名加密见 BASE-9 段）
             base = 1_700_000_000.0
-            check("单条写入", store.save_metric("equity_curve_total", 1_000_000.0, timestamp=base))
-            check("同 key 同秒忽略", store.save_metric("equity_curve_total", 1_000_000.0, timestamp=base) is False)
-            store.save_metric("equity_curve_total", 1_000_100.0, timestamp=base + 60)
+            check("单条写入", store.save_metric("curve_total_sample", 1_000_000.0, timestamp=base))
+            check("同 key 同秒忽略", store.save_metric("curve_total_sample", 1_000_000.0, timestamp=base) is False)
+            store.save_metric("curve_total_sample", 1_000_100.0, timestamp=base + 60)
             store.save_metric("patrol_status", 0.0, labels={"status": "healthy"}, timestamp=base + 120)
 
             # 查询
-            rows = store.query("equity_curve_total", limit=10)
+            rows = store.query("curve_total_sample", limit=10)
             check("按名查询", len(rows) == 2)
             check("倒序最新在前", rows[0]["timestamp"] == base + 60)
             rows = store.query("patrol_status", labels={"status": "healthy"})
@@ -1045,7 +1243,7 @@ def _run_self_test() -> int:
             # 保留清理：timestamp < base+10 的行 = equity(base) + sine_test(base) 共 2 行
             old = store.purge_before(base + 10)
             check("清理旧数据", old == 2)
-            check("清理后查询", len(store.query("equity_curve_total", limit=10)) == 1)
+            check("清理后查询", len(store.query("curve_total_sample", limit=10)) == 1)
 
             # 防御式校验
             try:
@@ -1129,6 +1327,76 @@ def _run_self_test() -> int:
             time.sleep(0.5)
             task.stop(run_once=False)
             check("调度器 start/stop 周期执行", task.last_result is not None)
+
+            # ══════════════════════════════════
+            #  BASE-9 自测（敏感字段加密 + 访问审计）
+            # ══════════════════════════════════
+
+            from myquant.monitoring.field_crypto import FieldCrypto
+
+            crypto = FieldCrypto(key_file=str(Path(tmp) / ".test_key"))
+            store.attach_field_crypto(crypto)
+
+            # 敏感指标密文落盘 + 解密回读
+            store.save_metric("equity_curve_total", 1_000_000.0, timestamp=base + 500)
+            rows = store.query("equity_curve_total", limit=5)
+            check(
+                "敏感指标解密回读真实值",
+                len(rows) == 1 and rows[0]["value"] == 1_000_000.0,
+                f"value={rows[0]['value']}",
+            )
+            # 落盘真实性：库内 value 应为占位 0.0 + value_encrypted 非空密文
+            raw = conn.execute(
+                "SELECT value, value_encrypted FROM metrics_history WHERE name = ?",
+                ("equity_curve_total",),
+            )
+            check(
+                "敏感字段密文落盘（value 占位 + 密文非空）",
+                float(raw[0]["value"]) == 0.0 and bool(raw[0]["value_encrypted"]),
+            )
+            check("密文非明文", "1000000.0" not in raw[0]["value_encrypted"])
+
+            # 普通指标不受影响
+            store.save_metric("patrol_status", 0.0, timestamp=base + 501)
+            raw2 = conn.execute(
+                "SELECT value, value_encrypted FROM metrics_history WHERE name = ?",
+                ("patrol_status",),
+            )
+            check("普通指标明文落库（无密文列）", raw2[0]["value_encrypted"] is None)
+
+            # 未绑定加密器写入敏感名 → 拒绝明文落盘
+            store_bare = MetricsHistoryStore(connection=conn)
+            try:
+                store_bare.save_metric("equity_curve_total", 5.0, timestamp=base + 502)
+                check("未绑定加密器拒绝敏感明文落盘", False)
+            except ValueError:
+                check("未绑定加密器拒绝敏感明文落盘", True)
+
+            # 敏感指标拒绝降采样聚合
+            try:
+                store.query_downsampled("equity_curve_total", bucket_minutes=60)
+                check("敏感指标降采样拒绝", False)
+            except ValueError:
+                check("敏感指标降采样拒绝", True)
+
+            # 访问审计：读取留痕 + 导出留痕
+            from myquant.monitoring.audit_log import AuditLogStore
+
+            audit = AuditLogStore(connection=conn)
+            store.attach_access_audit(audit)
+            store.query("patrol_status", limit=5, record_access=True)
+            export_path = Path(tmp) / "export.csv"
+            store.export_csv(str(export_path), name="patrol_status", limit=10)
+            check("导出文件生成", export_path.exists())
+            access_rows = audit.query(kind="access", order="asc")
+            check(
+                "读取/导出访问审计留痕",
+                len(access_rows) == 2
+                and access_rows[0]["detail"]["resource"] == "metrics_history"
+                and access_rows[1]["action"] == "export",
+                f"count={len(access_rows)}",
+            )
+            check("访问审计链完整", audit.verify_chain()[0] is True)
         finally:
             # BASE-6：后台 flush/降采样线程可能持有独立线程连接，
             # 须 close_all 跨线程关闭（close() 只关主线程连接）

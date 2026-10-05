@@ -75,7 +75,8 @@ class TestSchemaSelfCheck:
         MetricsHistoryStore(connection=tmp_conn)
 
     def test_migration_ddl_executable(self, tmp_path: Path) -> None:
-        """0006 迁移 DDL 在临时 sqlite 可执行（upgrade SQL 正确性）"""
+        """0006 迁移 DDL 可执行；BASE-9 起 0006 为历史快照（无加密列），
+        新列由 0008 迁移对旧表幂等补列（upgrade SQL 正确性）。"""
         import importlib
         conn = sqlite3.connect(str(tmp_path / "migrate_test.db"))
         try:
@@ -93,9 +94,34 @@ class TestSchemaSelfCheck:
                 )
             }
             assert "metrics_history" in tables
-            # 迁移 DDL 与 schema.py 逐字一致（BASE-2 要求）
-            assert m0006._CREATE_METRICS_HISTORY == CREATE_METRICS_HISTORY_SQL
-            assert m0006._CREATE_INDEXES == CREATE_METRICS_HISTORY_INDEX_SQL
+            # BASE-9：0006 是历史快照（BASE-2 版，无 value_encrypted）；
+            # 当前 schema 含加密列 → 新列由 0008 覆盖
+            assert "value_encrypted" not in m0006._CREATE_METRICS_HISTORY
+            assert "value_encrypted" in CREATE_METRICS_HISTORY_SQL
+            # 0008 upgrade 对旧表幂等补列（注入 alembic 上下文后执行真实迁移代码）
+            from alembic.migration import MigrationContext
+            from alembic.operations import Operations
+            from sqlalchemy import create_engine
+
+            eng = create_engine(f"sqlite:///{tmp_path / 'migrate_test.db'}")
+            with eng.begin() as sa_conn:
+                ctx = MigrationContext.configure(sa_conn)
+                m0008 = importlib.import_module(
+                    "myquant.database.migrations.versions.0008_add_value_encrypted"
+                )
+                from sqlalchemy import text as sa_text
+
+                with Operations.context(ctx):  # alembic.op proxy 绑定
+                    m0008.upgrade()
+                    cols = {
+                        row[1]
+                        for row in sa_conn.execute(
+                            sa_text("PRAGMA table_info(metrics_history)")
+                        )
+                    }
+                    assert "value_encrypted" in cols
+                    m0008.upgrade()  # 幂等：二次执行不报错
+            conn.commit()
         finally:
             conn.close()
 
@@ -106,8 +132,9 @@ class TestSchemaSelfCheck:
 
 class TestSaveMetric:
     def test_save_and_query_back(self, store: MetricsHistoryStore) -> None:
-        assert store.save_metric("equity_curve_total", 1_000_000.0, timestamp=BASE_TS)
-        rows = store.query("equity_curve_total", limit=10)
+        # BASE-9 起 equity* 为敏感名（须绑定 FieldCrypto）；通用存储测试用非敏感名
+        assert store.save_metric("sample_large_value", 1_000_000.0, timestamp=BASE_TS)
+        rows = store.query("sample_large_value", limit=10)
         assert len(rows) == 1
         assert rows[0]["value"] == 1_000_000.0
         assert rows[0]["labels"] == {}
@@ -177,24 +204,25 @@ class TestSaveBatch:
 
 class TestQuery:
     def _seed(self, store: MetricsHistoryStore) -> None:
-        store.save_metric("equity", 100.0, timestamp=BASE_TS)
-        store.save_metric("equity", 101.0, timestamp=BASE_TS + 60)
-        store.save_metric("equity", 102.0, timestamp=BASE_TS + 120)
+        # BASE-9 起 equity* 为敏感名；通用查询语义测试用非敏感名
+        store.save_metric("metric", 100.0, timestamp=BASE_TS)
+        store.save_metric("metric", 101.0, timestamp=BASE_TS + 60)
+        store.save_metric("metric", 102.0, timestamp=BASE_TS + 120)
         store.save_metric("patrol_status", 0.0, labels={"status": "healthy"}, timestamp=BASE_TS)
 
     def test_order_desc_default(self, store: MetricsHistoryStore) -> None:
         self._seed(store)
-        rows = store.query("equity", limit=10)
+        rows = store.query("metric", limit=10)
         assert [r["timestamp"] for r in rows] == [BASE_TS + 120, BASE_TS + 60, BASE_TS]
 
     def test_order_asc(self, store: MetricsHistoryStore) -> None:
         self._seed(store)
-        rows = store.query("equity", limit=10, order="asc")
+        rows = store.query("metric", limit=10, order="asc")
         assert [r["timestamp"] for r in rows] == [BASE_TS, BASE_TS + 60, BASE_TS + 120]
 
     def test_time_range_filter(self, store: MetricsHistoryStore) -> None:
         self._seed(store)
-        rows = store.query("equity", start_ts=BASE_TS + 1, end_ts=BASE_TS + 119, limit=10)
+        rows = store.query("metric", start_ts=BASE_TS + 1, end_ts=BASE_TS + 119, limit=10)
         assert len(rows) == 1 and rows[0]["timestamp"] == BASE_TS + 60
 
     def test_labels_filter(self, store: MetricsHistoryStore) -> None:
@@ -204,7 +232,7 @@ class TestQuery:
 
     def test_limit(self, store: MetricsHistoryStore) -> None:
         self._seed(store)
-        assert len(store.query("equity", limit=2)) == 2
+        assert len(store.query("metric", limit=2)) == 2
 
     def test_invalid_limit_rejected(self, store: MetricsHistoryStore) -> None:
         with pytest.raises(ValueError):

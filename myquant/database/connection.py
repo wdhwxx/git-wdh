@@ -15,6 +15,7 @@ connection.py - 数据库连接管理
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -104,6 +105,32 @@ class DatabaseConnection:
         # （原 close() 只关当前线程连接，其他线程连接泄漏）
         self._thread_conns: Dict[int, sqlite3.Connection] = {}
 
+    # ── BASE-9：库文件权限收紧（防泄露双控之一）──
+
+    def _harden_db_permissions(self) -> None:
+        """
+        收紧监控库文件权限（个人系统降级版静态加密三件套之一）。
+
+        - POSIX：chmod 600（仅属主读写；WAL/SHM 伴生文件同收）
+        - Windows：ACL 最小化依赖 NTFS 配置，记 warning 提示以
+          OS 级加密卷（BitLocker）+ 目录权限收紧兜底
+        不覆盖用户已设置的显式 ACL 意图（只收紧到 600 语义，不扩大权限）。
+        """
+        try:
+            if os.name == "posix":
+                self.db_path.chmod(0o600)
+                for suffix in ("-wal", "-shm"):
+                    p = Path(str(self.db_path) + suffix)
+                    if p.exists():
+                        p.chmod(0o600)
+            else:
+                logger.debug(
+                    f"[db] Windows 平台：库文件权限依赖 NTFS/加密卷配置 "
+                    f"（BASE-9 提示：建议 OS 级加密卷 BitLocker + 目录收紧）"
+                )
+        except OSError as e:
+            logger.warning(f"库文件权限收紧失败（不影响连接）: {e}")
+
     # ── 连接管理 ──
 
     def connect(self) -> None:
@@ -112,6 +139,8 @@ class DatabaseConnection:
             return
         # 确保目录存在
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        # BASE-9：监控库文件权限收紧（OS 级加密卷 + 权限最小化的降级版）
+        self._harden_db_permissions()
         conn = sqlite3.connect(
             str(self.db_path),
             check_same_thread=False,

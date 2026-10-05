@@ -208,6 +208,42 @@ class AuditLogStore:
             "created_ts": created_ts,
         }
 
+    def log_access(
+        self,
+        resource: str,
+        action: str,
+        actor: str = "system",
+        detail: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        监控库访问审计留痕（BASE-9：读取/导出纳入审计，kind=access）。
+
+        Parameters
+        ----------
+        resource : str
+            被访问资源（metrics_history/alerts/quant.db 等）
+        action : str
+            访问动作（read/export/query 等）
+        actor : str
+            访问者（组件名/用户标识）
+        detail : dict | None
+            访问明细（过滤条件/导出行数等）
+
+        Returns
+        -------
+        dict : append 返回的 {seq/row_hash/prev_hash/created_ts}
+
+        Raises
+        ------
+        ValueError: 参数非法时抛出（同 append 防御式校验）
+        """
+        return self.append(
+            "access",
+            action,
+            actor=actor,
+            detail={"resource": resource, **(detail or {})},
+        )
+
     # ── 读：只读查询（无 update/delete API，append-only）──
 
     def query(

@@ -424,11 +424,12 @@ CREATE_ALERTS_INDEX_SQL = [
 
 CREATE_METRICS_HISTORY_SQL = """
 CREATE TABLE IF NOT EXISTS metrics_history (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    name        TEXT    NOT NULL,
-    labels_json TEXT    NOT NULL DEFAULT '{}',
-    value       REAL    NOT NULL,
-    timestamp   REAL    NOT NULL,
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT    NOT NULL,
+    labels_json     TEXT    NOT NULL DEFAULT '{}',
+    value           REAL    NOT NULL,
+    timestamp       REAL    NOT NULL,
+    value_encrypted TEXT             DEFAULT NULL,   -- BASE-9 敏感字段密文（命中敏感名时非空）
     UNIQUE (name, labels_json, timestamp)
 );
 """
