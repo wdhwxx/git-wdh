@@ -508,6 +508,8 @@ Pythonwdhmm/
 
     │   │   ├── test_alert_store.py # ✨【回写#196】BASE-1 告警持久化测试（31 项，临时库不碰 quant.db）：建表自检/迁移 DDL 一致性/落库与状态流转/classification 打标/升级与 runbook/查询过滤/AlertManager 集成（重启后历史可查、确认/解决同步库、恢复成对记录、failed 不触发恢复）✅已完成
 
+    │   │   ├── test_metrics_history.py # ✨【回写#197】BASE-2 指标时序存储测试（30 项，临时库不碰 quant.db）：建表自检/迁移 DDL 一致性/唯一幂等/标签 JSON 归一/批量/查询过滤/降采样聚合/保留清理/HealthPatrol 集成（巡检落库可查、未绑定不落库、store 异常不阻断巡检）✅已完成
+
 │   │   ├── test_broker_platform_check.py # ✨【回写#25】券商适配器平台校验（审计疑点3：qmt/ptrade非Windows拦截、paper/sim放行、大小写不敏感）✅已完成
 
 │   │   ├── test_dashboard_serializer.py  # ✨【回写#25】回测看板数据序列化器测试（build_dashboard_json全链路/成本反向拆分/买卖配对/exit_reason_class/pool派生）✅已完成
@@ -1111,6 +1113,8 @@ Pythonwdhmm/
     │   ├── measurability.py         # ✨【回写#189】P0-8 可测量性统计模块：MTTx（MTTD/MTTA/MTTR）系统时间戳口径计算 + TP/FP/FN ground-truth 分类与准确率/误报率/检出率自动统计 + FI-01~07 标准故障注入用例库（与 D-6 混沌工程共用）；只消费已发生时间戳与告警记录，严格防未来
 
     │   ├── alert_store.py           # ✨【回写#196】BASE-1 告警持久化存储：alerts 表落库（save_alert 幂等 upsert/status 推导）、状态流转（update_status acked/resolved 时间戳语义/COALESCE 补 acked_at/reopen 清时间戳）、classification 打标（P0-8 统计读取源 R-01）、升级标记/runbook 绑定、查询（load_history 过滤/load_unacknowledged/load_escalated/get_open_by_dedup_key 恢复匹配）、防御式校验（非法 status/limit<=0/缺 alert_id/level/message 抛 ValueError）；__main__ 自测 14 项
+
+    │   ├── metrics_history.py       # ✨【回写#197】BASE-2 指标时序存储：metrics_history 表落库（save_metric 唯一幂等/save_batch 批量事务）、查询（name/labels/时间范围/limit）、降采样聚合（epoch 桶 avg/max/min/sum/count 支撑 1 年回放）、保留清理（原始 30 天 purge，R-02 仅回放不检测）；__main__ 自测 14 项
 
 │   └── data_quality_explorer.py # ✨【#S2修复】数据质量探查器（从web/dashboard.py迁移到monitoring底层，消除API依赖Web的架构倒置）：DataQualityExplorer类13方法（实时指标/清洗运行列表/运行详情/等级分布/脏数据统计/总览），纯Python数据层不依赖streamlit，API层和Web层均从此导入；数据源=CleanDataQueries+MetricsCollector；source过滤区分offline/live为实盘对接预留
 
@@ -2775,7 +2779,9 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
   a. schema.py TABLE_NAMES 10→13 张：新增 orders（逐笔订单，order_id 唯一）/fills（逐笔成交，trade_id 唯一）/positions_daily（持仓日快照，snapshot_date+symbol+account 唯一）三关系账 + DDL + 9 索引 + ALL_CREATE_TABLE/INDEX + drop_all_tables 顺序同步（test_database 表数断言 10→13）。
   b. Alembic 迁移 0004_add_trade_ledger.py（down=0003）：幂等 CREATE IF NOT EXISTS 三表 + 9 索引。
 
-    │           └── 0005_add_alerts.py  # ✨【回写#196】BASE-1 增量迁移：alerts 告警持久化表（15 字段：id/alert_id UNIQUE/level/category/source/message/details_json/dedup_key/status/classification/created_at/acked_at/resolved_at/escalated/runbook_id + 3 索引），DDL 与 schema.py 逐字一致（幂等 CREATE IF NOT EXISTS），down_revision=0004
+    │           ├── 0005_add_alerts.py  # ✨【回写#196】BASE-1 增量迁移：alerts 告警持久化表（15 字段：id/alert_id UNIQUE/level/category/source/message/details_json/dedup_key/status/classification/created_at/acked_at/resolved_at/escalated/runbook_id + 3 索引），DDL 与 schema.py 逐字一致（幂等 CREATE IF NOT EXISTS），down_revision=0004
+
+    │           └── 0006_add_metrics_history.py  # ✨【回写#197】BASE-2 增量迁移：metrics_history 指标时序表（name/labels_json/value/timestamp 唯一幂等 + 3 索引含按天分区表达式索引），DDL 与 schema.py 逐字一致（幂等 CREATE IF NOT EXISTS），down_revision=0005
   c. 新增 myquant/database/trade_log.py（TradeLedger）：record_order/record_fill/record_position_snapshot（INSERT OR IGNORE/REPLACE 幂等）+ query_orders/query_fills/query_positions_on（按标的/状态/订单/日期过滤）。
   d. live/engine.py 成交回调同步落库：__init__ 增可选 trade_ledger 注入；on_order_update 逐笔订单、on_trade 逐笔成交落库（try/except 失败不中断，None 时仅内存不落库向后兼容）。
 - 防未来：落库/查询仅消费已发生订单与成交事实，不使用未来行情。
@@ -3264,3 +3270,13 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
     e. 新增 tests/unit/test_alert_store.py（31 项，临时库不碰 quant.db）：建表自检/迁移 DDL 一致性/落库与状态流转/classification 打标/升级与 runbook/查询过滤/AlertManager 集成（重启后历史可查=库内存双读、确认/解决同步库、恢复成对记录、failed 不触发恢复）；同步更新 test_database.py test_table_names_complete（alerts 加入 14 表集合）。
     f. 验证结果：py_compile 5 文件通过；AlertStore __main__ 自测 14 项全绿；新增单测 31 passed；数据库/告警相关回归 70 passed +1 skipped；全量 pytest tests/unit 2384 passed +2 skipped 无回归。
     g. 纪律遵守：先更新蓝图再创建文件（#196 目录树登记先行）；无蓝图外文件；业务逻辑归 myquant、scripts 薄入口；严格防未来；任务后 git 提交。
+
+192. ✨【回写记录·2026-10-05·BASE-2 指标时序存储】【回写#197】
+    事实来源：本次落地，代码级核验：《量化系统监控模块施工总清单_V1.2.md》BASE-2 行验收口径（metrics_history 表 name/labels_json/value/timestamp 按天分区索引；scheduler 周期落库默认 60s；保留策略原始 30 天降采样 1 年；约束 R-02 仅回放不检测）。
+    a. 登记 myquant/monitoring/metrics_history.py + database/migrations/versions/0006_add_metrics_history.py + tests/unit/test_metrics_history.py 至蓝图目录树（monitoring/ 段 + migrations/versions 段 + tests/unit 段同步登记）。
+    b. 新建 myquant/monitoring/metrics_history.py（业务逻辑，已登记 monitoring/ 段）：MetricsHistoryStore（save_metric 唯一幂等 name+labels_json+timestamp、save_batch 批量事务 MAX_BATCH=1000、query name/labels/时间范围/limit/order、query_downsampled epoch 桶聚合 avg/max/min/sum/count、purge_before/retention_purge 原始 30 天）；全量类型注解 + Google docstring + 防御式校验 + R-02 约束明示（仅回放不检测）；防未来（timestamp 取采集时刻）。
+    c. 新建 myquant/database/migrations/versions/0006_add_metrics_history.py（迁移）：metrics_history 表 + 3 索引（含按天分区表达式索引 date(timestamp,'unixepoch')，SQLite 索引须确定性故不用 localtime），DDL 与 schema.py 逐字一致（单测 test_migration_ddl_executable 校验）；down_revision=0005。
+    d. 改造 myquant/live/scheduler.py：HealthPatrol 加 metrics_history 参数 + attach_metrics_history，build_report 末尾 _record_report_metrics 周期落库（patrol_status + 各检查项状态计数，随巡检 60s 一次；落库失败记 error 不阻断巡检）；attach_engine 默认绑定 MetricsHistoryStore（初始化失败降级仅内存巡检不落库）。
+    e. 新增 tests/unit/test_metrics_history.py（30 项，临时库不碰 quant.db）：建表自检/迁移 DDL 一致性/唯一幂等/标签 JSON 归一/批量/查询过滤/降采样聚合/保留清理/HealthPatrol 集成（全 down 与全 healthy 巡检落库可查、未绑定不落库、store 异常不阻断巡检）；同步更新 test_database.py test_table_names_complete（metrics_history 加入 15 表集合）。
+    f. 验证结果：py_compile 6 文件通过；MetricsHistoryStore __main__ 自测 14 项全绿；新增单测 + 数据库测试 97 passed +1 skipped；全量 pytest tests/unit 2414 passed +2 skipped 无回归。
+    g. 纪律遵守：先更新蓝图再创建文件（#197 目录树登记先行）；无蓝图外文件；业务逻辑归 myquant、scripts 薄入口；严格防未来；任务后 git 提交。

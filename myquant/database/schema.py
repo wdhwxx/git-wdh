@@ -44,6 +44,7 @@ TABLE_NAMES = {
     "fills": "fills",                       # 成交关系账（KP-P4-02）
     "positions_daily": "positions_daily",   # 持仓日快照账（KP-P4-02）
     "alerts": "alerts",                     # 告警持久化表（BASE-1 告警落库）
+    "metrics_history": "metrics_history",   # 指标时序存储表（BASE-2 周期落库）
 }
 
 
@@ -415,6 +416,30 @@ CREATE_ALERTS_INDEX_SQL = [
 
 
 # ─────────────────────────────────────────────
+# 指标时序存储表（BASE-2：与 0006_add_metrics_history.py 迁移 DDL 逐字一致）
+# ─────────────────────────────────────────────
+
+CREATE_METRICS_HISTORY_SQL = """
+CREATE TABLE IF NOT EXISTS metrics_history (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT    NOT NULL,
+    labels_json TEXT    NOT NULL DEFAULT '{}',
+    value       REAL    NOT NULL,
+    timestamp   REAL    NOT NULL,
+    UNIQUE (name, labels_json, timestamp)
+);
+"""
+
+# 按天分区索引：date(timestamp,'unixepoch') 表达式索引（UTC 日，SQLite 索引
+# 表达式须确定性，不可用 localtime 修饰符），支撑"按天分区查询/清理"
+CREATE_METRICS_HISTORY_INDEX_SQL = [
+    "CREATE INDEX IF NOT EXISTS idx_metrics_history_name_ts ON metrics_history(name, timestamp);",
+    "CREATE INDEX IF NOT EXISTS idx_metrics_history_day ON metrics_history(date(timestamp, 'unixepoch'));",
+    "CREATE INDEX IF NOT EXISTS idx_metrics_history_ts ON metrics_history(timestamp);",
+]
+
+
+# ─────────────────────────────────────────────
 # 所有建表SQL汇总
 # ─────────────────────────────────────────────
 
@@ -433,6 +458,7 @@ ALL_CREATE_TABLE_SQL = [
     CREATE_FILLS_SQL,
     CREATE_POSITIONS_DAILY_SQL,
     CREATE_ALERTS_SQL,
+    CREATE_METRICS_HISTORY_SQL,
 ]
 
 ALL_CREATE_INDEX_SQL = (
@@ -449,6 +475,7 @@ ALL_CREATE_INDEX_SQL = (
     + CREATE_FILLS_INDEX_SQL
     + CREATE_POSITIONS_DAILY_INDEX_SQL
     + CREATE_ALERTS_INDEX_SQL
+    + CREATE_METRICS_HISTORY_INDEX_SQL
 )
 
 
@@ -646,6 +673,7 @@ def drop_all_tables(connection) -> None:
         TABLE_NAMES["orders"],
         TABLE_NAMES["market_data"],
         TABLE_NAMES["alerts"],
+        TABLE_NAMES["metrics_history"],
     ]
     with connection.transaction():
         for table in table_order:

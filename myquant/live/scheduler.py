@@ -874,9 +874,17 @@ class HealthPatrol:
         # report["status"] == "healthy" | "degraded" | "down"
     """
 
-    def __init__(self):
+    def __init__(self, metrics_history: Optional[Any] = None):
         self._extra_checks: Dict[str, Callable[[], Any]] = {}
+        # BASE-2 指标时序落库（可选绑定；R-02：本存储仅服务趋势/基线/看板
+        # 回放，不参与任何 P0 实时告警检测，P0 实时告警一律走事件订阅）
+        self._metrics_history: Optional[Any] = metrics_history
         logger.debug("巡检器初始化")
+
+    def attach_metrics_history(self, store: Any) -> "HealthPatrol":
+        """绑定指标时序存储（BASE-2 周期落库，随巡检 60s 一次）。"""
+        self._metrics_history = store
+        return self
 
     def add_check(self, name: str, func: Callable[[], Any]) -> None:
         """
@@ -1086,7 +1094,62 @@ class HealthPatrol:
             f"degraded={self._count(checks, PATROL_DEGRADED)}, "
             f"down={self._count(checks, PATROL_DOWN)}"
         )
+        # BASE-2：巡检指标周期落库（随巡检节奏，默认 60s；失败不阻断巡检）
+        self._record_report_metrics(report)
         return report
+
+    def _record_report_metrics(self, report: Dict[str, Any]) -> None:
+        """
+        BASE-2：巡检报告指标落库（patrol_status + 各检查项状态计数）。
+
+        R-02 约束：本方法写入的指标仅供趋势/基线/看板回放，不参与任何
+        P0 实时告警检测；落库失败记 error 留痕，不阻断巡检主流程。
+        """
+        if self._metrics_history is None:
+            return
+        try:
+            status_map = {
+                PATROL_HEALTHY: 0.0,
+                PATROL_DEGRADED: 1.0,
+                PATROL_DOWN: 2.0,
+            }
+            ts = report["timestamp"]
+            rows: List[Dict[str, Any]] = [
+                {
+                    "name": "patrol_status",
+                    "value": status_map.get(report["status"], 2.0),
+                    "labels": {"status": report["status"]},
+                    "timestamp": ts,
+                },
+                {
+                    "name": "patrol_healthy_count",
+                    "value": float(self._count(report["checks"], PATROL_HEALTHY)),
+                    "timestamp": ts,
+                },
+                {
+                    "name": "patrol_degraded_count",
+                    "value": float(self._count(report["checks"], PATROL_DEGRADED)),
+                    "timestamp": ts,
+                },
+                {
+                    "name": "patrol_down_count",
+                    "value": float(self._count(report["checks"], PATROL_DOWN)),
+                    "timestamp": ts,
+                },
+            ]
+            for check_name, check in report["checks"].items():
+                rows.append(
+                    {
+                        "name": f"patrol_check.{check_name}",
+                        "value": status_map.get(check["status"], 2.0),
+                        "labels": {"status": check["status"]},
+                        "timestamp": ts,
+                    }
+                )
+            inserted = self._metrics_history.save_batch(rows)
+            logger.debug(f"[patrol] 指标落库 {inserted} 条 (R-02 仅回放不检测)")
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"巡检指标落库失败（不阻断巡检）: {e}")
 
     def run(self, **kwargs) -> Dict[str, Any]:
         """build_report 的别名，便于作为调度任务直接注册。"""
@@ -1618,6 +1681,13 @@ def attach_engine(
 
     if enable_patrol:
         patrol = HealthPatrol()
+        # BASE-2：默认绑定指标时序存储（周期落库 60s；初始化失败降级为
+        # 仅内存巡检不落库，不阻断巡检主流程）
+        try:
+            from myquant.monitoring.metrics_history import MetricsHistoryStore
+            patrol.attach_metrics_history(MetricsHistoryStore())
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"指标时序存储初始化失败（巡检不落库，仅内存回放）: {e}")
 
         def _patrol_job(**kw) -> None:  # noqa: ARG001
             report = patrol.build_report(

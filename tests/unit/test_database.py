@@ -253,17 +253,17 @@ class TestSchema:
     """Schema 表结构测试"""
 
     def test_table_names_complete(self):
-        """TABLE_NAMES 包含全部14张表（B-3 #83 新增 share_change；BASE-1 新增 alerts）"""
+        """TABLE_NAMES 包含全部15张表（B-3 #83 新增 share_change；BASE-1 新增 alerts；BASE-2 新增 metrics_history）"""
         expected = {"market_data", "financial_data", "factor_data",
                     "strategy_state", "data_source", "sync_status",
                     "clean_run_meta", "dirty_data_stats", "adjust_factor",
                     "share_change", "orders", "fills", "positions_daily",
-                    "alerts"}
+                    "alerts", "metrics_history"}
         assert set(TABLE_NAMES.keys()) == expected
         assert set(TABLE_NAMES.values()) == expected
 
     def test_create_all_tables(self, empty_conn):
-        """create_all_tables 创建全部14张表"""
+        """create_all_tables 创建全部15张表"""
         create_all_tables(empty_conn)
         for table_name in TABLE_NAMES.values():
             assert table_exists(empty_conn, table_name) is True
