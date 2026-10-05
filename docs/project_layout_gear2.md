@@ -506,6 +506,8 @@ Pythonwdhmm/
 │   │   ├── test_incident_response.py          # ✨【回写#169】事故响应测试(KP-P5-11：CRITICAL暂停/缺省不暂停/WARNING不暂停/pause异常不崩/制度文档/配置on_unhealthy，6项)✅已完成
 │   │   ├── test_channel_assembly.py       # ✨【回写#162】告警通道装配测试(KP-P5-05：按channels装配/未启用不装配/未投递回退写日志，3项)✅已完成底/env优先/运行API.py bootstrap不崩，4项)✅已完成1/缺参422/成功取真实值/失败501/异常501，5项)✅已完成/关闭/CORS互斥/401/429逻辑）✅已完成
 
+    │   │   ├── test_alert_store.py # ✨【回写#196】BASE-1 告警持久化测试（31 项，临时库不碰 quant.db）：建表自检/迁移 DDL 一致性/落库与状态流转/classification 打标/升级与 runbook/查询过滤/AlertManager 集成（重启后历史可查、确认/解决同步库、恢复成对记录、failed 不触发恢复）✅已完成
+
 │   │   ├── test_broker_platform_check.py # ✨【回写#25】券商适配器平台校验（审计疑点3：qmt/ptrade非Windows拦截、paper/sim放行、大小写不敏感）✅已完成
 
 │   │   ├── test_dashboard_serializer.py  # ✨【回写#25】回测看板数据序列化器测试（build_dashboard_json全链路/成本反向拆分/买卖配对/exit_reason_class/pool派生）✅已完成
@@ -791,7 +793,7 @@ Pythonwdhmm/
 
     │           └── 0002_add_market_data_composite_index.py  # 增量迁移：market_data(symbol,period,trade_date)复合索引
 
-    │           └── 0004_add_trade_ledger.py  # ✨【回写#142】增量迁移：KP-P4-02 orders/fills/positions_daily 三关系账 + 9 索引（幂等 CREATE IF NOT EXISTS）
+    │           ├── 0004_add_trade_ledger.py  # ✨【回写#142】增量迁移：KP-P4-02 orders/fills/positions_daily 三关系账 + 9 索引（幂等 CREATE IF NOT EXISTS）
 
     │
 
@@ -1107,6 +1109,8 @@ Pythonwdhmm/
     │   │                             # ✅已实现：11个内置数据质量指标(dirty_count/ratio/grade/repair等) + collect_from_data_quality_event + subscribe_to_event_bus自动采集 + Prometheus导出
 
     │   ├── measurability.py         # ✨【回写#189】P0-8 可测量性统计模块：MTTx（MTTD/MTTA/MTTR）系统时间戳口径计算 + TP/FP/FN ground-truth 分类与准确率/误报率/检出率自动统计 + FI-01~07 标准故障注入用例库（与 D-6 混沌工程共用）；只消费已发生时间戳与告警记录，严格防未来
+
+    │   ├── alert_store.py           # ✨【回写#196】BASE-1 告警持久化存储：alerts 表落库（save_alert 幂等 upsert/status 推导）、状态流转（update_status acked/resolved 时间戳语义/COALESCE 补 acked_at/reopen 清时间戳）、classification 打标（P0-8 统计读取源 R-01）、升级标记/runbook 绑定、查询（load_history 过滤/load_unacknowledged/load_escalated/get_open_by_dedup_key 恢复匹配）、防御式校验（非法 status/limit<=0/缺 alert_id/level/message 抛 ValueError）；__main__ 自测 14 项
 
 │   └── data_quality_explorer.py # ✨【#S2修复】数据质量探查器（从web/dashboard.py迁移到monitoring底层，消除API依赖Web的架构倒置）：DataQualityExplorer类13方法（实时指标/清洗运行列表/运行详情/等级分布/脏数据统计/总览），纯Python数据层不依赖streamlit，API层和Web层均从此导入；数据源=CleanDataQueries+MetricsCollector；source过滤区分offline/live为实盘对接预留
 
@@ -2770,6 +2774,8 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
 - 修复（myquant/database/schema.py + migrations/versions/0004 + database/trade_log.py + live/engine.py）：
   a. schema.py TABLE_NAMES 10→13 张：新增 orders（逐笔订单，order_id 唯一）/fills（逐笔成交，trade_id 唯一）/positions_daily（持仓日快照，snapshot_date+symbol+account 唯一）三关系账 + DDL + 9 索引 + ALL_CREATE_TABLE/INDEX + drop_all_tables 顺序同步（test_database 表数断言 10→13）。
   b. Alembic 迁移 0004_add_trade_ledger.py（down=0003）：幂等 CREATE IF NOT EXISTS 三表 + 9 索引。
+
+    │           └── 0005_add_alerts.py  # ✨【回写#196】BASE-1 增量迁移：alerts 告警持久化表（15 字段：id/alert_id UNIQUE/level/category/source/message/details_json/dedup_key/status/classification/created_at/acked_at/resolved_at/escalated/runbook_id + 3 索引），DDL 与 schema.py 逐字一致（幂等 CREATE IF NOT EXISTS），down_revision=0004
   c. 新增 myquant/database/trade_log.py（TradeLedger）：record_order/record_fill/record_position_snapshot（INSERT OR IGNORE/REPLACE 幂等）+ query_orders/query_fills/query_positions_on（按标的/状态/订单/日期过滤）。
   d. live/engine.py 成交回调同步落库：__init__ 增可选 trade_ledger 注入；on_order_update 逐笔订单、on_trade 逐笔成交落库（try/except 失败不中断，None 时仅内存不落库向后兼容）。
 - 防未来：落库/查询仅消费已发生订单与成交事实，不使用未来行情。
@@ -3248,3 +3254,13 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
     事实来源：本次落地（规范要点取自《量化系统监控模块施工总清单_V1.2.md》P0-7：密钥管理/最小权限/脱敏/告警防泄露/监控面 RBAC（A-16 对应）/数据加密与访问审计（BASE-9 对应））。
     a. 创建 docs/监控档案/安全合规.md：密钥零落盘明文（集中加密存储、不入日志）；最小权限；敏感数据脱敏（看板/告警）；告警内容防泄露；监控面 RBAC 角色（查看者/告警处置者/配置管理者/只读审计）与动作矩阵；监控数据加密与访问审计规范（OS 加密卷+权限收紧+关键字段加密，个人系统降级版）。
     b. 纪律遵守：先更新蓝图再创建文档（#195 登记先行）；无蓝图外文件；仅文档未动业务代码。
+
+191. ✨【回写记录·2026-10-05·BASE-1 告警持久化】【回写#196】
+    事实来源：本次落地，代码级核验：《量化系统监控模块施工总清单_V1.2.md》BASE-1 行验收口径（alerts 表 15 字段；AlertManager 发送落库、确认/解决/升级同步库、库内存双读；恢复通知同 key 未解决时健康恢复自动发 INFO 并置 resolved）。
+    a. 登记 myquant/monitoring/alert_store.py + database/migrations/versions/0005_add_alerts.py + tests/unit/test_alert_store.py 至蓝图目录树（monitoring/ 段 + migrations/versions 段 + tests/unit 段同步登记）。
+    b. 新建 myquant/monitoring/alert_store.py（业务逻辑，已登记 monitoring/ 段）：AlertStore（save_alert 幂等 upsert/status 推导、update_status acked/resolved 时间戳语义 + COALESCE 补 acked_at/reopen 清时间戳、set_classification P0-8 读取源、mark_escalated/set_runbook_id、load_history/load_unacknowledged/load_escalated/get_open_by_dedup_key、非法输入防御抛 ValueError）；全量类型注解 + Google docstring + 防御式校验 + 严格防未来（created_at/acked_at/resolved_at 只取告警时间戳，不取系统当前时间）。
+    c. 新建 myquant/database/migrations/versions/0005_add_alerts.py（迁移）：alerts 表 + 3 索引，DDL 与 schema.py CREATE_ALERTS_SQL/INDEX_SQL 逐字一致（单测 test_migration_ddl_executable 校验）；down_revision=0004。
+    d. 改造 myquant/monitoring/alerting.py：Alert 加 classification 字段 + to_dict 带出；AlertManager 加 store/store_enabled 参数 + attach_store，send_alert 落库（失败记 error 不阻断投递）、acknowledge/resolve 同步库、check_escalations 升级同步库（acked+escalated=1）、get_history/get_unacknowledged/get_escalated 库内存双读（_alert_from_row/_merge_store_rows）、恢复通知 _send_recovery_for 挂在 handle_pipeline_complete_event 的 completed 分支（同 key 未解决 → INFO [恢复] + dedup_key=recovered: 前缀 + parent_alert_id + 原告警置 resolved 内存+库）；get_alert_manager 单例默认 attach AlertStore（失败降级纯内存不阻断）。
+    e. 新增 tests/unit/test_alert_store.py（31 项，临时库不碰 quant.db）：建表自检/迁移 DDL 一致性/落库与状态流转/classification 打标/升级与 runbook/查询过滤/AlertManager 集成（重启后历史可查=库内存双读、确认/解决同步库、恢复成对记录、failed 不触发恢复）；同步更新 test_database.py test_table_names_complete（alerts 加入 14 表集合）。
+    f. 验证结果：py_compile 5 文件通过；AlertStore __main__ 自测 14 项全绿；新增单测 31 passed；数据库/告警相关回归 70 passed +1 skipped；全量 pytest tests/unit 2384 passed +2 skipped 无回归。
+    g. 纪律遵守：先更新蓝图再创建文件（#196 目录树登记先行）；无蓝图外文件；业务逻辑归 myquant、scripts 薄入口；严格防未来；任务后 git 提交。

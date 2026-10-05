@@ -146,6 +146,8 @@ class Alert:
     escalated_from: Optional[SeverityLevel] = None
     parent_alert_id: Optional[str] = None
     aggregation_count: int = 1
+    # BASE-1/P0-8：处置分类（TP/FP/auto，空=未打标），供 P0-8 统计脚本读取（R-01）
+    classification: str = ""
 
     @property
     def level_name(self) -> str:
@@ -181,6 +183,7 @@ class Alert:
             "escalated_from": self.escalated_from.value if self.escalated_from else None,
             "parent_alert_id": self.parent_alert_id,
             "aggregation_count": self.aggregation_count,
+            "classification": self.classification,
         }
 
     def summary(self) -> str:
@@ -1155,7 +1158,13 @@ class AlertManager:
         manager.check_escalations()
     """
 
-    def __init__(self, dedup_window_seconds: float = 300.0, max_history: int = 1000):
+    def __init__(
+        self,
+        dedup_window_seconds: float = 300.0,
+        max_history: int = 1000,
+        store: Optional["AlertStore"] = None,
+        store_enabled: bool = True,
+    ):
         self._channels: Dict[str, AlertChannel] = {}
         self._dedup_window = dedup_window_seconds
         self._dedup_cache: Dict[str, float] = {}
@@ -1173,6 +1182,15 @@ class AlertManager:
         self._on_alert_callbacks: List[Callable[[Alert], None]] = []
         self._last_escalation_check: float = 0.0
         self._escalation_lock = threading.Lock()
+
+        # BASE-1 告警持久化：发送落库、确认/解决/升级同步库、库内存双读
+        self._store: Optional["AlertStore"] = store
+        self._store_enabled: bool = store_enabled
+
+    def attach_store(self, store: "AlertStore") -> "AlertManager":
+        """绑定告警持久化存储（BASE-1：发送落库/状态同步/双读）。"""
+        self._store = store
+        return self
 
     # ═══════════════════════════════════════════
     #  告警规则管理（任务10新增）
@@ -1354,6 +1372,16 @@ class AlertManager:
 
         # 记录历史
         self._history.append(alert)
+
+        # BASE-1 告警落库（失败不阻断投递：告警投递优先，落库失败记 error 留痕）
+        if self._store is not None and self._store_enabled:
+            try:
+                self._store.save_alert(alert)
+            except Exception as e:
+                logger.error(
+                    f"告警落库失败（不阻断投递）: alert_id={alert.alert_id}: {e}",
+                    exc_info=True,
+                )
 
         # 通道路由 + 多通道分发
         channels = self._route_channels(alert.level)
@@ -1758,6 +1786,14 @@ class AlertManager:
                 )
                 self._send_aggregated_alert(bucket, bucket_level)
 
+            # BASE-1 恢复通知：流水线完成（健康恢复信号）→ 同 symbol/data_type
+            # 的未解决数据质量告警发 INFO 恢复通知并置 resolved（断流→恢复成对记录）
+            if status == "completed":
+                try:
+                    self._send_recovery_for(symbol, data_type)
+                except Exception as e:
+                    logger.error(f"恢复通知处理异常: {e}", exc_info=True)
+
             # 流水线失败 → ERROR
             if status == "failed":
                 alert = Alert(
@@ -1809,6 +1845,60 @@ class AlertManager:
         except Exception as e:
             logger.error(f"处理流水线完成事件异常: {e}", exc_info=True)
             return None
+
+    def _send_recovery_for(self, symbol: str, data_type: str) -> int:
+        """
+        BASE-1 恢复通知：健康恢复信号到达时，对同 symbol/data_type 的
+        未解决数据质量告警自动发 INFO 恢复通知并置 resolved（成对记录）。
+
+        匹配规则：
+          - 内存中 category=data_quality、未解决、dedup_key 以
+            agg:/qa:/pipeline_fail:/pipeline_quality: 开头的告警
+          - symbol/data_type 非空时须出现在 dedup_key 中
+
+        Parameters
+        ----------
+        symbol : str
+            标的代码（可能为空，为空则不限标的）
+        data_type : str
+            数据类型（可能为空，为空则不限类型）
+
+        Returns
+        -------
+        int : 恢复通知数量
+        """
+        prefixes = ("agg:", "qa:", "pipeline_fail:", "pipeline_quality:")
+        recovered = 0
+        for alert in list(self._history):
+            if alert.resolved or alert.category != "data_quality":
+                continue
+            dk = alert.deduplication_key or ""
+            if not any(dk.startswith(p) for p in prefixes):
+                continue
+            if symbol and symbol not in dk:
+                continue
+            if data_type and data_type not in dk:
+                continue
+            recovery = Alert(
+                level=SeverityLevel.INFO,
+                message=f"[恢复] {alert.message}（健康已恢复，置 resolved）",
+                source=alert.source,
+                category="data_quality",
+                details=dict(alert.details, original_alert_id=alert.alert_id, recovery=True),
+                deduplication_key=f"recovered:{alert.deduplication_key}",
+                parent_alert_id=alert.alert_id,
+            )
+            self.send_alert(recovery, dedup_enabled=False)
+            # 置原告警 resolved（内存 + 库）
+            alert.resolved = True
+            alert.acknowledged = True
+            self._sync_store_status(alert.alert_id, "resolved")
+            recovered += 1
+            logger.info(
+                f"恢复通知: {alert.alert_id} 已置 resolved, "
+                f"recovery_key=recovered:{alert.deduplication_key}"
+            )
+        return recovered
 
     def flush_aggregator(self) -> int:
         """
@@ -1878,6 +1968,13 @@ class AlertManager:
                     sent = self.send_alert(escalated_alert, dedup_enabled=False)
                     if sent > 0:
                         alert.acknowledged = True  # 标记原告警为已确认（避免重复升级）
+                        # BASE-1：升级同步库（原告警置 acked + escalated=1）
+                        if self._store is not None and self._store_enabled:
+                            try:
+                                self._store.update_status(alert.alert_id, "acked")
+                                self._store.mark_escalated(alert.alert_id)
+                            except Exception as e:
+                                logger.error(f"升级同步库失败: {alert.alert_id}: {e}")
                         escalated += 1
                         logger.warning(f"告警升级: {alert.alert_id} WARNING -> ERROR")
 
@@ -1914,13 +2011,72 @@ class AlertManager:
     #  告警历史与统计
     # ═══════════════════════════════════════════
 
+    @staticmethod
+    def _alert_from_row(row: Dict[str, Any]) -> Alert:
+        """由告警存储行（dict）重建 Alert（库内存双读的"库"侧还原）。
+
+        升级标记 escalated=1 时 escalated_from 以 WARNING 近似还原
+        （库仅存标志位，不存原级别；历史展示以 is_escalated 为准）。
+        """
+        try:
+            level = SeverityLevel(row["level"])
+        except ValueError:
+            level = SeverityLevel.WARNING
+        alert = Alert(
+            level=level,
+            message=row["message"],
+            source=row["source"],
+            category=row["category"],
+            details=row.get("details", {}),
+            deduplication_key=row.get("deduplication_key", ""),
+            timestamp=row.get("created_at", 0.0),
+            alert_id=row.get("alert_id", ""),
+            acknowledged=row.get("status", "open") in ("acked", "resolved"),
+            resolved=row.get("status", "open") == "resolved",
+        )
+        alert.classification = row.get("classification", "")
+        if row.get("escalated"):
+            alert.escalated_from = SeverityLevel.WARNING
+        return alert
+
+    def _merge_store_rows(
+        self,
+        memory_alerts: List[Alert],
+        limit: int,
+        level: Optional[SeverityLevel] = None,
+        category: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> List[Alert]:
+        """库内存双读合并：内存结果不足 limit 时读库补足（按 alert_id 去重）。"""
+        if self._store is None or not self._store_enabled or len(memory_alerts) >= limit:
+            return memory_alerts
+        try:
+            db_rows = self._store.load_history(
+                limit=limit,
+                level=level.value if level else None,
+                category=category,
+                status=status,
+            )
+        except Exception as e:
+            logger.error(f"告警历史读库失败（回退内存）: {e}")
+            return memory_alerts
+        known_ids = {a.alert_id for a in memory_alerts}
+        merged = list(memory_alerts)
+        for row in db_rows:
+            if row["alert_id"] not in known_ids:
+                merged.append(self._alert_from_row(row))
+                known_ids.add(row["alert_id"])
+                if len(merged) >= limit:
+                    break
+        return merged
+
     def get_history(
         self,
         level: Optional[SeverityLevel] = None,
         category: Optional[str] = None,
         limit: int = 50,
     ) -> List[Alert]:
-        """查询告警历史"""
+        """查询告警历史（库内存双读：内存实时 + 库权威补足）"""
         results = []
         for alert in reversed(self._history):
             if level and alert.level != level:
@@ -1930,32 +2086,68 @@ class AlertManager:
             results.append(alert)
             if len(results) >= limit:
                 break
-        return results
+        return self._merge_store_rows(results, limit, level=level, category=category)
 
     def get_unacknowledged(self, limit: int = 50) -> List[Alert]:
-        """获取未确认的告警"""
-        return [a for a in reversed(self._history) if not a.acknowledged and not a.resolved][:limit]
+        """获取未确认的告警（库内存双读）"""
+        mem = [a for a in reversed(self._history) if not a.acknowledged and not a.resolved][:limit]
+        return self._merge_store_rows(mem, limit, status="open")
 
     def get_escalated(self, limit: int = 50) -> List[Alert]:
-        """获取升级告警"""
-        return [a for a in reversed(self._history) if a.is_escalated][:limit]
+        """获取升级告警（库内存双读）"""
+        mem = [a for a in reversed(self._history) if a.is_escalated][:limit]
+        if self._store is not None and self._store_enabled and len(mem) < limit:
+            try:
+                db_rows = self._store.load_escalated(limit=limit)
+            except Exception as e:
+                logger.error(f"升级告警读库失败（回退内存）: {e}")
+                db_rows = []
+            known_ids = {a.alert_id for a in mem}
+            for row in db_rows:
+                if row["alert_id"] not in known_ids:
+                    mem.append(self._alert_from_row(row))
+                    known_ids.add(row["alert_id"])
+                    if len(mem) >= limit:
+                        break
+        return mem
 
     def acknowledge(self, alert_id: str) -> bool:
-        """确认告警"""
+        """确认告警（内存 + 同步库）"""
         for alert in self._history:
             if alert.alert_id == alert_id:
                 alert.acknowledged = True
+                self._sync_store_status(alert_id, "acked")
                 return True
+        # 内存未命中（重启后仅库有）也尝试落库
+        if self._store is not None and self._store_enabled:
+            try:
+                return self._store.update_status(alert_id, "acked")
+            except Exception as e:
+                logger.error(f"确认告警落库失败: {alert_id}: {e}")
         return False
 
     def resolve(self, alert_id: str) -> bool:
-        """解决告警"""
+        """解决告警（内存 + 同步库）"""
         for alert in self._history:
             if alert.alert_id == alert_id:
                 alert.resolved = True
                 alert.acknowledged = True
+                self._sync_store_status(alert_id, "resolved")
                 return True
+        if self._store is not None and self._store_enabled:
+            try:
+                return self._store.update_status(alert_id, "resolved")
+            except Exception as e:
+                logger.error(f"解决告警落库失败: {alert_id}: {e}")
         return False
+
+    def _sync_store_status(self, alert_id: str, status: str) -> None:
+        """同步告警状态到库（BASE-1：确认/解决同步库；失败记 error 不阻断）"""
+        if self._store is not None and self._store_enabled:
+            try:
+                self._store.update_status(alert_id, status)
+            except Exception as e:
+                logger.error(f"告警状态同步库失败: alert_id={alert_id}, status={status}: {e}")
 
     def clear_dedup_cache(self) -> None:
         """清空调警去重缓存"""
@@ -1992,6 +2184,7 @@ class AlertManager:
             "escalation_enabled": self._alert_rule.escalation_enabled,
             "escalation_time": self._alert_rule.escalation_time,
             "callbacks_count": len(self._on_alert_callbacks),
+            "store_enabled": self._store is not None and self._store_enabled,
         }
 
     def __repr__(self) -> str:
@@ -2020,6 +2213,13 @@ def get_alert_manager() -> AlertManager:
     with _alert_manager_lock:
         if _global_alert_manager is None:
             _global_alert_manager = AlertManager()
+            # BASE-1：默认绑定告警持久化存储（发送落库/状态同步/双读）；
+            # store 初始化失败降级为纯内存，不阻断告警功能
+            try:
+                from myquant.monitoring.alert_store import AlertStore
+                _global_alert_manager.attach_store(AlertStore())
+            except Exception as e:
+                logger.warning(f"告警持久化存储初始化失败（降级为纯内存）: {e}")
             # 默认注册控制台和日志通道
             _global_alert_manager.add_channel(ConsoleAlertChannel())
             _global_alert_manager.add_channel(LogAlertChannel())

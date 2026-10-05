@@ -43,6 +43,7 @@ TABLE_NAMES = {
     "orders": "orders",                     # 订单关系账（KP-P4-02）
     "fills": "fills",                       # 成交关系账（KP-P4-02）
     "positions_daily": "positions_daily",   # 持仓日快照账（KP-P4-02）
+    "alerts": "alerts",                     # 告警持久化表（BASE-1 告警落库）
 }
 
 
@@ -383,6 +384,37 @@ CREATE_POSITIONS_DAILY_INDEX_SQL = [
 
 
 # ─────────────────────────────────────────────
+# 告警持久化表（BASE-1：与 0005_add_alerts.py 迁移 DDL 逐字一致）
+# ─────────────────────────────────────────────
+
+CREATE_ALERTS_SQL = """
+CREATE TABLE IF NOT EXISTS alerts (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    alert_id       TEXT    NOT NULL UNIQUE,
+    level          TEXT    NOT NULL,
+    category       TEXT    NOT NULL DEFAULT 'system',
+    source         TEXT    NOT NULL DEFAULT 'monitoring',
+    message        TEXT    NOT NULL,
+    details_json   TEXT,
+    dedup_key      TEXT,
+    status         TEXT    NOT NULL DEFAULT 'open',
+    classification TEXT    DEFAULT '',
+    created_at     REAL    NOT NULL,
+    acked_at       REAL,
+    resolved_at    REAL,
+    escalated      INTEGER NOT NULL DEFAULT 0,
+    runbook_id     TEXT
+);
+"""
+
+CREATE_ALERTS_INDEX_SQL = [
+    "CREATE INDEX IF NOT EXISTS idx_alerts_dedup_key ON alerts(dedup_key);",
+    "CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status);",
+    "CREATE INDEX IF NOT EXISTS idx_alerts_created_at ON alerts(created_at);",
+]
+
+
+# ─────────────────────────────────────────────
 # 所有建表SQL汇总
 # ─────────────────────────────────────────────
 
@@ -400,6 +432,7 @@ ALL_CREATE_TABLE_SQL = [
     CREATE_ORDERS_SQL,
     CREATE_FILLS_SQL,
     CREATE_POSITIONS_DAILY_SQL,
+    CREATE_ALERTS_SQL,
 ]
 
 ALL_CREATE_INDEX_SQL = (
@@ -415,6 +448,7 @@ ALL_CREATE_INDEX_SQL = (
     + CREATE_ORDERS_INDEX_SQL
     + CREATE_FILLS_INDEX_SQL
     + CREATE_POSITIONS_DAILY_INDEX_SQL
+    + CREATE_ALERTS_INDEX_SQL
 )
 
 
@@ -611,6 +645,7 @@ def drop_all_tables(connection) -> None:
         TABLE_NAMES["fills"],
         TABLE_NAMES["orders"],
         TABLE_NAMES["market_data"],
+        TABLE_NAMES["alerts"],
     ]
     with connection.transaction():
         for table in table_order:
