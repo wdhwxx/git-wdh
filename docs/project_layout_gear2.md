@@ -514,6 +514,8 @@ Pythonwdhmm/
 
     │   │   ├── test_monitoring_config.py # ✨【回写#198】BASE-3 监控配置集中化测试（13 项）：_build_monitoring_config 默认/覆盖/非法回退/slo 非 dict 回退/深拷贝不污染常量；真实 settings.yaml 加载验收（slo 关键 LOCKED 值与 P0-2 锁定表一致）；AlertManager 装配集成（配置驱动 store/dedup/AlertRule 三参数、配置缺失应用默认、配置异常不阻断）✅已完成
 
+    │   │   ├── test_event_bus_chain.py # ✨【回写#199】BASE-4 事件链路 id 规范测试（16 项）：ChainEvent 四元组 schema（link_ids/missing_link_ids/to_dict/防未来不注入创建时刻）；4 强类型类构造与序列化（OrderEvent 覆盖 5 类 EventType）；publish_chain 统一入口（缺 event_ts warning 不阻断/require_event_ts 拒绝/非链路 TypeError）；链路连续性（signal→order→fill 同 signal_id 贯穿、event_ts 差值可测延迟）✅已完成
+
 │   │   ├── test_broker_platform_check.py # ✨【回写#25】券商适配器平台校验（审计疑点3：qmt/ptrade非Windows拦截、paper/sim放行、大小写不敏感）✅已完成
 
 │   │   ├── test_dashboard_serializer.py  # ✨【回写#25】回测看板数据序列化器测试（build_dashboard_json全链路/成本反向拆分/买卖配对/exit_reason_class/pool派生）✅已完成
@@ -728,7 +730,7 @@ Pythonwdhmm/
 
     │   ├── async_runtime.py          # 异步运行时管理：事件循环、任务封装、信号处理优雅关闭
 
-    │   ├── event_bus.py              # 事件总线：进程内发布订阅，同步/异步事件
+    │   ├── event_bus.py              # 事件总线：进程内发布订阅，同步/异步事件；✨【回写#199】BASE-4 事件链路 id 规范 schema 定稿——ChainEvent 基类（signal_id/order_id/trade_id/event_ts 四元组 + link_ids/missing_link_ids/to_dict）+ 4 强类型事件类（SignalEvent/OrderEvent/PositionUpdateEvent/SystemErrorEvent，对应 A-3 的 8 类 EventType）+ publish_chain 统一发布入口（缺 event_ts warning 不阻断/require_event_ts 拒绝/非链路事件 TypeError），__main__ 自测 24 项全绿
 
     │   │                             # ✅已实现：DataQualityEvent/PipelineCompleteEvent/QualityAlertEvent/StrategyPauseEvent 强类型事件 + EventFilter过滤器 + DataQualityEventPublisher便捷发布器
 
@@ -3294,3 +3296,15 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
     e. 新增 tests/unit/test_monitoring_config.py（13 项）：_build_monitoring_config 空/None→默认、覆盖生效、非法值回退、slo 非 dict 回退、深拷贝不污染 DEFAULT_MONITORING；真实 config/settings.yaml 加载验收（slo 关键 LOCKED 值与 P0-2 锁定表一致：freshness_max_seconds=60/gap_allowed=0/对账容差=0/限额 0.80-0.95/心跳窗口 60/连续 5 次；alerts 字段生效；patrol_interval=60）；AlertManager 装配集成（配置驱动 store/dedup/AlertRule 三参数生效、配置缺失应用默认、配置读取异常不阻断）。
     f. 验证结果：py_compile 3 文件通过；新增单测 13 passed；全量 pytest tests/unit 2427 passed +2 skipped 无回归（基线 2414+13）。
     g. 纪律遵守：先更新蓝图再创建文件（#198 目录树登记先行）；无蓝图外文件；业务逻辑归 myquant、scripts 薄入口；严格防未来；任务后 git 提交。
+
+194. ✨【回写记录·2026-10-05·BASE-4 事件链路 id 规范】【回写#199】
+    事实来源：本次落地，代码级核验：《量化系统监控模块施工总清单_V1.2.md》BASE-4 行验收口径（core/event_bus.py 事件字段；所有交易事件统一携带 signal_id/order_id/trade_id/event_ts 四元组，为滑点/延迟/链路追踪/根因分析打底；验收=事件 schema 定稿，A-3 起发布事件全部带链路 id——A-3 行明示 8 类已定义未使用事件 ORDER_SUBMIT/FILLED/PARTIAL/CANCELLED/REJECTED/POSITION_UPDATE/SIGNAL/SYSTEM_ERROR 全部带链路 id）。
+    a. 登记 myquant/core/event_bus.py（#199 注释更新）与 tests/unit/test_event_bus_chain.py 至蓝图目录树（core/ 段 + tests/unit 段同步登记）。
+    b. 改造 myquant/core/event_bus.py（BASE-4 schema 定稿，落点=事件字段，未越界到 A-3 埋点实施）：
+       - 新增 ChainEvent(Event) 链路事件基类：signal_id/order_id/trade_id/event_ts 四元组字段 + docstring 语义定稿（signal_id=make_signal_id 确定性派生格式、order_id=signal_id 派生或券商返回、trade_id=fills 表唯一、event_ts=业务发生时刻 epoch 秒）；link_ids()/missing_link_ids()/to_dict() 序列化带出四元组；防未来红线（event_ts 必须由发布方填真实业务时刻，默认 None 不静默注入 Event.timestamp 创建时刻）；event_type 必填（防御：链路事件类型必须明确）。
+       - 新增 4 个强类型交易事件类（承接 A-3 的 8 类 EventType，字段仅链路必需不做臆造扩展）：SignalEvent（SIGNAL_GENERATED，strategy_id/symbol/signal_type）、OrderEvent（构造传 ORDER_SUBMIT/FILLED/PARTIAL/CANCELLED/REJECTED，symbol/status/reject_reason）、PositionUpdateEvent（POSITION_UPDATE，symbol/side/quantity/avg_price）、SystemErrorEvent（SYSTEM_ERROR，error/component，仍携带四元组定位到出错链路）。
+       - 新增 EventBus.publish_chain 统一发布入口：非 ChainEvent 抛 TypeError；缺 event_ts 记 warning 仍发布（A-3 过渡期不阻断）、require_event_ts=True 时记 error 拒绝发布返回 0；发布记链路日志（type + 四元组）。
+       - __main__ 自测新增第 9 块链路事件自测（四元组序列化/链路贯穿/四缺识别/require 拒绝/TypeError）。
+    c. 新增 tests/unit/test_event_bus_chain.py（16 项）：ChainEvent 四元组 schema（默认空/四缺/部分缺失/to_dict）；4 强类型类（OrderEvent 覆盖 5 类、reject_reason、SystemError 带四元组）；publish_chain（送达/缺 event_ts warning 不阻断/require 拒绝/TypeError/通配符）；链路连续性（signal→order→fill 同 signal_id 贯穿、event_ts 单调递增、延迟差值可算= B-4 打底）。
+    d. 验证结果：py_compile 通过；event_bus __main__ 自测 24 项全绿（原 17+新 7）；新增单测 16 passed；全量 pytest tests/unit 2443 passed +2 skipped 无回归（基线 2427+16）。
+    e. 纪律遵守：先更新蓝图再创建文件（#199 目录树登记先行）；无蓝图外文件；业务逻辑归 myquant；严格防未来（event_ts 防未来红线明示）；任务后 git 提交。

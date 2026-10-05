@@ -130,6 +130,168 @@ class Event:
 
 
 # ═══════════════════════════════════════════════
+#  交易链路事件定义（BASE-4：事件链路 id 规范 schema 定稿）
+# ═══════════════════════════════════════════════
+
+@dataclass
+class ChainEvent(Event):
+    """
+    交易链路事件基类（事件链路 id 规范 · BASE-4 schema 定稿）
+
+    所有交易事件统一携带 ``signal_id / order_id / trade_id / event_ts``
+    四元组，为滑点/延迟/链路追踪/根因分析打底（《施工总清单_V1.2》BASE-4）。
+
+    四元组语义（链路唯一真源，A-3 起发布事件全部携带）:
+      signal_id : str
+          确定性信号 ID（strategies/base.py ``Signal.make_signal_id`` 派生，
+          格式 ``strategy_id:symbol:日期:signal_type``）；同一信号
+          signal→order→fill 全链路各事件保持一致。
+      order_id : str
+          订单 ID（Signal.to_order 幂等设计：有 signal 时以 signal_id
+          派生 order_id；无 signal 的订单用券商返回 ID）。
+      trade_id : str
+          成交 ID（database/trade_log.py fills 表唯一，与券商逐笔一致）。
+      event_ts : float | None
+          事件业务发生时刻（epoch 秒）。**防未来红线**：必须为业务真实
+          发生时刻，由发布方填写；禁止用未来时间戳；缺失时不得静默用
+          Event.timestamp（事件创建时刻）替代业务时刻，应由发布方补填。
+    """
+    signal_id: str = ""
+    order_id: str = ""
+    trade_id: str = ""
+    event_ts: Optional[float] = None
+
+    def link_ids(self) -> Dict[str, Any]:
+        """返回链路四元组（供日志/指标/追踪打点）"""
+        return {
+            "signal_id": self.signal_id,
+            "order_id": self.order_id,
+            "trade_id": self.trade_id,
+            "event_ts": self.event_ts,
+        }
+
+    def missing_link_ids(self) -> List[str]:
+        """返回缺失的链路 id 列表（防御式校验，供发布前提示）"""
+        missing: List[str] = []
+        if not self.signal_id:
+            missing.append("signal_id")
+        if not self.order_id:
+            missing.append("order_id")
+        if not self.trade_id:
+            missing.append("trade_id")
+        if self.event_ts is None:
+            missing.append("event_ts")
+        return missing
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = super().to_dict()
+        d.update(self.link_ids())
+        return d
+
+
+@dataclass
+class SignalEvent(ChainEvent):
+    """
+    信号事件（EventType.SIGNAL / SIGNAL_GENERATED）——A-3 引擎埋点载体。
+
+    附加字段：
+      strategy_id : str  策略 ID
+      symbol      : str  标的代码
+      signal_type : str  信号类型（如 ma_cross）
+    """
+    event_type: Union[EventType, str] = EventType.SIGNAL_GENERATED
+    strategy_id: str = ""
+    symbol: str = ""
+    signal_type: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = super().to_dict()
+        d.update({
+            "strategy_id": self.strategy_id,
+            "symbol": self.symbol,
+            "signal_type": self.signal_type,
+        })
+        return d
+
+
+@dataclass
+class OrderEvent(ChainEvent):
+    """
+    订单事件（构造时传 EventType.ORDER_SUBMIT/FILLED/PARTIAL/CANCELLED/REJECTED
+    之一）——A-3 引擎逐笔订单埋点载体；status 与 event_type 同源冗余存证。
+
+    附加字段：
+      symbol        : str  标的代码
+      status        : str  订单状态（submitted/filled/partial/cancelled/rejected）
+      reject_reason : str  拒单原因（REJECTED 时）
+    """
+    event_type: Union[EventType, str] = EventType.ORDER_SUBMIT
+    symbol: str = ""
+    status: str = ""
+    reject_reason: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = super().to_dict()
+        d.update({
+            "symbol": self.symbol,
+            "status": self.status,
+            "reject_reason": self.reject_reason,
+        })
+        return d
+
+
+@dataclass
+class PositionUpdateEvent(ChainEvent):
+    """
+    持仓更新事件（EventType.POSITION_UPDATE）——A-3 持仓变化埋点载体。
+
+    附加字段：
+      symbol    : str   标的代码
+      side      : str   方向（buy/sell）
+      quantity  : float 变化数量（正=增持，负=减持）
+      avg_price : float 更新后持仓均价
+    """
+    event_type: Union[EventType, str] = EventType.POSITION_UPDATE
+    symbol: str = ""
+    side: str = ""
+    quantity: float = 0.0
+    avg_price: float = 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = super().to_dict()
+        d.update({
+            "symbol": self.symbol,
+            "side": self.side,
+            "quantity": self.quantity,
+            "avg_price": self.avg_price,
+        })
+        return d
+
+
+@dataclass
+class SystemErrorEvent(ChainEvent):
+    """
+    系统错误事件（EventType.SYSTEM_ERROR）——A-3 8 类事件之一；
+    交易链路异常时仍携带四元组（可定位到出错信号/订单/成交）。
+
+    附加字段：
+      error     : str  错误信息
+      component : str  出错组件（如 engine/broker/risk）
+    """
+    event_type: Union[EventType, str] = EventType.SYSTEM_ERROR
+    error: str = ""
+    component: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = super().to_dict()
+        d.update({
+            "error": self.error,
+            "component": self.component,
+        })
+        return d
+
+
+# ═══════════════════════════════════════════════
 #  数据质量事件定义（阶段9新增）
 # ═══════════════════════════════════════════════
 
@@ -1111,6 +1273,49 @@ class EventBus:
     # ═══════════════════════════════════════════
     #  类型化发布方法（阶段9新增）
     # ═══════════════════════════════════════════
+
+    def publish_chain(
+        self,
+        event: ChainEvent,
+        require_event_ts: bool = False,
+    ) -> int:
+        """
+        发布交易链路事件（BASE-4 事件链路 id 规范：统一入口 + 四元组校验）
+
+        Parameters
+        ----------
+        event : ChainEvent
+            链路事件（SignalEvent/OrderEvent/PositionUpdateEvent/SystemErrorEvent）
+        require_event_ts : bool
+            是否强制 event_ts 非空。默认 False：缺失记 warning 仍发布
+            （A-3 埋点过渡期不阻断）；True：缺失记 error 并返回 0（不发布）。
+
+        Returns
+        -------
+        int : 触发的处理器数量（强制模式缺 event_ts 时为 0）
+
+        Raises
+        ------
+        TypeError : event 不是 ChainEvent 子类时抛出（防误用普通 Event）
+        """
+        if not isinstance(event, ChainEvent):
+            raise TypeError(
+                f"publish_chain 仅接受 ChainEvent，收到 {type(event).__name__}"
+            )
+        missing = event.missing_link_ids()
+        if event.event_ts is None:
+            if require_event_ts:
+                logger.error(
+                    f"[chain] 发布拒绝：{event.type_name} 缺 event_ts"
+                    f"（缺失 {missing}），业务发生时刻必须由发布方填写"
+                )
+                return 0
+            logger.warning(
+                f"[chain] 发布 {event.type_name} 缺 event_ts（缺失 {missing}），"
+                f"请发布方补填业务发生时刻（防未来红线，禁止用未来时间戳）"
+            )
+        logger.info(f"[chain] 发布 {event.type_name}: {event.link_ids()}")
+        return self.publish(event)
 
     def publish_data_quality(
         self,
@@ -2103,6 +2308,60 @@ def _run_self_test() -> int:
     for e in es:
         bus_cmp2.publish(e)
     check("批量 vs 逐条 接收总数一致", cnt_a["n"] == cnt_b["n"] == 4, f"batch={cnt_a['n']}, one_by_one={cnt_b['n']}")
+
+    # 9. 交易链路事件（BASE-4 事件链路 id 规范）
+    chain_recv: List[Event] = []
+    bus_chain = EventBus()
+    bus_chain.subscribe("*", lambda e: chain_recv.append(e))
+    sig = SignalEvent(
+        signal_id="ma_cross:000001.SZ:2026-10-05:ma_cross",
+        symbol="000001.SZ",
+        strategy_id="ma_cross",
+        signal_type="cross_up",
+        event_ts=1700000000.0,
+    )
+    d = sig.to_dict()
+    check(
+        "SignalEvent 四元组序列化",
+        d["signal_id"].startswith("ma_cross:000001.SZ")
+        and d["event_ts"] == 1700000000.0
+        and d["event_type"] == "strategy.signal_generated",
+        f"{d.get('signal_id')}",
+    )
+    ord_ev = OrderEvent(
+        event_type=EventType.ORDER_FILLED,
+        signal_id=sig.signal_id,       # 链路连续：同 signal_id
+        order_id=sig.signal_id,        # Signal.to_order 幂等派生
+        trade_id="T_1001",
+        event_ts=1700000000.5,
+        symbol="000001.SZ",
+        status="filled",
+    )
+    check(
+        "OrderEvent 链路贯穿同 signal_id",
+        ord_ev.signal_id == sig.signal_id and ord_ev.order_id == sig.signal_id,
+        f"{ord_ev.order_id}",
+    )
+    bus_chain.publish_chain(sig)
+    bus_chain.publish_chain(ord_ev)
+    check(
+        "publish_chain 发布两事件均送达",
+        len(chain_recv) == 2 and all(ev.signal_id == sig.signal_id for ev in chain_recv),
+        f"recv={len(chain_recv)}",
+    )
+    bad = ChainEvent(event_type="test.chain")  # event_type 必填（防御：链路事件类型必须明确）
+    check(
+        "missing_link_ids 识别四缺",
+        bad.missing_link_ids() == ["signal_id", "order_id", "trade_id", "event_ts"],
+        f"{bad.missing_link_ids()}",
+    )
+    rejected = bus_chain.publish_chain(bad, require_event_ts=True)
+    check("require_event_ts 拒绝发布缺时间戳事件", rejected == 0, f"triggered={rejected}")
+    try:
+        bus_chain.publish_chain(Event(EventType.TICK))  # type: ignore[arg-type]
+        check("publish_chain 拒绝非链路事件", False, "未抛 TypeError")
+    except TypeError:
+        check("publish_chain 拒绝非链路事件", True, "TypeError")
 
     print("=" * 60)
     if failures:
