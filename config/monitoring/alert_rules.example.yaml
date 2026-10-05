@@ -1,0 +1,46 @@
+# config/monitoring/alert_rules.example.yaml
+# ══════════════════════════════════════════════════════════════════
+# P0-6 监控即代码：告警规则配置模板（真实配置复制为 alert_rules.yaml，不入库）
+# 依据：《量化系统监控模块施工总清单_V1.2.md》P0-6（告警规则落 yaml 版本化）
+# 级别按 P0-3《告警分级.md》（P0=1分钟/P1=5分钟/P2=15分钟/P3=次日）；
+# 阈值一律引用 P0-2 monitoring.slo，禁止在此自定义；runbook 引用 P0-4 模板文件
+# ══════════════════════════════════════════════════════════════════
+
+alert_rules:
+  # ── P0：资金异常 / 风控击穿 / 交易中断（1 分钟响应，必挂 Runbook）──
+  - rule: reconcile_diff_critical
+    level: P0
+    metric: reconcile_diff_amount_cny
+    condition: "abs(value) > slo.reconciliation.realtime_diff_tolerance"   # 容差=0 硬约束
+    channel: [log, console, mail, webhook]
+    runbook: docs/监控档案/runbooks/Runbook模板.md
+
+  - rule: market_quote_stall
+    level: P0
+    metric: market_quote_delay_p99_ms
+    condition: "value > slo.market.quote_delay_p99_ms * 3"
+    channel: [log, console, mail, webhook]
+    runbook: docs/监控档案/runbooks/Runbook模板.md
+
+  - rule: engine_heartbeat_dead
+    level: P0
+    metric: engine_heartbeat_miss_count
+    condition: "value >= slo.engine_heartbeat.consecutive_misses"   # 5×10s<60s 硬约束
+    channel: [log, console, mail, webhook]
+    runbook: docs/监控档案/runbooks/Runbook模板.md
+
+  # ── P1：核心策略异常 / 行情中断 / 大量拒单（5 分钟响应，必挂 Runbook）──
+  - rule: trade_order_reject_surge
+    level: P1
+    metric: trade_order_reject_rate_pct
+    condition: "value > slo.trading.order_reject_rate_max"
+    channel: [log, console, webhook]
+    runbook: docs/监控档案/runbooks/Runbook模板.md
+
+  # ── P2：性能退化 / 数据延迟（15 分钟响应）──
+  - rule: data_freshness_gap
+    level: P2
+    metric: data_freshness_gap_s
+    condition: "value > slo.data.freshness_max_seconds"
+    channel: [log, console]
+    runbook: docs/监控档案/runbooks/Runbook模板.md

@@ -1,0 +1,50 @@
+# config/monitoring/dashboard.example.yaml
+# ══════════════════════════════════════════════════════════════════
+# P0-6 监控即代码：仪表盘配置模板（真实配置复制为 dashboard.yaml，不入库）
+# 依据：《量化系统监控模块施工总清单_V1.2.md》P0-6（仪表盘落 yaml 版本化）
+# 指标名必须符合 P0-5《指标规范.md》命名（领域_对象_动作_单位），阈值引用 P0-2 monitoring.slo
+# ══════════════════════════════════════════════════════════════════
+
+dashboards:
+  - id: monitor_overview
+    title: 监控中心总览（A-11）
+    refresh_seconds: 30
+    panels:
+      - id: market_quote_delay
+        title: 行情延迟 P99
+        metric: market_quote_delay_p99_ms
+        chart: line
+      - id: data_freshness
+        title: 数据新鲜度缺口
+        metric: data_freshness_gap_s
+        chart: line
+      - id: risk_limit_usage
+        title: 限额使用率
+        metric: risk_position_limit_usage_pct
+        chart: gauge
+        thresholds: { warn: 0.80, alert: 0.95 }   # 引用 P0-2 slo.risk
+      - id: trade_order_reject
+        title: 订单拒绝率
+        metric: trade_order_reject_rate_pct
+        chart: line
+      - id: portfolio_equity
+        title: 权益曲线
+        metric: portfolio_equity_cny
+        chart: line
+      - id: engine_heartbeat
+        title: 引擎心跳
+        metric: engine_heartbeat_miss_count
+        chart: line
+
+  - id: monitor_reconcile
+    title: 对账驾驶舱（A-16）
+    refresh_seconds: 60
+    panels:
+      - id: reconcile_diff
+        title: 对账差异
+        metric: reconcile_diff_amount_cny
+        chart: table
+      - id: margin_usage
+        title: 保证金占用
+        metric: portfolio_margin_usage_pct
+        chart: gauge

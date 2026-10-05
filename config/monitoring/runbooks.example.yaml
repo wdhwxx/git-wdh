@@ -1,0 +1,37 @@
+# config/monitoring/runbooks.example.yaml
+# ══════════════════════════════════════════════════════════════════
+# P0-6 监控即代码：Runbook 配置模板（真实配置复制为 runbooks.yaml，不入库）
+# 依据：《量化系统监控模块施工总清单_V1.2.md》P0-6（Runbook 落 yaml 版本化）
+# 每条 P0/P1 告警绑定一条 Runbook 条目；模板字段见 docs/监控档案/runbooks/Runbook模板.md（P0-4）
+# ══════════════════════════════════════════════════════════════════
+
+runbooks:
+  - rule: reconcile_diff_critical
+    title: 持仓/资金对账差异（P0）
+    level: P0
+    template: docs/监控档案/runbooks/Runbook模板.md
+    key_steps:
+      - 查看对账驾驶舱差异明细（A-16）
+      - 核对券商端持仓/资金与本地 portfolio 差异
+      - 定位差异来源（成交回报/持仓更新/撤单）
+    rollback: 暂停开仓直至差异归零（容差=0 硬约束）
+
+  - rule: market_quote_stall
+    title: 行情源断流（P0）
+    level: P0
+    template: docs/监控档案/runbooks/Runbook模板.md
+    key_steps:
+      - 行情活性面板确认 staleness
+      - 数据源连通性探活（health_check）
+      - 切换备用行情源
+    rollback: 恢复行情源后确认 staleness 刷新
+
+  - rule: engine_heartbeat_dead
+    title: 引擎僵死（P0）
+    level: P0
+    template: docs/监控档案/runbooks/Runbook模板.md
+    key_steps:
+      - get_status 连续无响应确认（N×间隔<60s）
+      - 检查进程/线程/资源占用
+      - 重启引擎并核对状态
+    rollback: 重启后确认心跳恢复、告警自动置 resolved

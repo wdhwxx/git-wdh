@@ -1,0 +1,37 @@
+# config/monitoring/collectors.example.yaml
+# ══════════════════════════════════════════════════════════════════
+# P0-6 监控即代码：采集配置模板（真实配置复制为 collectors.yaml，不入库）
+# 依据：《量化系统监控模块施工总清单_V1.2.md》P0-6（采集配置落 yaml 版本化）
+# 指标名符合 P0-5《指标规范.md》；只采集已发生数据（防未来）；周期参数外置禁止硬编码
+# ══════════════════════════════════════════════════════════════════
+
+collectors:
+  - collector: market_metrics
+    source: data_feed 事件（A-3 引擎事件接入后）
+    interval_seconds: 10
+    metrics: [market_quote_delay_p99_ms]
+    retention_days: 30
+
+  - collector: data_quality_metrics
+    source: data_access/cleaner 数据质量事件
+    interval_seconds: 60
+    metrics: [data_freshness_gap_s]
+    retention_days: 30
+
+  - collector: trade_metrics
+    source: 订单/成交事件（ORDER_FILLED / ORDER_REJECTED）
+    interval_seconds: 30
+    metrics: [trade_order_reject_rate_pct]
+    retention_days: 90
+
+  - collector: portfolio_metrics
+    source: portfolio 状态快照（盘后对账 cron 触发表）
+    interval_seconds: 300
+    metrics: [portfolio_equity_cny, reconcile_diff_amount_cny]
+    retention_days: 90
+
+  - collector: engine_metrics
+    source: 引擎心跳探活（A-5）
+    interval_seconds: 10
+    metrics: [engine_heartbeat_miss_count]
+    retention_days: 30
