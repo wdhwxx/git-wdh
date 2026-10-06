@@ -254,6 +254,11 @@ class BuiltinMetrics:
     # 交易异常告警闭环（A-8：事件到达即同步计数，按事件类型/级别打标签）
     TRADE_EXCEPTION_ALERTS_TOTAL = "trade_exception_alerts_total"
 
+    # 交易所限流/频控监控（A-12：按动作类型累计计数，进 /api/metrics）
+    RATE_LIMIT_ORDERS_TOTAL = "rate_limit_orders_total"
+    RATE_LIMIT_QUERIES_TOTAL = "rate_limit_queries_total"
+    RATE_LIMIT_CANCELS_TOTAL = "rate_limit_cancels_total"
+
     # 质量等级数值映射（0=excellent, 1=good, 2=fair, 3=poor, 4=critical）
     QUALITY_GRADE_MAP = {
         "excellent": 0,
@@ -487,6 +492,14 @@ class MetricsCollector:
                       "Total trade exception events triggering alerts "
                       "(order.rejected/order.failed/fill.report_error/emergency.liquidation)",
                       label_names=["event_type", "level"])
+
+        # 交易所限流/频控监控（A-12：报单/查询/撤单累计计数，供 /api/metrics 观测窗口压力）
+        self.register(BuiltinMetrics.RATE_LIMIT_ORDERS_TOTAL, MetricType.COUNTER,
+                      "Total order submissions observed by exchange rate-limit monitor (cumulative)")
+        self.register(BuiltinMetrics.RATE_LIMIT_QUERIES_TOTAL, MetricType.COUNTER,
+                      "Total quote/query requests observed by exchange rate-limit monitor (cumulative)")
+        self.register(BuiltinMetrics.RATE_LIMIT_CANCELS_TOTAL, MetricType.COUNTER,
+                      "Total cancel requests observed by exchange rate-limit monitor (cumulative)")
 
         return self
 

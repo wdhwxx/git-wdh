@@ -95,3 +95,11 @@ monitoring:
     margin:
       strong_flat_distance_pct: ~      # 强平价距离百分比（接近强平 → P0 告警），PENDING_CAL
       funding_rate_threshold: ~        # 资金费率阈值（持仓隔夜成本），PENDING_CAL
+
+    # ── 交易所限流/频控（A-12 滑动窗口计数报单/查询/撤单；接近阈值 P1 预警+到阈值前自动暂停开仓）──
+    exchange_rate_limit:
+      window_seconds: 60              # 滑动窗口长度（秒，=1分钟口径），LOCKED(初值)
+      order_per_minute: 300           # 每分钟报单上限（接近即 P1 预警），LOCKED(初值，实盘按交易所档位校准)
+      query_per_minute: 600            # 每分钟查询/行情拉取上限，LOCKED(初值)
+      cancel_per_minute: 300           # 每分钟撤单上限，LOCKED(初值)
+      warn_ratio: 0.8                 # 达上限此比例即 P1 预警 + 自动暂停开仓（到阈值前制动），LOCKED(初值)
