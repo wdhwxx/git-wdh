@@ -89,6 +89,72 @@ class TestBuildMonitoringConfig:
         assert DEFAULT_MONITORING["alerts"]["store_enabled"] is True
         assert DEFAULT_MONITORING["alerts"]["dedup_window_seconds"] == 300.0
 
+    # ── D-1（回写#243）：action_engine 配置块 ──────────────────
+
+    def test_action_engine_defaults(self) -> None:
+        cfg = _build_monitoring_config({})
+        ae = cfg["action_engine"]
+        assert ae["enabled"] is True
+        assert ae["mode"] == "shadow"          # 缺省安全模式：只读建议
+        assert ae["cooldown_seconds"] == 300.0
+        assert ae["approval_timeout_seconds"] == 3600.0
+        assert ae["interval_seconds"] == 30.0
+        assert ae["auto_register_rules"] is False
+        assert ae["rules"] == []
+
+    def test_action_engine_override_effective(self) -> None:
+        cfg = _build_monitoring_config(
+            {
+                "action_engine": {
+                    "mode": "auto",
+                    "cooldown_seconds": 60,
+                    "approval_timeout_seconds": 120.0,
+                    "interval_seconds": 10,
+                    "auto_register_rules": True,
+                    "rules": [{"rule_id": "r1", "action": {"type": "notify"}}],
+                }
+            }
+        )
+        ae = cfg["action_engine"]
+        assert ae["mode"] == "auto"
+        assert ae["cooldown_seconds"] == 60.0
+        assert ae["approval_timeout_seconds"] == 120.0
+        assert ae["interval_seconds"] == 10.0
+        assert ae["auto_register_rules"] is True
+        assert ae["rules"] == [{"rule_id": "r1", "action": {"type": "notify"}}]
+
+    def test_action_engine_invalid_falls_back(self) -> None:
+        cfg = _build_monitoring_config(
+            {
+                "action_engine": {
+                    "mode": "panic",                # 非法模式回退 shadow
+                    "cooldown_seconds": -5,         # 负数回退
+                    "approval_timeout_seconds": "x",
+                    "auto_register_rules": "yes",   # 字符串 true 生效
+                    "rules": "not-list",            # 非 list 回退空
+                }
+            }
+        )
+        ae = cfg["action_engine"]
+        assert ae["mode"] == "shadow"
+        assert ae["cooldown_seconds"] == 300.0
+        assert ae["approval_timeout_seconds"] == 3600.0
+        assert ae["auto_register_rules"] is True
+        assert ae["rules"] == []
+
+    def test_action_engine_rules_filter_non_dict(self) -> None:
+        cfg = _build_monitoring_config(
+            {"action_engine": {"rules": [{"rule_id": "ok"}, 42, "bad"]}}
+        )
+        assert cfg["action_engine"]["rules"] == [{"rule_id": "ok"}]
+
+    def test_action_engine_from_real_yaml(self) -> None:
+        from myquant.core.settings import get_monitoring_config
+        ae = get_monitoring_config()["action_engine"]
+        assert ae["enabled"] is True
+        assert ae["mode"] == "shadow"
+        assert ae["rules"] == []
+
 
 # ═══════════════════════════════════════════
 #  2. 真实 config/settings.yaml 验收（BASE-3）

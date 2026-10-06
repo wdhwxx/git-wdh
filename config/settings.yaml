@@ -37,6 +37,18 @@ monitoring:
     governance_meta_cooldown_seconds: 120             # R-08 元监控独立冷却窗口（秒，与业务 dedup 300s 隔离，meta:* 专用）
     governance_baseline_noise_reduction_enabled: false # 动态基线降噪开关（集成 C-6：值在动态基线内则抑制静态阈值误报；默认关，C-6 实例就绪后开启）
 
+  # ── 自动化响应编排（D-1 规则引擎 · 三阶段安全模型 shadow→confirm→auto）──
+  # 安全原则（评估强制）：所有自动化动作 shadow 只读先行 → 人工确认 → 自动执行；
+  # Kill Switch 独立于规则引擎；阈值/模式全部外置于此（R-04），禁止代码内自定义。
+  action_engine:
+    enabled: true                    # 引擎总开关（关闭时 evaluate/run_cycle 不执行任何动作）
+    mode: shadow                     # 全局默认模式：shadow 只读建议 → confirm 人工确认 → auto 自动执行
+    cooldown_seconds: 300            # 同 key 动作冷却窗口（秒，防抖，窗口内同 key 跳过）
+    approval_timeout_seconds: 3600   # 人工确认超时（秒，confirm 模式 pending 超时自动作废）
+    interval_seconds: 30             # run_cycle 周期（秒，调度器装配用）
+    auto_register_rules: false       # 是否自动注册 rules 列表（监控即代码 P0-6；默认关，规则由部署方显式配置）
+    rules: []                        # 规则 yaml 列表（默认空，不编造业务规则）
+
   # ── SLO 数值阈值锁定表（R-04 唯一真源；LOCKED 项实盘后不得改动，
   #    PENDING_CAL 项待实盘校准后填死，禁止编造）──
   slo:

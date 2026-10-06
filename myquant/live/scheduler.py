@@ -1670,6 +1670,8 @@ def attach_engine(
     enable_daily_model_drift: bool = True,
     daily_model_drift_cron: str = "30 4 * * *",
     pause_on_critical: bool = False,
+    enable_action_engine: bool = False,
+    action_engine_interval: Optional[float] = None,
 ) -> Dict[str, str]:
     """
     将实盘引擎一键挂载到调度器：自动注册巡检任务 + 收盘日报任务 + 断线补单对账任务。
@@ -2034,6 +2036,61 @@ def attach_engine(
             cron_expr=daily_model_drift_cron,
         )
 
+    if enable_action_engine:
+        # D-1（回写#243）：自动化响应编排规则引擎——周期巡检未确认告警 → 规则评估 →
+        # shadow/confirm/auto 三阶段安全模型执行。装配默认关闭（自动化安全先行，需显式开启）。
+        # 模式/冷却/审批超时/规则全部读 settings.yaml monitoring.action_engine（R-04 外置）；
+        # 审计绑定 AuditLogStore（BASE-7，失败降级内存留痕不阻断）；初始化失败记 warning 不阻断装配。
+        try:
+            from myquant.monitoring.action_engine import (
+                ActionEngine,
+                load_action_engine_config,
+            )
+            ae_cfg = load_action_engine_config()
+            if ae_cfg.get("enabled", True):
+                audit_store = None
+                try:
+                    from myquant.monitoring.audit_log import AuditLogStore
+                    audit_store = AuditLogStore()
+                except Exception as aexc:  # noqa: BLE001
+                    logger.warning(f"[attach] D-1 审计存储不可用（内存留痕）: {aexc}")
+                action_engine = ActionEngine(
+                    mode=str(ae_cfg.get("mode", "shadow")),
+                    cooldown_seconds=float(
+                        ae_cfg.get("cooldown_seconds", 300.0)
+                    ),
+                    approval_timeout_seconds=float(
+                        ae_cfg.get("approval_timeout_seconds", 3600.0)
+                    ),
+                    audit_log=audit_store,
+                )
+                if ae_cfg.get("auto_register_rules") and isinstance(
+                    ae_cfg.get("rules"), list
+                ):
+                    action_engine.load_rules(ae_cfg["rules"])
+
+                def _action_engine_job(**kw) -> None:  # noqa: ARG001
+                    summary = action_engine.run_cycle()
+                    if summary["executed"] or summary["blocked"] or summary["proposed"]:
+                        logger.info(f"[attach] D-1 动作编排周期: {summary}")
+
+                interval = (
+                    float(action_engine_interval)
+                    if action_engine_interval is not None
+                    else float(ae_cfg.get("interval_seconds", 30.0))
+                )
+                task_ids["action_engine"] = scheduler.add_interval_task(
+                    _action_engine_job,
+                    name="自动化响应编排",
+                    interval_seconds=interval,
+                )
+                logger.info(
+                    f"[attach] D-1 自动化响应编排已装配: mode={action_engine.mode}, "
+                    f"rules={len(action_engine.get_rules())}"
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[attach] D-1 自动化响应编排装配失败（不阻断装配）: {e}")
+
     logger.info(
         f"[attach] 实盘引擎已挂载: patrol={task_ids.get('patrol')}, "
         f"daily_report={task_ids.get('daily_report')}, "
@@ -2041,7 +2098,8 @@ def attach_engine(
         f"reconcile={task_ids.get('reconcile')}, "
         f"resend_pending={task_ids.get('resend_pending')}, "
         f"monthly_governance={task_ids.get('monthly_governance')}, "
-        f"daily_model_drift={task_ids.get('daily_model_drift')}"
+        f"daily_model_drift={task_ids.get('daily_model_drift')}, "
+        f"action_engine={task_ids.get('action_engine')}"
     )
     return task_ids
 

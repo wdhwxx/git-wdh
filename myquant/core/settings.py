@@ -19,7 +19,7 @@ import copy
 import os
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from myquant.core.logger import get_logger
 
@@ -296,6 +296,15 @@ DEFAULT_MONITORING: Dict[str, Any] = {
         "escalation_time_seconds": 300.0,
         "escalation_enabled": True,
     },
+    "action_engine": {                           # D-1 自动化响应编排（三阶段安全模型 R-04 外置）
+        "enabled": True,
+        "mode": "shadow",                        # shadow 只读建议 → confirm 人工确认 → auto 自动执行
+        "cooldown_seconds": 300.0,               # 同 key 动作冷却窗口（防抖）
+        "approval_timeout_seconds": 3600.0,      # 人工确认超时（confirm 模式 pending 超时自动作废）
+        "interval_seconds": 30.0,                # run_cycle 周期（调度器装配用）
+        "auto_register_rules": False,            # 是否自动注册 rules 列表（监控即代码 P0-6）
+        "rules": [],                             # 规则 yaml 列表（默认空，不编造业务规则）
+    },
     "slo": {},                                   # SLO 阈值由 settings.yaml 提供；缺省为空（不编造阈值）
 }
 
@@ -366,6 +375,20 @@ def _build_monitoring_config(raw: Dict[str, Any]) -> Dict[str, Any]:
         logger.warning(f"monitoring.{key} 非法：{val!r}，回退默认 {fallback}")
         return fallback
 
+    def _choice(key: str, allowed: Tuple[str, ...], fallback: str) -> str:
+        val = Settings._get_nested(result, key)
+        if isinstance(val, str) and val in allowed:
+            return val
+        logger.warning(f"monitoring.{key} 非法：{val!r}，回退默认 {fallback}")
+        return fallback
+
+    def _list(key: str, fallback: List[Any]) -> List[Any]:
+        val = Settings._get_nested(result, key)
+        if isinstance(val, list):
+            return val
+        logger.warning(f"monitoring.{key} 非法（须为 list），回退默认")
+        return list(fallback)
+
     result["patrol_interval"] = _positive_int(
         "patrol_interval", DEFAULT_MONITORING["patrol_interval"]
     )
@@ -405,6 +428,39 @@ def _build_monitoring_config(raw: Dict[str, Any]) -> Dict[str, Any]:
         "escalation_enabled": _bool(
             "alerts.escalation_enabled", DEFAULT_MONITORING["alerts"]["escalation_enabled"]
         ),
+    }
+    ae = result.get("action_engine") or {}
+    ae_rules: List[Any] = _list("action_engine.rules", [])
+    clean_rules: List[Dict[str, Any]] = []
+    for i, r in enumerate(ae_rules):
+        if not isinstance(r, dict):
+            logger.warning("monitoring.action_engine.rules[%d] 非 dict，丢弃", i)
+        else:
+            clean_rules.append(r)
+    result["action_engine"] = {
+        "enabled": _bool("action_engine.enabled", DEFAULT_MONITORING["action_engine"]["enabled"]),
+        "mode": _choice(
+            "action_engine.mode",
+            ("shadow", "confirm", "auto"),
+            DEFAULT_MONITORING["action_engine"]["mode"],
+        ),
+        "cooldown_seconds": _positive_float(
+            "action_engine.cooldown_seconds",
+            DEFAULT_MONITORING["action_engine"]["cooldown_seconds"],
+        ),
+        "approval_timeout_seconds": _positive_float(
+            "action_engine.approval_timeout_seconds",
+            DEFAULT_MONITORING["action_engine"]["approval_timeout_seconds"],
+        ),
+        "interval_seconds": _positive_float(
+            "action_engine.interval_seconds",
+            DEFAULT_MONITORING["action_engine"]["interval_seconds"],
+        ),
+        "auto_register_rules": _bool(
+            "action_engine.auto_register_rules",
+            DEFAULT_MONITORING["action_engine"]["auto_register_rules"],
+        ),
+        "rules": clean_rules,
     }
     slo = result.get("slo")
     if slo is not None and not isinstance(slo, dict):
