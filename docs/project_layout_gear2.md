@@ -438,6 +438,8 @@ Pythonwdhmm/
 
 │   ├── 验收_B包保钱包.py            # ✨【回写#230】B-10 B 包保钱包验收薄入口：argparse（--out 默认 docs/监控档案/B包保钱包验收_20261006.json + --db + --mode）+ find_project_root + 调 myquant/monitoring/b_acceptance.py（B-1~B-9 九项验收），控制台逐项摘要 + JSON 报告；业务逻辑零写入脚本
 
+│   ├── 验收_C包保Alpha.py           # ✨【回写#241】C-12 C 包保 Alpha 验收薄入口：argparse（--out 默认 docs/监控档案/C包保Alpha验收_<日期>.json + --db + --mode）+ find_project_root + 调 myquant/monitoring/c_acceptance.py（C-1~C-11 验收项），控制台逐项摘要 + JSON 报告；业务逻辑零写入脚本
+
 │   ├── 数据库迁移.py                  # ✨【第6项】Alembic迁移中文入口：upgrade/downgrade/current/history/stamp/check/init，支持--db指定数据库路径
 
 │   ├── 数据库初始化.py                # 数据库初始化：调用database.schema与migrations创建表结构
@@ -567,6 +569,22 @@ Pythonwdhmm/
     │   │   ├── test_business_cabin.py # ✨【回写#228】B-8 驾驶舱测试（9 项）：四键聚合（reconciliation/pnl/limit_usage/execution）/对账冻结/PnL 同源/限额 GAUGE+配置/执行 summary+兜底/空数据防御/API 与看板同源✅已完成
 
     │   │   ├── test_b_acceptance.py # ✨【回写#230】B-10 B 包验收测试（13 项）：九项检查逐项断言/隔离环境重建跨 run 去重/阈值真源引用/防未来时间戳/异常如实记录不吞✅已完成
+
+    │   │   ├── test_signal_decay.py # ✨【回写#233】C-4 信号衰减监控测试：信号后收益滚动 IC/信号密度下降/连续无效信号占比计算；衰减超阈 P1/P2 预警（显式注入阈值演示，配置 None 不告警不编造）；衰减曲线数据可输出；防未来（只消费已发生信号-收益对）；防御校验✅已完成
+
+    │   │   ├── test_attribution.py # ✨【回写#234】C-5 归因分析测试：策略/因子/标的/时段四维归因计算；实盘-回测归因对比差异；日报归因摘要结构；backtest/metrics.py 归因侧函数；防未来；防御校验✅已完成
+
+    │   │   ├── test_dynamic_baseline.py # ✨【回写#235】C-6 动态基线测试：滚动基线（均值/波动窗口）/同环比/多条件组合判定；异常输出 anomaly 事件；冷启动静态阈值兜底；regime 自适应切换；阈值 None 不告警不编造；防未来（只消费历史点）✅已完成
+
+    │   │   ├── test_incident_context.py # ✨【回写#236】C-7 根因分析测试：同窗告警/指标/变更/日志聚合 incident；依赖抑制（底层抑制上层）；EVENT 事件路径（断流→单条根因告警非风暴）；防未来时间戳；防御校验✅已完成
+
+    │   │   ├── test_capacity.py # ✨【回写#237】C-8 容量预测测试：数据量增长预测/资源占用估算/策略容量上限；容量不足 P2 预警（阈值 None 不告警不编造）；指标进看板；防未来；防御校验✅已完成
+
+    │   │   ├── test_alert_governance.py # ✨【回写#238】C-9 告警治理与降噪测试：聚合分组/依赖抑制/元监控独立冷却窗口（R-08）/TP/FP/FN classification 自动统计（P0-8 口径 R-01）/升级机制✅已完成
+
+    │   │   ├── test_signal_consistency.py # ✨【回写#239】C-10 回测实盘信号一致性测试：逐笔对比（方向/价格/时间错配）偏差率；偏差超阈→告警附明细（阈值 PENDING_CAL=None 不告警不编造，R-04/R-05）；防未来；防御校验✅已完成
+
+    │   │   ├── test_c_acceptance.py # ✨【回写#241】C-12 C 包验收测试：C-1~C-11 逐项断言/隔离环境重建跨 run 去重/阈值真源引用/防未来时间戳/异常如实记录不吞✅已完成
 
     │   │   ├── test_alert_escalation.py # ✨【回写#214】A-10 告警分级与升级测试（20 项）：P0~P3 统一映射与非法值防御、runbook_id 显式字段提升/默认映射/落库贯通、超时未确认 WARNING→ERROR 且落库 acked+escalated（无通道仍升级补缺）、已确认/已解决/未超时/开关关闭不重复升级、A-7 对账事件装配接线✅已完成
 
@@ -980,7 +998,7 @@ Pythonwdhmm/
 
     │   ├── data_loader.py            # ✨【回写#105】已迁移为兼容薄壳（re-export）：DataProviderBase + HistoricalDataProvider + require_ohlcv + EN_TO_CN_COLUMN_MAP 真实实现已于 2026-10-03 下沉至 myquant/data_access/provider.py，本文件仅做 from myquant.data_access.provider import ... 向后兼容，18 处历史调用方（run_*.py/scripts/gui/backtest 内部/tests）零改动；新代码应直接 from myquant.data_access.provider import；原注释「从processed加载，严格end_date过滤防未来」逻辑全部在 provider.py；✨【回写#72】EN_TO_CN_COLUMN_MAP 加 turnover→换手率；✨【回写#83】S1 派生量复权现算 _recompute_price_derived_metrics
 
-    │   ├── metrics.py                # 绩效指标：夏普、最大回撤、胜率、Calmar、Sortino；✨【回写#174】无基准时 alpha/beta/excess/benchmark_return 显式置 None（KP-P2-04）
+    │   ├── metrics.py                # 绩效指标：夏普、最大回撤、胜率、Calmar、Sortino；✨【回写#174】无基准时 alpha/beta/excess/benchmark_return 显式置 None（KP-P2-04）；✨【回写#234】C-5 归因分析框架——扩展归因侧绩效计算（按策略/因子/标的/时段分组的收益/风险贡献计算函数），供 monitoring/attribution.py 调用（C-5 落点）
 
     │   ├── recorder.py               # 交易记录器：成交明细、持仓变动、资金曲线
 
@@ -1205,6 +1223,20 @@ Pythonwdhmm/
     │   ├── b_acceptance.py            # ✨【回写#230】B-10 B 包保钱包验收业务逻辑：BAcceptanceRunner（隔离环境=临时 AlertStore+真实 AlertManager+真实 EventBus+临时 MetricsHistoryStore(FieldCrypto)）——B-1~B-9 九项检查（对账差异=0 可展示/PnL 防脏门+权益回放/限额分级闭环/延迟 P99 可视化/拒单率 SLO/熔断动作链/新鲜度缺口/驾驶舱四键/保证金强平闭环），阈值全部引用 get_monitoring_config() 真源（禁硬编码）；异常不吞如实记录该项失败；每次 run() 重建隔离跨 run 去重；防未来时间戳；JSON 报告结构；__main__ 自测
 │   └── data_quality_explorer.py # ✨【#S2修复】数据质量探查器（从web/dashboard.py迁移到monitoring底层，消除API依赖Web的架构倒置）：DataQualityExplorer类13方法（实时指标/清洗运行列表/运行详情/等级分布/脏数据统计/总览），纯Python数据层不依赖streamlit，API层和Web层均从此导入；数据源=CleanDataQueries+MetricsCollector；source过滤区分offline/live为实盘对接预留；✨【回写#227】B-7 数据新鲜度 SLI——DataFreshnessSli（既有类零改动追加）：新鲜度滞后 latest_lag_seconds=max(0,now−最新ts) 按标的/数据类分别（slo.data.freshness_max_seconds=60 LOCKED：>60s WARNING/>2×ERROR）；每日缺口 record_gap/gap_provider 按日聚合（gap_allowed=0 缺口即 ERROR(P1)）；因子/财务同步延迟分别设值（PENDING_CAL 未配置不告警不写指标不编造）；指标 data_freshness_lag_seconds(data_key)/data_gap_count/factor|financial_sync_delay_seconds 进 /api/metrics（懒加载）；poll()+DATA_LOADED 事件驱动；防未来（滞后/延迟截断非负）；__main__ 自测 14 项
     │   ├── rolling_performance.py    # ✨【回写#232】C-2 滚动绩效指标（周期/POLL，非 MTTD 类）：RollingPerformanceMonitor——滚动窗口（日/周/月=1/7/30 自然日 trailing）收益 return_pct、夏普 sharpe=mean/std×√252（样本<2 None）、回撤 drawdown_pct=权益路径最大峰谷、胜率 win_rate=日收益>0 占比；日内回撤/亏损（当日已发生绩效点）超 slo.strategy.intraday_drawdown_limit → WARNING（category=strategy，dedup=strategy:intraday_drawdown/loss:<name>，附值）；record() 摄入已发生 (ts,equity) 按策略归组（拒绝未来点防未来）+ replay_from_history(store, metric_name, strategy, ...) 基于 MetricsHistoryStore.query 回放（C-2 验收口径）；阈值读 slo.strategy（PENDING_CAL=None 不告警不编造）；REGISTERED_METRICS 8 项经 set_gauge(labels={"strategy":name})；__main__ 自测 15 项
+
+    │   ├── signal_decay.py           # ✨【回写#233】C-4 信号衰减监控（周期/POLL，非 MTTD 类）：SignalDecayMonitor——信号质量退化检测：信号后收益滚动 IC、信号密度下降、连续无效信号占比；衰减超阈值 → P1/P2 预警（附衰减曲线数据）；阈值读 settings.yaml monitoring.slo.signal_decay（PENDING_CAL=None 不告警不编造，验收演示显式注入阈值）；防未来（只消费已发生信号/收益对）；__main__ 自测
+
+    │   ├── attribution.py            # ✨【回写#234】C-5 归因分析框架（批任务）：AttributionAnalyzer——收益归因（策略/因子/标的/时段维度）、实盘与回测归因对比（同口径逐维差异）、归因结果进日报（摘要 dict + 可视化数据）；复用 backtest/metrics.py 绩效指标；防未来（只消费已发生收益序列）；__main__ 自测
+
+    │   ├── dynamic_baseline.py       # ✨【回写#235】C-6 动态基线+异常检测（周期/POLL）：DynamicBaseline——关键指标从静态阈值升级为滚动基线（滚动窗口均值/波动）+ 同环比 + 多条件组合判定；异常输出 anomaly 事件（time/series/value/baseline/ratio）；冷启动（历史不足）静态阈值兜底；基线随 regime 自适应（regime 标签可注入，为 D-3 打底）；阈值读 settings.yaml monitoring.slo（PENDING_CAL 不告警不编造）；__main__ 自测
+
+    │   ├── incident_context.py       # ✨【回写#236】C-7 根因分析单机版（EVENT）：IncidentContextEngine——同时间窗内相关告警/指标/最近变更/日志聚合为一次 incident；依赖抑制（底层故障抑制上层告警）；验收=一次行情断流只产生一条根因告警（事件路径验证，R-02）；防未来（只聚合已发生时间戳）；__main__ 自测
+
+    │   ├── capacity.py              # ✨【回写#237】C-8 容量预测（周期/POLL）：CapacityMonitor——数据量增长预测（历史落库趋势外推）、回测/清洗资源占用（复用 utils/memory_watcher.py）、策略容量上限；容量不足 → P2 预警；容量指标进看板（REGISTERED_METRICS + set_gauge）；阈值读 settings.yaml monitoring.slo.capacity（PENDING_CAL=None 不告警不编造）；__main__ 自测
+
+    │   ├── signal_consistency.py    # ✨【回写#239】C-10 回测实盘逐笔信号一致性（批任务）：SignalConsistencyChecker——回测信号与实盘信号逐笔对比（同参数同时间窗），偏差率监控（偏差=方向/价格/时间错配样本占比）；偏差超阈值 → 回测实盘偏差告警（附偏差明细）；阈值引用 P0-2 slo.backtest_consistency.signal_deviation_rate_max（PENDING_CAL=None 不告警不编造，R-04/R-05）；防未来（只对比已发生信号）；__main__ 自测
+
+    │   ├── c_acceptance.py          # ✨【回写#241】C-12 C 包验收业务逻辑：CAcceptanceRunner（隔离环境=临时 AlertStore+真实 AlertManager+真实 EventBus）——C-1~C-11 验收项逐项断言（漂移预警/滚动绩效/信号衰减曲线/归因对比/动态基线 anomaly/根因聚合/容量预警/降噪准确率 P0-8 口径/信号一致性），阈值全部引用 get_monitoring_config() 真源；每次 run() 重建隔离跨 run 去重；防未来时间戳；JSON 报告结构；__main__ 自测
 
     │
 
