@@ -65,6 +65,341 @@ except ImportError:
 
 
 # ═══════════════════════════════════════════════
+#  A-11 监控中心：敏感字段脱敏（P0-7 §3）
+# ═══════════════════════════════════════════════
+
+# 敏感字段名模式（命中即按 P0-7 规则脱敏；小写子串匹配）
+_ACCOUNT_KEY_PATTERNS: tuple = ("account", "broker_account", "fund_account", "cash_account")
+_CREDENTIAL_KEY_PATTERNS: tuple = (
+    "api_key", "apikey", "secret", "token", "password", "passwd", "credential", "private_key",
+)
+_BALANCE_KEY_PATTERNS: tuple = (
+    "balance", "equity", "capital", "position_value", "position_amount",
+    "available_cash", "total_assets", "frozen_cash", "pnl",
+)
+
+
+def _lower_key(key: str) -> str:
+    """归一化字段名（小写，去空白）。"""
+    return (key or "").strip().lower()
+
+
+def mask_sensitive_fields(details: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    告警详情敏感字段脱敏（P0-7 §3，看板/告警防泄露）。
+
+    规则（对齐 docs/监控档案/安全合规.md §3）：
+      - 券商账号类（account/broker_account...）：仅保留后 4 位
+      - API 密钥/凭证类（api_key/secret/token/password...）：全部掩码 `****`
+      - 资金/持仓类（balance/equity/capital/position_value...）：聚合展示，
+        明细值掩码为 `****`（明细查看需更高权限，v1 看板默认脱敏视图）
+      - 其余字段：原样透传
+
+    防未来：脱敏只作用于当前已落库的告警 details，不产生任何预测。
+
+    Parameters
+    ----------
+    details : dict | None
+        告警 details 原始字典（None 返回空 dict）
+
+    Returns
+    -------
+    dict : 脱敏后的新字典（不修改入参）
+    """
+    out: Dict[str, Any] = {}
+    if not isinstance(details, dict):
+        return out
+    for key, value in details.items():
+        k = _lower_key(str(key))
+        if any(p in k for p in _CREDENTIAL_KEY_PATTERNS):
+            out[key] = "****"
+        elif any(p in k for p in _ACCOUNT_KEY_PATTERNS):
+            s = str(value) if value is not None else ""
+            out[key] = ("****" + s[-4:]) if len(s) >= 4 else "****"
+        elif any(p in k for p in _BALANCE_KEY_PATTERNS):
+            out[key] = "****"
+        elif isinstance(value, dict):
+            out[key] = mask_sensitive_fields(value)  # 嵌套字典递归脱敏
+        else:
+            out[key] = value
+    return out
+
+
+# ═══════════════════════════════════════════════
+#  A-11 监控中心数据提供者（纯逻辑，可单测；不依赖 streamlit）
+# ═══════════════════════════════════════════════
+
+# 交易连续状态候选指标名子串（A-4/A-5/A-6 完成后消费其指标；未完成则 graceful=unknown）
+_MARKET_ACTIVITY_HINTS: tuple = ("market_activity", "quote_recv", "tick_recv", "data_feed")
+_ENGINE_HEARTBEAT_HINTS: tuple = ("engine_heartbeat", "scheduler_heartbeat", "loop_iteration")
+_BROKER_CONN_HINTS: tuple = ("broker_connection", "broker_connected", "trade_connection")
+
+_DEFAULT_ALERT_LIMIT: int = 20
+
+
+class MonitorCenterDataProvider:
+    """
+    A-11 监控中心数据提供者。
+
+    聚合四类只读数据（全部消费"当前已发生"状态，防未来）：
+      1. 健康总览（系统级 overall + 组件级 checks，复用 HealthChecker 报告结构）
+      2. 告警列表（scope/level/category 筛选，走 AlertManager；details 脱敏）
+      3. 实盘指标卡片（MetricsCollector 已采集指标）
+      4. 交易连续状态（行情活性/引擎心跳/券商连接；指标缺失则 unknown，不伪造）
+
+    依赖全部可注入（测试用 fake）；未注入时懒加载全局单例。
+
+    Usage:
+        provider = MonitorCenterDataProvider()
+        overview = provider.get_health_overview()
+        alerts = provider.get_alerts(scope="unacknowledged")
+    """
+
+    def __init__(
+        self,
+        alert_manager: Optional[Any] = None,
+        health_checker: Optional[Any] = None,
+        metrics_collector: Optional[Any] = None,
+    ):
+        """
+        Parameters
+        ----------
+        alert_manager : AlertManager | None
+            告警管理器（None 懒加载全局单例）
+        health_checker : HealthChecker | None
+            健康检查器（None 则系统级状态回退为 unknown，不崩溃）
+        metrics_collector : MetricsCollector | None
+            指标采集器（None 懒加载全局单例）
+        """
+        self._alert_manager = alert_manager
+        self._health_checker = health_checker
+        self._metrics_collector = metrics_collector
+
+    # ── 依赖懒加载 ──
+
+    def _get_alert_manager(self) -> Any:
+        """获取告警管理器（注入优先，否则全局单例）。"""
+        if self._alert_manager is None:
+            from myquant.monitoring import get_alert_manager as _g
+            self._alert_manager = _g()
+        return self._alert_manager
+
+    def _get_collector(self) -> Any:
+        """获取指标采集器（注入优先，否则全局单例）。"""
+        if self._metrics_collector is None:
+            from myquant.monitoring import get_metrics_collector as _g
+            self._metrics_collector = _g()
+        return self._metrics_collector
+
+    # ── 1. 健康总览（系统+组件两级）──
+
+    def get_health_overview(self) -> Dict[str, Any]:
+        """
+        健康总览：系统级 overall + 组件级 checks。
+
+        复用 HealthChecker.get_summary() 报告结构（overall_status/healthy/degraded/
+        unhealthy/results）；健康检查器未注入 → 系统级 unknown，组件列表为空（不谎报）。
+
+        Returns
+        -------
+        dict : {"system": {"status", "checks_count", "healthy", "degraded", "unhealthy"},
+                "components": [{"name", "status", "message"}]}
+        """
+        if self._health_checker is None:
+            return {
+                "system": {"status": "unknown", "checks_count": 0,
+                           "healthy": 0, "degraded": 0, "unhealthy": 0},
+                "components": [],
+            }
+        try:
+            summary = self._health_checker.get_summary()
+        except Exception as e:  # 健康检查器异常：降级为 unknown，不阻断看板
+            logger.error(f"[web] 健康总览采集失败: {e}")
+            return {
+                "system": {"status": "unknown", "checks_count": 0,
+                           "healthy": 0, "degraded": 0, "unhealthy": 0},
+                "components": [],
+            }
+        components = [
+            {
+                "name": r.get("name", ""),
+                "status": r.get("status", "unknown"),
+                "message": r.get("message", ""),
+            }
+            for r in (summary.get("results") or [])
+        ]
+        return {
+            "system": {
+                "status": summary.get("overall_status", "unknown"),
+                "checks_count": summary.get("checks_count", len(components)),
+                "healthy": summary.get("healthy_count", 0),
+                "degraded": summary.get("degraded_count", 0),
+                "unhealthy": summary.get("unhealthy_count", 0),
+            },
+            "components": components,
+        }
+
+    # ── 2. 告警列表（筛选 + 脱敏）──
+
+    def get_alerts(
+        self,
+        scope: str = "all",
+        level: str = "",
+        category: str = "",
+        limit: int = _DEFAULT_ALERT_LIMIT,
+    ) -> Dict[str, Any]:
+        """
+        告警列表（含统计；details 脱敏）。
+
+        【防未来】只返回 AlertManager 中已发生的告警，不预测未来。
+
+        Parameters
+        ----------
+        scope : str
+            all / unacknowledged / escalated
+        level : str
+            info/warning/error/critical（空=不限）
+        category : str
+            告警分类（空=不限）
+        limit : int
+            返回条数（1..500）
+
+        Returns
+        -------
+        dict : {"count", "alerts": [...], "summary": {...}}
+        """
+        if limit <= 0:
+            raise ValueError(f"limit 必须为正整数，收到 {limit}")
+        am = self._get_alert_manager()
+        try:
+            if scope == "unacknowledged":
+                alerts = am.get_unacknowledged(limit=limit)
+            elif scope == "escalated":
+                alerts = am.get_escalated(limit=limit)
+            else:
+                level_enum = None
+                if level:
+                    from myquant.core.constants import SeverityLevel
+                    try:
+                        level_enum = SeverityLevel(level)
+                    except ValueError:
+                        level_enum = None
+                alerts = am.get_history(
+                    level=level_enum, category=category or None, limit=limit,
+                )
+        except Exception as e:
+            logger.error(f"[web] 告警列表采集失败: {e}")
+            return {"count": 0, "alerts": [], "summary": {}}
+
+        rows: List[Dict[str, Any]] = []
+        for a in alerts:
+            d = a.to_dict() if hasattr(a, "to_dict") else dict(a)
+            d["details"] = mask_sensitive_fields(d.get("details"))
+            rows.append(d)
+        try:
+            summary = am.stats
+        except Exception:
+            summary = {}
+        return {"count": len(rows), "alerts": rows, "summary": summary}
+
+    # ── 3. 实盘指标卡片 ──
+
+    def get_metric_cards(self, limit: int = 12) -> List[Dict[str, Any]]:
+        """
+        实盘指标卡片（MetricsCollector 已采集指标的当前值）。
+
+        【防未来】只展示采集器中已存在的数据点，不做趋势预测。
+
+        Returns
+        -------
+        list[dict] : [{"name", "value", "labels", "age_seconds"}]
+        """
+        collector = self._get_collector()
+        try:
+            points = collector.get_all()
+        except Exception as e:
+            logger.error(f"[web] 指标卡片采集失败: {e}")
+            return []
+        cards: List[Dict[str, Any]] = []
+        for m in points:
+            to_dict = getattr(m, "to_dict", None)
+            if callable(to_dict):
+                d = to_dict()
+            elif isinstance(m, dict):
+                d = m
+            else:
+                continue
+            cards.append({
+                "name": d.get("name", ""),
+                "value": d.get("value", 0.0),
+                "labels": d.get("labels", {}) or {},
+                "timestamp": d.get("timestamp", 0.0),
+            })
+        return cards[: max(1, limit)]
+
+    # ── 4. 交易连续状态（行情活性/引擎心跳/券商连接）──
+
+    def _continuity_status(self, hints: tuple) -> Dict[str, Any]:
+        """
+        按指标名子串探测一类连续状态；无匹配指标 → unknown（graceful，不伪造）。
+
+        Returns
+        -------
+        dict : {"state": "ok"|"stale"|"unknown", "metric": name|None, "value": float}
+        """
+        collector = self._get_collector()
+        try:
+            points = collector.get_all()
+        except Exception as e:
+            logger.error(f"[web] 交易连续状态采集失败: {e}")
+            return {"state": "unknown", "metric": None, "value": 0.0}
+        for m in points:
+            to_dict = getattr(m, "to_dict", None)
+            d = to_dict() if callable(to_dict) else (m if isinstance(m, dict) else {})
+            name = str(d.get("name", "")).lower()
+            if any(h in name for h in hints):
+                return {"state": "ok", "metric": d.get("name"), "value": float(d.get("value", 0.0))}
+        return {"state": "unknown", "metric": None, "value": 0.0}
+
+    def get_trading_continuity(self) -> Dict[str, Any]:
+        """
+        交易连续状态三连：行情活性 / 引擎心跳 / 券商连接。
+
+        A-4/A-5/A-6 完成后可直接消费其指标；未完成时对应项为 unknown（
+        诚实降级，绝不伪造"已连接/心跳正常"）。
+
+        Returns
+        -------
+        dict : {"market_activity": {...}, "engine_heartbeat": {...}, "broker_connection": {...}}
+        """
+        return {
+            "market_activity": self._continuity_status(_MARKET_ACTIVITY_HINTS),
+            "engine_heartbeat": self._continuity_status(_ENGINE_HEARTBEAT_HINTS),
+            "broker_connection": self._continuity_status(_BROKER_CONN_HINTS),
+        }
+
+    # ── 聚合：监控中心一页数据（API 与看板同源）──
+
+    def build_overview_payload(self, alert_limit: int = _DEFAULT_ALERT_LIMIT) -> Dict[str, Any]:
+        """
+        监控中心一页聚合数据（健康+告警+指标+连续状态）。
+
+        Returns
+        -------
+        dict : 监控中心完整只读视图（供 /api/monitor/overview 与看板复用同源数据）
+        """
+        return {
+            "health": self.get_health_overview(),
+            "alerts": self.get_alerts(limit=alert_limit),
+            "metric_cards": self.get_metric_cards(),
+            "trading_continuity": self.get_trading_continuity(),
+        }
+
+
+
+
+
+# ═══════════════════════════════════════════════
 #  页面名称枚举
 # ═══════════════════════════════════════════════
 
@@ -75,6 +410,7 @@ PAGES = [
     "💹 实盘",
     "🛡️ 风控",
     "🧹 数据质量",
+    "📡 监控中心",
     "💾 数据",
     "ℹ️ 关于",
 ]
@@ -133,6 +469,7 @@ class Dashboard:
         self._data_manager: Optional[Any] = None
         self._data_quality_explorer: Optional[Any] = None  # 任务15：数据质量探查器
         self._db_connection: Optional[Any] = None          # 任务15：数据库连接
+        self._monitor_provider: Optional[MonitorCenterDataProvider] = None  # A-11 监控中心
 
         # 页面渲染函数注册表
         self._page_renderers: Dict[str, Callable] = {
@@ -142,6 +479,7 @@ class Dashboard:
             "💹 实盘": self._render_live,
             "🛡️ 风控": self._render_risk,
             "🧹 数据质量": self._render_data_quality,
+            "📡 监控中心": self._render_monitor_center,
             "💾 数据": self._render_data,
             "ℹ️ 关于": self._render_about,
         }
@@ -186,6 +524,18 @@ class Dashboard:
         """注入数据库连接（任务15新增，未注入时自动 fallback 到全局单例）"""
         self._db_connection = connection
         logger.info("[web] 数据库连接已注入")
+
+    def set_monitor_provider(self, provider: MonitorCenterDataProvider) -> None:
+        """注入监控中心数据提供者（A-11新增，测试/自定义数据源用）"""
+        self._monitor_provider = provider
+        logger.info("[web] 监控中心数据提供者已注入")
+
+    def _get_monitor_provider(self) -> MonitorCenterDataProvider:
+        """获取监控中心数据提供者（注入优先，否则自动构建默认实例）。"""
+        if self._monitor_provider is None:
+            self._monitor_provider = MonitorCenterDataProvider()
+            logger.info("[web] 监控中心数据提供者自动构建完成")
+        return self._monitor_provider
 
     def _get_explorer(self) -> "DataQualityExplorer":
         """
@@ -660,6 +1010,115 @@ class Dashboard:
             st.info("暂无运行记录可选")
 
     # ═══════════════════════════════════════════
+    #  页面：监控中心（A-11 核心仪表盘 v1）
+    # ═══════════════════════════════════════════
+
+    def _render_monitor_center(self) -> None:
+        """渲染监控中心页（A-11：健康总览/告警列表/指标卡片/交易连续状态）。
+
+        确认/解决按钮按当前角色鉴权（A-16 RBAC）：viewer/auditor 禁用，
+        operator/admin 可用。数据全部来自 MonitorCenterDataProvider（同源只读）。
+        """
+        st.title("📡 监控中心")
+        st.markdown("---")
+
+        provider = self._get_monitor_provider()
+
+        # ── 区块1：健康总览（系统+组件两级）──
+        st.subheader("🏥 健康总览")
+        health = provider.get_health_overview()
+        sys_h = health.get("system", {})
+        col_h1, col_h2, col_h3, col_h4 = st.columns(4)
+        with col_h1:
+            st.metric("系统状态", sys_h.get("status", "unknown"))
+        with col_h2:
+            st.metric("健康项", sys_h.get("healthy", 0))
+        with col_h3:
+            st.metric("降级项", sys_h.get("degraded", 0))
+        with col_h4:
+            st.metric("异常项", sys_h.get("unhealthy", 0))
+        components = health.get("components", [])
+        if components:
+            st.dataframe([
+                {"组件": c.get("name", ""), "状态": c.get("status", ""),
+                 "说明": c.get("message", "")}
+                for c in components
+            ], use_container_width=True)
+        else:
+            st.caption("暂无组件级健康检查（未注册 HealthChecker）")
+
+        st.markdown("---")
+
+        # ── 区块2：告警列表（筛选/确认/解决）──
+        st.subheader("🚨 告警列表")
+        f_scope = st.selectbox("范围", ["all", "unacknowledged", "escalated"], key="mc_scope")
+        f_level = st.selectbox("级别", ["", "info", "warning", "error", "critical"], key="mc_level")
+        f_limit = st.selectbox("条数", [10, 20, 50], index=1, key="mc_limit")
+        alerts_view = provider.get_alerts(
+            scope=f_scope, level=f_level, limit=f_limit,
+        )
+        st.caption(f"当前 {alerts_view.get('count', 0)} 条告警（details 已按 P0-7 脱敏）")
+        alerts = alerts_view.get("alerts", [])
+        if alerts:
+            st.dataframe([
+                {
+                    "时间": str(a.get("timestamp", ""))[:19],
+                    "级别": a.get("level", ""),
+                    "来源": a.get("source", ""),
+                    "分类": a.get("category", ""),
+                    "消息": a.get("message", ""),
+                    "已确认": a.get("acknowledged", False),
+                    "已解决": a.get("resolved", False),
+                }
+                for a in alerts
+            ], use_container_width=True)
+            # 确认/解决动作（A-16：按角色禁用越权按钮；RBAC 不可用时保守禁用）
+            try:
+                from myquant.api.middleware.auth import current_role_can
+                can_ack = current_role_can("ack_alerts")
+                can_resolve = current_role_can("resolve_alerts")
+            except Exception as e:  # RBAC 模块未就绪：保守禁用写按钮（fail-safe）
+                logger.warning(f"[web] RBAC 不可用，监控处置按钮保守禁用: {e}")
+                can_ack = False
+                can_resolve = False
+            ack_disabled = not can_ack
+            resolve_disabled = not can_resolve
+            st.caption("处置操作（越权角色按钮自动禁用）")
+            col_a1, col_a2 = st.columns(2)
+            with col_a1:
+                st.button("✅ 确认选中告警", disabled=ack_disabled, use_container_width=True)
+            with col_a2:
+                st.button("✔️ 解决选中告警", disabled=resolve_disabled, use_container_width=True)
+        else:
+            st.info("暂无告警")
+
+        st.markdown("---")
+
+        # ── 区块3：实盘指标卡片 ──
+        st.subheader("📈 实盘指标卡片")
+        cards = provider.get_metric_cards()
+        if cards:
+            cols = st.columns(min(4, len(cards)))
+            for i, c in enumerate(cards):
+                with cols[i % len(cols)]:
+                    st.metric(str(c.get("name", "")), c.get("value", 0.0))
+        else:
+            st.caption("暂无实盘指标（MetricsCollector 无数据点）")
+
+        st.markdown("---")
+
+        # ── 区块4：交易连续状态 ──
+        st.subheader("🔗 交易连续状态")
+        cont = provider.get_trading_continuity()
+        col_c1, col_c2, col_c3 = st.columns(3)
+        with col_c1:
+            st.metric("行情活性", cont["market_activity"].get("state", "unknown"))
+        with col_c2:
+            st.metric("引擎心跳", cont["engine_heartbeat"].get("state", "unknown"))
+        with col_c3:
+            st.metric("券商连接", cont["broker_connection"].get("state", "unknown"))
+
+    # ═══════════════════════════════════════════
     #  页面：数据
     # ═══════════════════════════════════════════
 
@@ -803,5 +1262,145 @@ def run_dashboard(title: str = "Pythonwdhmm 量化交易系统") -> None:
     dashboard.run()
 
 
+# ═══════════════════════════════════════════════
+#  自测（python -m myquant.web.dashboard）
+# ═══════════════════════════════════════════════
+
+class _FakeAlert:
+    """假告警（测监控中心数据提供者用）。"""
+
+    def __init__(self, alert_id: str, level: str, message: str,
+                 source: str = "system", category: str = "system",
+                 details: Optional[Dict[str, Any]] = None,
+                 acknowledged: bool = False, resolved: bool = False):
+        self.alert_id = alert_id
+        self.level = level
+        self.message = message
+        self.source = source
+        self.category = category
+        self.details = details or {}
+        self.acknowledged = acknowledged
+        self.resolved = resolved
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "alert_id": self.alert_id, "level": self.level, "message": self.message,
+            "source": self.source, "category": self.category, "details": self.details,
+            "acknowledged": self.acknowledged, "resolved": self.resolved,
+            "timestamp": 0.0,
+        }
+
+
+class _FakeAlertManager:
+    """假告警管理器（测筛选/脱敏用，不落库）。"""
+
+    def __init__(self, alerts: List[_FakeAlert]):
+        self._alerts = list(alerts)
+
+    def get_history(self, level=None, category=None, limit=50):
+        out = [a for a in reversed(self._alerts)]
+        if level is not None:
+            out = [a for a in out if a.level == level.value]
+        if category:
+            out = [a for a in out if a.category == category]
+        return out[:limit]
+
+    def get_unacknowledged(self, limit=50):
+        return [a for a in reversed(self._alerts)
+                if not a.acknowledged and not a.resolved][:limit]
+
+    def get_escalated(self, limit=50):
+        return []
+
+    @property
+    def stats(self) -> Dict[str, Any]:
+        return {"history_size": len(self._alerts)}
+
+
+class _FakeMetric:
+    def __init__(self, name: str, value: float):
+        self.name = name
+        self.value = value
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"name": self.name, "value": self.value, "labels": {}, "timestamp": 0.0}
+
+
+class _FakeCollector:
+    def __init__(self, metrics: List[_FakeMetric]):
+        self._metrics = metrics
+
+    def get_all(self, name=None):
+        return list(self._metrics)
+
+
+def _run_self_test() -> int:
+    """监控中心数据提供者自测：脱敏/筛选/连续状态降级/聚合，0=通过。"""
+    passed = 0
+    failed = 0
+
+    def check(label: str, cond: bool, detail: str = "") -> None:
+        nonlocal passed, failed
+        if cond:
+            passed += 1
+            logger.info("  ✓ %s", label)
+        else:
+            failed += 1
+            logger.error("  ✗ %s %s", label, detail)
+
+    # 脱敏规则
+    masked = mask_sensitive_fields({
+        "broker_account": "1234567890",
+        "api_key": "sk-secret-xyz",
+        "balance": 123456.7,
+        "message": "磁盘满",
+    })
+    check("券商账号留后4位", masked["broker_account"] == "****7890", str(masked["broker_account"]))
+    check("API密钥全掩码", masked["api_key"] == "****")
+    check("资金余额掩码", masked["balance"] == "****")
+    check("普通字段透传", masked["message"] == "磁盘满")
+    check("None details 安全", mask_sensitive_fields(None) == {})
+
+    # 数据提供者：告警筛选 + details 脱敏
+    am = _FakeAlertManager([
+        _FakeAlert("a1", "error", "磁盘满", details={"api_key": "sk-x", "node": "n1"}),
+        _FakeAlert("a2", "warning", "延迟高", acknowledged=True),
+    ])
+    provider = MonitorCenterDataProvider(alert_manager=am, metrics_collector=_FakeCollector([]))
+    view = provider.get_alerts(scope="all")
+    check("告警列表2条", view["count"] == 2, str(view["count"]))
+    a1_row = next(a for a in view["alerts"] if a["alert_id"] == "a1")
+    check("告警 details 脱敏", a1_row["details"].get("api_key") == "****")
+    unack = provider.get_alerts(scope="unacknowledged")
+    check("未确认筛选1条", unack["count"] == 1 and unack["alerts"][0]["alert_id"] == "a1")
+
+    # 交易连续状态：无指标 → unknown（不伪造）
+    cont = provider.get_trading_continuity()
+    check("无指标→行情活性 unknown", cont["market_activity"]["state"] == "unknown")
+    check("无指标→引擎心跳 unknown", cont["engine_heartbeat"]["state"] == "unknown")
+
+    # 有心跳指标 → ok
+    provider2 = MonitorCenterDataProvider(
+        alert_manager=am,
+        metrics_collector=_FakeCollector([_FakeMetric("engine_heartbeat", 1.0)]),
+    )
+    cont2 = provider2.get_trading_continuity()
+    check("有心跳指标→engine ok", cont2["engine_heartbeat"]["state"] == "ok")
+
+    # 健康总览：未注入 → unknown（不谎报）
+    check("健康未注入→unknown", provider.get_health_overview()["system"]["status"] == "unknown")
+
+    # 聚合 payload
+    payload = provider.build_overview_payload()
+    check("聚合 payload 四键", set(payload.keys()) ==
+          {"health", "alerts", "metric_cards", "trading_continuity"})
+
+    logger.info("Dashboard 自测结果: %d 通过, %d 失败", passed, failed)
+    return 0 if failed == 0 else 1
+
+
 if __name__ == "__main__":
-    run_dashboard()
+    if "--run" in sys.argv:
+        run_dashboard()
+    else:
+        raise SystemExit(_run_self_test())

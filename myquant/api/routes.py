@@ -145,6 +145,45 @@ except ImportError:
 
 
 # ═══════════════════════════════════════════════
+#  A-11 告警详情脱敏（P0-7 §3；与 web/dashboard.py 规则同源，避免 API→Web 反向依赖）
+# ═══════════════════════════════════════════════
+
+_MASK_ACCOUNT_PATTERNS: tuple = ("account", "broker_account", "fund_account")
+_MASK_CREDENTIAL_PATTERNS: tuple = (
+    "api_key", "apikey", "secret", "token", "password", "passwd", "credential",
+)
+_MASK_BALANCE_PATTERNS: tuple = (
+    "balance", "equity", "capital", "position_value", "available_cash",
+    "total_assets", "frozen_cash", "pnl",
+)
+
+
+def _mask_alert_details(details: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    告警 details 脱敏（P0-7 §3：账号留后4位 / 凭证全掩码 / 资金明细聚合掩码）。
+
+    【防未来】只脱敏当前已落库的告警详情，不预测。不修改入参。
+    """
+    out: Dict[str, Any] = {}
+    if not isinstance(details, dict):
+        return out
+    for key, value in details.items():
+        k = (str(key) or "").strip().lower()
+        if any(p in k for p in _MASK_CREDENTIAL_PATTERNS):
+            out[key] = "****"
+        elif any(p in k for p in _MASK_ACCOUNT_PATTERNS):
+            s = str(value) if value is not None else ""
+            out[key] = ("****" + s[-4:]) if len(s) >= 4 else "****"
+        elif any(p in k for p in _MASK_BALANCE_PATTERNS):
+            out[key] = "****"
+        elif isinstance(value, dict):
+            out[key] = _mask_alert_details(value)
+        else:
+            out[key] = value
+    return out
+
+
+# ═══════════════════════════════════════════════
 #  内存存储（v1使用，后续迭代替换为数据库）
 # ═══════════════════════════════════════════════
 
@@ -893,10 +932,15 @@ def create_app(
                     limit=limit,
                 )
             summary = am.stats
+            alert_rows = []
+            for a in alerts:
+                d = a.to_dict()
+                d["details"] = _mask_alert_details(d.get("details"))  # A-11/P0-7 脱敏
+                alert_rows.append(d)
             return ApiResponse.success(data={
                 "scope": scope,
-                "count": len(alerts),
-                "alerts": [a.to_dict() for a in alerts],
+                "count": len(alert_rows),
+                "alerts": alert_rows,
                 "summary": summary,
             }, message="告警列表")
         except Exception as e:
@@ -938,6 +982,105 @@ def create_app(
         except Exception as e:
             logger.error(f"[api] 告警解决失败: {e}")
             return ApiResponse.error(code=500, message="告警解决失败")
+
+    # ═══════════════════════════════════════════
+    #  A-11 监控中心总览（只读：健康两级 + 告警 + 指标卡片 + 交易连续状态）
+    # ═══════════════════════════════════════════
+
+    @app.get("/api/monitor/overview", response_model=ApiResponse, tags=["监控"])
+    async def monitor_overview():
+        """
+        监控中心总览（A-11：看状态→查告警 只读视图）。
+
+        返回：系统+组件两级健康（复用 /api/health 注册检查器）、告警统计与最近
+        告警（details 脱敏）、实盘指标卡片、交易连续状态（行情活性/引擎心跳/
+        券商连接；指标缺失则 unknown，不伪造）。
+        【防未来】只聚合当前已发生状态，不预测。
+        """
+        try:
+            # ── 健康总览（系统+组件两级）──
+            checkers: Dict[str, Any] = getattr(app.state, "health_checkers", {}) or {}
+            components: List[Dict[str, Any]] = []
+            degraded = False
+            for name, checker in checkers.items():
+                try:
+                    result = checker() if callable(checker) else checker
+                    if result is True or result == "healthy":
+                        st = "healthy"
+                    elif result is False or result == "down":
+                        st = "down"
+                        degraded = True
+                    else:
+                        st = "degraded"
+                        degraded = True
+                except Exception as e:
+                    st = "down"
+                    degraded = True
+                    logger.error(f"[api] 监控健康检查器 {name} 异常: {e}")
+                components.append({"name": name, "status": st})
+            system_status = "degraded" if degraded else ("healthy" if components else "unknown")
+
+            # ── 告警统计 + 最近告警（脱敏）──
+            am = _get_alert_manager()
+            recent = am.get_unacknowledged(limit=10)
+            recent_rows = []
+            for a in recent:
+                d = a.to_dict()
+                d["details"] = _mask_alert_details(d.get("details"))
+                recent_rows.append(d)
+            try:
+                alert_summary = am.stats
+            except Exception:
+                alert_summary = {}
+
+            # ── 实盘指标卡片 ──
+            collector = _get_collector()
+            cards: List[Dict[str, Any]] = []
+            try:
+                for m in collector.get_all():
+                    td = getattr(m, "to_dict", None)
+                    d = td() if callable(td) else (m if isinstance(m, dict) else {})
+                    cards.append({
+                        "name": d.get("name", ""),
+                        "value": d.get("value", 0.0),
+                    })
+            except Exception as e:
+                logger.error(f"[api] 监控指标卡片采集失败: {e}")
+            cards = cards[:12]
+
+            # ── 交易连续状态（指标缺失→unknown，不伪造）──
+            def _continuity(hints: tuple) -> Dict[str, Any]:
+                try:
+                    for m in collector.get_all():
+                        td = getattr(m, "to_dict", None)
+                        d = td() if callable(td) else (m if isinstance(m, dict) else {})
+                        name = str(d.get("name", "")).lower()
+                        if any(h in name for h in hints):
+                            return {"state": "ok", "metric": d.get("name"),
+                                    "value": float(d.get("value", 0.0))}
+                except Exception as e:
+                    logger.error(f"[api] 交易连续状态采集失败: {e}")
+                return {"state": "unknown", "metric": None, "value": 0.0}
+
+            continuity = {
+                "market_activity": _continuity(("market_activity", "quote_recv", "tick_recv")),
+                "engine_heartbeat": _continuity(("engine_heartbeat", "scheduler_heartbeat")),
+                "broker_connection": _continuity(("broker_connection", "broker_connected")),
+            }
+
+            return ApiResponse.success(data={
+                "health": {
+                    "system": {"status": system_status, "checks_count": len(components)},
+                    "components": components,
+                },
+                "alerts": {"count": len(recent_rows), "alerts": recent_rows,
+                           "summary": alert_summary},
+                "metric_cards": cards,
+                "trading_continuity": continuity,
+            }, message="监控中心总览")
+        except Exception as e:
+            logger.error(f"[api] 监控中心总览失败: {e}")
+            return ApiResponse.error(code=500, message="监控中心总览失败")
 
     logger.info(f"[api] FastAPI应用创建成功: {title} v{version}")
     return app
