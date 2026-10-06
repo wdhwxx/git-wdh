@@ -27,7 +27,7 @@ __version__ = "0.1.0"
 __author__ = "Pythonwdhmm"
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -455,3 +455,261 @@ class MetricsCalculator:
         # 当前版本返回原指标，实盘对接时可扩展
         logger.debug(f"增量更新指标: equity={new_point.equity:.4f}")
         return metrics
+
+
+# ═══════════════════════════════════════════════════════════════
+#  C-5 归因侧纯函数（回写#234）：按分组键聚合收益/风险贡献
+# ═══════════════════════════════════════════════════════════════
+# 设计原则：
+#   1. 纯函数：不读全局状态、不打日志、不抛 IO；输入 list[dict] → 输出 list[dict]，
+#      方便单测与 attribution.py 调用；
+#   2. 归因自洽：收益贡献口径 = 加总 pnl，Σ组贡献 == 总贡献（浮点容差内），无近似；
+#   3. 严格防未来：本层只做聚合，时间过滤（拒绝未来时间戳）由调用方
+#      （AttributionAnalyzer.add_record）保证；
+#   4. 结果 JSON 可序列化：仅 float/int/str/list/dict，"无定义"项用 None；
+#   5. 防御式校验：输入类型非法即 raise ValueError，绝不静默吞错。
+
+#: 分组缺省键（记录缺该字段时归入 "unknown"，不丢弃样本）
+ATTRIBUTION_DEFAULT_GROUP: str = "unknown"
+
+#: 合法周期粒度
+ATTRIBUTION_PERIODS: tuple = ("day", "week")
+
+
+def period_bucket_of(timestamp: float, period: str = "day") -> str:
+    """
+    把 epoch 秒时间戳归到自然周期桶键（严格使用该记录自身时间戳，不引入未来数据）。
+
+    本行使用的数据：仅 timestamp 本身（记录已发生时刻）。
+
+    Args:
+        timestamp: 记录发生时刻（epoch 秒，调用方已保证 <= now）。
+        period: 周期粒度。"day" → 'YYYY-MM-DD'；"week" → 'YYYY-Www'（ISO 周年-周）。
+
+    Returns:
+        周期桶键字符串。
+
+    Raises:
+        ValueError: period 非法 / timestamp 不可解析时抛出。
+    """
+    if period not in ATTRIBUTION_PERIODS:
+        raise ValueError(f"period 必须是 {ATTRIBUTION_PERIODS} 之一，收到 {period!r}")
+    try:
+        ts = float(timestamp)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"timestamp 必须可转 float，收到 {timestamp!r}") from e
+    if not np.isfinite(ts):
+        raise ValueError(f"timestamp 必须为有限数，收到 {ts!r}")
+    dt = datetime.fromtimestamp(ts)
+    if period == "day":
+        return dt.strftime("%Y-%m-%d")
+    iso = dt.isocalendar()
+    return f"{iso[0]}-W{iso[1]:02d}"
+
+
+def group_contribution(
+    records: List[Dict[str, Any]],
+    group_key: str,
+    value_field: str = "pnl",
+) -> List[Dict[str, Any]]:
+    """
+    按分组键聚合收益贡献（C-5 收益归因核心纯函数）。
+
+    口径（简单可解释的加总归因，自洽无近似）：
+      - 组贡献值 = Σ records[i][value_field]（按 records[i][group_key] 归组）；
+      - 总贡献   = Σ 各组贡献（= Σ 全部记录 value_field）；
+      - 贡献占比 = 组贡献 / 总贡献。
+      - 总贡献为 0 时占比一律置 0.0（分母为零、占比无定义，由调用方在日报口径中披露）；
+        此时 Σ组贡献值 仍 == 总贡献（=0），对账不破。
+
+    防未来：本函数只聚合传入记录，不读系统时钟；时间过滤由调用方完成。
+
+    Args:
+        records: 已发生记录列表，每条为 dict，至少含 group_key / value_field。
+        group_key: 分组维度键名（如 "strategy"/"factor"/"symbol"/"period_bucket"）。
+        value_field: 收益值字段名（默认 "pnl"）。
+
+    Returns:
+        [{"group": 组键, "contribution": float, "ratio": float(0~1), "count": int}, ...]，
+        按 |contribution| 降序；空输入返回 []。
+
+    Raises:
+        ValueError: records 非 list / group_key 空 / 记录非 dict / value_field 不可转 float 时抛出。
+    """
+    if not isinstance(records, list):
+        raise ValueError(f"records 必须为 list，收到 {type(records).__name__}")
+    if not group_key or not isinstance(group_key, str):
+        raise ValueError(f"group_key 必须为非空字符串，收到 {group_key!r}")
+
+    sums: Dict[str, float] = {}
+    counts: Dict[str, int] = {}
+    total = 0.0
+    for rec in records:
+        if not isinstance(rec, dict):
+            raise ValueError(f"归因记录必须为 dict，收到 {type(rec).__name__}")
+        g = rec.get(group_key)
+        g = ATTRIBUTION_DEFAULT_GROUP if g is None else str(g)
+        try:
+            v = float(rec.get(value_field, 0.0))
+        except (TypeError, ValueError) as e:
+            raise ValueError(
+                f"记录 group={g!r} 的 {value_field} 不可转 float: {rec.get(value_field)!r}"
+            ) from e
+        sums[g] = sums.get(g, 0.0) + v
+        counts[g] = counts.get(g, 0) + 1
+        total += v
+
+    rows: List[Dict[str, Any]] = []
+    for g, s in sums.items():
+        ratio = (s / total) if total != 0.0 else 0.0
+        rows.append({
+            "group": g,
+            "contribution": float(s),
+            "ratio": float(ratio),
+            "count": int(counts[g]),
+        })
+    rows.sort(key=lambda r: abs(r["contribution"]), reverse=True)
+    return rows
+
+
+def group_risk_contribution(
+    records: List[Dict[str, Any]],
+    group_key: str,
+    period_field: str = "period_bucket",
+    value_field: str = "pnl",
+) -> List[Dict[str, Any]]:
+    """
+    按分组键聚合风险贡献（C-5 风险侧纯函数）。
+
+    口径（标准差代理，仅用于组间相对比较，不做年化）：
+      1. 先把记录按 (group, period) 聚合为每周期 pnl 序列；
+      2. 组风险 = np.std(组内逐周期 pnl，ddof=1)；周期样本 <2 → 0.0（无法估计波动）；
+      3. 风险占比 = 组风险 / Σ 组风险（总风险=0 → 0.0）。
+
+    防未来：本函数只聚合传入记录，不读系统时钟。
+
+    Args:
+        records: 已发生记录列表（dict），需含 group_key / period_field / value_field。
+        group_key: 分组维度键名。
+        period_field: 周期桶键字段名（默认 "period_bucket"）。
+        value_field: 收益值字段名（默认 "pnl"）。
+
+    Returns:
+        [{"group": str, "risk": float, "risk_ratio": float, "periods": int}, ...]，
+        按 risk 降序；空输入返回 []。
+
+    Raises:
+        ValueError: 输入类型非法 / value_field 不可转 float 时抛出。
+    """
+    if not isinstance(records, list):
+        raise ValueError(f"records 必须为 list，收到 {type(records).__name__}")
+    if not group_key or not isinstance(group_key, str):
+        raise ValueError(f"group_key 必须为非空字符串，收到 {group_key!r}")
+    if not period_field or not isinstance(period_field, str):
+        raise ValueError(f"period_field 必须为非空字符串，收到 {period_field!r}")
+
+    # (group -> {period: pnl_sum})
+    period_pnl: Dict[str, Dict[str, float]] = {}
+    for rec in records:
+        if not isinstance(rec, dict):
+            raise ValueError(f"归因记录必须为 dict，收到 {type(rec).__name__}")
+        g = rec.get(group_key)
+        g = ATTRIBUTION_DEFAULT_GROUP if g is None else str(g)
+        p = rec.get(period_field)
+        p = ATTRIBUTION_DEFAULT_GROUP if p is None else str(p)
+        try:
+            v = float(rec.get(value_field, 0.0))
+        except (TypeError, ValueError) as e:
+            raise ValueError(
+                f"记录 group={g!r} period={p!r} 的 {value_field} 不可转 float: {rec.get(value_field)!r}"
+            ) from e
+        bucket = period_pnl.setdefault(g, {})
+        bucket[p] = bucket.get(p, 0.0) + v
+
+    rows: List[Dict[str, Any]] = []
+    total_risk = 0.0
+    for g, pmap in period_pnl.items():
+        vals = list(pmap.values())
+        risk = float(np.std(vals, ddof=1)) if len(vals) >= 2 else 0.0
+        rows.append({"group": g, "risk": risk, "periods": len(vals)})
+        total_risk += risk
+    for r in rows:
+        r["risk_ratio"] = float(r["risk"] / total_risk) if total_risk > 0.0 else 0.0
+    rows.sort(key=lambda r: r["risk"], reverse=True)
+    return rows
+
+
+def compare_attribution(
+    backtest_rows: List[Dict[str, Any]],
+    live_rows: List[Dict[str, Any]],
+    value_field: str = "contribution",
+) -> List[Dict[str, Any]]:
+    """
+    同口径对比回测/实盘归因行（C-5 差异纯函数，按 "group" 对齐）。
+
+    差异口径：
+      - 绝对差 abs_diff   = live_value - backtest_value；
+      - 相对差 rel_diff   = (live_value - backtest_value) / backtest_value
+        （backtest_value == 0 → None，避免除零；JSON 序列化为 null）；
+      - 任一侧缺失的组按 0.0 计，并在 "missing" 标注缺失侧
+        （"backtest" / "live" / "both"），保证对比表行列完整可解释。
+
+    防未来：纯函数，不读系统时钟；两组行均为已发生记录的归因结果。
+
+    Args:
+        backtest_rows: 回测归因行（group_contribution 输出）。
+        live_rows: 实盘归因行（同口径）。
+        value_field: 参与对比的值字段（默认 "contribution"）。
+
+    Returns:
+        [{"group", "backtest_value", "live_value", "abs_diff", "rel_diff", "missing"}, ...]，
+        按 |abs_diff| 降序。
+
+    Raises:
+        ValueError: 任一输入非 list 时抛出。
+    """
+    if not isinstance(backtest_rows, list) or not isinstance(live_rows, list):
+        raise ValueError("backtest_rows / live_rows 必须均为 list")
+
+    bt_map: Dict[str, float] = {}
+    live_map: Dict[str, float] = {}
+    for r in backtest_rows:
+        if isinstance(r, dict) and r.get("group") is not None:
+            try:
+                bt_map[str(r["group"])] = float(r.get(value_field, 0.0))
+            except (TypeError, ValueError):
+                bt_map[str(r["group"])] = 0.0
+    for r in live_rows:
+        if isinstance(r, dict) and r.get("group") is not None:
+            try:
+                live_map[str(r["group"])] = float(r.get(value_field, 0.0))
+            except (TypeError, ValueError):
+                live_map[str(r["group"])] = 0.0
+
+    all_groups = sorted(set(bt_map) | set(live_map))
+    rows: List[Dict[str, Any]] = []
+    for g in all_groups:
+        bv = bt_map.get(g, 0.0)
+        lv = live_map.get(g, 0.0)
+        abs_diff = lv - bv
+        if g not in bt_map:
+            missing = "backtest"
+        elif g not in live_map:
+            missing = "live"
+        else:
+            missing = ""
+        rel_diff: Optional[float]
+        if bv != 0.0:
+            rel_diff = float(abs_diff / bv)
+        else:
+            rel_diff = None  # 回测基准为零，相对差无定义
+        rows.append({
+            "group": g,
+            "backtest_value": bv,
+            "live_value": lv,
+            "abs_diff": float(abs_diff),
+            "rel_diff": rel_diff,
+            "missing": missing,
+        })
+    rows.sort(key=lambda r: abs(r["abs_diff"]), reverse=True)
+    return rows
