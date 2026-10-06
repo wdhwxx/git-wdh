@@ -1,0 +1,80 @@
+# 文件名：scripts/故障演练/季频故障演练.py
+"""
+D-6 混沌工程与故障演练 薄入口（scripts 层，业务逻辑在 myquant）。
+==================================================================
+季度故障演练：复用 P0-8 FI-01~07 用例库，逐 FI 用例注入→计时→分类→记录，
+产出复盘报告（JSON）落盘；仅做命令行编排，不含业务逻辑。
+
+用法：
+  python scripts/故障演练/季频故障演练.py                     # 全量 7 用例
+  python scripts/故障演练/季频故障演练.py --select FI-01 FI-06 # 指定用例
+  python scripts/故障演练/季频故障演练.py --out 报告.json       # 复盘报告落盘
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+from typing import List, Optional
+
+from myquant.monitoring.chaos_drill import ChaosDrillRunner, DEFAULT_DRILL_HEADER
+
+DEFAULT_REPORT_PATH = "docs/监控档案/混沌演练/季度故障演练报告.json"
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="季频故障演练",
+        description=DEFAULT_DRILL_HEADER,
+    )
+    parser.add_argument(
+        "--select", nargs="+", default=None,
+        help="指定要演练的 FI 用例（如 FI-01 FI-06）；缺省全量 FI-01~07",
+    )
+    parser.add_argument(
+        "--out", default=DEFAULT_REPORT_PATH,
+        help=f"复盘报告落盘路径（缺省 {DEFAULT_REPORT_PATH}）",
+    )
+    parser.add_argument(
+        "--db", default=None,
+        help="告警落库的临时数据库路径；缺省自动创建并在结束清理",
+    )
+    parser.add_argument(
+        "--list", action="store_true",
+        help="仅打印可用 FI 用例清单（P0-8 用例库）后退出",
+    )
+    return parser
+
+
+def list_cases() -> None:
+    from myquant.monitoring.measurability import list_fi_cases
+    print("P0-8 故障注入用例库（演练/验收同源，R-01）：")
+    for row in list_fi_cases():
+        print(f"  {row['case_id']}: {row['fault_desc']} | {row['kpi']}")
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    args = build_parser().parse_args(argv)
+    if args.list:
+        list_cases()
+        return 0
+
+    runner = ChaosDrillRunner(store_db_path=args.db)
+    try:
+        runner.register_builtin_cases(select=args.select)
+        if not runner.case_ids:
+            print("无可用演练用例（select 过滤为空），退出。", file=sys.stderr)
+            return 2
+        report = runner.run(select=args.select)
+        runner.write_report(args.out)
+        summary = report["summary"]
+        print(f"演练完成：共 {summary['cases_total']} 项，检出 {summary['detected']} "
+              f"项（检出率 {summary['detect_rate']:.1%}），TP={summary['tp']} "
+              f"FP={summary['fp']} FN={summary['fn']}")
+        print(f"复盘报告已落盘：{args.out}")
+        return 0
+    finally:
+        runner.close()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

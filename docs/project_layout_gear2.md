@@ -440,6 +440,8 @@ Pythonwdhmm/
 
 │   ├── 验收_C包保Alpha.py           # ✨【回写#241】C-12 C 包保 Alpha 验收薄入口：argparse（--out 默认 docs/监控档案/C包保Alpha验收_<日期>.json + --db + --mode）+ find_project_root + 调 myquant/monitoring/c_acceptance.py（C-1~C-11 验收项），控制台逐项摘要 + JSON 报告；业务逻辑零写入脚本
 
+│   ├── 故障演练/季频故障演练.py      # ✨【回写#248】D-6 混沌工程与故障演练薄入口：argparse（--select FI-01…FI-07 + --out + --db + --list）+ find_project_root + 调 myquant/monitoring/chaos_drill.py（复用 P0-8 FI-01~07 用例库，逐用例注入→MTTx 计时→TP/FP/FN 分类→复盘报告 JSON），季度演练落盘；业务逻辑零写入脚本
+
 │   ├── 数据库迁移.py                  # ✨【第6项】Alembic迁移中文入口：upgrade/downgrade/current/history/stamp/check/init，支持--db指定数据库路径
 
 │   ├── 数据库初始化.py                # 数据库初始化：调用database.schema与migrations创建表结构
@@ -549,6 +551,8 @@ Pythonwdhmm/
     │   │   ├── test_rbac.py            # ✨【回写#219】A-16 监控面 RBAC 测试（20 项）：角色矩阵逐角色断言、normalize_role 向后兼容、RbacGuard 拒绝留 deny/放行留 allowed、viewer/auditor 越权 ack/resolve→403 且审计无成功动作、operator/admin 成功、不传角色兼容、改阈值/复位熔断占位 403/501 分流；✨【回写#226】B-6 circuit reset 断言 501→真实复位成功+circuit 审计留痕（viewer 403 不变）✅已完成
 
     │   │   ├── test_m1_acceptance.py # ✨【回写#220】A-15 M1 保命验收测试（12 项）：四环覆盖率 100%、A-15-Min（FI-01/03/04/05 检出走事件路径）、A-15-Full（FI-01~05 检出 + MTTx 预算逐用例 + 事件路径非巡检 + 分类达标）、时间戳单调防未来、同 runner 连跑 min→full 去重隔离、非法 mode 抛错✅已完成
+
+    │   │   ├── test_chaos_drill.py  # ✨【回写#248】D-6 混沌工程测试（16 项）：P0-8 用例库复用（FI-01~07 齐 + 字段完整 + list_fi_cases 同源）；预算解析（MTTD<1min/MTTA<5min/KPI-8 无预算）；核心编排（捕获即 TP + MTTx 计时 + 落库确认/解决闭环、注入失败/未捕获=FN 不阻断、重复注册拒绝、复盘报告 JSON 落盘、预算 met_* 标志）；内置用例（全 7 注册按 P0-8 顺序、7 用例全部捕获 TP 可演示、select 子集过滤）；FI-07 外部心跳（单次超时 degraded 不判死 R-08、连续多次超时判死）✅已完成
 
     │   │   ├── test_account_reconciler.py # ✨【回写#221】B-1 实时对账+T1终局测试（12 项）：EVENT 事件路径（publish→flush 核对执行）/cash 差 1 分→冻结+CRITICAL+审计/持仓数量差冻结/T+1 差异→t1_freeze+mark_resolved 解冻/容差配置跟随与 None 回退 0/sleep 桩 handler 立即返回（异步非阻塞）/在途 3 事件合并补一次/PnL 防脏门（冻结拒绝解冻放行）/last_check_ts 当前时点防未来✅已完成
 
@@ -1219,6 +1223,8 @@ Pythonwdhmm/
     │   ├── watchdog.py                  # ✨【回写#208/#209/#210】交易看门狗：A-4 行情活性 StalenessDetector（EVENT bar 刷新+秒级兜底，超 bar_timeout_seconds 断流 ERROR、非交易时段豁免、开盘 grace 未就绪告警、到达间隔 P99 统计，阈值读 monitoring.watchdog）；A-5 引擎心跳 EngineHeartbeatWatcher（连续 consecutive_misses 判僵死 P0，5×10s=50s<60s 保 MTTD，阈值读 slo.engine_heartbeat）；A-6 券商连接 BrokerConnectionWatcher（快速轮询+健康→不健康转换点 P0/CRITICAL，details.runbook_id=RB-BROKER-DISCONNECT-001）；__main__ 自测 14 项
 
     │   ├── m1_acceptance.py         # ✨【回写#220】A-15 M1 保命验收业务逻辑：M1AcceptanceRunner（隔离环境=临时 AlertStore + 真实 AlertManager + 真实 EventBus）——check_coverage 保命闭环四环覆盖率（A-4/A-6/A-8/A-7）+ FI-01~05 故障注入（断流/引擎僵死/券商断连/伪造拒单/持仓差异）走真实事件路径 + MTTx 系统时间戳计时（MTTD<1min/MTTA<5min/MTTR<30min）+ TP/FP/FN ground-truth 分类（注入捕获=TP，受控无 FP）；防未来（只消费已发生时间戳），__main__ 自测 3 项
+
+    │   ├── chaos_drill.py           # ✨【回写#248】D-6 混沌工程与故障演练（monitoring/ 段）：ChaosDrillRunner 季度演练编排——复用 P0-8 FI-01~07 标准故障注入用例库（R-01 同库，字段取自 measurability.FI_CASES 不另立）→ 逐用例注入（注入函数返回 InjectOutcome，经 manager._history 定位本轮告警）→ 按 P0-8 ② 口径 MTTD/MTTA/MTTR 系统时间戳计时（KPI 预算解析 _budget_for，met_* 达标标志）→ 按 P0-8 ① 口径 TP/FP/FN 分类（捕获=TP，注入失败/未捕获=FN）→ 复盘报告 JSON（detect_rate/accuracy/avg_mttx/replay_suggestions）；隔离环境=临时 AlertStore + 真实 AlertManager；build_builtin_cases 接线 FI-01~07 真实路径（FI-01 StalenessDetector 断流 / FI-02 引擎僵死心跳 / FI-03 券商断连 / FI-04 伪造拒单 ORDER_REJECTED / FI-05 持仓差异 reconcile / FI-06 主通道故障落盘兜底 / FI-07 外部心跳连续超时判死 R-08）；审计 kind=chaos_drill 失败降级不阻断；防未来（只消费已发生时间戳）；__main__ 自测
 
     │   ├── rate_limit_monitor.py        # ✨【回写#216】A-12 交易所限流/频控监控：ExchangeRateLimitMonitor 滑动窗口（order/query/cancel 分别）计数已发生动作→接近阈值 P1 预警+到阈值前自动暂停开仓（可回滚留痕）、达上限 ERROR、窗口回落自动恢复；阈值读 slo.exchange_rate_limit（LOCKED 初值）；指标 rate_limit_orders/queries/cancels_total 进 /api/metrics；__main__ 自测 9 项
 
@@ -3838,3 +3844,10 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
    c. 新增 tests/unit/test_param_tuner.py（36 项）：构造防御；propose 校验（空/非有限/通配/白名单/空白名单/actor）；未批准不生效；参数合并与冷启动；approve（缺 apply_fn 不假成功/生效跟踪/校验/生效失败不生效）；registry 衔接（登记回填/缺注入不编造/失败不阻断）；reject；auto；rollback（恢复/未知/未 applied/缺 fn False）；留痕审计（序列化/裁剪/写入/失败不阻断/summary）；action_engine 集成（注册/缺注入/dry-run/执行回滚/提议→确认→生效→回滚全链路留痕可审计）。
    d. 验证结果：py_compile 通过；单测 36 项全绿 + 既有 test_action_engine.py 82 项 + test_strategies.py + test_risk_reallocation.py 40 项 + test_allocation.py 63 项回归零破坏（339 passed）；全量 pytest 结果见提交后终验（基线 3192 passed/2 skipped/0 failed）。
    e. 纪律遵守：先更新蓝图目录树（strategies 段 param_tuner.py 登记 #247 + action_engine.py 条目追加 #247 + tests/unit 段 test_param_tuner.py）再创建文件（蓝图优先）；无蓝图外新文件；业务逻辑归 myquant（调整器业务类归 strategies/，动作引擎接线归 monitoring/，未改 strategies/base.py/registry.py/model_registry.py，registry 以注入回调衔接）；业务阈值不编造（apply/rollback/registry 回调由部署方接线，参数值由调用方注入）；严格防未来（时间戳一律当前时点，不预测参数最优值）；任务后 git 提交（commit message 引用 #247）。
+
+## #248 · 2026-10-07 · D-6 混沌工程与故障演练（对应报告 Phase 4）
+   a. 新增 myquant/monitoring/chaos_drill.py（monitoring/ 段登记 #248）：**直接复用 P0-8 标准故障注入用例库**（R-01 同库，字段取自 measurability.FI_CASES 的 FI-01~07，未另立用例）；ChaosDrillRunner 季度演练编排——隔离环境（临时 AlertStore + 真实 AlertManager）逐用例注入（注入函数返回 InjectOutcome{fault_ts/captured_alert_id/期望捕获项}，经 manager._history 定位本轮告警，与 m1_acceptance 同捕获模式）→ 按 P0-8 ② 口径 MTTD/MTTA/MTTR 系统时间戳计时（MTTD=fault_ts→created_at、MTTA=created_at→acked_at、MTTR=fault_ts→resolved_at，演练模拟 ack/resolve）→ 按 P0-8 ① 口径 TP/FP/FN 分类（捕获=TP 并 set_classification、注入异常/未捕获=FN 如实记录不吞）→ 复盘报告 JSON（detect_rate/accuracy/avg_mttx + KPI 预算 _budget_for 解析与 met_* 达标标志 + replay_suggestions 自动化改进建议）；审计 kind=chaos_drill 失败降级不阻断；防未来（fault_ts/created_at/acked_at/resolved_at 一律系统时钟已发生时刻，clock 可注入）；__main__ 自测。build_builtin_cases 接线 FI-01~07 真实路径（FI-01 StalenessDetector 断流、FI-02 引擎僵死 EngineHeartbeatWatcher.probe、FI-03 券商断连 on_state 转换点、FI-04 伪造拒单 ORDER_REJECTED 事件、FI-05 持仓差异 reconcile CRITICAL、FI-06 主通道故障 A-9 落盘兜底、FI-07 外部心跳连续超时判死 R-08）。
+   b. 新增 scripts/故障演练/季频故障演练.py（scripts/ 段新增 故障演练/ 子目录登记 #248）：argparse（--select 指定 FI 用例/--out 复盘报告落盘/--db/--list 打印 P0-8 用例库）+ find_project_root + 调 ChaosDrillRunner（注册内置 7 用例 → run → write_report），控制台摘要（cases_total/detect_rate/TP/FP/FN）+ JSON 落盘；业务逻辑零写入脚本。
+   c. 新增 tests/unit/test_chaos_drill.py（16 项）：P0-8 用例库复用（FI-01~07 恰全 + 字段完整 + list_fi_cases 同源）；预算解析（MTTD<1min→60s/MTTA<5min→300s/KPI-8 无预算）；核心编排（捕获即 TP + MTTx 计时 + 落库 ack/resolve 闭环、未捕获/注入异常=FN 不阻断、重复注册 ValueError、复盘报告 JSON 可解析 + summary 计数、预算 met_* 标志）；内置用例（全 7 注册按 P0-8 顺序、7 用例全部捕获 TP 可演示最小可行版本、select 子集过滤）；FI-07 外部心跳 R-08（单次超时 degraded 不误判主进程死、连续多次超时判死）。
+   d. 验证结果：py_compile 通过；薄入口自测（--list 打印 P0-8 用例库；--select FI-01 FI-06 真实演练落盘 detect_rate=1.0、TP=2、FN=0）；单测 16 项全绿；既有 test_measurability.py 未破坏（复用同库）；全量 pytest 结果见提交后终验。
+   e. 纪律遵守：先更新蓝图目录树（monitoring 段 chaos_drill.py + scripts/ 段新增 故障演练/季频故障演练.py + tests/unit 段 test_chaos_drill.py）再创建文件（蓝图优先）；无蓝图外新文件；业务逻辑归 myquant；用例库复用不另立（R-01）；业务阈值不编造（MTTx 预算与 P0-8 KPI 一致，从 FI_CASES kpi 字段解析）；严格防未来（只消费已发生时间戳）；任务后 git 提交（commit message 引用 #248）。
