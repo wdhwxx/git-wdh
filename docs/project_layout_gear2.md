@@ -511,6 +511,7 @@ Pythonwdhmm/
 │   │   ├── test_scheduler_health_alert.py # ✨【回写#160】监控阈值告警闭环测试(KP-P5-03：巡检注册/非healthy告警/healthy不告警，3项)✅已完成
 │   │   ├── test_scheduler_escalation.py    # ✨【回写#161】告警升级检查测试(KP-P5-04：任务注册/被调用/可禁用，3项)✅已完成
 │   │   ├── test_model_drift.py             # ✨【回写#231】C-1 模型漂移监控实时化测试（17 项）：evaluate_drift 漂移超阈值 drift/阈值内 healthy/阈值未配置 not_configured/部分阈值只判配置项/空序列返回0/防御非法入参；DriftReport.to_dict；run_daily_model_drift_check 漂移→WARNING 告警附 PSI/KS+dedup=model:drift:<model>:<version>/阈值未配置不告警/健康不告警/非法pair跳过/告警失败不阻断；get_model_drift_thresholds 读配置真源(R-04/PENDING_CAL=None)；attach_engine 注册日频任务/可禁用/调用 run✅已完成
+│   │   ├── test_rolling_performance.py     # ✨【回写#232】C-2 滚动绩效监控测试（17 项）：滚动收益（30d=10%/7d>5%/1d 样本不足 None）/夏普/回撤/胜率/多策略分列；日内回撤/亏损超阈 WARNING 告警（category=strategy、dedup=strategy:intraday_drawdown/loss:<name>、附值）/阈值未配置不告警不编造/健康不告警；metrics_history 回放（临时库真实 store 回放+策略标签过滤）；防未来拒绝未来点/防御校验（空策略/负阈值/非有限权益/非法 store/空 metric_name）/record 幂等去重/set_gauge 按策略 labels✅已完成
 │   │   ├── test_incident_response.py          # ✨【回写#169】事故响应测试(KP-P5-11：CRITICAL暂停/缺省不暂停/WARNING不暂停/pause异常不崩/制度文档/配置on_unhealthy，6项)✅已完成
 │   │   ├── test_channel_assembly.py       # ✨【回写#162】告警通道装配测试(KP-P5-05：按channels装配/未启用不装配/未投递回退写日志，3项)✅已完成底/env优先/运行API.py bootstrap不崩，4项)✅已完成1/缺参422/成功取真实值/失败501/异常501，5项)✅已完成/关闭/CORS互斥/401/429逻辑）✅已完成
 
@@ -1203,6 +1204,7 @@ Pythonwdhmm/
 
     │   ├── b_acceptance.py            # ✨【回写#230】B-10 B 包保钱包验收业务逻辑：BAcceptanceRunner（隔离环境=临时 AlertStore+真实 AlertManager+真实 EventBus+临时 MetricsHistoryStore(FieldCrypto)）——B-1~B-9 九项检查（对账差异=0 可展示/PnL 防脏门+权益回放/限额分级闭环/延迟 P99 可视化/拒单率 SLO/熔断动作链/新鲜度缺口/驾驶舱四键/保证金强平闭环），阈值全部引用 get_monitoring_config() 真源（禁硬编码）；异常不吞如实记录该项失败；每次 run() 重建隔离跨 run 去重；防未来时间戳；JSON 报告结构；__main__ 自测
 │   └── data_quality_explorer.py # ✨【#S2修复】数据质量探查器（从web/dashboard.py迁移到monitoring底层，消除API依赖Web的架构倒置）：DataQualityExplorer类13方法（实时指标/清洗运行列表/运行详情/等级分布/脏数据统计/总览），纯Python数据层不依赖streamlit，API层和Web层均从此导入；数据源=CleanDataQueries+MetricsCollector；source过滤区分offline/live为实盘对接预留；✨【回写#227】B-7 数据新鲜度 SLI——DataFreshnessSli（既有类零改动追加）：新鲜度滞后 latest_lag_seconds=max(0,now−最新ts) 按标的/数据类分别（slo.data.freshness_max_seconds=60 LOCKED：>60s WARNING/>2×ERROR）；每日缺口 record_gap/gap_provider 按日聚合（gap_allowed=0 缺口即 ERROR(P1)）；因子/财务同步延迟分别设值（PENDING_CAL 未配置不告警不写指标不编造）；指标 data_freshness_lag_seconds(data_key)/data_gap_count/factor|financial_sync_delay_seconds 进 /api/metrics（懒加载）；poll()+DATA_LOADED 事件驱动；防未来（滞后/延迟截断非负）；__main__ 自测 14 项
+    │   ├── rolling_performance.py    # ✨【回写#232】C-2 滚动绩效指标（周期/POLL，非 MTTD 类）：RollingPerformanceMonitor——滚动窗口（日/周/月=1/7/30 自然日 trailing）收益 return_pct、夏普 sharpe=mean/std×√252（样本<2 None）、回撤 drawdown_pct=权益路径最大峰谷、胜率 win_rate=日收益>0 占比；日内回撤/亏损（当日已发生绩效点）超 slo.strategy.intraday_drawdown_limit → WARNING（category=strategy，dedup=strategy:intraday_drawdown/loss:<name>，附值）；record() 摄入已发生 (ts,equity) 按策略归组（拒绝未来点防未来）+ replay_from_history(store, metric_name, strategy, ...) 基于 MetricsHistoryStore.query 回放（C-2 验收口径）；阈值读 slo.strategy（PENDING_CAL=None 不告警不编造）；REGISTERED_METRICS 8 项经 set_gauge(labels={"strategy":name})；__main__ 自测 15 项
 
     │
 
@@ -3669,3 +3671,11 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
     c. 新增 tests/unit/test_model_drift.py（17 项）：evaluate_drift 三态（drift/healthy/not_configured）+部分阈值+空序列+防御；DriftReport.to_dict；run_daily_model_drift_check 告警/不告警/非法/失败不阻断；get_model_drift_thresholds 读真源；attach_engine 日频任务注册/调用/可禁用。
     d. 验证结果：py_compile model_monitor.py/scheduler.py 通过；新增单测 17 passed；全量 pytest 无回归（基线 2958 passed/2 skipped/1 failed 环境豁免，新增 17 项后只增不减）。
     e. 纪律遵守：无蓝图外文件（3 文件均登记目录树）；阈值引用配置真源（PENDING_CAL 不编造）；触发为日频周期+可事件调用（R-02 非 MTTD 类）；防未来（只消费已观测分布）；任务后 git 提交（commit 见 #231 蓝图提交）。
+227. ✨【回写记录·2026-10-06·C-2 滚动绩效指标】【回写#232】
+    事实来源：本次落地，代码级核验：《量化系统监控模块施工总清单_V1.2.md》C-2 行验收口径（滚动窗口日/周/月收益、夏普、回撤、胜率；日内回撤/亏损超策略阈值告警；基于 metrics_history 回放）+ P0-2《SLO与阈值锁定清单》行 9（策略日内回撤/亏损，metrics_history 回放）+ 行 96（日内回撤阈值按策略回测历史回撤分布设定）。
+    a. 新增 myquant/monitoring/rolling_performance.py（monitoring/ 段登记 #232）：RollingPerformanceMonitor——滚动窗口（日/周/月=1/7/30 自然日 trailing）收益 return_pct=(窗口末权益/首权益-1)×100、夏普 sharpe=mean(日收益)/std(日收益)×√252（样本<2 或 std=0 → None）、回撤 drawdown_pct=窗口权益路径最大峰谷回撤、胜率 win_rate=日收益>0 占比（无样本 None）；record() 摄入已发生 (timestamp, equity) 按策略归组（同 ts 幂等去重、缓存上限丢最旧、拒绝未来点防未来）；日内回撤/亏损基于当日已发生绩效点（日期边界=自然日）；阈值读 slo.strategy.intraday_drawdown_limit（R-04，PENDING_CAL=None → 只计算输出不告警不编造）。
+    b. 告警契约：日内回撤>阈值 或 日内亏损(|当日收益|>阈值) → WARNING（category=strategy、source=monitoring.rolling_performance、dedup=strategy:intraday_drawdown/loss:<name>、details 附回撤/收益/阈值）；告警失败记 warning 不阻断；触发模式为周期（poll() 巡检复核，C-2 触发列=周期，R-02 非 MTTD 类）。
+    c. 基于 metrics_history 回放：replay_from_history(store, metric_name, strategy=None, start_ts=None, end_ts=None, limit=10000) 从 MetricsHistoryStore.query(name/labels/时间范围/order=asc) 拉取绩效点按策略归组注入（C-2 验收口径）；指标 REGISTERED_METRICS 8 项（rolling_performance_return_1d/7d/30d、sharpe_30d、drawdown_30d、winrate_30d、strategy_intraday_drawdown/return）经 set_gauge(labels={"strategy":name}) 进 /api/metrics。
+    d. 新增 tests/unit/test_rolling_performance.py（17 项，临时库不碰 quant.db）：滚动收益/夏普/回撤/胜率/多策略分列；日内回撤/亏损超阈 WARNING（category=strategy、dedup、附值）/阈值未配置不告警不编造/健康不告警；metrics_history 真实临时库回放+策略标签过滤；防未来拒绝未来点/防御校验（空策略/负阈值/非有限权益/非法 store/空 metric_name）/record 幂等去重/set_gauge 按策略 labels。模块 __main__ 自测 15 项。
+    e. 验证结果：py_compile 通过；新增单测 17 passed；全量 tests（unit+benchmarks）无回归（基线 2975 passed/2 skipped/1 failed 环境豁免，新增 17 项后只增不减）。
+    f. 纪律遵守：无蓝图外文件（新模块 + 测试文件均登记目录树）；阈值引用配置真源（slo.strategy PENDING_CAL 不编造）；触发为周期巡检（R-02 非 MTTD 类）；防未来（record 拒绝未来绩效点，滚动/日内只消费已发生点）；任务后 git 提交（commit 见 #232 蓝图提交）。
