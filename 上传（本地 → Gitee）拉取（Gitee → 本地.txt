@@ -1,0 +1,49 @@
+# ========== 上传（本地 → Gitee）==========
+
+# 1. 进入项目目录（后面所有命令都在这运行）
+cd D:\Projects\Pythonwdhmm
+
+# 2. 把所有改动加入暂存区（-A = all，含新增/修改/删除）
+#    注意：.gitignore 里排除的数据、配置、日志不会被加进来，放心用
+git add -A
+
+# 3. 把暂存区的内容打包成一个提交（-m 后写本次改动的说明，方便以后查历史）
+git commit -m "更新说明（改成你的描述）"
+
+# 4. 推送到 Gitee 远端
+#    origin = 远程仓库名（你的 Gitee 仓库）
+#    master = 分支名
+git push origin master
+
+
+# ========== 拉取（Gitee → 本地）==========
+
+# 1. 进入项目目录
+cd D:\Projects\Pythonwdhmm
+
+# 2. 把 Gitee 上别人/别的电脑推送的最新改动同步到本地
+#    建议每次开始工作前先执行这一步，避免和本地改动冲突
+git pull origin master
+
+
+# ========== 克隆全新副本（Gitee → 新目录）==========
+
+# 把整个仓库完整下载到一个新文件夹（首次拿到代码、换电脑、备份时用）
+# 注意：
+#   - 第二个路径必须是"不存在的新文件夹"（或空文件夹）
+#   - 克隆的是代码和文档，不含数据库、行情数据等被忽略的大文件
+git clone git@gitee.com:wdhxx/pythonwdhmm.git D:\Projects\Pythonwdhmm-backup
+
+一句话总结分工：
+
+- **上传** = `add`（挑东西）→ `commit`（打包）→ `push`（寄出去）
+- **拉取** = `pull`（收包裹），**克隆** = `clone`（整个仓库下载一份新的）
+
+
+# ========== 本地 ↔ Gitee 一致性验证（随时可自查）==========
+
+cd D:\Projects\Pythonwdhmm
+git fetch origin          # ① 同步远端信息
+git status -sb            # ② 看是否 ahead/behind
+git diff origin/master    # ③ 内容 diff，空 = 一致
+
