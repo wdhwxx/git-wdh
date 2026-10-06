@@ -1281,6 +1281,32 @@ def create_app(
             logger.error(f"[api] 当日权益曲线回放失败: {e}")
             return ApiResponse.error(code=500, message="当日权益曲线回放失败")
 
+    @app.get("/api/monitor/cockpit", response_model=ApiResponse, tags=["监控"])
+    async def monitor_cockpit():
+        """
+        业务驾驶舱四视图（B-8，只读）。
+
+        四视图：①对账状态（AccountReconciler.to_dict）②资金 PnL（B-2 快照）
+        ③限额使用（LimitUsageMonitor 配置 + collector 使用率 GAUGE）④执行质量
+        （ExecutionStatsMonitor.summary：滑点/拒单/延迟）。数据全部经
+        MonitorCenterDataProvider.build_cockpit_payload 聚合，与监控中心看板同源，
+        保证"数据与 API 一致"。无数据视图 graceful 返回空（不伪造）。
+        """
+        try:
+            from myquant.web.dashboard import MonitorCenterDataProvider
+            provider = MonitorCenterDataProvider(
+                metrics_collector=_get_collector(),
+                metrics_history_store=_get_history_store(),
+                account_reconciler=_get_reconciler(),
+                limit_usage_monitor=_container.get("limit_usage_monitor"),
+                execution_stats_monitor=_container.get("execution_stats_monitor"),
+            )
+            data = provider.build_cockpit_payload()
+            return ApiResponse.success(data=data, message="业务驾驶舱四视图")
+        except Exception as e:
+            logger.error(f"[api] 业务驾驶舱聚合失败: {e}")
+            return ApiResponse.error(code=500, message="业务驾驶舱聚合失败")
+
     logger.info(f"[api] FastAPI应用创建成功: {title} v{version}")
     return app
 

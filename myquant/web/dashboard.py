@@ -163,6 +163,8 @@ class MonitorCenterDataProvider:
         metrics_collector: Optional[Any] = None,
         metrics_history_store: Optional[Any] = None,
         account_reconciler: Optional[Any] = None,
+        limit_usage_monitor: Optional[Any] = None,
+        execution_stats_monitor: Optional[Any] = None,
     ):
         """
         Parameters
@@ -176,13 +178,19 @@ class MonitorCenterDataProvider:
         metrics_history_store : MetricsHistoryStore | None
             指标时序库（B-2 权益曲线/PnL 回放；None 懒加载默认库）
         account_reconciler : AccountReconciler | None
-            账户对账器（B-2/B-8 对账状态；None 则对账状态回退 unknown）
+            账户对账器（B-2/B-8 对账状态；None 则对账状态回退全局单例）
+        limit_usage_monitor : LimitUsageMonitor | None
+            限额监控（B-8 限额使用视图配置；当前使用率读 collector 指标）
+        execution_stats_monitor : ExecutionStatsMonitor | None
+            执行统计监控（B-8 执行质量视图 summary()）
         """
         self._alert_manager = alert_manager
         self._health_checker = health_checker
         self._metrics_collector = metrics_collector
         self._history_store = metrics_history_store
         self._account_reconciler = account_reconciler
+        self._limit_usage_monitor = limit_usage_monitor
+        self._execution_stats_monitor = execution_stats_monitor
 
     # ── 依赖懒加载 ──
 
@@ -470,6 +478,114 @@ class MonitorCenterDataProvider:
         except Exception as e:  # noqa: BLE001
             logger.error(f"[web] 当日权益曲线回放失败: {e}")
             return []
+
+    # ═══════════════════════════════════════════
+    #  B-8：业务驾驶舱四视图（与 /api/monitor/cockpit 同源）
+    # ═══════════════════════════════════════════
+
+    def _metric_value(self, name: str) -> Optional[float]:
+        """从 collector 取某指标当前值（多标签组合取最新；无则 None）。"""
+        collector = self._get_collector()
+        try:
+            points = collector.get_all(name=name)
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"[web] 指标 {name} 读取失败: {e}")
+            return None
+        values: List[float] = []
+        for m in points:
+            to_dict = getattr(m, "to_dict", None)
+            d = to_dict() if callable(to_dict) else (m if isinstance(m, dict) else {})
+            if d.get("name") == name:
+                try:
+                    values.append(float(d.get("value", 0.0)))
+                except (TypeError, ValueError):
+                    continue
+        return values[-1] if values else None
+
+    def get_limit_usage_view(self) -> Dict[str, Any]:
+        """
+        限额使用视图（B-8 视图③）：各维度当前使用率 + 配置阈值。
+
+        当前使用率读 MetricsCollector 的 limit_usage_* GAUGE（与 /api/metrics
+        同源）；阈值/限额读 LimitUsageMonitor.get_status()（注入时）。未配置维度
+        enabled=false（PENDING_CAL，不编造数值）。
+
+        Returns
+        -------
+        dict : {"usages": {dim: {"value": float|None, "enabled": bool}},
+                "config": {...}|None}
+        """
+        from myquant.monitoring.metrics_collector import BuiltinMetrics
+        usage_metrics = {
+            "concentration": BuiltinMetrics.LIMIT_USAGE_CONCENTRATION,
+            "leverage": BuiltinMetrics.LIMIT_USAGE_LEVERAGE,
+            "single_stock": BuiltinMetrics.LIMIT_USAGE_SINGLE_STOCK,
+        }
+        usages: Dict[str, Any] = {}
+        for dim, metric_name in usage_metrics.items():
+            val = self._metric_value(metric_name)
+            usages[dim] = {"value": val, "enabled": val is not None}
+        config: Optional[Dict[str, Any]] = None
+        if self._limit_usage_monitor is not None:
+            try:
+                config = self._limit_usage_monitor.get_status()
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"[web] 限额配置读取失败: {e}")
+                config = None
+        return {"usages": usages, "config": config}
+
+    def get_execution_quality_view(self) -> Dict[str, Any]:
+        """
+        执行质量视图（B-8 视图④）：延迟 P99 / 滑点 / 拒单率。
+
+        注入 ExecutionStatsMonitor 时直接消费其 summary()（滑点买/卖分列、
+        延迟四段 P99、拒单率+累计计数）；未注入则从 collector GAUGE 取当前值兜底，
+        无样本时数值为 None（不伪造）。
+
+        Returns
+        -------
+        dict : {"summary": {...}|None, "gauges": {...}, "available": bool}
+        """
+        summary: Optional[Dict[str, Any]] = None
+        if self._execution_stats_monitor is not None:
+            try:
+                summary = self._execution_stats_monitor.summary()
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"[web] 执行统计 summary 读取失败: {e}")
+                summary = None
+        # collector 兜底（与 /api/metrics 同源）
+        gauges: Dict[str, Optional[float]] = {
+            "ack_p99_ms": self._metric_value("execution_ack_p99_ms"),
+            "signal_to_fill_p99_ms": self._metric_value("execution_signal_to_fill_p99_ms"),
+            "slippage_buy_pct": self._metric_value("slippage_buy_pct"),
+            "slippage_sell_pct": self._metric_value("slippage_sell_pct"),
+            "order_reject_rate": self._metric_value("order_reject_rate"),
+            "orders_submitted_total": self._metric_value("orders_submitted_total"),
+            "orders_rejected_total": self._metric_value("orders_rejected_total"),
+        }
+        available = summary is not None or any(v is not None for v in gauges.values())
+        return {"summary": summary, "gauges": gauges, "available": available}
+
+    def build_cockpit_payload(self) -> Dict[str, Any]:
+        """
+        业务驾驶舱四视图聚合（B-8；API 与看板同源，数据一致）。
+
+        四视图：
+          1. reconciliation 对账状态（consistent/frozen/last_diff）
+          2. pnl 资金 PnL（B-2 快照 + 当日曲线点数）
+          3. limit_usage 限额使用（各维度使用率 + 阈值配置）
+          4. execution 执行质量（滑点/拒单/延迟）
+
+        Returns
+        -------
+        dict : 四键视图；任一视图内部异常均 graceful 降级，不整体抛错。
+        """
+        return {
+            "reconciliation": self.get_reconciliation_status(),
+            "pnl": self.get_pnl_snapshot(),
+            "limit_usage": self.get_limit_usage_view(),
+            "execution": self.get_execution_quality_view(),
+        }
 
 
 
@@ -1239,6 +1355,59 @@ class Dashboard:
             st.caption(f"当日 {len(curve)} 个权益采样点（防脏门一致后才采集）")
         else:
             st.info("当日暂无权益曲线数据（PnL 尚未采集 / 对账不一致被门控）")
+
+        st.markdown("---")
+
+        # ── 区块7：业务驾驶舱四视图（B-8：对账/资金PnL/限额/执行质量）──
+        st.subheader("🛰️ 业务驾驶舱")
+        cockpit = provider.build_cockpit_payload()
+
+        # 视图①对账状态
+        st.markdown("**① 对账状态**")
+        rec = cockpit.get("reconciliation", {}) or {}
+        if rec.get("available") is False:
+            st.caption("对账器未接入（unknown）")
+        else:
+            col_r1, col_r2, col_r3 = st.columns(3)
+            with col_r1:
+                st.metric("一致", rec.get("consistent"))
+            with col_r2:
+                st.metric("冻结", rec.get("frozen"))
+            with col_r3:
+                st.metric("在途", rec.get("in_flight"))
+            if rec.get("last_diff"):
+                st.caption(f"最近差异: {rec.get('last_diff')}")
+
+        # 视图③限额使用
+        st.markdown("**② 限额使用**")
+        lu = cockpit.get("limit_usage", {}) or {}
+        usages = lu.get("usages", {}) or {}
+        if usages:
+            st.dataframe([
+                {"维度": dim, "使用率(0~1)": (u or {}).get("value"),
+                 "已启用": (u or {}).get("enabled")}
+                for dim, u in usages.items()
+            ], use_container_width=True)
+        else:
+            st.caption("暂无限额使用率数据")
+
+        # 视图④执行质量
+        st.markdown("**③ 执行质量（延迟/滑点/拒单）**")
+        ex = cockpit.get("execution", {}) or {}
+        if ex.get("available"):
+            g = ex.get("gauges", {}) or {}
+            col_e1, col_e2, col_e3, col_e4 = st.columns(4)
+            with col_e1:
+                st.metric("ACK P99(ms)", g.get("ack_p99_ms") if g.get("ack_p99_ms") is not None else "—")
+            with col_e2:
+                st.metric("信号→成交 P99(ms)",
+                          g.get("signal_to_fill_p99_ms") if g.get("signal_to_fill_p99_ms") is not None else "—")
+            with col_e3:
+                st.metric("买滑点%", g.get("slippage_buy_pct") if g.get("slippage_buy_pct") is not None else "—")
+            with col_e4:
+                st.metric("拒单率", g.get("order_reject_rate") if g.get("order_reject_rate") is not None else "—")
+        else:
+            st.caption("暂无执行质量数据（无样本）")
 
     # ═══════════════════════════════════════════
     #  页面：数据
