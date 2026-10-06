@@ -1942,6 +1942,26 @@ def attach_engine(
                 cron_expr=reconcile_cron,
             )
 
+        # A-7 收口（回写#214 b段）：事件驱动对账装配。portfolio 具备
+        # attach_reconciliation_event_trigger（A-7 commit 8fe464a 已定稿）且 broker
+        # 非空时，装配即订阅全局 EventBus 的 ORDER_FILLED/POSITION_UPDATE 事件，实时触发
+        # 一次核对（R-02：检测由事件流实时触发，盘后 cron 仅漏检兜底）。异常记 warning 不
+        # 阻断装配；reconcile_vs_broker 本体不改动。
+        # 清理语义：attach_engine 现状无 teardown 钩子（巡检/看门狗同模式常驻进程生命周期），
+        # 引擎关停/调度器 stop 不自动退订；调用方应在引擎关停流程显式调
+        # portfolio.detach_reconciliation_event_trigger()（幂等）退订，避免 handler 泄漏。
+        if hasattr(portfolio, "attach_reconciliation_event_trigger"):
+            try:
+                from myquant.core.event_bus import get_event_bus
+                handler_ids = portfolio.attach_reconciliation_event_trigger(
+                    get_event_bus(), broker
+                )
+                logger.info(
+                    f"[attach] A-7 事件驱动对账已装配: handlers={len(handler_ids)}"
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"[attach] A-7 事件驱动对账装配失败（不阻断装配）: {e}")
+
     if enable_escalation:
         # KP-P5-04: 告警升级检查接入周期任务（check_escalations 原无调用方）
         def _escalation_job(**kw) -> None:  # noqa: ARG001

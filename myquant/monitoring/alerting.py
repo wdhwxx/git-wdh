@@ -119,6 +119,63 @@ TRADE_EXCEPTION_ALERT_EVENT_TYPES: Tuple[str, ...] = (
 
 
 # ═══════════════════════════════════════════════
+#  P0~P3 业务分级 → SeverityLevel 统一映射（A-10，回写#214；P0-3 告警分级定稿）
+# ═══════════════════════════════════════════════
+# 语义取自 docs/监控档案/告警分级.md §1 分级表（响应时限：P0=1min / P1=5min /
+# P2=15min / P3=次日）。与 A-8 已提交映射自洽：P1 交易异常(order.rejected 等)→ERROR、
+# P0 emergency.liquidation→CRITICAL；本表作为统一映射被引用，不改动 A-8 handler 行为。
+#  - P0 资金异常/风控击穿/交易中断 → CRITICAL（最高级）
+#  - P1 核心策略异常/行情中断/大量拒单 → ERROR
+#  - P2 性能退化/数据延迟 → WARNING
+#  - P3 趋势/日报 → INFO
+ALERT_LEVEL_CODE_MAP: Dict[str, "SeverityLevel"] = {
+    "P0": SeverityLevel.CRITICAL,
+    "P1": SeverityLevel.ERROR,
+    "P2": SeverityLevel.WARNING,
+    "P3": SeverityLevel.INFO,
+}
+
+
+def p0_p3_level(code: str) -> "SeverityLevel":
+    """把 P0~P3 业务分级代码映射为 SeverityLevel（统一入口，大小写与首尾空白容错）。
+
+    Args:
+        code: 业务分级代码（"P0"/"P1"/"P2"/"P3"，大小写不敏感、容忍首尾空白）。
+
+    Returns:
+        SeverityLevel: 映射后的告警级别（P0→CRITICAL、P1→ERROR、P2→WARNING、P3→INFO）。
+
+    Raises:
+        ValueError: code 为空或非 P0~P3 时抛出（防御式，禁止静默落到某一级）。
+    """
+    if code is None:
+        raise ValueError("p0_p3_level: code 不能为空")
+    key = str(code).strip().upper()
+    if key not in ALERT_LEVEL_CODE_MAP:
+        raise ValueError(
+            f"非法告警分级代码: {code!r}（须为 P0~P3，与 P0-3 告警分级表对齐）"
+        )
+    return ALERT_LEVEL_CODE_MAP[key]
+
+
+# A-10（回写#214）：按 category 的默认 Runbook 映射（P0-4 模板；与 docs/监控档案/
+# 告警分级.md §2 示例告警 FI-xx 对齐）。显式 runbook_id / details.runbook_id 优先，
+# 二者皆空时按 category 兜底补齐，保证 P0/P1 告警必挂 Runbook。
+# 注：broker 默认值与 myquant.monitoring.watchdog.RUNBOOK_BROKER_DISCONNECT 逐字一致
+# （避免跨模块 import 耦合，字符串常量对齐即可）。
+DEFAULT_RUNBOOK_BY_CATEGORY: Dict[str, str] = {
+    "data_quality": "RB-DATA-QUALITY-001",   # 数据质量/新鲜度缺口（P2）
+    "connection": "RB-CONNECTION-001",       # 通用连接类（P0）
+    "broker": "RB-BROKER-DISCONNECT-001",    # 券商连接断开（FI-03，P0）
+    "trade": "RB-TRADE-EXCEPTION-001",       # 拒单/成交回报异常（FI-04，P1）
+    "risk": "RB-RISK-001",                   # 风控/保证金占用（P0）
+    "reconciliation": "RB-RECONCILE-001",    # 持仓/资金对账差异（FI-05，P0）
+    "health": "RB-HEALTH-001",               # 巡检非健康（health_check）
+    "system": "RB-SYSTEM-001",               # 系统兜底
+}
+
+
+# ═══════════════════════════════════════════════
 #  告警数据类
 # ═══════════════════════════════════════════════
 
@@ -155,6 +212,11 @@ class Alert:
         父告警ID（升级告警关联原始告警）
     aggregation_count : int
         聚合的原始事件数量（聚合告警>1）
+    classification : str
+        处置分类（TP/FP/auto，空=未打标），P0-8 统计读取源
+    runbook_id : str
+        A-10（回写#214）显式 Runbook 绑定（P0-4 模板）；由 __post_init__ 归一化
+        （显式字段 > details.runbook_id > category 默认映射），贯通落库/查询
     """
     level: SeverityLevel
     message: str
@@ -171,6 +233,26 @@ class Alert:
     aggregation_count: int = 1
     # BASE-1/P0-8：处置分类（TP/FP/auto，空=未打标），供 P0-8 统计脚本读取（R-01）
     classification: str = ""
+    # A-10（回写#214）：显式 Runbook 绑定；默认空，由 __post_init__ 归一化填充
+    runbook_id: str = ""
+
+    def __post_init__(self) -> None:
+        """A-10（回写#214）：runbook_id 归一化。
+
+        优先级：显式构造字段 > details["runbook_id"] 透传 > 按 category 默认 Runbook
+        （DEFAULT_RUNBOOK_BY_CATEGORY）兜底；并把最终值回填 details["runbook_id"]，
+        使落库 details_json 与 runbook_id 列一致（A-4/A-6 历史 details.runbook_id
+        告警自动归入显式字段）。防未来：只消费本告警已携带的静态字段，不预测未来事件。
+        """
+        if not self.runbook_id:
+            rid = (self.details or {}).get("runbook_id")
+            if rid:
+                self.runbook_id = str(rid)
+            else:
+                self.runbook_id = DEFAULT_RUNBOOK_BY_CATEGORY.get(self.category, "")
+        # 显式字段为准，回填 details（保证 runbook_id 列与 details_json 一致）
+        if self.runbook_id and (self.details or {}).get("runbook_id") != self.runbook_id:
+            self.details["runbook_id"] = self.runbook_id
 
     @property
     def level_name(self) -> str:
@@ -207,6 +289,7 @@ class Alert:
             "parent_alert_id": self.parent_alert_id,
             "aggregation_count": self.aggregation_count,
             "classification": self.classification,
+            "runbook_id": self.runbook_id,
         }
 
     def summary(self) -> str:
@@ -1404,6 +1487,17 @@ class AlertManager:
         if self._store is not None and self._store_enabled:
             try:
                 self._store.save_alert(alert)
+                # A-10（回写#214）：runbook_id 贯通落库——save_alert 仅写主体字段，
+                # 显式 runbook_id 经既有 set_runbook_id 回填 alerts.runbook_id 列
+                # （幂等；绑定失败仅记 error，不阻断告警投递）。
+                if alert.runbook_id:
+                    try:
+                        self._store.set_runbook_id(alert.alert_id, alert.runbook_id)
+                    except Exception as re:  # noqa: BLE001
+                        logger.error(
+                            f"告警 runbook_id 落库失败（不阻断投递）: "
+                            f"alert_id={alert.alert_id}: {re}"
+                        )
             except Exception as e:
                 logger.error(
                     f"告警落库失败（不阻断投递）: alert_id={alert.alert_id}: {e}",
@@ -1459,8 +1553,23 @@ class AlertManager:
         category: str = "system",
         details: Optional[Dict[str, Any]] = None,
         deduplication_key: str = "",
+        runbook_id: str = "",
     ) -> int:
-        """便捷方法：创建并发送告警"""
+        """便捷方法：创建并发送告警。
+
+        Args:
+            level: 告警级别。
+            message: 告警消息。
+            source: 告警来源（模块/组件名）。
+            category: 告警分类（决定默认 Runbook 兜底）。
+            details: 详细信息；内含 runbook_id 时自动提升为显式字段（A-10）。
+            deduplication_key: 去重键。
+            runbook_id: A-10 显式 Runbook 绑定（P0-4）；空则按 details.runbook_id /
+                category 默认映射兜底。
+
+        Returns:
+            int: 成功发送的通道数量。
+        """
         alert = Alert(
             level=level,
             message=message,
@@ -1468,6 +1577,7 @@ class AlertManager:
             category=category,
             details=details or {},
             deduplication_key=deduplication_key,
+            runbook_id=runbook_id,
         )
         return self.send_alert(alert)
 
@@ -2126,17 +2236,22 @@ class AlertManager:
                         parent_alert_id=alert.alert_id,
                     )
                     sent = self.send_alert(escalated_alert, dedup_enabled=False)
-                    if sent > 0:
-                        alert.acknowledged = True  # 标记原告警为已确认（避免重复升级）
-                        # BASE-1：升级同步库（原告警置 acked + escalated=1）
-                        if self._store is not None and self._store_enabled:
-                            try:
-                                self._store.update_status(alert.alert_id, "acked")
-                                self._store.mark_escalated(alert.alert_id)
-                            except Exception as e:
-                                logger.error(f"升级同步库失败: {alert.alert_id}: {e}")
-                        escalated += 1
-                        logger.warning(f"告警升级: {alert.alert_id} WARNING -> ERROR")
+                    # A-10（回写#214）：升级状态机不依赖通道投递是否成功——判定只取决于
+                    # "WARNING 超时未确认"；通道失败另有 A-9 未投递落盘兜底（_write_undelivered），
+                    # 不影响升级状态流转与落库。原 sent>0 门控在"无通道/纯内存"时永不升级，
+                    # 与 A-10 验收（超时未确认→升级 ERROR 且落库 escalated 标记）相悖，故移除。
+                    alert.acknowledged = True  # 原告警已确认/已升级（避免重复升级）
+                    # BASE-1：升级同步库（原告警置 acked + escalated=1）
+                    if self._store is not None and self._store_enabled:
+                        try:
+                            self._store.update_status(alert.alert_id, "acked")
+                            self._store.mark_escalated(alert.alert_id)
+                        except Exception as e:
+                            logger.error(f"升级同步库失败: {alert.alert_id}: {e}")
+                    escalated += 1
+                    logger.warning(
+                        f"告警升级: {alert.alert_id} WARNING -> ERROR (通道投递={sent})"
+                    )
 
             if escalated > 0:
                 logger.info(f"告警升级检查完成: 升级了 {escalated} 条告警")
@@ -2195,6 +2310,8 @@ class AlertManager:
             resolved=row.get("status", "open") == "resolved",
         )
         alert.classification = row.get("classification", "")
+        # A-10（回写#214）：runbook_id 随行还原（库内存双读"库"侧一致展示）
+        alert.runbook_id = row.get("runbook_id") or ""
         if row.get("escalated"):
             alert.escalated_from = SeverityLevel.WARNING
         return alert
@@ -2536,3 +2653,91 @@ def reset_alert_manager() -> None:
     """重置全局告警管理器（测试用）"""
     global _global_alert_manager
     _global_alert_manager = None
+
+
+# ═══════════════════════════════════════════════
+#  自测 Demo（A-10，回写#214；临时库不碰真实 quant.db）
+# ═══════════════════════════════════════════════
+
+def _run_a10_self_test() -> int:
+    """A-10 自测：P0~P3 统一映射 / runbook_id 贯通 / 超时未确认自动升级落库。
+
+    防未来：使用固定偏移的历史时间戳（now-310s）模拟"已超时未确认"，不依赖随机时钟。
+
+    Returns:
+        int: 失败项数（0 = 全绿）。
+    """
+    import tempfile
+    from pathlib import Path
+
+    from myquant.database.connection import DatabaseConnection
+    from myquant.monitoring.alert_store import AlertStore
+
+    passed = 0
+    failures: List[str] = []
+
+    def check(name: str, cond: bool, detail: str = "") -> None:
+        nonlocal passed
+        if cond:
+            passed += 1
+        else:
+            failures.append(f"{name}: {detail}")
+
+    # 1) P0~P3 统一映射（对齐 P0-3 分级表）
+    check("P0->CRITICAL", p0_p3_level("P0") is SeverityLevel.CRITICAL)
+    check("P1->ERROR", p0_p3_level("P1") is SeverityLevel.ERROR)
+    check("P2->WARNING", p0_p3_level("P2") is SeverityLevel.WARNING)
+    check("P3->INFO", p0_p3_level("P3") is SeverityLevel.INFO)
+    check("p0 小写/空白容错", p0_p3_level(" p0 ") is SeverityLevel.CRITICAL)
+    try:
+        p0_p3_level("P9")
+        check("非法分级抛错", False, "未抛 ValueError")
+    except ValueError:
+        check("非法分级抛错", True)
+
+    # 2) runbook_id 归一化：details 透传 / category 默认 / 显式优先
+    a_detail = Alert(level=SeverityLevel.WARNING, message="t",
+                     category="broker", details={"runbook_id": "RB-X"})
+    check("details.runbook_id 提升为显式字段", a_detail.runbook_id == "RB-X")
+    a_default = Alert(level=SeverityLevel.WARNING, message="t", category="broker")
+    check("category 默认 runbook 兜底", a_default.runbook_id == "RB-BROKER-DISCONNECT-001")
+    a_explicit = Alert(level=SeverityLevel.CRITICAL, message="t",
+                       category="broker", runbook_id="RB-FORCED")
+    check("显式 runbook 优先", a_explicit.runbook_id == "RB-FORCED")
+    check("to_dict 含 runbook_id", a_explicit.to_dict().get("runbook_id") == "RB-FORCED")
+
+    # 3) 超时未确认自动升级（临时库；加 console 通道避免触发未投递落盘写 logs）
+    with tempfile.TemporaryDirectory() as tmp:
+        conn = DatabaseConnection(Path(tmp) / "esc_self.db")
+        store = AlertStore(connection=conn)
+        mgr = AlertManager(store=store)
+        mgr.add_channel(ConsoleAlertChannel("self-test-console"))
+        stale = Alert(
+            level=SeverityLevel.WARNING, message="超时未确认告警",
+            category="broker", alert_id="self-stale1",
+            timestamp=time.time() - 310.0,   # 已超默认 escalation_time=300s
+        )
+        mgr.send_alert(stale, dedup_enabled=False)
+        n = mgr.check_escalations()
+        check("升级计数=1", n == 1, f"n={n}")
+        row = store.get("self-stale1")
+        check("原告警置 acked", row is not None and row["status"] == "acked")
+        check("原告警 escalated 标记落库", row is not None and row["escalated"] is True)
+        check("原告警 runbook_id 落库",
+              row is not None and row["runbook_id"] == "RB-BROKER-DISCONNECT-001")
+        errs = store.load_history(limit=10, level=SeverityLevel.ERROR.value)
+        check("升级告警 ERROR 且带[升级]前缀落库",
+              any(e["message"].startswith("[升级]") for e in errs))
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+    print(f"[A-10] alerting 自测: {passed} 项通过, {len(failures)} 项失败")
+    for f in failures:
+        print(f"  - {f}")
+    return len(failures)
+
+
+if __name__ == "__main__":
+    raise SystemExit(_run_a10_self_test())
