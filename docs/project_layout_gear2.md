@@ -436,6 +436,8 @@ Pythonwdhmm/
 
 │   ├── 验收_监控M1保命.py            # ✨【回写#220】A-15 M1 保命验收薄入口：argparse（--mode min/full/both + --out + --db）+ find_project_root + 调 myquant/monitoring/m1_acceptance.py（保命闭环覆盖率 + FI-01~05 故障注入 + MTTx 计时 + TP/FP/FN 分类），输出 JSON 验收报告；业务逻辑零写入脚本
 
+│   ├── 验收_B包保钱包.py            # ✨【回写#230】B-10 B 包保钱包验收薄入口：argparse（--out 默认 docs/监控档案/B包保钱包验收_20261006.json + --db + --mode）+ find_project_root + 调 myquant/monitoring/b_acceptance.py（B-1~B-9 九项验收），控制台逐项摘要 + JSON 报告；业务逻辑零写入脚本
+
 │   ├── 数据库迁移.py                  # ✨【第6项】Alembic迁移中文入口：upgrade/downgrade/current/history/stamp/check/init，支持--db指定数据库路径
 
 │   ├── 数据库初始化.py                # 数据库初始化：调用database.schema与migrations创建表结构
@@ -540,9 +542,29 @@ Pythonwdhmm/
 
     │   │   ├── test_dashboard_monitor.py # ✨【回写#215】A-11 监控中心测试（17 项）：告警详情脱敏规则、告警筛选（scope/level/category）、健康两级未注入降级 unknown、指标卡片、交易连续状态 unknown/ok、/api/monitor/overview 与 /api/alerts 端点行为✅已完成
 
-    │   │   ├── test_rbac.py            # ✨【回写#219】A-16 监控面 RBAC 测试（20 项）：角色矩阵逐角色断言、normalize_role 向后兼容、RbacGuard 拒绝留 deny/放行留 allowed、viewer/auditor 越权 ack/resolve→403 且审计无成功动作、operator/admin 成功、不传角色兼容、改阈值/复位熔断占位 403/501 分流✅已完成
+    │   │   ├── test_rbac.py            # ✨【回写#219】A-16 监控面 RBAC 测试（20 项）：角色矩阵逐角色断言、normalize_role 向后兼容、RbacGuard 拒绝留 deny/放行留 allowed、viewer/auditor 越权 ack/resolve→403 且审计无成功动作、operator/admin 成功、不传角色兼容、改阈值/复位熔断占位 403/501 分流；✨【回写#226】B-6 circuit reset 断言 501→真实复位成功+circuit 审计留痕（viewer 403 不变）✅已完成
 
     │   │   ├── test_m1_acceptance.py # ✨【回写#220】A-15 M1 保命验收测试（12 项）：四环覆盖率 100%、A-15-Min（FI-01/03/04/05 检出走事件路径）、A-15-Full（FI-01~05 检出 + MTTx 预算逐用例 + 事件路径非巡检 + 分类达标）、时间戳单调防未来、同 runner 连跑 min→full 去重隔离、非法 mode 抛错✅已完成
+
+    │   │   ├── test_account_reconciler.py # ✨【回写#221】B-1 实时对账+T1终局测试（12 项）：EVENT 事件路径（publish→flush 核对执行）/cash 差 1 分→冻结+CRITICAL+审计/持仓数量差冻结/T+1 差异→t1_freeze+mark_resolved 解冻/容差配置跟随与 None 回退 0/sleep 桩 handler 立即返回（异步非阻塞）/在途 3 事件合并补一次/PnL 防脏门（冻结拒绝解冻放行）/last_check_ts 当前时点防未来✅已完成
+
+    │   │   ├── test_limit_usage_monitor.py # ✨【回写#223】B-3 限额监控测试（19 项）：0.5 无告警/0.85 WARNING/0.97 ERROR/0.95 边界仍 WARNING/slo 配置跟随/未配置不编造/collector get_all 可查/防未来幂等✅已完成
+
+    │   │   ├── test_execution_stats.py # ✨【回写#224】B-4 延迟/滑点测试（20 项）：P99 最近秩法/买卖分列符号/ACK>20ms→P2/小样本语义/防未来时序断言/配置防御校验✅已完成
+
+    │   │   ├── test_execution_rejection.py # ✨【回写#225】B-5 拒单率测试（13 项）：超 0.1%→P2/飙升→P1/未配置 N 只跑绝对阈值/基线不足不误报/窗口滑动剔除✅已完成
+
+    │   │   ├── test_circuit_breaker.py # ✨【回写#226】B-6 熔断线测试（12 项）：事件触发全链（撤单+禁开仓+审计+CRITICAL）/可观测/可回滚恢复/idempotent/只回滚自身暂停/shadow 不真动单/防未来/自动全平默认关+显式启用/RBAC admin 成功+viewer 403✅已完成
+
+    │   │   ├── test_data_freshness_sli.py # ✨【回写#227】B-7 数据新鲜度测试（24 项）：新鲜/过期分级告警（60s）/缺口>0→ERROR(P1)/每日缺口聚合/因子财务未配置不告警+超阈 WARNING/slo.data 配置跟随/防未来✅已完成
+
+    │   │   ├── test_margin_monitor.py # ✨【回写#229】B-9 保证金监控测试（23 项）：EVENT 路径（ORDER_FILLED/POSITION_UPDATE/TICK）触发重算/标记价恶化直接 P0/强平距离<5%→CRITICAL/POLL 兜底/None 配置不告警不编造/指标可查/防未来/降级不抛/负阈值拒✅已完成
+
+    │   │   ├── test_pnl_equity.py # ✨【回写#222】B-2 PnL 可信测试（9 项）：对账一致写时序库成功/冻结不写+留痕/当日权益回放排除昨日/最新快照/API 端点与采集一致✅已完成
+
+    │   │   ├── test_business_cabin.py # ✨【回写#228】B-8 驾驶舱测试（9 项）：四键聚合（reconciliation/pnl/limit_usage/execution）/对账冻结/PnL 同源/限额 GAUGE+配置/执行 summary+兜底/空数据防御/API 与看板同源✅已完成
+
+    │   │   ├── test_b_acceptance.py # ✨【回写#230】B-10 B 包验收测试（13 项）：九项检查逐项断言/隔离环境重建跨 run 去重/阈值真源引用/防未来时间戳/异常如实记录不吞✅已完成
 
     │   │   ├── test_alert_escalation.py # ✨【回写#214】A-10 告警分级与升级测试（20 项）：P0~P3 统一映射与非法值防御、runbook_id 显式字段提升/默认映射/落库贯通、超时未确认 WARNING→ERROR 且落库 acked+escalated（无通道仍升级补缺）、已确认/已解决/未超时/开关关闭不重复升级、A-7 对账事件装配接线✅已完成
 
@@ -1038,13 +1060,13 @@ Pythonwdhmm/
 
     │   ├── __init__.py
 
-    │   ├── risk_manager.py           # 风控核心：仓位限制、止损、流控、拦截；✨【回写#153】撤单计数与日报（KP-P3-06：CANCEL_ORDER 事件/record_cancel_order/set_pending_orders/get_daily_report/reset_daily_counts，check_order 注入计数）
+    │   ├── risk_manager.py           # 风控核心：仓位限制、止损、流控、拦截；✨【回写#153】撤单计数与日报（KP-P3-06：CANCEL_ORDER 事件/record_cancel_order/set_pending_orders/get_daily_report/reset_daily_counts，check_order 注入计数）；✨【回写#226】B-6 联动——pause_for_circuit_breaker/resume_from_circuit_breaker/circuit_paused（仅回滚熔断自身暂停，不误清数据质量/手动暂停）+ reset 清标记
 
     │   │                             # ✅已实现：DataQualityRiskConfig + SymbolDataQualityStatus + subscribe_to_event_bus(3类事件) + 脏数据自动暂停(单标的/全局) + 自动恢复
 
     │   ├── guardian.py               # 风控守护进程：健康监控、强制平仓断开；✨【回写#152】force_close_all/symbol 无回调 return False（KP-M02：不假成功）；✨【回写#186】KP-M04(T-30)：force_close_all/symbol 高危写操作准入守卫（未审批拒绝，默认仅审计留痕）
 
-    │   └── rules.py                  # 风控规则库；✨【回写#146】PriceLimitRule 缺昨收/现价 fail-closed（KP-P3-04：拒绝下单而非跳过放行）；✨【回写#148】StopLossRule 增 stop_price(avg_cost) 共享止损触发价口径（KP-P3-07，回测/混合引擎复用）；✨【回写#150】TradingHoursRule 增交易日维度（KP-P3-10：真实交易日历懒加载，非交易日拒绝下单）；✨【回写#153】异常交易类规则（KP-P3-06：SelfTrade 自成交互斥/CancelRate 撤单率/FatFinger 胖手指，注册 RULE_REGISTRY）
+    │   └── rules.py                  # 风控规则库；✨【回写#146】PriceLimitRule 缺昨收/现价 fail-closed（KP-P3-04：拒绝下单而非跳过放行）；✨【回写#148】StopLossRule 增 stop_price(avg_cost) 共享止损触发价口径（KP-P3-07，回测/混合引擎复用）；✨【回写#150】TradingHoursRule 增交易日维度（KP-P3-10：真实交易日历懒加载，非交易日拒绝下单）；✨【回写#153】异常交易类规则（KP-P3-06：SelfTrade 自成交互斥/CancelRate 撤单率/FatFinger 胖手指，注册 RULE_REGISTRY）；✨【回写#223】B-3 限额监控——LimitUsageMonitor（集中度/杠杆/单票仓位三维度 usage=exposure/limit，>=80% WARNING(P2)/>95% ERROR(P1)，category=risk dedup=limit:<dim>；阈值读 slo.risk position_limit_usage_warn/alert；限额 PENDING_CAL=None 不告警 enabled=false 不编造；指标 limit_usage_*3 进 /api/metrics）
 
     │
 
@@ -1084,7 +1106,7 @@ Pythonwdhmm/
 
     │   ├── __init__.py
 
-    │   └── dashboard.py              # Streamlit看板：8页面（首页/策略/回测/实盘/风控/数据质量/数据/关于）；✅已实现数据质量探查页（任务15）：_render_data_quality渲染 + 从monitoring.data_quality_explorer导入DataQualityExplorer（#S2修复：类定义已迁移到monitoring底层，web层仅做导入保持向后兼容）；数据源=CleanDataQueries(任务13)+MetricsCollector(任务11)；source过滤区分offline/live为实盘对接预留；streamlit未安装时友好提示；✨【回写#215/#219】监控中心页 v1（健康两级/告警筛选确认解决/指标卡片/交易连续状态，详情脱敏）+ RBAC 按钮按角色禁用
+    │   └── dashboard.py              # Streamlit看板：8页面（首页/策略/回测/实盘/风控/数据质量/数据/关于）；✅已实现数据质量探查页（任务15）：_render_data_quality渲染 + 从monitoring.data_quality_explorer导入DataQualityExplorer（#S2修复：类定义已迁移到monitoring底层，web层仅做导入保持向后兼容）；数据源=CleanDataQueries(任务13)+MetricsCollector(任务11)；source过滤区分offline/live为实盘对接预留；streamlit未安装时友好提示；✨【回写#215/#219】监控中心页 v1（健康两级/告警筛选确认解决/指标卡片/交易连续状态，详情脱敏）+ RBAC 按钮按角色禁用；✨【回写#222/#228】B-2 权益曲线实时绘制（当日时序回放 live_total_assets）+ PnL 五卡片+对账冻结警告；B-8 业务驾驶舱四视图（对账状态/资金 PnL/限额使用/执行质量，MonitorCenterDataProvider.build_cockpit_payload 与 /api/monitor/cockpit 同源）
 
     │
 
@@ -1104,7 +1126,7 @@ Pythonwdhmm/
 
     │   ├── data_feed.py              # 实时行情接入订阅重连分发；流式清洗(单条校验+跳变检测) + attach_event_bus事件总线联动 + 脏数据钩子；✨【回写#83】S2 live复权口径统一：_fetch_from_akshare 改拉不复权raw（adjust=""，与腾讯快照/本地历史同口径）/新增 adjust_out 参数（"qfq"按最新因子现算÷因子）+_stream_clean 除权跳变因子豁免（_live_jump_change_with_factor）+_clean_bars 注入 factor_lookup（config副本不污染共享配置）；✨【回写#139】_make_bar 的 timestamp 改 bar 周期归属时间 bar_date_to_epoch(formatted_date)（KP-P3-02，弃用墙钟 time.time()，避免同根bar因墙钟时刻不同被误判不同bar）
 
-    │   ├── portfolio.py              # 实时持仓、市值、可用冻结资金；✨【回写#141】账实对账 ReconciliationDiff + reconcile_vs_broker（KP-P4-01：本地 vs 券商只读 diff，现金容差0.01+持仓数量差）+ sync_from_broker 改先 diff 后重建，超阈值 critical 告警+__reconciliation_diff__ 回调，禁静默 clear 覆盖；✨【回写#149】增 diff_vs_broker 只读差异入口（KP-P3-08 风控基准券商权威账本）；✨【回写#186】KP-M04(T-30)：transfer_cash 高危写操作准入守卫（未审批拒绝，默认仅审计留痕）；✨【回写#211】A-7 对账容差改读锁定配置(=0)+差异 CRITICAL 告警含明细+事件驱动核对闭环
+    │   ├── portfolio.py              # 实时持仓、市值、可用冻结资金；✨【回写#141】账实对账 ReconciliationDiff + reconcile_vs_broker（KP-P4-01：本地 vs 券商只读 diff，现金容差0.01+持仓数量差）+ sync_from_broker 改先 diff 后重建，超阈值 critical 告警+__reconciliation_diff__ 回调，禁静默 clear 覆盖；✨【回写#149】增 diff_vs_broker 只读差异入口（KP-P3-08 风控基准券商权威账本）；✨【回写#186】KP-M04(T-30)：transfer_cash 高危写操作准入守卫（未审批拒绝，默认仅审计留痕）；✨【回写#211】A-7 对账容差改读锁定配置(=0)+差异 CRITICAL 告警含明细+事件驱动核对闭环；✨【回写#221】B-1 对账扩展——事件回调注入 AccountReconciler 时异步投递实时核对（未注入走 A-7 同步兜底保既有零破坏）；set_account_reconciler/account_reconciler 注入点；PnL 防脏门 record_pnl_snapshot（冻结返 None+pnl_block 审计，一致返快照）
 
     │   ├── scheduler.py              # 定时任务、巡检、日报；✨【回写#169】健康巡检 CRITICAL 可执行处置（KP-P5-11：pause_on_critical 自动暂停开仓/降级）；✨【回写#141】attach_engine 增 enable_reconcile/reconcile_cron 盘后账实对账 cron（KP-P4-01：只对账不重建，超阈值 critical 告警）；✨【回写#160】巡检健康告警闭环（KP-P5-03：run_all 非 healthy → alert_mgr.alert）；✨【回写#161】告警升级检查周期任务（KP-P5-04：check_escalations 接入调用方）；✨【回写#182】月频模型治理任务（KP-P6-05：enable_monthly_governance+monthly_governance_cron 注册月频任务，run_monthly_model_governance 未批准不 active + 漂移告警）；✨【回写#200】BASE-5 元监控接入——HealthPatrol 加 meta_monitor 参数/attach_meta_monitor/_run_meta_monitor（元监控随巡检采集并并入 checks，down 优先汇总，失败降级不阻断），attach_engine 自动装配 MetaMonitor（复用巡检时序库 + 全局 collector/bus）；✨【回写#208/#209/#210/#214】A-4 行情活性看门狗 add_check+秒级兜底、A-5 引擎心跳装配、A-6 券商连接快速轮询+_patrol_job broker 巡检告警闭环、A-10 对账事件触发装配收口
 
@@ -1112,7 +1134,7 @@ Pythonwdhmm/
 
     │   ├── state_store.py            # 状态持久化，崩溃恢复；✨【回写#167】订单对账+_SCHEMA_VERSION（KP-P5-08：未领回挂单cancel+警告/未来版本拒载）
 
-    │   ├── emergency_liquidation.py  # ✨【回写#47补录】紧急平仓服务（EmergencyLiquidationService：execute(confirm=False默认dry_run)生成撤单+平仓计划；先撤挂单再卖/优先可卖数量/单标异常不阻断/报告结构化）；被engine._setup_force_close与scripts/一键平仓.py调用；✨【回写#152】增 executed/planned 字段（KP-M02：dry-run 恒 executed=False、计划计 planned 不冒充 success、真实撤单/平仓置 executed）
+    │   ├── emergency_liquidation.py  # ✨【回写#47补录】紧急平仓服务（EmergencyLiquidationService：execute(confirm=False默认dry_run)生成撤单+平仓计划；先撤挂单再卖/优先可卖数量/单标异常不阻断/报告结构化）；被engine._setup_force_close与scripts/一键平仓.py调用；✨【回写#152】增 executed/planned 字段（KP-M02：dry-run 恒 executed=False、计划计 planned 不冒充 success、真实撤单/平仓置 executed）；✨【回写#226】B-6 联动——可选 event_bus，真实全平（executed=True）后发布 EMERGENCY_LIQUIDATION 供 A-8/熔断联动，dry_run 不发布
 
     │   ├── run_mode.py               # ✨【回写#52】运行模式切割接口：RunMode枚举(MONITOR/PAPER/SIM/LIVE)+describe+resolve(专先CLI>配置>默认paper)+apply_mode_to_config写回+validate_live实盘安全门(--confirm-live+证券qmt/ptrade+账户)+check_mode_consistency配置一致性；被run_实盘入口与create_live_engine消费；未来实盘切割 --mode sim→--mode live --confirm-live 一步切换；✨【回写#144】validate_live 增 KP-P6-01 报备合规门禁（LIVE 未备案拒绝启动）；✨【回写#186】KP-M04(T-30)：apply_mode_to_config->LIVE 实盘切换准入守卫（拒绝显式抛 ValueError）
 
@@ -1146,7 +1168,7 @@ Pythonwdhmm/
 
     │   │                             # ✅已实现：AlertManager.subscribe_to_event_bus(5类事件) + DataQualityEvent自动聚合告警 + Console/Log/Email/Webhook四通道
 
-    │   ├── metrics_collector.py      # 运行指标采集；✨【回写#206】A-2 L1 中间件监控——新增内置指标 middleware_queue_depth/middleware_dlq_count（GAUGE×queue）/middleware_event_bus_backlog(_ratio)（GAUGE）；collect_from_event_bus 增补总线积压条数+积压率（handler 错误/调用已有）；collect_from_rabbitmq_bus() 从 transport.get_queue_stats() 采集队列深度/DLQ（.dlq 后缀分流，None 记 warning 返回 0 不伪造）；check_middleware_backlog() 积压健康判定（队列深度超→DEGRADED、DLQ 超→UNHEALTHY、总线积压率超→DEGRADED、无数据 fail-closed→DEGRADED），供 HealthPatrol/scheduler 注册巡检；✨【回写#207】A-3 引擎统一埋点——新增 engine_orders_total/engine_filled_total/engine_rejected_total/engine_trades_total/engine_signals_total/engine_risk_rejected_total/engine_errors_total 内置指标（GAUGE 快照）；collect_from_engine() 从 LiveEngine.get_status() 采集引擎累计统计（只读已发生事实）+ 联动 LIVE_POSITIONS_COUNT/LIVE_PNL_TOTAL（portfolio 注入时），/api/metrics 可见实盘指标随状态变化；✨【回写#212/#216/#217】trade_exception_alerts_total + rate_limit_orders/queries/cancels_total + security_events_total 增量注册
+    │   ├── metrics_collector.py      # 运行指标采集；✨【回写#206】A-2 L1 中间件监控——新增内置指标 middleware_queue_depth/middleware_dlq_count（GAUGE×queue）/middleware_event_bus_backlog(_ratio)（GAUGE）；collect_from_event_bus 增补总线积压条数+积压率（handler 错误/调用已有）；collect_from_rabbitmq_bus() 从 transport.get_queue_stats() 采集队列深度/DLQ（.dlq 后缀分流，None 记 warning 返回 0 不伪造）；check_middleware_backlog() 积压健康判定（队列深度超→DEGRADED、DLQ 超→UNHEALTHY、总线积压率超→DEGRADED、无数据 fail-closed→DEGRADED），供 HealthPatrol/scheduler 注册巡检；✨【回写#207】A-3 引擎统一埋点——新增 engine_orders_total/engine_filled_total/engine_rejected_total/engine_trades_total/engine_signals_total/engine_risk_rejected_total/engine_errors_total 内置指标（GAUGE 快照）；collect_from_engine() 从 LiveEngine.get_status() 采集引擎累计统计（只读已发生事实）+ 联动 LIVE_POSITIONS_COUNT/LIVE_PNL_TOTAL（portfolio 注入时），/api/metrics 可见实盘指标随状态变化；✨【回写#212/#216/#217】trade_exception_alerts_total + rate_limit_orders/queries/cancels_total + security_events_total 增量注册；✨【回写#222】B-2 PnL——BuiltinMetrics 登记 live_total_assets/live_available_cash/live_position_market_value/live_realized_pnl/live_unrealized_pnl（GAUGE×account_id）+ 23 个 B 包指标（limit_usage_*3 / execution_*+slippage_*+拒单*11 / data_freshness_*4 / margin_*5）；collect_pnl_snapshot（经 record_pnl_snapshot 防脏门：对账冻结拒绝写库留痕，一致才 save_batch 落时序库+set_gauge）+ get_latest_pnl_snapshot/replay_intraday_equity_curve（当日权益回放，敏感名 FieldCrypto 语义）
 
     │   │                             # ✅已实现：11个内置数据质量指标(dirty_count/ratio/grade/repair等) + collect_from_data_quality_event + subscribe_to_event_bus自动采集 + Prometheus导出
 
@@ -1169,7 +1191,17 @@ Pythonwdhmm/
     │   ├── rate_limit_monitor.py        # ✨【回写#216】A-12 交易所限流/频控监控：ExchangeRateLimitMonitor 滑动窗口（order/query/cancel 分别）计数已发生动作→接近阈值 P1 预警+到阈值前自动暂停开仓（可回滚留痕）、达上限 ERROR、窗口回落自动恢复；阈值读 slo.exchange_rate_limit（LOCKED 初值）；指标 rate_limit_orders/queries/cancels_total 进 /api/metrics；__main__ 自测 9 项
 
     │   ├── security_monitor.py          # ✨【回写#217】A-13 安全监控：SecurityMonitor 可注入钩子（observe_login/observe_unauthorized_access/observe_credential_change/observe_secret_exposure）→P0/P1 告警；P0-7 密钥零明文（疑似密钥立即 sha256 指纹+mask_secret，告警/日志/落盘零原文）；指标 security_events_total(event_type) 进 /api/metrics；__main__ 自测 13 项
-│   └── data_quality_explorer.py # ✨【#S2修复】数据质量探查器（从web/dashboard.py迁移到monitoring底层，消除API依赖Web的架构倒置）：DataQualityExplorer类13方法（实时指标/清洗运行列表/运行详情/等级分布/脏数据统计/总览），纯Python数据层不依赖streamlit，API层和Web层均从此导入；数据源=CleanDataQueries+MetricsCollector；source过滤区分offline/live为实盘对接预留
+
+    │   ├── account_reconciler.py      # ✨【回写#221】B-1 实时对账+T+1终局（EVENT）：AccountReconciler——事件驱动实时核对（ORDER_FILLED/POSITION_UPDATE 经 portfolio 回调投递，复用 reconcile_vs_broker）+ ThreadPoolExecutor(2) 异步化+同 account 在途去重，handler 立即返回不阻塞事件流；实时/T+1 容差读 slo.reconciliation（LOCKED=0，None/PENDING_CAL 不编造回退 0）；差异→冻结+CRITICAL(category=reconciliation)+审计 freeze/t1_freeze；mark_resolved 人工解冻(unfreeze)+pnl_block 留痕；to_dict 状态（consistent/frozen/in_flight/last_diff/last_t1_diff）；get_account_reconciler() 惰性单例；__main__ 自测 12 项
+
+    │   ├── execution_stats.py         # ✨【回写#224/#225】B-4+B-5 执行质量：ExecutionStatsMonitor——四段延迟（signal_to_submit/send_to_ack/submit_to_fill/signal_to_fill）P99 最近秩法（<30 样本返 None）+ 滑点=(fill-ref)/ref×100 买卖分列（买>0=买贵/卖<0=卖低）；ACK P99>20ms（slo.trading order_ack_delay_p99_ms LOCKED）→P2；拒单率>0.1%（slo.trading order_reject_rate_max）→P2、飙升 r_now>N×r_base（N/窗口 PENDING_CAL 只跑绝对阈值不编造）；事件驱动 attach_event_bus + POLL collect_metrics()/summary()；指标 execution_*/slippage_*/order_reject_* 进 set_gauge；防未来（只消费事件 event_ts，时序异常样本丢弃，窗口以已观测水位线剔除）；__main__ 自测 13 项
+
+    │   ├── circuit_breaker.py         # ✨【回写#226】B-6 熔断线（EVENT）：CircuitBreaker 订阅 RISK_VIOLATION/RISK_LIMIT_HIT（R-02 事件路径同步触发不等周期）——禁开仓（RiskManager.pause_for_circuit_breaker 可回滚）+撤全部挂单（单笔异常不阻断）+降杠杆（broker 有 set_leverage 才联动否则注明无落地）+Kill Switch+自动全平默认关（auto_liquidate=True 人工确认兜底）；reset(actor,reason) 经 POST /api/monitor/circuit/reset（A-16 RBAC）复位+审计 kind=circuit+INFO；shadow 演练不真动单；触发=P0/CRITICAL 全流程审计；防未来 triggered_at 取事件 timestamp；__main__ 自测 14 项
+
+    │   ├── margin_monitor.py          # ✨【回写#229】B-9 保证金率/资金费率：MarginMonitor——保证金占用率=占用/权益、维持保证金=市值×率、强平价距离=(权益-维持保证金)/权益×100、资金费率隔夜成本=Σ市值×费率；EVENT 订阅 ORDER_FILLED/POSITION_UPDATE/TICK + poll() 兜底；距离<strong_flat_distance_pct 或占用超阈→P0/CRITICAL（category=margin dedup=margin:strong_flat/usage）、费率超阈→WARNING；阈值读 slo.margin（PENDING_CAL=None 不告警不编造）；REGISTERED_METRICS 5 项进 set_gauge；LivePortfolio 仅方法内惰性 import；__main__ 自测 12 项
+
+    │   ├── b_acceptance.py            # ✨【回写#230】B-10 B 包保钱包验收业务逻辑：BAcceptanceRunner（隔离环境=临时 AlertStore+真实 AlertManager+真实 EventBus+临时 MetricsHistoryStore(FieldCrypto)）——B-1~B-9 九项检查（对账差异=0 可展示/PnL 防脏门+权益回放/限额分级闭环/延迟 P99 可视化/拒单率 SLO/熔断动作链/新鲜度缺口/驾驶舱四键/保证金强平闭环），阈值全部引用 get_monitoring_config() 真源（禁硬编码）；异常不吞如实记录该项失败；每次 run() 重建隔离跨 run 去重；防未来时间戳；JSON 报告结构；__main__ 自测
+│   └── data_quality_explorer.py # ✨【#S2修复】数据质量探查器（从web/dashboard.py迁移到monitoring底层，消除API依赖Web的架构倒置）：DataQualityExplorer类13方法（实时指标/清洗运行列表/运行详情/等级分布/脏数据统计/总览），纯Python数据层不依赖streamlit，API层和Web层均从此导入；数据源=CleanDataQueries+MetricsCollector；source过滤区分offline/live为实盘对接预留；✨【回写#227】B-7 数据新鲜度 SLI——DataFreshnessSli（既有类零改动追加）：新鲜度滞后 latest_lag_seconds=max(0,now−最新ts) 按标的/数据类分别（slo.data.freshness_max_seconds=60 LOCKED：>60s WARNING/>2×ERROR）；每日缺口 record_gap/gap_provider 按日聚合（gap_allowed=0 缺口即 ERROR(P1)）；因子/财务同步延迟分别设值（PENDING_CAL 未配置不告警不写指标不编造）；指标 data_freshness_lag_seconds(data_key)/data_gap_count/factor|financial_sync_delay_seconds 进 /api/metrics（懒加载）；poll()+DATA_LOADED 事件驱动；防未来（滞后/延迟截断非负）；__main__ 自测 14 项
 
     │
 
@@ -1177,7 +1209,7 @@ Pythonwdhmm/
 
     │   ├── __init__.py                 # API包统一导出：create_app/run_api/FASTAPI_AVAILABLE + 11个响应/请求模型 + APIKeyAuth + FixedWindowLimiter/TokenBucketLimiter/RateLimitResult + ServiceContainer（__all__全量导出，供运行API.py与外部导入）
 
-    │   ├── routes.py                 # 路由聚合；✨【回写#154】占位写端点改真 501（KP-P1-01）；✨【回写#155】回测端点接线真实引擎（KP-P1-02）；✨【回写#157】无 fastapi 启动 raise（KP-P1-07）；✨【回写#158】文档默认关闭+移除文档豁免（KP-P4-04）；✨【回写#159】health unknown 计入 degraded（KP-P5-02）；✨【回写#177】CORS 缺省不开放（KP-P1-05）；✨【回写#215/#219】/api/monitor/overview 只读端点 + /api/alerts 告警脱敏 + ack/resolve/改阈值/复位熔断 RBAC 鉴权留痕
+    │   ├── routes.py                 # 路由聚合；✨【回写#154】占位写端点改真 501（KP-P1-01）；✨【回写#155】回测端点接线真实引擎（KP-P1-02）；✨【回写#157】无 fastapi 启动 raise（KP-P1-07）；✨【回写#158】文档默认关闭+移除文档豁免（KP-P4-04）；✨【回写#159】health unknown 计入 degraded（KP-P5-02）；✨【回写#177】CORS 缺省不开放（KP-P1-05）；✨【回写#215/#219】/api/monitor/overview 只读端点 + /api/alerts 告警脱敏 + ack/resolve/改阈值/复位熔断 RBAC 鉴权留痕；✨【回写#226】B-6 POST /api/monitor/circuit/reset 的 501 占位替换为真实复位（RBAC 鉴权保留，越权 403+审计 deny）；✨【回写#222/#228】B-2/B-8 新增 /api/monitor/pnl、/api/monitor/equity_curve、/api/monitor/cockpit 只读端点（PnL 快照+当日权益曲线回放+驾驶舱四视图，与看板同源）
 
     │   │                             # ✅已实现：6个数据质量端点(/api/data/quality, /overview, /runs, /runs/{id}, /dirty, /metrics) + 告警管理端点
 
@@ -3558,3 +3590,74 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
     d. 验证结果：py_compile m1_acceptance.py/脚本 通过；模块 __main__ 自测 3 项全绿；新增单测 12 passed；实跑 A-15 验收 both 档全过（Min：覆盖率 100% + FI-01/03/04/05 检出；Full：FI-01~05 全检出，TP=5/FP=0/FN=0 准确率 1.0，MTTD 均<60s，事件路径全通过），JSON 报告入档 docs/监控档案/M1保命验收_20261006.json；全量 pytest tests/unit 无回归（docker 路径环境性失败豁免）。
     e. 如实注记（不掩盖）：FI-01 断流生产检测窗口 monitoring.watchdog.bar_timeout_seconds=300s≥60s，严格 KPI-2 MTTD<1min 需按实盘校准该阈值（R-04，P0-2 锁定项）；本验收以演示短窗 2s 证明事件路径机制可达预算；KPI-3 准确率/误报率≥4 周滚动口径须由 §7 周复盘在实盘数据上持续确认，本次为受控注入快照。
     f. 纪律遵守：无蓝图外文件；业务逻辑全在 myquant、scripts 薄入口零逻辑；阈值引用配置真源（容差=0/心跳窗口）不硬编码；EVENT 项经事件路径验证（非等满 60s 周期）；防未来（只消费已发生时间戳）；任务后 git 提交（commit 见 #220 蓝图提交）。
+216. ✨【回写记录·2026-10-06·B-1 实时对账+T1终局（EVENT）】【回写#221】
+    事实来源：本次落地，代码级核验《量化系统监控模块施工总清单_V1.2.md》B-1 行验收口径（实时对账+T+1终局对账；容差引用 P0-2=0；对账异步化不阻塞事件流；差异→冻结+人工介入+审计留痕；验收=实时差异=0 且可展示）+ P0-2 锁定表对账行（monitoring.slo.reconciliation，LOCKED=0）。
+    a. 新增 myquant/monitoring/account_reconciler.py：AccountReconciler——事件驱动实时核对（ORDER_FILLED/POSITION_UPDATE 经 portfolio 回调投递，复用 LivePortfolio.reconcile_vs_broker）；ThreadPoolExecutor(max_workers=2) 异步化+同 account 在途去重（在途期间新事件合并补一次），handler 立即返回不阻塞事件流；实时/T+1 容差读 get_monitoring_config().slo.reconciliation.{realtime,t1}_diff_tolerance（LOCKED=0，None/PENDING_CAL 不编造回退 0）；差异超阈→冻结+CRITICAL(category=reconciliation,details 含明细)+审计 append(freeze/t1_freeze)；mark_resolved(actor,note) 人工解冻(unfreeze)；note_pnl_blocked 审计；to_dict 状态快照；flush/shutdown；全局惰性单例 get_account_reconciler()/reset_account_reconciler()；__main__ 自测 12 项。
+    b. 扩展 myquant/live/portfolio.py：_on_reconciliation_event 注入 reconciler 时改异步投递、未注入走 A-7 同步兜底（既有 22 项测试零破坏）；新增 set_account_reconciler/account_reconciler；PnL 防脏门 record_pnl_snapshot（冻结拒绝返回 None+pnl_block 审计，一致返回快照）+ _resolve_reconciler 惰性取单例。
+    c. 新增 tests/unit/test_account_reconciler.py（12 项）：EVENT 事件路径（publish→flush 核对执行）/cash 差 1 分→冻结+CRITICAL+审计/持仓数量差冻结/T+1 差异→t1_freeze+mark_resolved 解冻/容差配置行为跟随/None 回退 0/sleep 桩 handler 立即返回（<0.2s）/在途 3 事件合并补一次（broker calls=2）/PnL 冻结拒绝+解冻放行/last_check_ts 当前时点防未来。
+    d. 验证：py_compile 3 文件通过；新测试 12 passed；A-7 回归 test_portfolio_reconciliation 22 passed 零破坏；live 相关 65 passed；__main__ 自测 account_reconciler 12/12、portfolio 8/8。
+    e. 纪律遵守：无蓝图外文件；阈值读真源不硬编码；EVENT 项事件路径实现；防未来（只消费已发生成交/持仓快照）；任务后 git 提交（commit 816c254）。
+217. ✨【回写记录·2026-10-06·B-2 PnL可信与权益曲线】【回写#222】
+    事实来源：本次落地，代码级核验《量化系统监控模块施工总清单_V1.2.md》B-2 行验收口径（权益曲线实时绘制；总资产/可用/持仓市值/已实现/未实现 PnL 进时序库；账户对账一致后才更新 PnL 防脏数据；验收=看板当日权益曲线、PnL 与对账结果一致）。
+    a. myquant/monitoring/metrics_collector.py：BuiltinMetrics 登记 5 个 live_* PnL 指标（live_total_assets/live_available_cash/live_position_market_value/live_realized_pnl/live_unrealized_pnl，GAUGE×account_id）+ 23 个 Wave1 指标注册清单（B-3 限额 3/B-4-5 执行 11/B-7 新鲜度 4/B-9 保证金 5，类型按各模块语义）；新增 collect_pnl_snapshot（经 LivePortfolio.record_pnl_snapshot 防脏门：冻结拒绝写库+pnl_block 留痕，一致才经 MetricsHistoryStore.save_batch 落时序库并 set_gauge 联动 /api/metrics；敏感名 asset/position/pnl 未绑 FieldCrypto 自动按 BASE-9 补绑后重试）+ get_latest_pnl_snapshot/replay_intraday_equity_curve/_today_start_ts（当日 local 零点→当前时刻升序回放，敏感值解密回读）。
+    b. myquant/api/routes.py：新增 GET /api/monitor/pnl（最新 PnL 快照+对账状态）、GET /api/monitor/equity_curve（当日权益曲线）；_get_history_store/_get_reconciler 依赖解析；B-6 circuit reset 实现一行未动。
+    c. myquant/web/dashboard.py：MonitorCenterDataProvider 增 get_reconciliation_status/get_pnl_snapshot/get_intraday_equity_curve 可注入依赖；监控中心渲染 PnL 五卡片+对账冻结警告+当日权益曲线 line_chart。
+    d. 新增 tests/unit/test_pnl_equity.py（9 项）：对账一致写时序库成功/冻结不写+留痕/当日权益回放排除昨日/最新快照/API 端点与采集一致；__main__ 自测补 11 项 EXIT=0。
+    e. 验证：新测试 9 passed；受影响既有回归（metrics_collector/routes/dashboard 相关）248+192+74 passed 零破坏；py_compile 3 文件通过。
+    f. 纪律遵守：无蓝图外文件；B-2 无新阈值（对账门读 AccountReconciler 状态）；防未来（只回放已发生时间点）；任务后 git 提交（commit 6a1f650）。
+218. ✨【回写记录·2026-10-06·B-3 限额监控（事件/周期）】【回写#223】
+    事实来源：本次落地，代码级核验《量化系统监控模块施工总清单_V1.2.md》B-3 行验收口径（限额使用率引用 P0-2：<80% 预警、>95% 强告警；集中度/杠杆/单票仓位分别设值并纳入指标与告警；验收=限额使用率进 /api/metrics、超阈值分级告警、阈值取 P0-2）+ config/settings.yaml monitoring.slo.risk（position_limit_usage_warn=0.80/alert=0.95 LOCKED）。
+    a. 落点 myquant/risk/rules.py 新增 LimitUsageMonitor（与既有下单前风控规则职责分离、不改其行为）：集中度/杠杆/单票仓位三维度 usage=exposure/limit（最大单标的市值/总资产、总市值/净资产、最大单票市值/总资产，docstring 注明口径）；分级告警 usage>=warn(0.80)→WARNING(P2)、usage>alert(0.95)→ERROR(P1)，经 get_alert_manager().alert(category="risk", dedup_key="limit:<dimension>:<level>", details 含 usage/limit/阈值/配置来源)。
+    b. 阈值真源 R-04：warn/alert 读 slo.risk；concentration_limit/leverage_limit/single_stock_position_limit（PENDING_CAL=~）读到 None→维度"未启用"，不告警不编造，指标 enabled=false 输出语义；get_limit_usage_metrics_registration() 返回注册清单。
+    c. 指标 limit_usage_concentration/leverage/single_stock 经 get_metrics_collector().set_gauge 懒加载进 /api/metrics；collect()/check() 供 POLL 巡检；可注入 portfolio.get_account/get_positions_snapshot 只读 getter；防未来（只消费已发生快照）。
+    d. 新增 tests/unit/test_limit_usage_monitor.py（19 项）+ risk 既有回归 115 passed 无破坏；__main__ 自测 8 项；py_compile 通过。
+    e. 纪律遵守：仅改蓝图已标注文件 risk/rules.py + tests/unit 新测试；无蓝图外文件；阈值零硬编码；任务后 git 提交（commit e572055；首次提交曾被并行 index 竞态夹带 B-7 文件，reset --mixed 撤销后重提干净）。
+219. ✨【回写记录·2026-10-06·B-4 执行链路延迟/滑点统计】【回写#224】
+    事实来源：本次落地，代码级核验《量化系统监控模块施工总清单_V1.2.md》B-4 行验收口径（信号→下单→成交三段延迟 P99；滑点=成交价 vs 信号价/参考价按买卖分别统计；订单发送到 ACK P99<20ms 报告建议值；验收=P99 可视化、超 SLI P2 告警）+ P0-2 锁定表（order_ack_delay_p99_ms=20 LOCKED）。
+    a. 新增 myquant/monitoring/execution_stats.py——ExecutionStatsMonitor：四段延迟（signal_to_submit/send_to_ack/submit_to_fill + 端到端 signal_to_fill）P99 最近秩法，样本<30 返回 None（不下发不告警）；滑点=(fill−ref)/ref×100，买/卖分列（买>0=买贵，卖<0=卖低，符号口径 docstring 固定）；发送→ACK P99 > slo.trading.order_ack_delay_p99_ms(20,LOCKED)→P2/WARNING（category=trade，dedup=exec:ack_delay_p99）。
+    b. 事件驱动 attach_event_bus 订阅 SIGNAL_GENERATED/ORDER_SUBMIT/FILLED/REJECTED + POLL collect_metrics()/summary()；8 指标（execution_signal_to_fill_p99_ms/execution_ack_p99_ms/execution_signal_to_submit_p99_ms/execution_submit_to_fill_p99_ms/slippage_buy_pct/slippage_sell_pct/slippage_buy_p99_pct/slippage_sell_p99_pct）set_gauge。
+    c. 防未来：只消费事件自带 event_ts 两两相减；ack<send/fill<ack/fill<signal 时序异常样本显式丢弃并记 warning；窗口只保留已观测水位线之前样本。
+    d. 新增 tests/unit/test_execution_stats.py（20 项）；py_compile 通过；__main__ 自测 13 项全过。
+    e. 纪律遵守：无蓝图外文件；阈值读真源；任务后 git 提交（commit 8ccc914）。
+220. ✨【回写记录·2026-10-06·B-5 订单拒绝率监控】【回写#225】
+    事实来源：本次落地，代码级核验《量化系统监控模块施工总清单_V1.2.md》B-5 行验收口径（订单拒绝率<0.1% SLO（P0-2 锁定）；窗口内飙升超锁定倍数 N→P1；验收=拒单率指标可查、飙升自动告警、阈值/窗口取 P0-2）+ slo.trading（order_reject_rate_max=0.001 LOCKED；reject_rate_surge_multiple/window=PENDING_CAL）。
+    a. ExecutionStatsMonitor 增补拒单率能力：窗口内 拒单/报单（事件驱动滑动窗，水位线=已观测 event_ts 向前剔除防未来）；绝对 SLO 拒单率>order_reject_rate_max(0.001)→P2/WARNING（dedup=exec:reject_rate_slo）。
+    b. 飙升检测 r_now>N×r_base（当前窗 vs 前一窗基线，基线样本≥20 防冷启动误报）→P1/ERROR（dedup=exec:reject_surge）；N/窗口 PENDING_CAL 未配置→只执行绝对阈值、不编造默认，docstring 标注待实盘校准。
+    c. 指标 order_reject_rate/orders_submitted_total/orders_rejected_total 进 set_gauge；新增 tests/unit/test_execution_rejection.py（13 项）。
+    d. 纪律遵守：同 B-4 模块无蓝图外文件；任务后 git 提交（commit 7cf616b）。
+221. ✨【回写记录·2026-10-06·B-6 熔断线配置（EVENT）】【回写#226】
+    事实来源：本次落地，代码级核验《量化系统监控模块施工总清单_V1.2.md》B-6 行验收口径（EVENT；风控击穿→自动撤单/禁开仓/降杠杆/Kill Switch；与已有 emergency_liquidation 联动；熔断状态可观测、可人工复位（复位受 A-16 RBAC 鉴权，接 POST /api/monitor/circuit/reset 当前 501 占位）；所有自动动作可审计/可回滚/有权限边界/有人工确认兜底；验收=触发风控阈值→自动禁开仓+Kill Switch 生效+全流程留痕）。
+    a. 新增 myquant/monitoring/circuit_breaker.py：CircuitBreaker——subscribe_to_event_bus 订阅 RISK_VIOLATION/RISK_LIMIT_HIT（R-02 事件路径同步触发不等周期）；trip(reason, source_event) 动作链=禁开仓(pause_for_circuit_breaker 打标记可回滚)→撤全部挂单(get_active_orders+cancel_order 单笔异常不阻断)→降杠杆(留接口：broker 暴露 set_leverage 才联动降到 1.0，否则注明无落地)→Kill Switch→(可选)自动全平；reset(actor,reason) 仅回滚熔断自身暂停+审计 kind=circuit/action=reset+INFO 告警；to_dict(tripped/triggered_at/reason/actions) 可观测；shadow 演练模式只记录不真动单；自动全平默认关闭须 auto_liquidate=True（人工确认兜底）；全流程审计+告警（触发=P0/CRITICAL）；防未来 triggered_at 取事件 timestamp；__main__ 自测 14 项。
+    b. 改造 myquant/risk/risk_manager.py：新增 pause_for_circuit_breaker(reason)（已不可开仓幂等跳过，置 _circuit_paused 标记）/resume_from_circuit_breaker(reason)（仅 _circuit_paused=True 才回滚，不误清数据质量/手动暂停）/circuit_paused 只读属性；reset() 清标记。
+    c. 改造 myquant/live/emergency_liquidation.py：__init__ 增可选 event_bus；真实全平 executed=True 后发布 EventType.EMERGENCY_LIQUIDATION（供 A-8→CRITICAL/熔断联动），dry_run 不发布；发布失败记 error 不阻断。
+    d. 改造 myquant/api/routes.py：仅替换 POST /api/monitor/circuit/reset 的 501 分支→RBAC 鉴权通过后调 CircuitBreaker.reset(actor,reason) 返回真实结果；保留 guard.check permission=reset_circuit_breaker 与越权 403+审计 deny。
+    e. 新增 tests/unit/test_circuit_breaker.py（12 项）+ test_rbac.py 同步（admin reset 501→真实复位成功+circuit 审计留痕，viewer 403 不变）；受影响既有回归 128 passed 无破坏。
+    f. 纪律遵守：无蓝图外文件；任务后 git 提交（commit 17f52ab）。
+222. ✨【回写记录·2026-10-06·B-7 数据新鲜度 SLI（L2 增强，事件/周期）】【回写#227】
+    事实来源：本次落地，代码级核验《量化系统监控模块施工总清单_V1.2.md》B-7 行验收口径（数据新鲜度引用 P0-2 锁定 <1min/缺口=0；每日数据缺口统计；因子/财务同步任务延迟分别设值；验收=指标可查、缺口/延迟超阈值告警、阈值取 P0-2）+ slo.data（freshness_max_seconds=60/gap_allowed=0 LOCKED；factor/financial 同步延迟 PENDING_CAL）。
+    a. 扩展既有 myquant/monitoring/data_quality_explorer.py（不另建文件，既有 DataQualityExplorer 行为零改动）：新增 DataFreshnessSli——①新鲜度滞后 latest_lag_seconds()=max(0,now−最新到达ts)，按标的/数据类分别，latest_timestamp_provider 回调注入（缺省空快照防御不误告警）；②每日缺口 record_gap/record_gaps+gap_provider 按日聚合，daily_gap_stats() 逐日 dict，当前评估缺口=最新日期键；③因子/财务同步延迟分别设值 record_factor/financial_sync，未配置(None=PENDING_CAL)→不告警不写指标不编造数值；④指标 data_freshness_lag_seconds(data_key)/data_gap_count/factor_sync_delay_seconds/financial_sync_delay_seconds 经 set_gauge 进 /api/metrics（懒加载）；⑤告警 category=data_quality：新鲜度>60s WARNING、>2×ERROR；缺口>0(LOCKED)即 ERROR(P1)；同步延迟超配置 WARNING；⑥poll()/collect() 周期巡检 + attach_event_bus 订阅 DATA_LOADED 事件驱动；防未来（滞后/延迟截断非负，只消费已发生数据）。
+    b. 新增 tests/unit/test_data_freshness_sli.py（24 项）；py_compile 通过；__main__ 自测 14 项全绿；既有回归 test_dashboard_serializer+rate_limit+monitoring_config 61 passed 无破坏。
+    c. 纪律遵守：无蓝图外文件；阈值读 R-04 真源不硬编码；防未来；任务后 git 提交（commit fa3ff0b；因并行 index 锁竞争被卷入并行提交后主控实测核验补提，代码已在 HEAD 测试全绿）。
+223. ✨【回写记录·2026-10-06·B-8 业务驾驶舱v1】【回写#228】
+    事实来源：本次落地，代码级核验《量化系统监控模块施工总清单_V1.2.md》B-8 行验收口径（web/dashboard.py 监控中心扩展；对账状态/资金 PnL/限额使用/执行质量（滑点/拒单/延迟）四视图；验收=驾驶舱页上线、数据与 API 一致）。
+    a. myquant/web/dashboard.py：MonitorCenterDataProvider 增可注入依赖（limit_usage_monitor/execution_stats_monitor 等）+ get_reconciliation_status/get_pnl_snapshot/get_intraday_equity_curve/get_limit_usage_view/get_execution_quality_view/build_cockpit_payload；监控中心渲染 B-8 业务驾驶舱四视图：①对账状态（AccountReconciler.to_dict: consistent/frozen/last_diff）②资金 PnL（B-2 快照+当日曲线）③限额使用（collector limit_usage_* GAUGE + LimitUsageMonitor.get_status 阈值配置）④执行质量（ExecutionStatsMonitor.summary() 滑点买/卖分列+拒单率+四段延迟 P99，collector GAUGE 兜底）；无数据视图 graceful 返回空/None 不伪造不抛。
+    b. myquant/api/routes.py：新增 GET /api/monitor/cockpit 经同一 build_cockpit_payload 聚合，与监控中心看板同源，保证"数据与 API 一致"。
+    c. 新增 tests/unit/test_business_cabin.py（9 项）：四键聚合/对账冻结/PnL 同源/限额 GAUGE+配置/执行 summary+兜底/空数据防御/API 与看板同源；dashboard __main__ 自测 EXIT=0。
+    d. 验证：新测试 9 passed；受影响回归 192 passed 无破坏；py_compile dashboard/routes 通过。
+    e. 纪律遵守：无蓝图外文件；任务后 git 提交（commit 0d25f51）。
+224. ✨【回写记录·2026-10-06·B-9 保证金率/资金费率监控】【回写#229】
+    事实来源：本次落地，代码级核验《量化系统监控模块施工总清单_V1.2.md》B-9 行验收口径（保证金占用率/维持保证金/强平价距离/资金费率（持仓隔夜成本）；EVENT（成交/标记价变动触发占用率重算）+POLL 兜底；强平距离阈值引用 P0-2；占用超阈→P0 强平预警；验收=保证金/强平价进看板、接近强平→P0 告警、阈值取 P0-2）。
+    a. 新增 myquant/monitoring/margin_monitor.py：MarginMonitor——保证金占用率=占用保证金/权益×100（占用取 account.used_margin 缺省回退 frozen_cash）、维持保证金=持仓总市值×maintenance_margin_rate、强平价距离=(权益−维持保证金)/权益×100、资金费率隔夜成本=Σ市值×funding_rate；全部基于已发生快照防未来。
+    b. EVENT 接线（R-02）：attach_event_bus 订阅 ORDER_FILLED/POSITION_UPDATE/TICK（标记价变动）→refresh() 重算；poll() 周期兜底。
+    c. 告警：距离<strong_flat_distance_pct 或占用率>margin_usage_ratio_threshold→P0/CRITICAL（category=margin，dedup=margin:strong_flat/margin:usage）；费率>funding_rate_threshold→WARNING（margin:funding_rate）；阈值 R-04 读 slo.margin，None(PENDING_CAL) 不告警不编造。
+    d. 指标 margin_usage_ratio/maintenance_margin/liquidation_distance_pct/funding_rate/funding_cost_estimate（REGISTERED_METRICS）set_gauge 懒加载进 /api/metrics；to_dict() 状态可观测；LivePortfolio 仅方法内惰性 import（B-1 并行修改解耦）。
+    e. 新增 tests/unit/test_margin_monitor.py（23 项）：EVENT 路径 ORDER_FILLED/POSITION_UPDATE/TICK 触发重算不等巡检/标记价恶化事件路径直接 P0/强平距离<5%→CRITICAL/POLL 兜底/None 配置不告警不编造/指标可查/防未来/快照异常降级不抛/负阈值拒。
+    f. 验证：py_compile 通过；新测试 23 passed；__main__ 自测 12 项 PY_EXIT=0；纪律遵守无蓝图外文件，commit 8a9bbcf。
+225. ✨【回写记录·2026-10-06·B-10 B 包保钱包验收】【回写#230】
+    事实来源：本次落地，验收级核验《量化系统监控模块施工总清单_V1.2.md》B-10 行验收口径（沿用 A-15 模式：b_acceptance.py + scripts 薄入口 + 复用 MttxCalculator/ClassificationStats + 隔离注入；对账差异=0 达成可展示；行情/信号/订单延迟 P99 可视化；限额/保证金强告警闭环；阈值均取 P0-2；验收=B-1~B-9 逐项通过）。
+    a. 新增 myquant/monitoring/b_acceptance.py：BAcceptanceRunner（隔离环境=临时 AlertStore+真实 AlertManager+真实 EventBus+临时 MetricsHistoryStore(FieldCrypto 绑定 BASE-9)+内存采集器；每次 run() 重建隔离跨 run 去重；异常不吞如实记录该项 failed）。九项检查：B-1 对账差异=0（一致快照 consistent=True+现金差1分→冻结+审计 freeze，容差 slo.reconciliation=0）；B-2 PnL（record_pnl_snapshot 一致返 dict/冻结返 None+时序库落 live_total_assets+当日权益回放有点）；B-3 限额（0.97→ERROR(P1) category=risk dedup=limit:*、0.5 无告警，warn=0.8/alert=0.95 真源）；B-4 延迟（四段 P99 非 None+ACK 30ms>20ms→P2）；B-5 拒单率（1%>0.1%→P2，飙升 N/窗口 PENDING_CAL 只跑绝对阈值）；B-6 熔断（RISK_VIOLATION→禁开仓+撤单 2 笔+审计 trip、auto_liquidate 默认关、reset 恢复开仓+审计 reset）；B-7 新鲜度（滞后 90s>60s→P2+缺口 1>0→P1+新鲜无告警）；B-8 驾驶舱（build_cockpit_payload 四键齐全）；B-9 保证金（PENDING_CAL 不告警+显式配置强平距离/占用率→P0/CRITICAL category=margin 两条落 AlertStore）。
+    b. 新增 scripts/验收_B包保钱包.py（薄入口）：argparse（--out 默认 docs/监控档案/B包保钱包验收_20261006.json + --db + --mode）+ find_project_root + 调 BAcceptanceRunner，控制台逐项摘要 + JSON 报告；业务逻辑零写入。
+    c. 新增 tests/unit/test_b_acceptance.py（13 项）；py_compile 3 文件通过；回归 test_m1_acceptance+test_b_acceptance 25 passed。
+    d. 实跑验收：9/9 全项 pass（B-1~B-9 全绿），JSON 报告 docs/监控档案/B包保钱包验收_20261006.json（顶层 4 键+report.items=9+summary.passed=9+overall_pass=True，json 模块校验通过）。
+    e. 如实注记（不掩盖）：B-9 保证金阈值与 B-5 飙升参数当前为 PENDING_CAL，本验收按"不告警不编造"语义验证默认行为，并以显式配置演示 P0/CRITICAL 闭环可触发（生产配置就绪后自动跟随）；B-8 内存桩采集器不支持 get_all() 记 ERROR 日志不影响验收结论（生产用真实 MetricsCollector）。
+    f. 纪律遵守：无蓝图外文件；业务逻辑全在 myquant、scripts 薄入口零逻辑；阈值全部引用 get_monitoring_config() 真源不硬编码；EVENT 项经事件路径验证（非等满周期）；防未来（只消费已发生时间戳）；任务后 git 提交（commit 6dbc6b8）。
