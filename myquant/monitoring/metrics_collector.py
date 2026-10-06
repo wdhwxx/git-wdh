@@ -259,6 +259,9 @@ class BuiltinMetrics:
     RATE_LIMIT_QUERIES_TOTAL = "rate_limit_queries_total"
     RATE_LIMIT_CANCELS_TOTAL = "rate_limit_cancels_total"
 
+    # 安全监控（A-13：按事件类型计数进 /api/metrics；P0-7 不含密钥原文）
+    SECURITY_EVENTS_TOTAL = "security_events_total"
+
     # 质量等级数值映射（0=excellent, 1=good, 2=fair, 3=poor, 4=critical）
     QUALITY_GRADE_MAP = {
         "excellent": 0,
@@ -500,6 +503,12 @@ class MetricsCollector:
                       "Total quote/query requests observed by exchange rate-limit monitor (cumulative)")
         self.register(BuiltinMetrics.RATE_LIMIT_CANCELS_TOTAL, MetricType.COUNTER,
                       "Total cancel requests observed by exchange rate-limit monitor (cumulative)")
+
+        # 安全监控（A-13：登录失败/未授权访问/凭证变更/密钥泄漏按事件类型计数；P0-7 不含密钥原文）
+        self.register(BuiltinMetrics.SECURITY_EVENTS_TOTAL, MetricType.COUNTER,
+                      "Total security events detected by security monitor "
+                      "(login_failed/unauthorized_access/credential_change/secret_exposure)",
+                      label_names=["event_type"])
 
         return self
 
