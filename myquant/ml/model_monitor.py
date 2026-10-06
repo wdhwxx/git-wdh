@@ -76,6 +76,11 @@ STATUS_HEALTHY: str = "healthy"
 STATUS_DEGRADED: str = "degraded"
 STATUS_RETIRED: str = "retired"
 
+# 漂移健康状态（C-1）
+DRIFT_STATUS_HEALTHY: str = "healthy"            # 漂移在基线阈值内
+DRIFT_STATUS_DRIFT: str = "drift"                # 漂移超基线阈值 → 预警
+DRIFT_STATUS_NOT_CONFIGURED: str = "not_configured"  # 基线阈值未配置（PENDING_CAL），仅度量不预警
+
 # 绩效指标键
 METRIC_IC: str = "ic"
 METRIC_MAX_DRAWDOWN: str = "max_drawdown"
@@ -159,6 +164,44 @@ class HealthReport:
             degraded_to=data.get("degraded_to"),
             decided_at=str(data.get("decided_at", "")),
         )
+
+
+@dataclass(frozen=True)
+class DriftReport:
+    """模型分布漂移评估结果（C-1，可序列化入档/告警）。
+
+    Attributes:
+        model_name: 模型名称。
+        version: 版本号。
+        psi: 群体稳定性指标（PSI）值（None=度量失败/无数据）。
+        ks: 两样本 KS 统计量（None=度量失败/无数据）。
+        psi_threshold: PSI 基线阈值（None=PENDING_CAL 未配置）。
+        ks_threshold: KS 基线阈值（None=PENDING_CAL 未配置）。
+        status: healthy / drift / not_configured。
+        reasons: 判定原因明细（drift 时附 PSI/KS 值）。
+    """
+
+    model_name: str
+    version: int
+    psi: Optional[float] = None
+    ks: Optional[float] = None
+    psi_threshold: Optional[float] = None
+    ks_threshold: Optional[float] = None
+    status: str = DRIFT_STATUS_HEALTHY
+    reasons: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """序列化为 JSON 安全 dict。"""
+        return {
+            "model_name": self.model_name,
+            "version": self.version,
+            "psi": self.psi,
+            "ks": self.ks,
+            "psi_threshold": self.psi_threshold,
+            "ks_threshold": self.ks_threshold,
+            "status": self.status,
+            "reasons": list(self.reasons),
+        }
 
 
 # ═══════════════════════════════════════════════
@@ -274,6 +317,83 @@ class ModelMonitor:
         cdf_a = np.searchsorted(a, all_vals, side="right") / a.size
         cdf_e = np.searchsorted(e, all_vals, side="right") / e.size
         return float(np.max(np.abs(cdf_a - cdf_e)))
+
+    def evaluate_drift(
+        self,
+        actual: Sequence[float],
+        expected: Sequence[float],
+        model_name: str,
+        version: int,
+        psi_threshold: Optional[float] = None,
+        ks_threshold: Optional[float] = None,
+    ) -> DriftReport:
+        """评估模型特征/预测分布漂移（PSI/KS），超基线阈值即预警（C-1）。
+
+        R-04：阈值入参引用 P0-2 真源（slo.model.psi_threshold/ks_threshold）。
+        None = 该指标基线待校准（PENDING_CAL），不因该指标触发预警、不编造默认；
+        两阈值均为 None → status=not_configured（仅度量，不发预警）。
+
+        防未来：只消费已观测 actual（当前/最新分布）与 expected（基线/期望分布）
+        序列，无预测性未来信息。
+
+        Args:
+            actual: 已观测分布序列（当前）。
+            expected: 基线/期望分布序列（训练期）。
+            model_name: 模型名称（非空）。
+            version: 版本号（>=0 整数）。
+            psi_threshold: PSI 基线阈值（None=未配置）。
+            ks_threshold: KS 基线阈值（None=未配置）。
+
+        Returns:
+            DriftReport（status: healthy / drift / not_configured）。
+
+        Raises:
+            ModelMonitorError: model_name/version/序列非法，或度量计算失败时抛出。
+            ModelMonitorConfigError: 阈值非法时抛出。
+        """
+        if not isinstance(model_name, str) or not model_name:
+            raise ModelMonitorError(f"model_name 必须为非空字符串，got: {model_name!r}")
+        if not isinstance(version, int) or version < 0:
+            raise ModelMonitorError(f"version 必须 >=0 的整数，got: {version!r}")
+        for label, thr in (("psi_threshold", psi_threshold), ("ks_threshold", ks_threshold)):
+            if thr is not None and (not isinstance(thr, (int, float)) or thr < 0):
+                raise ModelMonitorConfigError(f"{label} 必须 >=0 的数值或 None，got: {thr!r}")
+        if not isinstance(actual, (list, tuple)) or not isinstance(expected, (list, tuple)):
+            raise ModelMonitorError("actual/expected 必须为序列（list/tuple）")
+        try:
+            psi = self.psi_score(list(actual), list(expected))
+            ks = self.ks_statistic(list(actual), list(expected))
+        except Exception as exc:  # noqa: BLE001
+            raise ModelMonitorError(f"漂移度量计算失败: {exc}") from exc
+
+        reasons: List[str] = []
+        drifted: bool = False
+        if psi_threshold is not None and float(psi) > float(psi_threshold):
+            drifted = True
+            reasons.append(f"PSI={psi:.4f} 超基线 {float(psi_threshold):.4f}")
+        if ks_threshold is not None and float(ks) > float(ks_threshold):
+            drifted = True
+            reasons.append(f"KS={ks:.4f} 超基线 {float(ks_threshold):.4f}")
+
+        if psi_threshold is None and ks_threshold is None:
+            status = DRIFT_STATUS_NOT_CONFIGURED
+            reasons.append("漂移基线未配置（PENDING_CAL），仅度量不预警")
+        elif drifted:
+            status = DRIFT_STATUS_DRIFT
+        else:
+            status = DRIFT_STATUS_HEALTHY
+            reasons.append("分布漂移在基线阈值内，模型分布稳定")
+
+        return DriftReport(
+            model_name=model_name,
+            version=version,
+            psi=round(psi, 6),
+            ks=round(ks, 6),
+            psi_threshold=float(psi_threshold) if psi_threshold is not None else None,
+            ks_threshold=float(ks_threshold) if ks_threshold is not None else None,
+            status=status,
+            reasons=reasons,
+        )
 
     # ─────────────────────────────────────────────
     #  配置注入（外置 config 通道）
@@ -513,7 +633,11 @@ __all__ = [
     "STATUS_HEALTHY",
     "STATUS_DEGRADED",
     "STATUS_RETIRED",
+    "DRIFT_STATUS_HEALTHY",
+    "DRIFT_STATUS_DRIFT",
+    "DRIFT_STATUS_NOT_CONFIGURED",
     "HealthReport",
+    "DriftReport",
     "ModelMonitor",
     "ModelMonitorError",
     "ModelMonitorConfigError",

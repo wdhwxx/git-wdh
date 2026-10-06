@@ -1667,6 +1667,8 @@ def attach_engine(
     escalation_interval: float = 300.0,
     enable_monthly_governance: bool = True,
     monthly_governance_cron: str = "0 0 1 * *",
+    enable_daily_model_drift: bool = True,
+    daily_model_drift_cron: str = "30 4 * * *",
     pause_on_critical: bool = False,
 ) -> Dict[str, str]:
     """
@@ -2011,13 +2013,35 @@ def attach_engine(
                 cron_expr=monthly_governance_cron,
             )
 
+    if enable_daily_model_drift:
+        def _daily_model_drift_job(**kw) -> None:  # noqa: ARG001
+            """C-1: 日频模型漂移预警——PSI/KS 超基线经 AlertManager 预警（阈值读 P0-2 真源）。"""
+            try:
+                from myquant.ml.model_monitor import ModelMonitor
+                from myquant.ml.model_registry import ModelRegistry
+                summary = run_daily_model_drift_check(
+                    ModelMonitor(),
+                    model_names=list(getattr(ModelRegistry(), "list_models", lambda: [])() or []),
+                    drift_checks={},
+                    versions={},
+                )
+                logger.info(f"[attach] 日频模型漂移检查完成: {summary}")
+            except Exception as exc:
+                logger.error(f"[attach] 日频模型漂移检查异常: {exc}")
+        task_ids["daily_model_drift"] = scheduler.add_cron_task(
+            _daily_model_drift_job,
+            name="日频模型漂移检查",
+            cron_expr=daily_model_drift_cron,
+        )
+
     logger.info(
         f"[attach] 实盘引擎已挂载: patrol={task_ids.get('patrol')}, "
         f"daily_report={task_ids.get('daily_report')}, "
         f"t1_settle={task_ids.get('t1_settle')}, "
         f"reconcile={task_ids.get('reconcile')}, "
         f"resend_pending={task_ids.get('resend_pending')}, "
-        f"monthly_governance={task_ids.get('monthly_governance')}"
+        f"monthly_governance={task_ids.get('monthly_governance')}, "
+        f"daily_model_drift={task_ids.get('daily_model_drift')}"
     )
     return task_ids
 
@@ -2084,4 +2108,130 @@ def run_monthly_model_governance(
             except Exception as exc:  # noqa: BLE001
                 logger.error(f"[governance] 模型 {name} 漂移计算异常: {exc}")
         summary[name] = entry
+    return summary
+
+
+def get_model_drift_thresholds() -> Dict[str, Optional[float]]:
+    """从 P0-2 真源读取模型漂移基线阈值（settings.yaml monitoring.slo.model）。
+
+    R-04：阈值单一真源。None = PENDING_CAL（待校准），未配置则不预警、不编造默认。
+
+    Returns:
+        {"psi_threshold": float|None, "ks_threshold": float|None,
+         "ic_threshold": float|None}。
+    """
+    from myquant.core.settings import get_monitoring_config
+    cfg = get_monitoring_config()
+    model = cfg.get("slo", {}).get("model", {}) or {}
+    psi = model.get("psi_threshold")
+    ks = model.get("ks_threshold")
+    ic = model.get("ic_threshold")
+    return {
+        "psi_threshold": float(psi) if psi is not None else None,
+        "ks_threshold": float(ks) if ks is not None else None,
+        "ic_threshold": float(ic) if ic is not None else None,
+    }
+
+
+def run_daily_model_drift_check(
+    monitor: Any,
+    model_names: Optional[List[str]] = None,
+    drift_checks: Optional[Dict[str, tuple]] = None,
+    versions: Optional[Dict[str, int]] = None,
+    alert_manager: Optional[Any] = None,
+    psi_threshold: Optional[float] = None,
+    ks_threshold: Optional[float] = None,
+) -> Dict[str, Any]:
+    """C-1 日频/事件触发模型漂移预警：PSI/KS 超基线 → AlertManager 预警（附值）。
+
+    提升模型漂移监控为日频（原月频治理之外新增的每日预警通道），阈值读 P0-2
+    真源（R-04）；drift 时经 alert_manager（默认 get_alert_manager()）发 WARNING
+    预警，category=model、dedup_key=model:drift:<model>:<version>，details 附
+    PSI/KS 值。本函数幂等，可按需/事件直接调用（日频 cron 亦调它）。
+
+    非 MTTD<1min 类（R-02）：统计类任务，日频/事件触发即可，无需秒级实时。
+
+    防未来：只消费已观测 actual/expected 分布与当前版本，无预测性未来信息。
+
+    Args:
+        monitor: ModelMonitor 实例（须具备 evaluate_drift/psi_score/ks_statistic）。
+        model_names: 模型名列表（仅用于占位，实际以 drift_checks 键为准；可空）。
+        drift_checks: {model_name: (actual, expected)}，actual=当前分布，expected=基线。
+        versions: {model_name: version}，缺省版本记为 0。
+        alert_manager: 告警管理器（None 用全局 get_alert_manager()）。
+        psi_threshold: PSI 基线阈值（None 时读配置真源）。
+        ks_threshold: KS 基线阈值（None 时读配置真源）。
+
+    Returns:
+        {model_name: {"drift": bool, "status": str, "psi": float|None,
+                      "ks": float|None, "alerted": bool}}。
+    """
+    from myquant.core.constants import SeverityLevel
+    from myquant.monitoring.alerting import get_alert_manager as _default_am
+    from myquant.ml.model_monitor import DRIFT_STATUS_DRIFT
+
+    drift_checks = drift_checks or {}
+    versions = versions or {}
+    if psi_threshold is None or ks_threshold is None:
+        cfg_thr = get_model_drift_thresholds()
+        if psi_threshold is None:
+            psi_threshold = cfg_thr["psi_threshold"]
+        if ks_threshold is None:
+            ks_threshold = cfg_thr["ks_threshold"]
+    am = alert_manager if alert_manager is not None else _default_am()
+
+    summary: Dict[str, Any] = {}
+    for name, pair in drift_checks.items():
+        if not isinstance(pair, (tuple, list)) or len(pair) != 2:
+            logger.error(f"[drift] 模型 {name} 漂移检查对非法，跳过")
+            summary[name] = {"drift": False, "status": "invalid", "psi": None,
+                             "ks": None, "alerted": False, "error": "pair 非法"}
+            continue
+        try:
+            report = monitor.evaluate_drift(
+                list(pair[0]), list(pair[1]),
+                model_name=str(name),
+                version=int(versions.get(name, 0)),
+                psi_threshold=psi_threshold,
+                ks_threshold=ks_threshold,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"[drift] 模型 {name} 漂移评估异常: {exc}")
+            summary[name] = {"drift": False, "status": "error", "psi": None,
+                             "ks": None, "alerted": False, "error": str(exc)}
+            continue
+
+        alerted: bool = False
+        if report.status == DRIFT_STATUS_DRIFT:
+            try:
+                am.alert(
+                    level=SeverityLevel.WARNING,
+                    message=(
+                        f"模型 {name} v{report.version} 分布漂移预警: "
+                        f"PSI={report.psi:.4f} KS={report.ks:.4f}"
+                    ),
+                    source="ml.model_drift",
+                    category="model",
+                    details={
+                        "model": str(name),
+                        "version": report.version,
+                        "psi": report.psi,
+                        "ks": report.ks,
+                        "psi_threshold": report.psi_threshold,
+                        "ks_threshold": report.ks_threshold,
+                        "reasons": list(report.reasons),
+                    },
+                    deduplication_key=f"model:drift:{name}:{report.version}",
+                )
+                alerted = True
+            except Exception as exc:  # noqa: BLE001
+                logger.error(f"[drift] 模型 {name} 漂移告警发送失败: {exc}")
+
+        summary[name] = {
+            "drift": report.status == DRIFT_STATUS_DRIFT,
+            "status": report.status,
+            "psi": report.psi,
+            "ks": report.ks,
+            "alerted": alerted,
+        }
     return summary
