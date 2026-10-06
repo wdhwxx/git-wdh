@@ -442,6 +442,8 @@ Pythonwdhmm/
 
 │   ├── 故障演练/季频故障演练.py      # ✨【回写#248】D-6 混沌工程与故障演练薄入口：argparse（--select FI-01…FI-07 + --out + --db + --list）+ find_project_root + 调 myquant/monitoring/chaos_drill.py（复用 P0-8 FI-01~07 用例库，逐用例注入→MTTx 计时→TP/FP/FN 分类→复盘报告 JSON），季度演练落盘；业务逻辑零写入脚本
 
+│   ├── 监控配置管理.py               # ✨【回写#249】D-7 监控即代码完善薄入口：argparse（--init 现有配置打初始版本/--list 盘点/--history 变更史/--apply + --content-file 应用新配置/--rollback 回滚 + --by 变更人 + --summary）+ 调 myquant/monitoring/config_as_code.py（config/monitoring 4 类配置版本化 + 变更关联监控 + 回滚），控制台逐项摘要；业务逻辑零写入脚本
+
 │   ├── 数据库迁移.py                  # ✨【第6项】Alembic迁移中文入口：upgrade/downgrade/current/history/stamp/check/init，支持--db指定数据库路径
 
 │   ├── 数据库初始化.py                # 数据库初始化：调用database.schema与migrations创建表结构
@@ -552,6 +554,7 @@ Pythonwdhmm/
 
     │   │   ├── test_m1_acceptance.py # ✨【回写#220】A-15 M1 保命验收测试（12 项）：四环覆盖率 100%、A-15-Min（FI-01/03/04/05 检出走事件路径）、A-15-Full（FI-01~05 检出 + MTTx 预算逐用例 + 事件路径非巡检 + 分类达标）、时间戳单调防未来、同 runner 连跑 min→full 去重隔离、非法 mode 抛错✅已完成
 
+    │   │   ├── test_config_as_code.py # ✨【回写#249】D-7 监控即代码测试（12 项）：KNOWN_ITEMS=4 类配置项；discover 识别 .yaml 与 .example.yaml/无文件项；initialize 打 v1+幂等；apply（版本+1/上一版本快照 prev_content/写盘 <item>.yaml）+变更关联告警 category=config/同版本 dedup 只告警一次；rollback（恢复最后一次变更前内容/无上一版本 rolled_back=False/多次 apply 后正确回滚到最近上一版本）；history JSON 可序列化；防御式（空内容/未知项拒绝）✅已完成
     │   │   ├── test_chaos_drill.py  # ✨【回写#248】D-6 混沌工程测试（16 项）：P0-8 用例库复用（FI-01~07 齐 + 字段完整 + list_fi_cases 同源）；预算解析（MTTD<1min/MTTA<5min/KPI-8 无预算）；核心编排（捕获即 TP + MTTx 计时 + 落库确认/解决闭环、注入失败/未捕获=FN 不阻断、重复注册拒绝、复盘报告 JSON 落盘、预算 met_* 标志）；内置用例（全 7 注册按 P0-8 顺序、7 用例全部捕获 TP 可演示、select 子集过滤）；FI-07 外部心跳（单次超时 degraded 不判死 R-08、连续多次超时判死）✅已完成
 
     │   │   ├── test_account_reconciler.py # ✨【回写#221】B-1 实时对账+T1终局测试（12 项）：EVENT 事件路径（publish→flush 核对执行）/cash 差 1 分→冻结+CRITICAL+审计/持仓数量差冻结/T+1 差异→t1_freeze+mark_resolved 解冻/容差配置跟随与 None 回退 0/sleep 桩 handler 立即返回（异步非阻塞）/在途 3 事件合并补一次/PnL 防脏门（冻结拒绝解冻放行）/last_check_ts 当前时点防未来✅已完成
@@ -1226,6 +1229,7 @@ Pythonwdhmm/
 
     │   ├── chaos_drill.py           # ✨【回写#248】D-6 混沌工程与故障演练（monitoring/ 段）：ChaosDrillRunner 季度演练编排——复用 P0-8 FI-01~07 标准故障注入用例库（R-01 同库，字段取自 measurability.FI_CASES 不另立）→ 逐用例注入（注入函数返回 InjectOutcome，经 manager._history 定位本轮告警）→ 按 P0-8 ② 口径 MTTD/MTTA/MTTR 系统时间戳计时（KPI 预算解析 _budget_for，met_* 达标标志）→ 按 P0-8 ① 口径 TP/FP/FN 分类（捕获=TP，注入失败/未捕获=FN）→ 复盘报告 JSON（detect_rate/accuracy/avg_mttx/replay_suggestions）；隔离环境=临时 AlertStore + 真实 AlertManager；build_builtin_cases 接线 FI-01~07 真实路径（FI-01 StalenessDetector 断流 / FI-02 引擎僵死心跳 / FI-03 券商断连 / FI-04 伪造拒单 ORDER_REJECTED / FI-05 持仓差异 reconcile / FI-06 主通道故障落盘兜底 / FI-07 外部心跳连续超时判死 R-08）；审计 kind=chaos_drill 失败降级不阻断；防未来（只消费已发生时间戳）；__main__ 自测
 
+    │   ├── config_as_code.py        # ✨【回写#249】D-7 监控即代码完善（monitoring/ 段）：MonitoringConfigRegistry——config/monitoring 4 类配置（dashboard/alert_rules/runbooks/collectors）yaml 版本化（P0-6 完成态）；initialize 现有配置打初始版本 v1（幂等不改内容）/discover 盘点/get_version 当前版本 sha256；apply 应用新配置（版本+1 + 留存上一版本内容快照 prev_content + 写盘 <item>.yaml）/rollback 恢复最后一次变更前内容快照（不依赖 git）/history 完整变更史（JSON 可序列化可追溯）；**变更关联监控**——每次 apply/rollback 经独立告警通道 category=config、source=config_as_code 留痕（dedup_key=config:<action>:<item>:<version> 同次变更只告警一次），审计 kind=config_as_code 失败降级不阻断；防御式（未知配置项/空内容拒绝）；防未来（applied_at 一律系统时钟当前时刻）；__main__ 自测
     │   ├── rate_limit_monitor.py        # ✨【回写#216】A-12 交易所限流/频控监控：ExchangeRateLimitMonitor 滑动窗口（order/query/cancel 分别）计数已发生动作→接近阈值 P1 预警+到阈值前自动暂停开仓（可回滚留痕）、达上限 ERROR、窗口回落自动恢复；阈值读 slo.exchange_rate_limit（LOCKED 初值）；指标 rate_limit_orders/queries/cancels_total 进 /api/metrics；__main__ 自测 9 项
 
     │   ├── security_monitor.py          # ✨【回写#217】A-13 安全监控：SecurityMonitor 可注入钩子（observe_login/observe_unauthorized_access/observe_credential_change/observe_secret_exposure）→P0/P1 告警；P0-7 密钥零明文（疑似密钥立即 sha256 指纹+mask_secret，告警/日志/落盘零原文）；指标 security_events_total(event_type) 进 /api/metrics；__main__ 自测 13 项
@@ -3851,3 +3855,10 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
    c. 新增 tests/unit/test_chaos_drill.py（16 项）：P0-8 用例库复用（FI-01~07 恰全 + 字段完整 + list_fi_cases 同源）；预算解析（MTTD<1min→60s/MTTA<5min→300s/KPI-8 无预算）；核心编排（捕获即 TP + MTTx 计时 + 落库 ack/resolve 闭环、未捕获/注入异常=FN 不阻断、重复注册 ValueError、复盘报告 JSON 可解析 + summary 计数、预算 met_* 标志）；内置用例（全 7 注册按 P0-8 顺序、7 用例全部捕获 TP 可演示最小可行版本、select 子集过滤）；FI-07 外部心跳 R-08（单次超时 degraded 不误判主进程死、连续多次超时判死）。
    d. 验证结果：py_compile 通过；薄入口自测（--list 打印 P0-8 用例库；--select FI-01 FI-06 真实演练落盘 detect_rate=1.0、TP=2、FN=0）；单测 16 项全绿；既有 test_measurability.py 未破坏（复用同库）；全量 pytest 结果见提交后终验。
    e. 纪律遵守：先更新蓝图目录树（monitoring 段 chaos_drill.py + scripts/ 段新增 故障演练/季频故障演练.py + tests/unit 段 test_chaos_drill.py）再创建文件（蓝图优先）；无蓝图外新文件；业务逻辑归 myquant；用例库复用不另立（R-01）；业务阈值不编造（MTTx 预算与 P0-8 KPI 一致，从 FI_CASES kpi 字段解析）；严格防未来（只消费已发生时间戳）；任务后 git 提交（commit message 引用 #248）。
+
+## #249 · 2026-10-07 · D-7 监控即代码完善（config/monitoring/*.yaml 版本化 + 变更关联监控 + 回滚）
+   a. 新增 myquant/monitoring/config_as_code.py（monitoring/ 段登记 #249）：MonitoringConfigRegistry——config/monitoring 4 类配置（dashboard/alert_rules/runbooks/collectors，P0-6 完成态）全部 yaml 版本化；initialize 对现有配置打初始版本 v1（幂等、不改内容）、discover 盘点（识别 <item>.yaml 与 <item>.example.yaml）、get_version 当前版本 + sha256 指纹；apply 应用新配置（版本 +1、留存上一版本内容快照 prev_content、写盘 <item>.yaml）、rollback 恢复最后一次变更前内容快照（不依赖 git）、history 完整变更史（JSON 可序列化可追溯）；**变更关联监控**——每次 apply/rollback 经独立告警通道 category=config、source=config_as_code 留痕（dedup_key=config:<action>:<item>:<version>，同次变更只告警一次，与业务告警隔离可追溯），审计 kind=config_as_code 失败降级不阻断；防御式（未知配置项/空内容拒绝）；防未来（applied_at/version 一律系统时钟当前时刻，clock 可注入）。
+   b. 新增 scripts/监控配置管理.py（scripts/ 段登记 #249）：argparse（--init/--list/--history ITEM/--apply ITEM + --content-file/--rollback ITEM + --by 变更人 + --summary）+ 调 MonitoringConfigRegistry（initialize/discover/history/apply/rollback），控制台逐项摘要；业务逻辑零写入脚本。
+   c. 新增 tests/unit/test_config_as_code.py（12 项）：KNOWN_ITEMS 恰为 4 类；discover 识别 yaml 与 example.yaml、无文件项 exists=False；initialize 打 v1 + 幂等（二次调用返回 0）；apply（版本+1/上一版本快照留痕/写盘 <item>.yaml）+ 变更关联监控告警 category=config + 同版本 dedup 只告警一次；rollback（恢复最后一次变更前内容/无上一版本 rolled_back=False/多次 apply 后正确回滚到最近上一版本）；history JSON 可序列化；防御式（空内容/未知项 ValueError）。
+   d. 验证结果：py_compile 通过；薄入口自测（--list 对真实 config/monitoring 识别 4 个 .example.yaml 模板并计算 sha256，version=None 未版本化，仅只读不触碰模板）；单测 12 项全绿；既有测试未破坏；全量 pytest 结果见提交后终验。
+   e. 纪律遵守：先更新蓝图目录树（monitoring 段 config_as_code.py + scripts 段 监控配置管理.py + tests/unit 段 test_config_as_code.py）再创建文件（蓝图优先）；无蓝图外新文件；业务逻辑归 myquant（scripts 薄入口零业务逻辑）；未改动现有 config/monitoring/*.example.yaml 模板（initialize 仅只读快照、apply/rollback 在测试隔离环境验证，真实配置变更由操作人经薄入口执行）；严格防未来；任务后 git 提交（commit message 引用 #249）。
