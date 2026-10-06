@@ -53,13 +53,51 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
+from myquant.core.constants import SeverityLevel
 from myquant.core.logger import get_logger
 from myquant.models.trade import OrderSide, Position, Trade
 
 logger = get_logger("live.portfolio")
 
-# 账实对账默认现金容差（元）：现金绝对差超过该值即视为账实不一致
-_DEFAULT_CASH_TOLERANCE = 0.01
+# 对账告警分类（A-7：与 B-1 完全对齐，category=reconciliation）
+RECONCILIATION_ALERT_CATEGORY = "reconciliation"
+
+
+def _load_realtime_diff_tolerance() -> float:
+    """R-04 阈值唯一真源：读取 settings.yaml 对账实时差异容差。
+
+    经 ``myquant.core.settings.get_monitoring_config()`` 读取
+    ``monitoring.slo.reconciliation.realtime_diff_tolerance``。P0-2 锁定清单：
+    实时对账容差 = 0（与 B-1 完全对齐，禁止本项自定义阈值，R-04）。
+    防御式：配置缺失/非法时回退 LOCKED=0.0 并记 warning 留痕，不静默使用脏值。
+
+    防未来：只消费静态配置值，不涉及任何时间序列或预测。
+
+    Returns:
+        float: 实时对账现金容差（元），LOCKED=0。
+    """
+    try:
+        from myquant.core.settings import get_monitoring_config
+        slo = get_monitoring_config().get("slo") or {}
+        rec = slo.get("reconciliation") or {}
+        return float(rec.get("realtime_diff_tolerance", 0.0))
+    except Exception as e:  # 配置读取失败不得阻断对账
+        logger.warning("[portfolio] 读取对账容差配置失败，回退 LOCKED=0.0: %s", e)
+        return 0.0
+
+
+def _reconciliation_dedup_key(diff: "ReconciliationDiff") -> str:
+    """构造对账告警去重键：日期 + 现金差 + 差异标的集合（内容相关，防刷屏）。
+
+    Args:
+        diff: 账实差异快照。
+
+    Returns:
+        str: dedup_key，形如 ``reconciliation:20261006:cash10000.00:600000.SH``。
+    """
+    date = time.strftime("%Y%m%d", time.localtime())
+    symbols = ",".join(sorted(diff.position_diffs.keys()))
+    return f"reconciliation:{date}:cash{diff.cash_diff:.2f}:{symbols}"
 
 
 @dataclass
@@ -69,12 +107,14 @@ class ReconciliationDiff:
     Attributes:
         cash_diff: 本地现金 - 券商现金（元）。
         position_diffs: symbol -> {local_quantity, broker_quantity, diff} 的持仓差异表。
-        cash_tolerance: 现金容差（元），超过即视为不一致。
+        cash_tolerance: 现金容差（元），超过即视为不一致（生产路径由
+            reconcile_vs_broker 经 R-04 配置真源解析传入；此处 0.0 仅为
+            dataclass 兜底默认，镜像 P0-2 LOCKED=0）。
     """
 
     cash_diff: float = 0.0
     position_diffs: Dict[str, Dict[str, float]] = field(default_factory=dict)
-    cash_tolerance: float = _DEFAULT_CASH_TOLERANCE
+    cash_tolerance: float = 0.0
 
     @property
     def exceeds_threshold(self) -> bool:
@@ -194,6 +234,11 @@ class LivePortfolio:
             "total_commission": 0.0,
             "last_update_time": 0.0,
         }
+
+        # A-7：事件驱动对账挂载状态（attach_reconciliation_event_trigger 写入）
+        self._recon_bus: Any = None
+        self._recon_broker: Any = None
+        self._recon_handler_ids: List[str] = []
 
         logger.info(
             f"实时持仓管理初始化: account={account_id}, "
@@ -523,7 +568,7 @@ class LivePortfolio:
 
     @_locked
     def reconcile_vs_broker(
-        self, broker: Any, cash_tolerance: float = _DEFAULT_CASH_TOLERANCE,
+        self, broker: Any, cash_tolerance: Optional[float] = None,
     ) -> ReconciliationDiff:
         """账实对账：本地账本 vs 券商权威账本，只 diff 不重建（先检查后同步）。
 
@@ -531,17 +576,28 @@ class LivePortfolio:
         券商返回空快照会静默覆盖本地持仓。本方法先产出差异清单供告警/落库，
         不修改任何本地状态。
 
+        A-7（R-04 / R-02）：现金容差不再硬编码，默认经
+        ``myquant.core.settings.get_monitoring_config()`` 读取
+        ``monitoring.slo.reconciliation.realtime_diff_tolerance``（P0-2 LOCKED=0，
+        与 B-1 完全对齐，不在本项自定义）。差异超阈 → 经 get_alert_manager().alert
+        发 CRITICAL 告警（details 含 cash_diff / 各持仓 position_diffs / 容差，
+        category=reconciliation，带内容相关 dedup_key，禁止静默覆盖）；一致 →
+        logger.info 记录。
+
         Parameters
         ----------
         broker : BaseBroker
             券商实例（PaperBroker 或真实券商）。
-        cash_tolerance : float
-            现金容差（元），超过即视为不一致，默认 0.01。
+        cash_tolerance : float | None
+            现金容差（元），超过即视为不一致；None 时取 R-04 配置真源（LOCKED=0）。
 
         Returns
         -------
         ReconciliationDiff : 账实差异快照（现金差 + 各持仓数量差 + 是否超阈值）。
         """
+        if cash_tolerance is None:
+            cash_tolerance = _load_realtime_diff_tolerance()
+
         account = broker.get_account()
         broker_cash = float(account.get("cash", 0.0))
         cash_diff = self._cash - broker_cash
@@ -561,22 +617,70 @@ class LivePortfolio:
                     "diff": local_qty - broker_qty,
                 }
 
-        return ReconciliationDiff(
+        diff = ReconciliationDiff(
             cash_diff=cash_diff,
             position_diffs=pos_diffs,
             cash_tolerance=cash_tolerance,
         )
 
+        # A-7：差异 → CRITICAL 告警（禁止静默覆盖）；一致 → INFO 记录
+        if diff.exceeds_threshold:
+            self._fire_reconciliation_alert(diff)
+        else:
+            logger.info(
+                "[portfolio] 账实对账一致: account=%s 现金差=%.4f 持仓差异数=%d",
+                self._account_id, diff.cash_diff, len(diff.position_diffs),
+            )
+        return diff
+
+    def _fire_reconciliation_alert(self, diff: ReconciliationDiff) -> None:
+        """差异超阈 → CRITICAL 告警（A-7，禁止静默覆盖）。
+
+        经全局告警管理器投递，details 含差异明细（cash_diff / cash_tolerance /
+        各持仓 position_diffs），category=reconciliation，带内容相关 dedup_key。
+        告警投递失败仅记 error 留痕，不阻断对账/交易（告警投递优先原则）。
+
+        Args:
+            diff: 超阈的账实差异快照。
+        """
+        logger.critical("[portfolio] 账实差异超阈: %s", diff)
+        details: Dict[str, Any] = {
+            "account_id": self._account_id,
+            "cash_diff": round(diff.cash_diff, 4),
+            "cash_tolerance": diff.cash_tolerance,
+            "position_diff_count": len(diff.position_diffs),
+            "position_diffs": diff.position_diffs,
+        }
+        dedup_key = _reconciliation_dedup_key(diff)
+        try:
+            from myquant.monitoring.alerting import get_alert_manager
+            get_alert_manager().alert(
+                level=SeverityLevel.CRITICAL,
+                message=(
+                    f"账实对账差异超阈（容差={diff.cash_tolerance}）: "
+                    f"现金差={diff.cash_diff:.2f}, 持仓差异={len(diff.position_diffs)}只"
+                ),
+                source="live.portfolio",
+                category=RECONCILIATION_ALERT_CATEGORY,
+                details=details,
+                deduplication_key=dedup_key,
+            )
+        except Exception as e:  # 告警投递失败不阻断对账主流程
+            logger.error("[portfolio] 对账 CRITICAL 告警投递失败（不阻断）: %s", e)
+
     @_locked
     def diff_vs_broker(
-        self, broker: Any, cash_tolerance: float = _DEFAULT_CASH_TOLERANCE,
+        self, broker: Any, cash_tolerance: Optional[float] = None,
     ) -> ReconciliationDiff:
-        """账实差异（KP-P3-08：风控基准券商权威账本时先取差异，只 diff 不重建）。"""
+        """账实差异（KP-P3-08：风控基准券商权威账本时先取差异，只 diff 不重建）。
+
+        容差默认取 R-04 配置真源（实时对账 LOCKED=0）。
+        """
         return self.reconcile_vs_broker(broker, cash_tolerance=cash_tolerance)
 
     @_locked
     def sync_from_broker(
-        self, broker: Any, cash_tolerance: float = _DEFAULT_CASH_TOLERANCE,
+        self, broker: Any, cash_tolerance: Optional[float] = None,
     ) -> ReconciliationDiff:
         """
         从broker同步持仓和资金（先 diff 后重建，禁止静默覆盖）。
@@ -631,6 +735,90 @@ class LivePortfolio:
         )
         self._notify_callbacks("__sync__")
         return diff
+
+    # ═══════════════════════════════════════════
+    #  A-7：事件驱动对账触发（R-02：实时核对由事件流触发，周期巡检仅兜底）
+    # ═══════════════════════════════════════════
+
+    def attach_reconciliation_event_trigger(self, bus: Any, broker: Any) -> List[str]:
+        """挂载事件驱动对账：订阅 EventBus 成交/持仓变更事件，实时触发一次核对。
+
+        R-02：持仓对账（A-7，MTTD<1min）的检测必须由事件流实时触发——每次
+        ORDER_FILLED / POSITION_UPDATE 即用注入的 broker 数据源核对一次；周期巡检
+        （盘后 cron）仅作漏检兜底，不作为检测来源。核对复用 reconcile_vs_broker：
+        差异 → CRITICAL 告警（禁止静默覆盖），一致 → INFO 记录。
+
+        Parameters
+        ----------
+        bus : EventBus
+            事件总线实例。
+        broker : BaseBroker
+            券商数据源（与 reconcile_vs_broker 同一注入 broker）。
+
+        Returns
+        -------
+        List[str] : 订阅 handler_id 列表（供 detach_reconciliation_event_trigger）。
+
+        Raises
+        ------
+        ValueError: bus 或 broker 缺失时抛出（防御式，避免空挂载）。
+        """
+        from myquant.core.event_bus import EventType
+        if bus is None or broker is None:
+            raise ValueError("attach_reconciliation_event_trigger 需要 bus 与 broker 均非空")
+        self._recon_broker = broker
+        ids: List[str] = []
+        for et in (EventType.ORDER_FILLED, EventType.POSITION_UPDATE):
+            hid = bus.subscribe(et, self._on_reconciliation_event)
+            ids.append(hid)
+        self._recon_bus = bus
+        self._recon_handler_ids = ids
+        logger.info(
+            "[portfolio] 事件驱动对账已挂载: account=%s "
+            "events=ORDER_FILLED/POSITION_UPDATE handlers=%d",
+            self._account_id, len(ids),
+        )
+        return ids
+
+    def detach_reconciliation_event_trigger(self) -> int:
+        """卸载事件驱动对账（退订已挂载的事件处理器）。
+
+        Returns:
+            int: 成功退订的 handler 数量。
+        """
+        bus = self._recon_bus
+        ids = list(self._recon_handler_ids)
+        removed = 0
+        if bus is not None:
+            for hid in ids:
+                try:
+                    if bus.unsubscribe(hid):
+                        removed += 1
+                except Exception as e:  # 退订失败留痕不抛
+                    logger.warning("[portfolio] 退订对账事件 handler 失败: %s", e)
+        self._recon_bus = None
+        self._recon_broker = None
+        self._recon_handler_ids = []
+        return removed
+
+    def _on_reconciliation_event(self, event: Any) -> None:
+        """事件驱动对账回调：用注入的 broker 数据源核对一次（只读 diff + 告警/INFO）。
+
+        防未来：只消费"已发生"的成交/持仓变更事件（业务发生时刻 event_ts），
+        不引用任何未来数据。异常仅记日志，不阻断事件流/交易。
+
+        Parameters
+        ----------
+        event : Event
+            EventBus 事件（ORDER_FILLED / POSITION_UPDATE）。
+        """
+        broker = self._recon_broker
+        if broker is None:
+            return
+        try:
+            self.reconcile_vs_broker(broker)
+        except Exception as e:  # 对账异常不得阻断事件流
+            logger.error("[portfolio] 事件驱动对账异常（不阻断事件流）: %s", e)
 
     @_locked
     def apply_trade(self, trade: Trade) -> None:
@@ -827,3 +1015,111 @@ class LivePortfolio:
             f"positions={self.get_position_count()}, "
             f"equity={self.get_equity():.4f})"
         )
+
+
+# ═══════════════════════════════════════════════
+#  自测 Demo（__main__ 入口，可运行；不碰 quant.db，告警走内存桩）
+# ═══════════════════════════════════════════════
+
+
+class _SelfTestBroker:
+    """自测用鸭子类型券商：仅提供对账所需 get_account / get_positions。"""
+
+    def __init__(self, cash: float, positions: List[Position]) -> None:
+        self._cash = float(cash)
+        self._positions = positions
+
+    def get_account(self) -> Dict[str, Any]:
+        return {"cash": self._cash, "frozen_cash": 0.0}
+
+    def get_positions(self) -> List[Position]:
+        return self._positions
+
+
+def _run_self_test() -> int:
+    """portfolio.py 模块自测 Demo（A-7 持仓对账）。
+
+    覆盖：默认容差取 R-04 配置真源（LOCKED=0）；一致不告警；差异 → CRITICAL
+    告警含明细 + category + dedup_key；发布 ORDER_FILLED 事件触发核对并告警。
+
+    Returns:
+        int: 失败项数（0=全绿）。
+    """
+    import myquant.monitoring.alerting as alerting_mod  # noqa: WPS433
+
+    from myquant.core.event_bus import Event, EventBus, EventType  # noqa: WPS433
+
+    sent: List[Dict[str, Any]] = []
+
+    class _StubAlertManager:
+        """内存告警桩：记录 alert 调用，不碰 quant.db。"""
+
+        def alert(self, **kw: Any) -> int:  # noqa: A003
+            sent.append(kw)
+            return 1
+
+    orig = alerting_mod.get_alert_manager
+    alerting_mod.get_alert_manager = lambda: _StubAlertManager()  # type: ignore[assignment]
+
+    passed = 0
+    failures: List[str] = []
+
+    def check(name: str, ok: bool, detail: str = "") -> None:
+        nonlocal passed
+        if ok:
+            passed += 1
+        else:
+            failures.append(f"{name} ({detail})")
+
+    try:
+        # 1. 默认容差取配置真源（LOCKED=0）；一致 → 不告警
+        p = LivePortfolio(initial_capital=100_000.0)
+        p._cash = 100_000.0
+        b_ok = _SelfTestBroker(100_000.0, [])
+        d = p.reconcile_vs_broker(b_ok)
+        check("默认容差取配置=0", d.cash_tolerance == 0.0, f"tol={d.cash_tolerance}")
+        check("一致快照不告警", d.exceeds_threshold is False and len(sent) == 0,
+              f"sent={len(sent)}")
+
+        # 2. 制造差异 → CRITICAL 告警含明细
+        p2 = LivePortfolio(initial_capital=100_000.0)
+        p2._cash = 100_000.0
+        p2._positions = {"600000.SH": Position(symbol="600000.SH", quantity=100.0)}
+        b_diff = _SelfTestBroker(90_000.0, [])  # 现金差 10000 + 本地多仓 100
+        d2 = p2.reconcile_vs_broker(b_diff)
+        check("差异超阈", d2.exceeds_threshold is True, "")
+        check("差异触发一条 CRITICAL 告警",
+              len(sent) == 1 and sent[0]["level"] == SeverityLevel.CRITICAL,
+              f"sent={len(sent)}")
+        check("告警 category=reconciliation",
+              bool(sent) and sent[0].get("category") == "reconciliation", "")
+        check("告警 details 含现金差与持仓差异",
+              bool(sent) and sent[0]["details"]["cash_diff"] == 10_000.0
+              and "600000.SH" in sent[0]["details"]["position_diffs"], "")
+        check("告警带 reconciliation: dedup_key",
+              bool(sent) and sent[0].get("deduplication_key", "").startswith("reconciliation:"),
+              "")
+
+        # 3. 事件触发路径：发布 FILLED → 触发核对 → 告警
+        bus = EventBus()
+        p3 = LivePortfolio(initial_capital=100_000.0)
+        p3._cash = 100_000.0
+        p3.attach_reconciliation_event_trigger(bus, b_diff)
+        n_before = len(sent)
+        bus.publish(Event(EventType.ORDER_FILLED, data={"symbol": "600000.SH"}))
+        check("发布 FILLED 事件触发对账并告警", len(sent) == n_before + 1,
+              f"sent={len(sent)}")
+    finally:
+        alerting_mod.get_alert_manager = orig  # type: ignore[assignment]
+
+    total = passed + len(failures)
+    print("=" * 60)
+    print(f"portfolio.py 自测: {passed}/{total} 项通过")
+    for f in failures:
+        print("  FAIL:", f)
+    print("=" * 60)
+    return len(failures)
+
+
+if __name__ == "__main__":
+    raise SystemExit(_run_self_test())
