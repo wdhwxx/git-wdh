@@ -72,7 +72,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Any, Callable, Deque, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Deque, Dict, List, Optional, Sequence, Set, Tuple
 from urllib import request as urlrequest
 from urllib.error import URLError
 
@@ -173,6 +173,57 @@ DEFAULT_RUNBOOK_BY_CATEGORY: Dict[str, str] = {
     "health": "RB-HEALTH-001",               # 巡检非健康（health_check）
     "system": "RB-SYSTEM-001",               # 系统兜底
 }
+
+
+# ═══════════════════════════════════════════════
+#  C-9 告警治理与降噪（回写#238）常量
+# ═══════════════════════════════════════════════
+# 治理流水线：聚合分组（接入既有 AlertAggregator）+ 依赖抑制（集成 C-7
+# IncidentContextEngine.DEFAULT_DEPENDENCY_MAP）+ 动态基线降噪（集成 C-6
+# DynamicBaseline）+ 元监控独立冷却（R-08）+ 周复盘 TP/FP/FN 统计（P0-8）。
+# 防未来：治理只消费 alert.timestamp <= now 的告警；周统计只取 created_at<=now。
+
+#: 元监控告警 dedup 键前缀（R-08：独立冷却窗口，与业务 dedup 300s 隔离）
+META_DEDUP_PREFIX: str = "meta:"
+
+#: 元监控告警 category（meta_monitor 探针告警落此 category）
+META_CATEGORY: str = "meta"
+
+#: 治理裁决原因常量（GovernanceDecision.reason）
+GOVERNANCE_ALLOWED: str = "allowed"
+GOVERNANCE_SUPPRESSED_DEPENDENCY: str = "dependency_suppressed"
+GOVERNANCE_SUPPRESSED_BASELINE: str = "baseline_suppressed"
+GOVERNANCE_SUPPRESSED_META: str = "meta_cooldown_suppressed"
+
+#: 周长度（秒，7 天）
+WEEK_SECONDS: float = 7.0 * 24.0 * 3600.0
+
+#: 周复盘单次拉取告警历史上限（只消费 created_at<=now 的行，防未来）
+WEEKLY_LOAD_LIMIT: int = 10000
+
+#: P0-8 周统计达标阈值（目标准确率>95% 且 误报率<5%；按周至少 4 周判定）
+WEEKLY_ACCURACY_TARGET: float = 0.95
+WEEKLY_FALSE_POSITIVE_RATE_TARGET: float = 0.05
+
+#: 达标判定注释（本周为统计口径实现，至少累计 4 周才作达标结论）
+WEEKLY_VERDICT_NOTE: str = "按周统计至少 4 周判定，本周为统计口径实现"
+
+#: 未来点判定容差（秒）：ts 晚于 now 超过此值视为未来点
+_GOVERNANCE_FUTURE_EPS: float = 1.0
+
+#: 治理统计指标名（经 get_metrics_collector() 动态注册，禁止改 metrics_collector.py 本体）
+METRIC_ALERT_SUPPRESSED_TOTAL: str = "alert_suppressed_total"
+METRIC_ALERT_AGGREGATED_TOTAL: str = "alert_aggregated_total"
+METRIC_ALERT_ACCURACY: str = "alert_accuracy"
+METRIC_ALERT_FALSE_POSITIVE_RATE: str = "alert_false_positive_rate"
+
+#: 本模块治理侧注册的全部指标名（供主控/驾驶舱查询）
+GOVERNANCE_REGISTERED_METRICS: List[str] = [
+    METRIC_ALERT_SUPPRESSED_TOTAL,
+    METRIC_ALERT_AGGREGATED_TOTAL,
+    METRIC_ALERT_ACCURACY,
+    METRIC_ALERT_FALSE_POSITIVE_RATE,
+]
 
 
 # ═══════════════════════════════════════════════
@@ -1228,6 +1279,469 @@ class AlertAggregator:
 
 
 # ═══════════════════════════════════════════════
+#  C-9 告警治理与降噪框架（回写#238）
+# ═══════════════════════════════════════════════
+
+@dataclass
+class GovernanceDecision:
+    """治理裁决结果（C-9）：单条告警在投递前经治理流水线后的去向。
+
+    Attributes
+    ----------
+    allowed : bool
+        True=放行投递；False=被治理抑制（不单独告警）。
+    reason : str
+        裁决原因（GOVERNANCE_ALLOWED / *_SUPPRESSED_* 常量之一）。
+    group_key : str
+        聚合分组键（同根因链路相似告警归并依据；空=未分组）。
+    detail : str
+        人可读裁决明细（留痕/日志/测试断言用）。
+    """
+
+    allowed: bool
+    reason: str = GOVERNANCE_ALLOWED
+    group_key: str = ""
+    detail: str = ""
+
+
+class _NoopAlertSink:
+    """空告警接收器：供治理侧 DynamicBaseline 注入，吞掉其内部 _fire_alert，
+    避免 C-6 异常告警与治理后放行的原告警重复投递。
+
+    C-6 record() 返回值才是治理裁决依据；本 sink 仅负责"不二次发告警"。
+    """
+
+    def alert(self, **_kwargs: Any) -> int:
+        """吞掉告警（返回 1 表示"已处理"，不真正投递）。"""
+        return 1
+
+
+class AlertGovernor:
+    """告警治理与降噪框架（C-9，回写#238）。
+
+    在 AlertManager.send_alert 投递前对每条告警做治理裁决（只消费已发生时间戳，
+    严格防未来）。治理流水线（按序裁决，先命中先返回）：
+
+      1. **元监控独立冷却（R-08）**：dedup_key 以 ``meta:`` 开头的告警走独立冷却
+         窗口（与业务 dedup 隔离），且**跳过**依赖抑制与动态基线降噪——元监控告警
+         不得被业务降噪规则误吞。
+      2. **动态基线降噪（集成 C-6 DynamicBaseline）**：告警 ``details.governance``
+         携带 ``series``/``value`` 时，喂入 DynamicBaseline.record()。值落在动态基线
+         带内（非异常）→ 抑制该静态阈值告警（替代静态阈值误报源）；确证异常 → 放行。
+         冷启动样本不足（无法判定）→ 不抑制（不编造判断）。
+      3. **依赖抑制（集成 C-7 DEFAULT_DEPENDENCY_MAP）**：同窗内底层（根因）category
+         已命中时，其依赖映射可引发的上层 category 告警抑制（不单独告警，仅留痕）。
+      4. **聚合分组**：同根因链路相似告警在聚合窗口内归并（暴露 summary 统计；
+         实际投递归并由既有 AlertAggregator 承担，本框架计数并暴露 alert_aggregated_total）。
+
+    指标（经 get_metrics_collector() 动态注册，不改 metrics_collector.py 本体）：
+      - alert_suppressed_total     （COUNTER）每抑制一条告警 +1（labels=reason）
+      - alert_aggregated_total     （COUNTER）每归并一条相似告警 +1
+      - alert_accuracy             （GAUGE）周复盘准确率（weekly_alert_stats 落盘）
+      - alert_false_positive_rate （GAUGE）周复盘误报率（weekly_alert_stats 落盘）
+
+    Usage:
+        gov = AlertGovernor()
+        mgr.attach_governor(gov)
+        decision = gov.evaluate(alert)   # 由 send_alert 内部调用
+        print(gov.summary())
+    """
+
+    def __init__(
+        self,
+        dependency_map: Optional[Dict[str, List[str]]] = None,
+        dependency_suppression_enabled: bool = True,
+        suppression_window_seconds: float = 60.0,
+        aggregation_window_seconds: float = 60.0,
+        dynamic_baseline: Any = None,
+        baseline_noise_reduction_enabled: bool = False,
+        meta_cooldown_seconds: float = 120.0,
+        metrics_collector: Any = None,
+        clock: Optional[Callable[[], float]] = None,
+    ) -> None:
+        """
+        Parameters
+        ----------
+        dependency_map : dict | None
+            "底层→上层"依赖映射 {底层category: [上层category,...]}；None 用 C-7
+            IncidentContextEngine.DEFAULT_DEPENDENCY_MAP（可注入扩展）。
+        dependency_suppression_enabled : bool
+            是否启用依赖抑制（默认 True；仅同窗底层根因命中时抑制上层，安全）。
+        suppression_window_seconds : float
+            依赖抑制窗口（秒，>0）：底层根因命中后多久内其上层告警被抑制。
+        aggregation_window_seconds : float
+            聚合分组窗口（秒，>0）：同组键相似告警在此窗口内计为归并。
+        dynamic_baseline : DynamicBaseline | None
+            C-6 动态基线实例（降噪 oracle）；None=不做动态基线降噪。
+        baseline_noise_reduction_enabled : bool
+            是否启用动态基线降噪（默认 False；未配置基线时不抑制，安全）。
+        meta_cooldown_seconds : float
+            R-08 元监控独立冷却窗口（秒，>0；与业务 dedup 隔离，默认 120s）。
+        metrics_collector : MetricsCollector | None
+            指标采集器；None 延迟取 get_metrics_collector()（动态注册，失败不阻断）。
+        clock : Callable[[], float] | None
+            当前时间戳函数（测试注入）；None 用 time.time。
+
+        Raises
+        ------
+        ValueError : 窗口/冷却非正数 / dependency_map 非法时抛出。
+        """
+        self._clock: Callable[[], float] = clock if clock is not None else time.time
+        self._metrics_collector = metrics_collector
+
+        # ── 防御式校验窗口参数 ──
+        self._suppression_window: float = self._positive(
+            suppression_window_seconds, "suppression_window_seconds")
+        self._aggregation_window: float = self._positive(
+            aggregation_window_seconds, "aggregation_window_seconds")
+        self._meta_cooldown: float = self._positive(
+            meta_cooldown_seconds, "meta_cooldown_seconds")
+
+        self._dependency_suppression_enabled = bool(dependency_suppression_enabled)
+        self._baseline_noise_reduction_enabled = bool(baseline_noise_reduction_enabled)
+
+        # ── 依赖映射归一化（复用 C-7 DEFAULT_DEPENDENCY_MAP 作缺省）──
+        raw_map = dependency_map
+        if raw_map is None:
+            try:
+                from myquant.monitoring.incident_context import DEFAULT_DEPENDENCY_MAP
+                raw_map = DEFAULT_DEPENDENCY_MAP
+            except Exception as e:  # noqa: BLE001 —— C-7 不可用时退化为空映射（不抑制依赖）
+                logger.warning("加载 C-7 DEFAULT_DEPENDENCY_MAP 失败（依赖抑制按空映射）: %s", e)
+                raw_map = {}
+        if not isinstance(raw_map, dict):
+            raise ValueError(f"dependency_map 必须为 dict，收到 {type(raw_map).__name__}")
+        self._dep_map: Dict[str, List[str]] = {}
+        for low, ups in raw_map.items():
+            if not isinstance(low, str) or not low:
+                raise ValueError(f"dependency_map 的 key 必须为非空字符串，收到 {low!r}")
+            if not isinstance(ups, (list, tuple)):
+                raise ValueError(f"dependency_map[{low!r}] 必须为 list/tuple")
+            self._dep_map[low] = [str(u) for u in ups if isinstance(u, str) and u]
+
+        # ── 动态基线降噪 oracle（C-6；注入空告警 sink 防双发）──
+        self._baseline: Any = dynamic_baseline
+        self._baseline_min_samples: int = 0
+        if self._baseline is not None:
+            try:
+                self._baseline_min_samples = int(self._baseline.to_dict().get("min_samples", 0))
+            except Exception as e:  # noqa: BLE001
+                logger.warning("读取 DynamicBaseline min_samples 失败（按 0 冷启动判定）: %s", e)
+            # C-6 内部 _fire_alert 改投空 sink，避免与治理后放行的原告警重复
+            try:
+                self._baseline._alert_manager = _NoopAlertSink()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("注入 DynamicBaseline 空告警 sink 失败（可能双发告警）: %s", e)
+
+        # ── 治理状态（全部按已观测时间戳推进，防未来）──
+        self._root_seen: Dict[str, float] = {}        # 底层根因 category -> 命中 ts
+        self._meta_dedup: Dict[str, float] = {}        # 元监控 dedup_key -> 上次放行 ts
+        self._groups: Dict[str, float] = {}            # 聚合分组键 -> 首次归并 ts
+        self._baseline_fed: Dict[str, int] = {}        # 每 series 已喂点数（冷启动判定）
+
+        # ── 治理计数器（内存镜像 + collector）──
+        self._allowed_total: int = 0
+        self._suppressed_total: int = 0
+        self._suppressed_by_dependency: int = 0
+        self._suppressed_by_baseline: int = 0
+        self._suppressed_by_meta: int = 0
+        self._aggregated_total: int = 0
+
+        self._register_metrics()
+        logger.debug(
+            "AlertGovernor 初始化: dep_map=%s suppression_window=%.0fs "
+            "aggregation_window=%.0fs meta_cooldown=%.0fs baseline=%s",
+            self._dep_map, self._suppression_window, self._aggregation_window,
+            self._meta_cooldown, "on" if self._baseline is not None else "off",
+        )
+
+    # ═══════════════════════════════════════════════
+    #  治理裁决入口（send_alert 投递前调用）
+    # ═══════════════════════════════════════════════
+    def evaluate(self, alert: "Alert") -> GovernanceDecision:
+        """对单条告警做治理裁决（只消费 alert.timestamp <= now，防未来）。
+
+        Parameters
+        ----------
+        alert : Alert
+            待投递告警（其 timestamp 必须 <= 当前时钟）。
+
+        Returns
+        -------
+        GovernanceDecision : allowed=True 放行；False=被抑制（不单独告警）。
+
+        Raises
+        ------
+        ValueError : alert 为未来时间戳时抛出（防未来红线）。
+        """
+        if alert is None:
+            raise ValueError("evaluate: alert 不能为 None")
+        now = self._clock()
+        ts = float(alert.timestamp)
+        if ts > now + _GOVERNANCE_FUTURE_EPS:
+            raise ValueError(
+                f"拒绝未来告警：ts={ts:.3f} 晚于当前 {now:.3f}（防未来红线）"
+            )
+
+        # 1) 元监控独立冷却（R-08）：meta:* 走独立冷却，跳过其余业务降噪
+        if self._is_meta_alert(alert):
+            if self._meta_in_cooldown(alert, now):
+                self._suppress(alert, GOVERNANCE_SUPPRESSED_META,
+                               f"meta 独立冷却窗口内: {alert.deduplication_key}")
+                return GovernanceDecision(
+                    allowed=False, reason=GOVERNANCE_SUPPRESSED_META,
+                    detail=f"meta:{alert.deduplication_key} 冷却窗口内",
+                )
+            # 放行：记录独立冷却时间戳（与业务 dedup 完全隔离）
+            self._meta_dedup[alert.deduplication_key] = now
+            self._record_allowed(alert)
+            return GovernanceDecision(allowed=True, reason=GOVERNANCE_ALLOWED,
+                                      detail="meta 告警放行（独立冷却）")
+
+        # 2) 动态基线降噪（集成 C-6）：值落在动态基线内 → 抑制静态阈值误报
+        if self._baseline_noise_reduction_enabled and self._baseline is not None:
+            if self._baseline_says_normal(alert):
+                self._suppress(alert, GOVERNANCE_SUPPRESSED_BASELINE,
+                               f"动态基线内（非异常）: {alert.category}")
+                return GovernanceDecision(
+                    allowed=False, reason=GOVERNANCE_SUPPRESSED_BASELINE,
+                    detail="指标值落在动态基线带内，静态阈值告警判为误报",
+                )
+
+        # 3) 依赖抑制（集成 C-7）：同窗底层根因命中 → 上层告警抑制
+        if self._dependency_suppression_enabled and self._dependency_suppressed(alert, now):
+            self._suppress(alert, GOVERNANCE_SUPPRESSED_DEPENDENCY,
+                           f"上层依赖被根因抑制: {alert.category}")
+            return GovernanceDecision(
+                allowed=False, reason=GOVERNANCE_SUPPRESSED_DEPENDENCY,
+                detail="同窗底层根因已命中，上层告警仅作关联上下文",
+            )
+
+        # 4) 聚合分组：同根因链路相似告警在聚合窗口内归并（计数暴露 summary）
+        group_key = self._group_key_of(alert)
+        if group_key and self._already_grouped(group_key, now):
+            self._aggregated_total += 1
+            self._inc_counter(METRIC_ALERT_AGGREGATED_TOTAL, labels={"reason": "group"})
+        else:
+            self._groups[group_key] = now
+        # 非抑制告警即潜在根因：登记其 category 供后续上层依赖抑制
+        self._root_seen[alert.category] = now
+        self._evict_expired(now)
+        self._record_allowed(alert, group_key=group_key)
+        return GovernanceDecision(allowed=True, reason=GOVERNANCE_ALLOWED,
+                                 group_key=group_key)
+
+    # ═══════════════════════════════════════════════
+    #  治理子判定
+    # ═══════════════════════════════════════════════
+    @staticmethod
+    def _is_meta_alert(alert: "Alert") -> bool:
+        """是否为元监控告警（dedup_key 以 meta: 开头，或 category=meta）。"""
+        return (
+            str(alert.deduplication_key).startswith(META_DEDUP_PREFIX)
+            or alert.category == META_CATEGORY
+        )
+
+    def _meta_in_cooldown(self, alert: "Alert", now: float) -> bool:
+        """元监控告警独立冷却窗口内是否已发过（与业务 dedup 隔离）。"""
+        last = self._meta_dedup.get(alert.deduplication_key)
+        return last is not None and (now - last) < self._meta_cooldown
+
+    def _baseline_says_normal(self, alert: "Alert") -> bool:
+        """动态基线降噪 oracle：True=值落在动态基线内（应抑制静态阈值告警）。
+
+        只消费 alert.details.governance.{series,value} 与 alert.timestamp（已发生）。
+        冷启动样本不足（无法判定）返回 False（不抑制、不编造）。
+        """
+        details = alert.details or {}
+        gov = details.get("governance") or {}
+        series = gov.get("series")
+        value = gov.get("value")
+        if not series or value is None:
+            return False
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            logger.debug("治理基线降噪 value 非数值，跳过: %r", value)
+            return False
+        fed_before = self._baseline_fed.get(series, 0)
+        try:
+            event = self._baseline.record(series, float(alert.timestamp), v)
+        except ValueError as e:
+            # 未来点/非法点 → 不抑制（不编造判断，留痕）
+            logger.debug("治理基线 record 拒绝（不抑制）: %s", e)
+            return False
+        self._baseline_fed[series] = fed_before + 1
+        # C-6 判定异常 → 真异常，放行（不抑制）
+        if event is not None:
+            return False
+        # record() 返回 None：样本已暖（>=min_samples）且值落在基线带内 → 真正常，抑制误报
+        if self._baseline_min_samples > 0 and (fed_before + 1) >= self._baseline_min_samples:
+            return True
+        # 冷启动样本不足 → 无法判定，不抑制
+        return False
+
+    def _dependency_suppressed(self, alert: "Alert", now: float) -> bool:
+        """依赖抑制：alert.category 是否为某同窗已命中底层根因的上层依赖。"""
+        for root_cat, root_ts in list(self._root_seen.items()):
+            if (now - root_ts) > self._suppression_window:
+                continue  # 根因已出窗，不抑制
+            if alert.category in self._dep_map.get(root_cat, []):
+                return True
+        return False
+
+    def _group_key_of(self, alert: "Alert") -> str:
+        """计算聚合分组键（同根因链路相似告警归并依据）。
+
+        优先用 dedup_key 根因前缀（同根因链路）；无 dedup_key 时用 category。
+        """
+        if alert.deduplication_key:
+            # 取根因前缀（冒号前两段），把同链路相似告警归并
+            parts = str(alert.deduplication_key).split(":")
+            return ":".join(parts[:2]) if len(parts) >= 2 else alert.deduplication_key
+        return alert.category
+
+    def _already_grouped(self, group_key: str, now: float) -> bool:
+        """同组键是否在聚合窗口内已归并过。"""
+        last = self._groups.get(group_key)
+        return last is not None and (now - last) < self._aggregation_window
+
+    # ═══════════════════════════════════════════════
+    #  计数 / 留痕 / 指标
+    # ═══════════════════════════════════════════════
+    def _suppress(self, alert: "Alert", reason: str, detail: str) -> None:
+        """登记一次抑制（计数器 + collector + 日志留痕）。"""
+        self._suppressed_total += 1
+        if reason == GOVERNANCE_SUPPRESSED_DEPENDENCY:
+            self._suppressed_by_dependency += 1
+        elif reason == GOVERNANCE_SUPPRESSED_BASELINE:
+            self._suppressed_by_baseline += 1
+        elif reason == GOVERNANCE_SUPPRESSED_META:
+            self._suppressed_by_meta += 1
+        self._inc_counter(METRIC_ALERT_SUPPRESSED_TOTAL, labels={"reason": reason})
+        logger.info("告警治理抑制: reason=%s category=%s dedup=%s (%s)",
+                    reason, alert.category, alert.deduplication_key, detail)
+
+    def _record_allowed(self, alert: "Alert", group_key: str = "") -> None:
+        """登记一次放行。"""
+        self._allowed_total += 1
+
+    def _evict_expired(self, now: float) -> None:
+        """淘汰出窗的根因/分组记录（按已观测水位线，防无界增长）。"""
+        for root_cat in [k for k, v in self._root_seen.items()
+                         if (now - v) > self._suppression_window]:
+            del self._root_seen[root_cat]
+        for gk in [k for k, v in self._groups.items()
+                   if (now - v) > self._aggregation_window]:
+            del self._groups[gk]
+
+    def summary(self) -> Dict[str, Any]:
+        """治理面板快照（JSON 可序列化）：抑制/归并/放行计数 + 窗口参数。"""
+        return {
+            "allowed_total": self._allowed_total,
+            "suppressed_total": self._suppressed_total,
+            "suppressed_by_dependency": self._suppressed_by_dependency,
+            "suppressed_by_baseline": self._suppressed_by_baseline,
+            "suppressed_by_meta_cooldown": self._suppressed_by_meta,
+            "aggregated_total": self._aggregated_total,
+            "suppression_window_seconds": self._suppression_window,
+            "aggregation_window_seconds": self._aggregation_window,
+            "meta_cooldown_seconds": self._meta_cooldown,
+            "dependency_suppression_enabled": self._dependency_suppression_enabled,
+            "baseline_noise_reduction_enabled": self._baseline_noise_reduction_enabled,
+            "root_categories_seen": sorted(self._root_seen.keys()),
+        }
+
+    # ═══════════════════════════════════════════════
+    #  指标动态注册（不改 metrics_collector.py 本体）
+    # ═══════════════════════════════════════════════
+    def _register_metrics(self) -> None:
+        """经 get_metrics_collector() 动态注册治理指标（失败仅记 warning）。"""
+        col = self._resolve_collector()
+        if col is None:
+            return
+        try:
+            from myquant.monitoring.metrics_collector import MetricType
+        except Exception as e:  # noqa: BLE001
+            logger.warning("导入 MetricType 失败（治理指标未注册）: %s", e)
+            return
+        helps = {
+            METRIC_ALERT_SUPPRESSED_TOTAL: "Total alerts suppressed by governance (dependency/baseline/meta-cooldown)",
+            METRIC_ALERT_AGGREGATED_TOTAL: "Total similar alerts merged by governance aggregation grouping",
+            METRIC_ALERT_ACCURACY: "Weekly alert accuracy TP/(TP+FP) (P0-8)",
+            METRIC_ALERT_FALSE_POSITIVE_RATE: "Weekly alert false-positive rate FP/(TP+FP) (P0-8)",
+        }
+        for name in GOVERNANCE_REGISTERED_METRICS:
+            try:
+                register = getattr(col, "register", None)
+                if callable(register):
+                    mtype = (MetricType.GAUGE if name in (METRIC_ALERT_ACCURACY,
+                             METRIC_ALERT_FALSE_POSITIVE_RATE) else MetricType.COUNTER)
+                    register(name, mtype, help=helps.get(name, name), label_names=[])
+            except Exception as e:  # noqa: BLE001 —— 单个注册失败不阻断其余
+                logger.warning("治理指标 %s 注册失败（继续其余）: %s", name, e)
+
+    def _resolve_collector(self) -> Any:
+        """延迟解析指标采集器；不可用返回 None（仅记 warning）。"""
+        col = self._metrics_collector
+        if col is not None:
+            return col
+        try:
+            from myquant.monitoring.metrics_collector import get_metrics_collector
+            col = get_metrics_collector()
+            self._metrics_collector = col
+            return col
+        except Exception as e:  # noqa: BLE001
+            logger.warning("获取 metrics_collector 失败（治理指标未写入）: %s", e)
+            return None
+
+    def _inc_counter(self, name: str, amount: float = 1.0,
+                     labels: Optional[Dict[str, str]] = None) -> None:
+        """inc_counter 一个治理计数器；采集器不可用仅记 warning 不阻断。"""
+        col = self._resolve_collector()
+        if col is None:
+            return
+        try:
+            col.inc_counter(name, amount=amount, labels=labels or {})
+        except Exception as e:  # noqa: BLE001
+            logger.warning("治理指标 %s 递增失败（不阻断治理）: %s", name, e)
+
+    def set_accuracy_gauges(self, accuracy: Optional[float],
+                            fp_rate: Optional[float]) -> None:
+        """周复盘后落盘准确率/误报率 GAUGE（None 落 0.0 占位）。"""
+        col = self._resolve_collector()
+        if col is None:
+            return
+        try:
+            col.set_gauge(METRIC_ALERT_ACCURACY,
+                          0.0 if accuracy is None else float(accuracy))
+            col.set_gauge(METRIC_ALERT_FALSE_POSITIVE_RATE,
+                          0.0 if fp_rate is None else float(fp_rate))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("落盘治理准确率指标失败（不阻断）: %s", e)
+
+    # ═══════════════════════════════════════════════
+    #  防御式校验工具
+    # ═══════════════════════════════════════════════
+    @staticmethod
+    def _positive(value: float, name: str) -> float:
+        """正数校验：非法抛 ValueError（防御式，禁止静默落到错误窗口）。"""
+        try:
+            v = float(value)
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"{name} 必须为数值，收到 {value!r}") from e
+        if v <= 0:
+            raise ValueError(f"{name} 必须为正数，收到 {v!r}")
+        return v
+
+    def __repr__(self) -> str:
+        return (
+            f"<AlertGovernor suppressed={self._suppressed_total} "
+            f"allowed={self._allowed_total} aggregated={self._aggregated_total}>"
+        )
+
+
+# ═══════════════════════════════════════════════
 #  AlertManager 告警管理器（阶段9任务10增强）
 # ═══════════════════════════════════════════════
 
@@ -1297,9 +1811,37 @@ class AlertManager:
         self._undelivered_count: int = 0
         self._last_channel_attempts: List[Dict[str, Any]] = []
 
+        # C-9 告警治理与降噪（回写#238）：治理入口（None=不治理，保持既有行为）。
+        # 由 attach_governor() 装配；全局单例在 get_alert_manager() 按 settings 接入。
+        self._governor: Optional[AlertGovernor] = None
+
     def attach_store(self, store: "AlertStore") -> "AlertManager":
         """绑定告警持久化存储（BASE-1：发送落库/状态同步/双读）。"""
         self._store = store
+        return self
+
+    def attach_governor(self, governor: AlertGovernor) -> "AlertManager":
+        """装配 C-9 告警治理与降噪框架（send_alert 投递前裁决）。
+
+        Parameters
+        ----------
+        governor : AlertGovernor
+            治理框架实例（聚合分组/依赖抑制/动态基线降噪/元监控独立冷却）。
+
+        Returns
+        -------
+        AlertManager : self
+
+        Raises
+        ------
+        ValueError : governor 非 AlertGovernor 实例时抛出。
+        """
+        if not isinstance(governor, AlertGovernor):
+            raise ValueError(
+                f"governor 必须为 AlertGovernor 实例，收到 {type(governor).__name__}"
+            )
+        self._governor = governor
+        logger.info("AlertManager 已装配告警治理框架: %s", governor)
         return self
 
     # ═══════════════════════════════════════════
@@ -1458,6 +2000,23 @@ class AlertManager:
         if self._silenced and time.time() < self._silence_until:
             logger.debug(f"告警被静默模式抑制: {alert.summary()}")
             return 0
+
+        # C-9 告警治理与降噪（回写#238）：投递前治理裁决（聚合分组/依赖抑制/
+        # 动态基线降噪/元监控独立冷却）。被抑制的告警不单独投递（不更新 dedup、
+        # 不落库、不通道发送），仅留治理计数。governor=None 时保持既有行为不变。
+        if self._governor is not None:
+            try:
+                decision = self._governor.evaluate(alert)
+            except ValueError as e:
+                # 防未来红线：未来告警拒绝投递（不静默吞，记 error 留痕）
+                logger.error("告警治理拒绝未来告警（不投递）: %s", e)
+                return 0
+            if not decision.allowed:
+                logger.debug(
+                    "告警被治理抑制: reason=%s category=%s dedup=%s",
+                    decision.reason, alert.category, alert.deduplication_key,
+                )
+                return 0
 
         # 去重检查
         if dedup_enabled and alert.deduplication_key:
@@ -2465,6 +3024,8 @@ class AlertManager:
             # A-9 告警通道冗余元监控计数
             "undelivered_count": self._undelivered_count,
             "last_channel_attempts": self._last_channel_attempts,
+            # C-9 告警治理与降噪面板（governor=None 时为 None，未治理）
+            "governance": self._governor.summary() if self._governor is not None else None,
         }
 
     def __repr__(self) -> str:
@@ -2519,6 +3080,11 @@ def configure_notification_channels(manager: AlertManager) -> int:
     added = 0
     # BASE-3：告警行为装配（独立 try，失败不阻断通道装配）
     added += _apply_alert_config(manager)
+    # C-9：告警治理与降噪框架装配（依赖抑制/聚合分组/元监控冷却/动态基线降噪开关）
+    try:
+        added += _apply_governance_config(manager)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("治理框架装配调用失败（不阻断通道装配）: %s", e)
     try:
         from myquant.core.settings import get_settings
         notif = get_settings().get("notification", None) or {}
@@ -2623,6 +3189,183 @@ def _apply_alert_config(manager: AlertManager) -> int:
     except Exception as e:
         logger.warning(f"告警行为装配失败（保持默认）: {e}")
     return applied
+
+
+def _apply_governance_config(manager: AlertManager) -> int:
+    """C-9（回写#238）：按 monitoring.alerts 装配告警治理与降噪框架（改 settings 生效）。
+
+    装配项（monitoring.alerts 段新增降噪键，只增不改既有键；R-04 阈值纪律）：
+      - governance_dependency_suppression_enabled      依赖抑制开关（集成 C-7 依赖映射）
+      - governance_dependency_suppression_window_seconds 依赖抑制窗口（秒）
+      - governance_aggregation_group_window_seconds     聚合分组窗口（秒）
+      - governance_meta_cooldown_seconds                R-08 元监控独立冷却窗口（与业务 dedup 隔离）
+      - governance_baseline_noise_reduction_enabled    动态基线降噪开关（集成 C-6；默认关）
+
+    失败记 warning 不阻断（治理是增强项，告警主功能优先；装配失败=不治理）。
+
+    Parameters
+    ----------
+    manager : AlertManager
+        告警管理器（attach_governor 装配）。
+
+    Returns
+    -------
+    int : 成功装配=1，未装配=0。
+    """
+    try:
+        from myquant.core.settings import get_settings
+        # get_monitoring_config() 对 alerts 段有白名单（只透传 6 个既有键），
+        # C-9 新增降噪键须读原始 monitoring.alerts 块（不改 settings.py 白名单）。
+        raw_alerts = (get_settings().get_dict("monitoring", {}) or {}).get("alerts") or {}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("监控配置读取失败（不装配治理框架）: %s", e)
+        return 0
+
+    try:
+        dep_on = raw_alerts.get("governance_dependency_suppression_enabled", True)
+        dep_win = raw_alerts.get("governance_dependency_suppression_window_seconds", 60)
+        agg_win = raw_alerts.get("governance_aggregation_group_window_seconds", 60)
+        meta_cd = raw_alerts.get("governance_meta_cooldown_seconds", 120)
+        base_on = raw_alerts.get("governance_baseline_noise_reduction_enabled", False)
+
+        def _f(v: Any, dflt: float) -> float:
+            return float(v) if isinstance(v, (int, float)) else dflt
+
+        governor = AlertGovernor(
+            dependency_suppression_enabled=bool(dep_on),
+            suppression_window_seconds=_f(dep_win, 60.0),
+            aggregation_window_seconds=_f(agg_win, 60.0),
+            meta_cooldown_seconds=_f(meta_cd, 120.0),
+            baseline_noise_reduction_enabled=bool(base_on),
+            # 动态基线实例由监控侧（C-6）另行注入；此处仅开/关降噪开关
+            dynamic_baseline=None,
+        )
+        manager.attach_governor(governor)
+        logger.info(
+            "[config] 告警治理框架已按 monitoring.alerts 装配: "
+            "dep_suppression=%s dep_window=%.0fs agg_window=%.0fs "
+            "meta_cooldown=%.0fs baseline_nr=%s",
+            dep_on, governor._suppression_window, governor._aggregation_window,
+            governor._meta_cooldown, base_on,
+        )
+        return 1
+    except Exception as e:  # noqa: BLE001
+        logger.warning("告警治理框架装配失败（保持既有告警行为）: %s", e)
+        return 0
+
+
+def weekly_alert_stats(
+    store: "AlertStore",
+    week_end: Optional[float] = None,
+    fi_records: Optional[Sequence[Dict[str, Any]]] = None,
+    clock: Optional[Callable[[], float]] = None,
+) -> Dict[str, Any]:
+    """C-9 / P0-8 周告警复盘统计：TP/FP/FN + 准确率/误报率/检出率 + 达标判定。
+
+    按周从 AlertStore.load_history 取告警，依据 classification 字段（TP/FP/auto）
+    与周时间窗口计算（严格防未来：只消费 created_at <= now 的行）。
+
+    口径（P0-8 ①，与 measurability.ClassificationStats 同口径）：
+      - 准确率 accuracy        = TP/(TP+FP)
+      - 误报率 false_positive_rate = FP/(TP+FP)
+      - 检出率 detection_rate  = TP/(TP+FN)（FN 由 FI 故障注入主动测量；本周口径 FN 默认 0）
+      - 达标 passed = 准确率 > 0.95 且 误报率 < 0.05
+
+    Parameters
+    ----------
+    store : AlertStore
+        告警持久化存储（BASE-1）。
+    week_end : float | None
+        周窗口右端（epoch 秒）；None 取当前时钟。防未来：week_end 钳制到 <= now。
+    fi_records : list[dict] | None
+        故障注入记录（FN 主动测量输入，每条含 captured: bool）；None 时 FN=0。
+    clock : Callable[[], float] | None
+        当前时间戳函数（测试注入）；None 用 time.time。
+
+    Returns
+    -------
+    dict : 周统计（周起止/TP/FP/FN/auto/unclassified/准确率/误报率/检出率/
+        达标判定/目标阈值/注释/公式）。样本不足时比率为 None（诚实标注不造数）。
+
+    Raises
+    ------
+    ValueError : store 为 None 时抛出。
+    """
+    if store is None:
+        raise ValueError("weekly_alert_stats: store 不能为 None")
+    now = (clock if clock is not None else time.time)()
+    end = float(week_end) if week_end is not None else now
+    # 防未来：周右端不得晚于当前时钟
+    end = min(end, now)
+    start = end - WEEK_SECONDS
+
+    rows = store.load_history(limit=WEEKLY_LOAD_LIMIT)
+    tp = fp = auto = unclassified = 0
+    for row in rows:
+        created = row.get("created_at")
+        if created is None:
+            continue
+        try:
+            ts = float(created)
+        except (TypeError, ValueError):
+            continue
+        if ts > now + _GOVERNANCE_FUTURE_EPS:
+            continue  # 防未来：跳过未来时间戳
+        if ts < start or ts > end:
+            continue
+        label = str(row.get("classification") or "").strip().upper()
+        if label == "TP":
+            tp += 1
+        elif label == "FP":
+            fp += 1
+        elif label == "AUTO":
+            auto += 1
+        else:
+            unclassified += 1
+
+    # FN：由 FI 故障注入主动测量（复用 measurability.ClassificationStats.count_fn）
+    fn = 0
+    if fi_records is not None:
+        try:
+            from myquant.monitoring.measurability import ClassificationStats
+            fn = ClassificationStats.count_fn(fi_records)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("统计 FN 失败（按 0 计）: %s", e)
+
+    tp_plus_fp = tp + fp
+    tp_plus_fn = tp + fn
+    accuracy = round(tp / tp_plus_fp, 6) if tp_plus_fp > 0 else None
+    fp_rate = round(fp / tp_plus_fp, 6) if tp_plus_fp > 0 else None
+    detection_rate = round(tp / tp_plus_fn, 6) if tp_plus_fn > 0 else None
+
+    # 达标判定：准确率>0.95 且 误报率<0.05（两者皆可计算才判；样本不足诚实判 False）
+    if accuracy is not None and fp_rate is not None:
+        passed = (accuracy > WEEKLY_ACCURACY_TARGET
+                  and fp_rate < WEEKLY_FALSE_POSITIVE_RATE_TARGET)
+    else:
+        passed = False
+
+    return {
+        "week_start": round(start, 3),
+        "week_end": round(end, 3),
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+        "auto": auto,
+        "unclassified": unclassified,
+        "accuracy": accuracy,
+        "false_positive_rate": fp_rate,
+        "detection_rate": detection_rate,
+        "accuracy_target": WEEKLY_ACCURACY_TARGET,
+        "false_positive_rate_target": WEEKLY_FALSE_POSITIVE_RATE_TARGET,
+        "passed": passed,
+        "note": WEEKLY_VERDICT_NOTE,
+        "formula": {
+            "accuracy": "TP/(TP+FP)",
+            "false_positive_rate": "FP/(TP+FP)",
+            "detection_rate": "TP/(TP+FN)",
+        },
+    }
 
 
 def _write_undelivered(alert: Alert) -> None:
@@ -2739,5 +3482,196 @@ def _run_a10_self_test() -> int:
     return len(failures)
 
 
+def _run_c9_governance_self_test() -> int:
+    """C-9（回写#238）治理自测：依赖抑制 / 元监控独立冷却 / 动态基线降噪 /
+    聚合分组 / 周统计 TP-FP-FN 达标判定 / 指标注册 / 防未来 / 防御校验。
+
+    防未来：用固定时钟（clock_now 远大于喂入点 ts），周统计用历史 ts 落临时库。
+
+    Returns:
+        int: 失败项数（0 = 全绿）。
+    """
+    import tempfile
+    from pathlib import Path
+
+    from myquant.database.connection import DatabaseConnection
+    from myquant.monitoring.alert_store import AlertStore
+    from myquant.monitoring.dynamic_baseline import DynamicBaseline
+
+    passed = 0
+    failures: List[str] = []
+
+    def check(name: str, cond: bool, detail: str = "") -> None:
+        nonlocal passed
+        if cond:
+            passed += 1
+        else:
+            failures.append(f"{name}: {detail}")
+
+    # ── 固定时钟：远大于所有喂入 ts（全部历史点 <= now，严格防未来）──
+    clock_now = [1_700_000_000.0 + 1_000_000.0]
+
+    def clock() -> float:
+        return clock_now[0]
+
+    # 1) 依赖抑制：watchdog 根因命中 → 同窗 data_quality 上层告警被抑制
+    gov = AlertGovernor(
+        dependency_suppression_enabled=True,
+        suppression_window_seconds=60.0,
+        aggregation_window_seconds=60.0,
+        meta_cooldown_seconds=120.0,
+        clock=clock,
+    )
+    root = Alert(level=SeverityLevel.ERROR, message="行情断流",
+                 category="watchdog", source="monitoring.watchdog",
+                 deduplication_key="watchdog:staleness", timestamp=clock())
+    d_root = gov.evaluate(root)
+    check("C9-1) 根因 watchdog 告警放行", d_root.allowed, f"{d_root}")
+    upper = Alert(level=SeverityLevel.WARNING, message="数据质量下降",
+                  category="data_quality", source="monitoring.data_quality",
+                  deduplication_key="dq:gap", timestamp=clock())
+    d_up = gov.evaluate(upper)
+    check("C9-1) 上层 data_quality 被根因抑制",
+          not d_up.allowed and d_up.reason == GOVERNANCE_SUPPRESSED_DEPENDENCY,
+          f"{d_up}")
+    # 非依赖关系的 broker 告警放行
+    other = Alert(level=SeverityLevel.WARNING, message="券商延迟",
+                  category="broker", deduplication_key="broker:latency",
+                  timestamp=clock())
+    d_other = gov.evaluate(other)
+    check("C9-1) 非依赖 broker 告警放行", d_other.allowed, f"{d_other}")
+
+    # 2) 元监控独立冷却（R-08）：meta:* 走独立冷却，跳过业务降噪
+    meta1 = Alert(level=SeverityLevel.WARNING, message="[meta] collector stale",
+                  category="meta", source="meta_monitor",
+                  deduplication_key="meta:collector_health", timestamp=clock())
+    check("C9-2) 首轮 meta 告警放行", gov.evaluate(meta1).allowed)
+    meta2 = Alert(level=SeverityLevel.WARNING, message="[meta] collector stale 再发",
+                  category="meta", source="meta_monitor",
+                  deduplication_key="meta:collector_health", timestamp=clock())
+    d_meta2 = gov.evaluate(meta2)
+    check("C9-2) 冷却窗口内 meta 告警被独立冷却抑制",
+          not d_meta2.allowed and d_meta2.reason == GOVERNANCE_SUPPRESSED_META,
+          f"{d_meta2}")
+
+    # 3) 动态基线降噪（集成 C-6）：值落在动态基线内 → 抑制静态阈值误报
+    step = 60.0
+    base = 1_700_000_000.0
+
+    def ts(k: int) -> float:
+        return base + k * step
+
+    db = DynamicBaseline(window=20, k=3.0, min_samples=10, clock=clock)
+    gov2 = AlertGovernor(
+        dependency_suppression_enabled=False,
+        baseline_noise_reduction_enabled=True,
+        dynamic_baseline=db,
+        clock=clock,
+    )
+    # 喂平稳段（mean≈100）：冷启动样本不足（<min_samples=10）→ 不抑制（不编造判断）
+    normal = [100.0, 101.0, 99.0, 100.5, 99.5, 100.2, 99.8, 100.1, 99.9]  # 9 点 <10
+    for i, v in enumerate(normal):
+        a = Alert(level=SeverityLevel.WARNING, message="静态阈值告警",
+                  category="system", deduplication_key=f"static:lat:{i}",
+                  details={"governance": {"series": "latency_ms", "value": v}},
+                  timestamp=ts(i))
+        d = gov2.evaluate(a)
+        check(f"C9-3) 冷启动段第{i}点不抑制", d.allowed, f"{d}")
+    # 第 10 个点（fed=10>=min_samples 已暖机）：值 100.2 落在基线带内 → 抑制误报
+    a_normal = Alert(level=SeverityLevel.WARNING, message="静态阈值误报",
+                      category="system", deduplication_key="static:lat:normal",
+                      details={"governance": {"series": "latency_ms", "value": 100.2}},
+                      timestamp=ts(15))
+    d_norm = gov2.evaluate(a_normal)
+    check("C9-3) 暖机后基线内值抑制静态阈值误报",
+          not d_norm.allowed and d_norm.reason == GOVERNANCE_SUPPRESSED_BASELINE,
+          f"{d_norm}")
+
+    # 4) 聚合分组：同根因链路相似告警在窗口内归并（暴露 summary）
+    gov3 = AlertGovernor(aggregation_window_seconds=60.0, clock=clock)
+    g1 = Alert(level=SeverityLevel.WARNING, message="a", category="data_quality",
+               deduplication_key="dq:gap:one", timestamp=clock())
+    gov3.evaluate(g1)
+    g2 = Alert(level=SeverityLevel.WARNING, message="b", category="data_quality",
+               deduplication_key="dq:gap:two", timestamp=clock())
+    gov3.evaluate(g2)
+    check("C9-4) 同链路相似告警归并计数=1",
+          gov3.summary()["aggregated_total"] == 1,
+          f"{gov3.summary()}")
+
+    # 5) 周统计 TP/FP/FN + 达标判定（临时库落历史告警）
+    with tempfile.TemporaryDirectory() as tmp:
+        conn = DatabaseConnection(Path(tmp) / "c9_week.db")
+        store = AlertStore(connection=conn)
+        now = clock_now[0]
+        # 落 19 条 TP + 1 条 FP（本周窗口内），classification 打标
+        for i in range(19):
+            a = Alert(level=SeverityLevel.WARNING, message=f"tp-{i}",
+                      category="system", alert_id=f"c9-tp-{i}",
+                      timestamp=now - 3600.0, classification="TP")
+            store.save_alert(a)
+            store.set_classification(f"c9-tp-{i}", "TP")
+        for i in range(1):
+            a = Alert(level=SeverityLevel.WARNING, message=f"fp-{i}",
+                      category="system", alert_id=f"c9-fp-{i}",
+                      timestamp=now - 3600.0, classification="FP")
+            store.save_alert(a)
+            store.set_classification(f"c9-fp-{i}", "FP")
+        stats = weekly_alert_stats(store, clock=clock)
+        check("C9-5) TP=19 / FP=1",
+              stats["tp"] == 19 and stats["fp"] == 1, f"{stats}")
+        check("C9-5) 准确率=19/20=0.95 边界不达标(>0.95)",
+              stats["accuracy"] == 0.95 and stats["passed"] is False,
+              f"{stats['accuracy']}/{stats['passed']}")
+        check("C9-5) 误报率=1/20=0.05 边界(<0.05 不达标)",
+              stats["false_positive_rate"] == 0.05 and not stats["passed"])
+        check("C9-5) 含达标注释", "至少 4 周" in stats["note"])
+        # 再落 1 条 TP → 20/21≈0.9524>0.95 且 fp=1/21≈0.0476<0.05 → 达标
+        a = Alert(level=SeverityLevel.WARNING, message="tp-more",
+                  category="system", alert_id="c9-tp-more", timestamp=now - 1800.0)
+        store.save_alert(a)
+        store.set_classification("c9-tp-more", "TP")
+        stats2 = weekly_alert_stats(store, clock=clock)
+        check("C9-5) 20TP/1FP → 准确率>0.95 且误报率<0.05 → 达标",
+              stats2["passed"] is True, f"{stats2['accuracy']}/{stats2['false_positive_rate']}")
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+    # 6) 防未来：拒绝未来告警
+    gov4 = AlertGovernor(clock=clock)
+    future = Alert(level=SeverityLevel.WARNING, message="future", category="system",
+                   timestamp=clock_now[0] + 1000.0)
+    rejected = False
+    try:
+        gov4.evaluate(future)
+    except ValueError:
+        rejected = True
+    check("C9-6) 拒绝未来告警", rejected)
+
+    # 7) 防御式校验：非法窗口 / attach 非 governor
+    bad = False
+    try:
+        AlertGovernor(suppression_window_seconds=-1)
+    except ValueError:
+        bad = True
+    check("C9-7) 非法窗口拒绝", bad)
+    mgr = AlertManager()
+    bad2 = False
+    try:
+        mgr.attach_governor("not-a-governor")  # type: ignore[arg-type]
+    except ValueError:
+        bad2 = True
+    check("C9-7) attach 非 governor 拒绝", bad2)
+
+    print(f"[C-9] alerting 治理自测: {passed} 项通过, {len(failures)} 项失败")
+    for f in failures:
+        print(f"  - {f}")
+    return len(failures)
+
+
 if __name__ == "__main__":
-    raise SystemExit(_run_a10_self_test())
+    _a10 = _run_a10_self_test()
+    _c9 = _run_c9_governance_self_test()
+    raise SystemExit(_a10 + _c9)

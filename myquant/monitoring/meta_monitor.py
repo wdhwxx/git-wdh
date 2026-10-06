@@ -615,17 +615,36 @@ class MetaMonitor:
         return self._business_alert_manager
 
     def _get_meta_manager(self) -> Any:
-        """独立告警通道（R-08：独立冷却窗口，与业务告警完全隔离）"""
+        """独立告警通道（R-08：独立冷却窗口，与业务告警完全隔离）。
+
+        C-9（回写#238）增强：元监控 manager 额外装配一个 meta 作用域
+        AlertGovernor，使 dedup_key=meta:* 告警**确实流经 C-9 治理框架**的
+        元监控独立冷却分支（META_DEDUP_PREFIX 识别 → 独立冷却窗口 → 跳过业务
+        依赖抑制/动态基线降噪），与业务 dedup 300s 完全隔离。既有 16 项契约
+        不变：首轮回调放行、冷却窗口内抑制、新实例缓存重建可再告警。
+        """
         if self._meta_manager is None:
             try:
                 from myquant.monitoring.alerting import (
                     AlertManager,
                     ConsoleAlertChannel,
                     LogAlertChannel,
+                    AlertGovernor,
                 )
                 manager = AlertManager(dedup_window_seconds=self._cooldown_seconds)
                 manager.add_channel(ConsoleAlertChannel(name="meta-console"))
                 manager.add_channel(LogAlertChannel(name="meta-log", logger_name="monitoring.meta"))
+                # C-9：装配 meta 作用域治理（独立冷却=本探针 cooldown；
+                # 依赖抑制/动态基线降噪关闭——元监控告警不得被业务降噪误吞）
+                try:
+                    meta_gov = AlertGovernor(
+                        dependency_suppression_enabled=False,
+                        baseline_noise_reduction_enabled=False,
+                        meta_cooldown_seconds=self._cooldown_seconds,
+                    )
+                    manager.attach_governor(meta_gov)
+                except Exception as e:  # noqa: BLE001 —— 治理装配失败不阻断元监控告警
+                    logger.warning(f"元监控治理框架装配失败（仅走独立 dedup）: {e}")
                 self._meta_manager = manager
             except Exception as e:  # noqa: BLE001
                 logger.warning(f"元监控独立告警通道初始化失败: {e}")

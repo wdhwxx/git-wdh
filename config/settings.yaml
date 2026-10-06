@@ -30,6 +30,12 @@ monitoring:
     aggregation_window_seconds: 60     # 聚合窗口（秒，AlertRule.aggregation_window）
     escalation_time_seconds: 300       # 升级时限（秒，WARNING 未确认升级 ERROR，对齐 P0-3 P1=5min）
     escalation_enabled: true           # 升级开关（AlertRule.escalation_enabled）
+    # ── C-9 告警治理与降噪（回写#238；只增不改既有键；R-04 阈值纪律，读 get_monitoring_config()）──
+    governance_dependency_suppression_enabled: true     # 依赖抑制开关（集成 C-7 依赖映射：底层根因命中时上层告警不单独告警）
+    governance_dependency_suppression_window_seconds: 60  # 依赖抑制窗口（秒，同窗底层根因命中后其上层告警被抑制）
+    governance_aggregation_group_window_seconds: 60   # 聚合分组窗口（秒，同根因链路相似告警归并，暴露 summary）
+    governance_meta_cooldown_seconds: 120             # R-08 元监控独立冷却窗口（秒，与业务 dedup 300s 隔离，meta:* 专用）
+    governance_baseline_noise_reduction_enabled: false # 动态基线降噪开关（集成 C-6：值在动态基线内则抑制静态阈值误报；默认关，C-6 实例就绪后开启）
 
   # ── SLO 数值阈值锁定表（R-04 唯一真源；LOCKED 项实盘后不得改动，
   #    PENDING_CAL 项待实盘校准后填死，禁止编造）──
@@ -84,6 +90,19 @@ monitoring:
     backtest_consistency:
       signal_deviation_rate_max: ~     # 回测实盘信号偏差率上限 X%（按策略风格设定），PENDING_CAL
       deviation_window: ~              # 偏差率计算窗口，PENDING_CAL
+
+    # ── 信号衰减（C-4，待实盘校准后填死，禁止编造）──
+    signal_decay:
+      ic_rolling_window: ~             # 信号后收益 IC 滚动窗口，PENDING_CAL
+      ic_threshold: ~                  # 滚动 IC 衰减阈值（低于即预警），PENDING_CAL
+      density_min: ~                   # 信号密度下限（低于即预警），PENDING_CAL
+      invalid_signal_ratio_max: ~      # 连续无效信号占比上限（超过即预警），PENDING_CAL
+
+    # ── 容量预测（C-8，待实盘校准后填死，禁止编造）──
+    capacity:
+      growth_projection_days: ~        # 数据量增长预测天数，PENDING_CAL
+      storage_headroom_min_pct: ~      # 存储余量下限（低于即 P2 预警），PENDING_CAL
+      strategy_count_limit: ~          # 策略容量上限（超过即 P2 预警），PENDING_CAL
 
     # ── 引擎心跳（R-02 硬约束：N×心跳间隔必须 <60s 才能保住 MTTD<1min）──
     engine_heartbeat:
