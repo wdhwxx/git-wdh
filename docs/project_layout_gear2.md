@@ -576,6 +576,8 @@ Pythonwdhmm/
 
     │   │   ├── test_dynamic_baseline.py # ✨【回写#235】C-6 动态基线测试：滚动基线（均值/波动窗口）/同环比/多条件组合判定；异常输出 anomaly 事件；冷启动静态阈值兜底；regime 自适应切换；阈值 None 不告警不编造；防未来（只消费历史点）✅已完成
 
+    │   │   ├── test_threshold_calibration.py # ✨【回写#245】D-3 阈值自动校准测试（37 项）：构造防御（非法 method/k/分位/min_samples/apply_mode/历史上限）；shadow 只出建议不生效/auto 立即生效；不足样本与常量序列不校准（退化区间不编造）；quantile 法校准；非有限值/空历史不校准；apply_proposal 人工确认与校验；人工覆盖优先级与 overridden 标记、参数校验；回滚（恢复旧阈值/撤人工覆盖/unknown/非 applied False/校验）；解析优先级（人工覆盖>applied>None）；per-regime 隔离；历史 JSON 可序列化/limit 校验/上限裁剪；审计写入/审计失败不阻断；summary 计数；_read_calibrator_config 读 settings.yaml 真源（R-04）；DynamicBaseline 集成（regime 切换触发校准/冷启动静态阈值消费校准阈值/人工覆盖影响 anomaly 判定/to_dict 含校准摘要/未挂接校准器行为不变）✅已完成
+
     │   │   ├── test_incident_context.py # ✨【回写#236】C-7 根因分析测试：同窗告警/指标/变更/日志聚合 incident；依赖抑制（底层抑制上层）；EVENT 事件路径（断流→单条根因告警非风暴）；防未来时间戳；防御校验✅已完成
 
     │   │   ├── test_capacity.py # ✨【回写#237】C-8 容量预测测试：数据量增长预测/资源占用估算/策略容量上限；容量不足 P2 预警（阈值 None 不告警不编造）；指标进看板；防未来；防御校验✅已完成
@@ -1232,7 +1234,7 @@ Pythonwdhmm/
 
     │   ├── attribution.py            # ✨【回写#234】C-5 归因分析框架（批任务）：AttributionAnalyzer——收益归因（策略/因子/标的/时段维度）、实盘与回测归因对比（同口径逐维差异）、归因结果进日报（摘要 dict + 可视化数据）；复用 backtest/metrics.py 绩效指标；防未来（只消费已发生收益序列）；__main__ 自测
 
-    │   ├── dynamic_baseline.py       # ✨【回写#235】C-6 动态基线+异常检测（周期/POLL）：DynamicBaseline——关键指标从静态阈值升级为滚动基线（滚动窗口均值/波动）+ 同环比 + 多条件组合判定；异常输出 anomaly 事件（time/series/value/baseline/ratio）；冷启动（历史不足）静态阈值兜底；基线随 regime 自适应（regime 标签可注入，为 D-3 打底）；阈值读 settings.yaml monitoring.slo（PENDING_CAL 不告警不编造）；__main__ 自测
+    │   ├── dynamic_baseline.py       # ✨【回写#235】C-6 动态基线+异常检测（周期/POLL）：DynamicBaseline——关键指标从静态阈值升级为滚动基线（滚动窗口均值/波动）+ 同环比 + 多条件组合判定；异常输出 anomaly 事件（time/series/value/baseline/ratio）；冷启动（历史不足）静态阈值兜底；基线随 regime 自适应（regime 标签可注入，为 D-3 打底）；阈值读 settings.yaml monitoring.slo（PENDING_CAL 不告警不编造）；__main__ 自测；✨【回写#245】D-3 阈值自动校准：追加 ThresholdCalibrator——监控阈值随 regime 切换自动校准（zscore mean±k×std / quantile 分位带，取该 regime 已积累最近 min_samples 样本；不足样本/常量序列退化不校准不编造）；校准可审计（calibration_history 全量留痕+AuditLogStore kind=dynamic_baseline）、可回滚（rollback 恢复旧阈值）、可人工覆盖（set_manual_thresholds 优先于自动校准）；安全模型对齐 D-1（apply_mode=shadow 只出建议 proposed 需 apply_proposal 人工确认 / auto 自动生效）；有效阈值解析优先级=人工覆盖>applied 校准>None；DynamicBaseline 挂接 calibrator 后 set_regime 自动触发校准、_resolve_static 冷启动消费校准阈值（regime 切换后阈值自适应）；校准参数读 settings.yaml monitoring.slo.dynamic_baseline.calibrator（R-04，算法参数非业务阈值，缺省 shadow 安全）；to_dict 含校准摘要；__main__ 自测追加 D-3 段
 
     │   ├── incident_context.py       # ✨【回写#236】C-7 根因分析单机版（EVENT）：IncidentContextEngine——同时间窗内相关告警/指标/最近变更/日志聚合为一次 incident；依赖抑制（底层故障抑制上层告警）；验收=一次行情断流只产生一条根因告警（事件路径验证，R-02）；防未来（只聚合已发生时间戳）；__main__ 自测
 
@@ -3806,3 +3808,11 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
    b. tests/unit/test_action_engine.py 追加 D-2 测试（18 项，同文件 #243 累计 82 项）：SwitchDataSource（dry-run 不切换/执行切换+undo 恢复/缺 switch_fn not_supported/缺 restore_fn undo False/完整场景 触发→auto 切源→审计→回滚恢复）；StopSignalGeneration（dry-run/执行+undo/缺 stop_fn/场景 shadow 只读演练先行）；RollbackDataVersion（dry-run/执行回滚+undo 恢复/缺 rollback_fn/完整场景 触发→auto 回滚版本→审计→恢复）；NotifyTrader（经假 sink 投递计数/undo False/非法级别 failed/投递通道异常如实 failed 不假成功/四类执行器注册断言）。
    c. 验证结果：py_compile 通过；模块 __main__ 自测全绿；单测 82 passed（含既有 D-1 64 项零破坏）；全量 pytest 结果见提交后终验（基线 3192 passed/2 skipped/0 failed）。
    d. 纪律遵守：蓝图目录树 action_engine.py 条目 #243 追加 #244（monitoring 段+test_action_engine.py 段），无蓝图外新文件；业务逻辑归 myquant；动作不编造业务阈值（注入回调由部署方接线）；严格防未来（只消费当前状态，时间戳一律当前时点）；告警只调 get_alert_manager().alert() 不改 alerting.py；任务后 git 提交（commit message 引用 #244）。
+
+245. ✨【回写记录·2026-10-06·D-3 阈值自动校准】【回写#245】
+   事实来源：本次落地，代码级核验：《量化系统监控模块施工总清单_V1.2.md》D-3 行验收口径（监控阈值随 regime 切换自动校准，避免固定阈值在 regime 切换后失效；校准过程可审计、可回滚、可人工覆盖；验收=regime 切换后阈值自适应，校准历史可查）+ docs/代码变更治理规则.md + docs/py文件代码规则.md。
+   a. myquant/monitoring/dynamic_baseline.py 追加 D-3（C-6 文件同文件升级，monitoring/ 段 dynamic_baseline.py 条目 #235 追加 #245）：新增 ThresholdCalibrator（阈值自动校准器）+ CalibrationRecord（校准全量留痕，JSON 可序列化）+ _read_calibrator_config（读 settings.yaml monitoring.slo.dynamic_baseline.calibrator 真源 R-04）；校准算法 zscore（mean±k×std）/quantile（经验分位带，复用 DynamicBaseline._quantile），取该 regime 已积累最近 min_samples 样本计算建议阈值；不足样本/常量序列退化（std≈0 或 high-low≈0）不校准不编造；安全模型对齐 D-1 三阶段——apply_mode=shadow 只出建议（status=proposed）需 apply_proposal 人工确认后 applied，apply_mode=auto 自动生效（安全测试后放开）；校准可审计（calibration_history 上限裁剪 + AuditLogStore kind=dynamic_baseline，审计失败降级内存留痕不阻断）、可回滚（rollback 恢复校准前有效阈值/撤人工覆盖）、可人工覆盖（set_manual_thresholds 优先级最高，被覆盖 applied 标记 overridden）；有效阈值解析优先级=人工覆盖>applied 自动校准>None；DynamicBaseline 集成：__init__ 新增 calibrator 参数、set_regime 切换后 _calibrate_for_regime 按新 regime 已积累历史自动校准（新 regime 冷启动无历史不校准）、_resolve_static 优先消费校准器有效阈值（regime 切换后阈值自适应）、to_dict 含校准摘要；__main__ 自测追加 D-3 段。
+   b. config/settings.yaml 追加 monitoring.slo.dynamic_baseline.calibrator 块（method/k/quantile_low/high/min_samples/apply_mode，全部算法参数非业务阈值，apply_mode 缺省 shadow 安全）。
+   c. 新增 tests/unit/test_threshold_calibration.py（37 项）：构造防御；shadow 建议不生效/auto 立即生效；不足样本与常量序列不校准；quantile 法；非有限值/空历史；apply_proposal 确认与校验；人工覆盖优先级/参数校验；回滚恢复/撤覆盖/unknown/非 applied；解析优先级；per-regime 隔离；历史可审计/上限裁剪；审计失败不阻断；summary；配置真源；DynamicBaseline 集成（regime 切换触发校准/冷启动消费校准阈值/人工覆盖影响 anomaly 判定/to_dict 摘要/未挂接行为不变）。
+   d. 验证结果：py_compile 通过；模块 __main__ 自测 52 项全绿；单测 37 项全绿 + 既有 test_dynamic_baseline.py 37 项回归零破坏；全量 pytest 结果见提交后终验（基线 3192 passed/2 skipped/0 failed）。
+   e. 纪律遵守：先更新蓝图目录树（monitoring 段 dynamic_baseline.py 条目 #235 追加 #245 + tests/unit 段 test_threshold_calibration.py）再创建文件（蓝图优先）；无蓝图外新文件（校准器并入既有 dynamic_baseline.py，同 C-6 watchdog 累计式回写）；业务逻辑归 myquant；校准参数读配置真源（算法参数非业务阈值，业务阈值 PENDING_CAL 不编造）；严格防未来（只消费已发生历史观测，时间戳一律当前时点）；任务后 git 提交（commit message 引用 #245）。

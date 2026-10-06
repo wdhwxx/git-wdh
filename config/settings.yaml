@@ -120,6 +120,16 @@ monitoring:
     dynamic_baseline:
       static_low: ~                   # 冷启动静态阈值下限（低于即异常告警），PENDING_CAL
       static_high: ~                  # 冷启动静态阈值上限（高于即异常告警），PENDING_CAL
+      # ── 阈值自动校准（D-3，回写#245）：regime 切换后按该 regime 已积累历史观测自动校准 ──
+      # 以下均为算法参数（非业务阈值）：zscore 倍数/分位法分位/最小样本数/生效模式；
+      # apply_mode=shadow 只出建议（proposed），经人工确认后生效（D-1 confirm 语义对齐）
+      calibrator:
+        method: zscore                # 校准算法：zscore（mean±k×std）/ quantile（经验分位带）
+        k: 3.0                        # zscore 倍数（算法参数）
+        quantile_low: 0.05            # quantile 法低分位（算法参数）
+        quantile_high: 0.95           # quantile 法高分位（算法参数）
+        min_samples: 20               # 触发校准的最小历史样本数（不足不校准，防噪声）
+        apply_mode: shadow            # shadow 只出建议（需人工确认）/ auto 自动生效（安全测试后放开）
 
     # ── 环境匹配（C-3，基于 RSRS 识别市场环境 + 策略-环境匹配评分；待实盘校准后填死，禁止编造）──
     regime_matcher:

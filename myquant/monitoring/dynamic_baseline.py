@@ -58,6 +58,8 @@ from __future__ import annotations
 
 import math
 import time
+import uuid
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from myquant.core.constants import SeverityLevel
@@ -162,6 +164,7 @@ class DynamicBaseline:
         metrics_collector: Any = None,
         clock: Optional[Callable[[], float]] = None,
         max_points_per_key: int = MAX_POINTS_PER_KEY,
+        calibrator: Any = None,
     ) -> None:
         """
         Parameters
@@ -193,6 +196,10 @@ class DynamicBaseline:
             当前时间戳函数（测试注入）；None 用 time.time。
         max_points_per_key : int
             每 (series, regime) 缓存上限（正整数）。
+        calibrator : ThresholdCalibrator | None
+            阈值自动校准器（D-3）；None 时不自动校准（静态阈值走注入/SLO）。
+            挂接后：regime 切换自动按新环境历史观测校准，_resolve_static
+            优先消费校准器有效阈值（人工覆盖 > applied 自动校准）。
         """
         # ── 防御式校验算法参数 ──
         if not isinstance(window, int) or window <= 0:
@@ -247,6 +254,9 @@ class DynamicBaseline:
         self._alert_manager = alert_manager
         self._metrics_collector = metrics_collector
         self._max_points = int(max_points_per_key)
+
+        # D-3 阈值自动校准器（None=不自动校准）
+        self._calibrator: Any = calibrator
 
         # 缓冲：{(series, regime): [(ts, value), ...]}（按 ts 升序）
         self._buffers: Dict[Tuple[str, str], List[Tuple[float, float]]] = {}
@@ -370,12 +380,36 @@ class DynamicBaseline:
             return None
 
     def _resolve_static(self, series: str) -> Optional[Tuple[float, float]]:
-        """解析冷启动静态阈值：per-series 注入 > 缺省注入 > SLO 真源。"""
+        """解析冷启动静态阈值：校准器有效阈值（D-3） > per-series 注入 > 缺省注入 > SLO 真源。"""
+        if self._calibrator is not None:
+            calibrated = self._calibrator.resolve(series, self._regime)
+            if calibrated is not None:
+                return calibrated
         if series in self._static_thresholds:
             return self._static_thresholds[series]
         if self._static_default is not None:
             return self._static_default
         return self._slo_static
+
+    def _calibrate_for_regime(self, label: str) -> int:
+        """
+        挂接校准器时，regime 切换后按新 regime 已有历史观测自动校准（D-3）。
+
+        不足 min_samples 的 (series, regime) 不校准（防噪声）；
+        返回触发校准条数（含不足样本跳过 = 0 条）。
+        """
+        if self._calibrator is None:
+            return 0
+        count = 0
+        for (series, regime), buf in list(self._buffers.items()):
+            if regime != label or not buf:
+                continue
+            rec = self._calibrator.calibrate_from_history(series, label, buf)
+            if rec is not None:
+                count += 1
+        if count:
+            logger.info("[calibrate] regime=%s 自动校准 %d 条阈值", label, count)
+        return count
 
     # ── regime 管理 ───────────────────────────────────────────────────
     def set_regime(self, label: str) -> None:
@@ -400,6 +434,8 @@ class DynamicBaseline:
         rec = {"time": self._clock(), "old": old, "new": label}
         self._regime_history.append(rec)
         logger.info("regime 切换: %s → %s", old, label)
+        # D-3：切换后按新 regime 历史观测自动校准阈值（shadow 建议/auto 生效）
+        self._calibrate_for_regime(label)
 
     def regime_history(self) -> List[Dict[str, Any]]:
         """返回 regime 切换留痕（按时间升序，含初始 default）。"""
@@ -740,7 +776,542 @@ class DynamicBaseline:
             "min_samples": self._min_samples,
             "yoy_lag": self._yoy_lag,
             "regime_history": self.regime_history(),
+            "calibrator": (
+                self._calibrator.summary() if self._calibrator is not None else None
+            ),
         }
+
+
+# ═══════════════════════════════════════════════════════════════
+#  D-3 阈值自动校准（回写#245）
+# ═══════════════════════════════════════════════════════════════
+# 目的：监控阈值随 regime 切换自动校准（避免固定阈值在 regime 切换后失效）。
+# 安全模型（对齐 D-1 三阶段）：apply_mode=shadow 只出建议（proposed），
+# 经 apply_proposal 人工确认后 applied；apply_mode=auto 自动生效（安全测试通过后放开）。
+# 校准可审计（calibration_history 全量留痕）、可回滚（rollback 恢复旧阈值）、
+# 可人工覆盖（set_manual_thresholds 优先于自动校准）。
+# 阈值/参数读 settings.yaml monitoring.slo.dynamic_baseline.calibrator（R-04 外置，
+# 算法参数缺省保守；业务阈值 PENDING_CAL 不编造）。
+
+# 校准状态
+CAL_STATUS_PROPOSED = "proposed"      # shadow 只出建议
+CAL_STATUS_APPLIED = "applied"        # 自动生效/人工确认生效
+CAL_STATUS_ROLLED_BACK = "rolled_back"  # 已回滚
+CAL_STATUS_OVERRIDDEN = "overridden"  # 被人工覆盖取代
+CAL_METHODS = ("zscore", "quantile")
+CAL_MODES = ("shadow", "auto")
+
+# 校准算法默认参数（非业务阈值；配置缺失时使用）
+CAL_DEFAULT_K: float = 3.0
+CAL_DEFAULT_QUANTILE_LOW: float = 0.05
+CAL_DEFAULT_QUANTILE_HIGH: float = 0.95
+CAL_DEFAULT_MIN_SAMPLES: int = 20
+CAL_DEFAULT_HISTORY_LIMIT: int = 500
+
+
+@dataclass
+class CalibrationRecord:
+    """
+    一次阈值校准的全链路留痕（JSON 可序列化）。
+
+    Attributes
+    ----------
+    calibration_id : str
+        校准记录唯一 ID（回滚/查询句柄）。
+    series : str
+        指标/序列名。
+    regime : str
+        校准适用 regime。
+    status : str
+        proposed / applied / rolled_back / overridden。
+    old_low / old_high : float | None
+        校准前有效阈值（None=此前无阈值）。
+    new_low / new_high : float
+        校准后的建议阈值。
+    method : str
+        校准算法（zscore/quantile）。
+    samples : int
+        参与校准的历史样本数。
+    mean / std : float
+        样本统计（std 可能为 0：常量序列，标记退化）。
+    actor : str
+        操作者（自动="system"，人工确认/覆盖/回滚时写入）。
+    reason : str
+        原因。
+    created_at : float
+        校准提议时刻（当前时点，防未来）。
+    decided_at : float | None
+        生效/回滚/覆盖时刻。
+    override : bool
+        是否人工覆盖（True 时优先于自动校准）。
+    """
+
+    calibration_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+    series: str = ""
+    regime: str = ""
+    status: str = CAL_STATUS_PROPOSED
+    old_low: Optional[float] = None
+    old_high: Optional[float] = None
+    new_low: float = 0.0
+    new_high: float = 0.0
+    method: str = CAL_METHODS[0]
+    samples: int = 0
+    mean: float = 0.0
+    std: float = 0.0
+    actor: str = "system"
+    reason: str = ""
+    created_at: float = field(default_factory=time.time)
+    decided_at: Optional[float] = None
+    override: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        """序列化（JSON 可读）。"""
+        return {
+            "calibration_id": self.calibration_id,
+            "series": self.series,
+            "regime": self.regime,
+            "status": self.status,
+            "old_low": self.old_low,
+            "old_high": self.old_high,
+            "new_low": round(self.new_low, 6),
+            "new_high": round(self.new_high, 6),
+            "method": self.method,
+            "samples": self.samples,
+            "mean": round(self.mean, 6),
+            "std": round(self.std, 6),
+            "actor": self.actor,
+            "reason": self.reason,
+            "created_at": self.created_at,
+            "decided_at": self.decided_at,
+            "override": self.override,
+        }
+
+
+class ThresholdCalibrator:
+    """
+    监控阈值随 regime 切换自动校准器（D-3）。
+
+    用法:
+        from myquant.monitoring.dynamic_baseline import ThresholdCalibrator
+        cal = ThresholdCalibrator(method="zscore", k=3.0, min_samples=20,
+                                  apply_mode="shadow")
+        rec = cal.calibrate_from_history("order_reject_rate", "trend_up",
+                                         [(ts, v), ...])      # 自动提议/生效
+        cal.set_manual_thresholds("order_reject_rate", "trend_up", 0.0, 0.01,
+                                  actor="trader", reason="人工覆盖")
+        bounds = cal.resolve("order_reject_rate", "trend_up")  # 有效阈值解析
+        cal.rollback(rec.calibration_id, actor="ops", reason="校准回滚")
+
+    有效阈值解析优先级：人工覆盖 > applied 自动校准 > None。
+    shadow 模式只出建议（proposed），需 apply_proposal 人工确认后 applied；
+    校准全量留痕 calibration_history（可审计），rollback 恢复旧阈值（可回滚）。
+    """
+
+    def __init__(
+        self,
+        method: str = CAL_METHODS[0],
+        k: float = CAL_DEFAULT_K,
+        quantile_low: float = CAL_DEFAULT_QUANTILE_LOW,
+        quantile_high: float = CAL_DEFAULT_QUANTILE_HIGH,
+        min_samples: int = CAL_DEFAULT_MIN_SAMPLES,
+        apply_mode: str = CAL_MODES[0],
+        audit_log: Any = None,
+        clock: Optional[Callable[[], float]] = None,
+        max_history: int = CAL_DEFAULT_HISTORY_LIMIT,
+    ) -> None:
+        """
+        Parameters
+        ----------
+        method : str
+            校准算法 zscore / quantile（算法参数非业务阈值）。
+        k : float
+            zscore 倍数（mean ± k×std，>=0）。
+        quantile_low / quantile_high : float
+            quantile 法低/高分位（0<low<high<1）。
+        min_samples : int
+            触发校准的最小历史样本数（>=1；不足不校准，防噪声）。
+        apply_mode : str
+            shadow（只出建议，需 apply_proposal 人工确认）/ auto（自动生效）。
+        audit_log : AuditLogStore | None
+            审计存储（kind=dynamic_baseline）；None 惰性尝试，失败降级内存留痕。
+        clock : Callable[[], float] | None
+            当前时间戳函数（测试注入）；None 用 time.time。
+        max_history : int
+            校准历史留存上限（正整数）。
+        """
+        if method not in CAL_METHODS:
+            raise ValueError(f"method 必须为 {CAL_METHODS}，收到 {method!r}")
+        try:
+            kf = float(k)
+        except (TypeError, ValueError):
+            raise ValueError(f"k 必须为数值，收到 {k!r}") from None
+        if kf < 0:
+            raise ValueError(f"k 不能为负，收到 {k!r}")
+        try:
+            ql = float(quantile_low)
+            qh = float(quantile_high)
+        except (TypeError, ValueError):
+            raise ValueError("quantile_low/high 必须为数值") from None
+        if not (0.0 < ql < qh < 1.0):
+            raise ValueError(f"需满足 0<quantile_low<quantile_high<1，收到 {ql}/{qh}")
+        if not isinstance(min_samples, int) or min_samples < 1:
+            raise ValueError(f"min_samples 必须为 >=1 整数，收到 {min_samples!r}")
+        if apply_mode not in CAL_MODES:
+            raise ValueError(f"apply_mode 必须为 {CAL_MODES}，收到 {apply_mode!r}")
+        if not isinstance(max_history, int) or max_history <= 0:
+            raise ValueError(f"max_history 必须为正整数，收到 {max_history!r}")
+
+        self._method: str = method
+        self._k: float = kf
+        self._q_low: float = ql
+        self._q_high: float = qh
+        self._min_samples: int = int(min_samples)
+        self._apply_mode: str = apply_mode
+        self._audit_log: Any = audit_log
+        self._audit_tried: bool = audit_log is not None
+        self._clock: Callable[[], float] = clock if clock is not None else time.time
+        self._max_history: int = int(max_history)
+
+        # 生效阈值表：{(series, regime): (low, high)}（仅 applied / 人工覆盖）
+        self._effective: Dict[Tuple[str, str], Tuple[float, float]] = {}
+        # 人工覆盖标记：{(series, regime): calibration_id}
+        self._override_keys: Dict[Tuple[str, str], str] = {}
+        # 校准全量留痕（上限裁剪）
+        self._history: List[CalibrationRecord] = []
+        # 反查：calibration_id → record
+        self._by_id: Dict[str, CalibrationRecord] = {}
+
+    # ── 校准算法 ───────────────────────────────────────────────
+
+    def _compute_bounds(
+        self, values: List[float]
+    ) -> Optional[Tuple[float, float, float, str]]:
+        """
+        由样本值计算 (low, high, mean, method) 建议阈值。
+
+        不足样本/常量序列（std≈0）返回 None（不校准，不编造退化阈值）。
+        """
+        if len(values) < self._min_samples:
+            return None
+        vals = [float(v) for v in values]
+        if any(not math.isfinite(v) for v in vals):
+            return None
+        mean = sum(vals) / len(vals)
+        if self._method == "zscore":
+            if len(vals) > 1:
+                var = sum((x - mean) ** 2 for x in vals) / (len(vals) - 1)
+                std = math.sqrt(var)
+            else:
+                std = 0.0
+            if std < 1e-12:
+                return None  # 常量序列退化：不编造阈值
+            return (mean - self._k * std, mean + self._k * std, mean, std)
+        # quantile 法
+        sorted_vals = sorted(vals)
+        low = DynamicBaseline._quantile(sorted_vals, self._q_low)
+        high = DynamicBaseline._quantile(sorted_vals, self._q_high)
+        if high - low < 1e-12:
+            return None  # 退化区间：不编造阈值
+        std = math.sqrt(
+            sum((x - mean) ** 2 for x in vals) / (len(vals) - 1)
+            if len(vals) > 1 else 0.0
+        )
+        return (low, high, mean, std)
+
+    # ── 对外操作 ───────────────────────────────────────────────
+
+    def calibrate_from_history(
+        self,
+        series: str,
+        regime: str,
+        history_points: List[Tuple[float, float]],
+    ) -> Optional[CalibrationRecord]:
+        """
+        由 (ts, value) 历史观测触发校准（regime 切换后调用）。
+
+        取最近 min_samples 个样本计算建议阈值；不足样本返回 None（不校准）；
+        shadow 模式 status=proposed（需 apply_proposal），auto 模式直接 applied。
+        """
+        if not series or not isinstance(series, str):
+            raise ValueError(f"series 必须为非空字符串，收到 {series!r}")
+        if not regime or not isinstance(regime, str):
+            raise ValueError(f"regime 必须为非空字符串，收到 {regime!r}")
+        if not isinstance(history_points, list) or not history_points:
+            return None
+        points = sorted(
+            (float(t), float(v)) for t, v in history_points
+            if math.isfinite(float(t)) and math.isfinite(float(v))
+        )
+        if len(points) < self._min_samples:
+            return None
+        values = [v for _, v in points[-self._min_samples:]]
+        computed = self._compute_bounds(values)
+        if computed is None:
+            return None
+        low, high, mean, std = computed
+        old = self.resolve(series, regime)
+        rec = CalibrationRecord(
+            series=series,
+            regime=regime,
+            status=CAL_STATUS_PROPOSED,
+            old_low=old[0] if old else None,
+            old_high=old[1] if old else None,
+            new_low=low,
+            new_high=high,
+            method=self._method,
+            samples=len(values),
+            mean=mean,
+            std=std,
+            actor="system",
+            reason=f"regime={regime} 自动校准（{self._method}，样本 {len(values)}）",
+            created_at=self._clock(),
+        )
+        if self._apply_mode == "auto":
+            self._apply(rec, actor="system", reason="auto 自动生效")
+        else:
+            self._record(rec)
+            self._audit("calibrate", "proposed", "system", rec.to_dict())
+        return rec
+
+    def apply_proposal(
+        self,
+        calibration_id: str,
+        actor: str = "system",
+        reason: str = "人工确认校准生效",
+    ) -> CalibrationRecord:
+        """
+        人工确认校准建议生效（shadow 模式；对应 D-1 confirm 阶段）。
+
+        Raises
+        ------
+        ValueError : 校准记录不存在/非 proposed/actor 为空时抛出。
+        """
+        calibration_id = (calibration_id or "").strip()
+        if not calibration_id:
+            raise ValueError("apply_proposal calibration_id 不能为空")
+        if not (actor or "").strip():
+            raise ValueError("apply_proposal actor 不能为空")
+        rec = self._by_id.get(calibration_id)
+        if rec is None or rec.status != CAL_STATUS_PROPOSED:
+            raise ValueError(f"校准记录 {calibration_id} 不存在或非 proposed")
+        self._apply(rec, actor=actor, reason=reason)
+        return rec
+
+    def set_manual_thresholds(
+        self,
+        series: str,
+        regime: str,
+        low: float,
+        high: float,
+        actor: str,
+        reason: str = "人工覆盖",
+    ) -> CalibrationRecord:
+        """
+        人工覆盖阈值（优先级最高；覆盖既有 applied 校准并留痕）。
+
+        Raises
+        ------
+        ValueError : 参数非法（series/regime 空、low>=high、非有限数、actor 空）时抛出。
+        """
+        if not series or not isinstance(series, str):
+            raise ValueError(f"series 必须为非空字符串，收到 {series!r}")
+        if not regime or not isinstance(regime, str):
+            raise ValueError(f"regime 必须为非空字符串，收到 {regime!r}")
+        if not (actor or "").strip():
+            raise ValueError("set_manual_thresholds actor 不能为空")
+        try:
+            low_f = float(low)
+            high_f = float(high)
+        except (TypeError, ValueError):
+            raise ValueError("low/high 必须为数值") from None
+        if not (math.isfinite(low_f) and math.isfinite(high_f)):
+            raise ValueError("low/high 必须为有限数")
+        if low_f >= high_f:
+            raise ValueError(f"需满足 low<high，收到 {low_f}/{high_f}")
+        key = (series, regime)
+        old = self.resolve(series, regime)
+        rec = CalibrationRecord(
+            series=series,
+            regime=regime,
+            status=CAL_STATUS_APPLIED,
+            old_low=old[0] if old else None,
+            old_high=old[1] if old else None,
+            new_low=low_f,
+            new_high=high_f,
+            method="manual",
+            samples=0,
+            mean=0.0,
+            std=0.0,
+            actor=actor,
+            reason=reason,
+            created_at=self._clock(),
+            decided_at=self._clock(),
+            override=True,
+        )
+        # 既有 applied 校准（含此前人工覆盖）标记 overridden
+        for rid, r in self._by_id.items():
+            if (r.series, r.regime) == key and r.status == CAL_STATUS_APPLIED:
+                r.status = CAL_STATUS_OVERRIDDEN
+                r.decided_at = self._clock()
+        self._effective[key] = (low_f, high_f)
+        self._override_keys[key] = rec.calibration_id
+        self._record(rec)
+        self._audit("calibrate", "manual_override", actor, rec.to_dict())
+        return rec
+
+    def rollback(
+        self,
+        calibration_id: str,
+        actor: str = "system",
+        reason: str = "校准回滚",
+    ) -> bool:
+        """
+        回滚一次校准（恢复校准前有效阈值；可回滚）。
+
+        Returns
+        -------
+        bool : 是否成功回滚（记录不存在/非 applied/actor 为空返回 False 或抛错）。
+        """
+        calibration_id = (calibration_id or "").strip()
+        if not calibration_id:
+            raise ValueError("rollback calibration_id 不能为空")
+        if not (actor or "").strip():
+            raise ValueError("rollback actor 不能为空")
+        rec = self._by_id.get(calibration_id)
+        if rec is None or rec.status not in (CAL_STATUS_APPLIED,):
+            return False
+        key = (rec.series, rec.regime)
+        if rec.override:
+            # 人工覆盖回滚 = 移除人工覆盖，回退到覆盖前的 applied 校准/无
+            self._override_keys.pop(key, None)
+        if self._effective.get(key) == (rec.new_low, rec.new_high):
+            if rec.old_low is not None and rec.old_high is not None:
+                self._effective[key] = (rec.old_low, rec.old_high)
+            else:
+                self._effective.pop(key, None)
+        rec.status = CAL_STATUS_ROLLED_BACK
+        rec.decided_at = self._clock()
+        rec.actor = actor
+        rec.reason = reason
+        self._audit("calibrate", "rolled_back", actor, rec.to_dict())
+        return True
+
+    def resolve(self, series: str, regime: str) -> Optional[Tuple[float, float]]:
+        """有效阈值解析：人工覆盖 > applied 自动校准 > None。"""
+        key = (series, regime)
+        if key in self._override_keys:
+            return self._effective.get(key)
+        if key in self._effective:
+            return self._effective.get(key)
+        return None
+
+    # ── 观测 ───────────────────────────────────────────────────
+
+    def history(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """返回校准全量留痕（JSON 可序列化；可审计/可查）。"""
+        if not isinstance(limit, int) or limit <= 0:
+            raise ValueError(f"history limit 必须为正整数，收到 {limit!r}")
+        return [r.to_dict() for r in self._history[-limit:]]
+
+    def summary(self) -> Dict[str, Any]:
+        """校准器状态汇总（生效阈值数/建议数/覆盖数/模式）。"""
+        return {
+            "method": self._method,
+            "apply_mode": self._apply_mode,
+            "effective_keys": len(self._effective),
+            "override_keys": len(self._override_keys),
+            "proposed_total": sum(
+                1 for r in self._history if r.status == CAL_STATUS_PROPOSED
+            ),
+            "applied_total": sum(
+                1 for r in self._history if r.status == CAL_STATUS_APPLIED
+            ),
+            "rolled_back_total": sum(
+                1 for r in self._history if r.status == CAL_STATUS_ROLLED_BACK
+            ),
+            "history_total": len(self._history),
+        }
+
+    # ── 内部 ───────────────────────────────────────────────────
+
+    def _apply(self, rec: CalibrationRecord, actor: str, reason: str) -> None:
+        """把建议校准置为 applied 并写入生效阈值表。"""
+        key = (rec.series, rec.regime)
+        rec.status = CAL_STATUS_APPLIED
+        rec.decided_at = self._clock()
+        rec.actor = actor
+        rec.reason = reason
+        self._effective[key] = (rec.new_low, rec.new_high)
+        if key in self._override_keys:
+            # 人工覆盖存在时自动校准不生效（人工优先）；覆盖记录保持
+            pass
+        self._record(rec)
+        self._audit("calibrate", "applied", actor, rec.to_dict())
+
+    def _record(self, rec: CalibrationRecord) -> CalibrationRecord:
+        """留痕（上限裁剪最旧）。"""
+        self._history.append(rec)
+        self._by_id[rec.calibration_id] = rec
+        if len(self._history) > self._max_history:
+            drop = self._history[: -self._max_history]
+            self._history = self._history[-self._max_history:]
+            for r in drop:
+                self._by_id.pop(r.calibration_id, None)
+        return rec
+
+    def _audit(
+        self, action: str, sub_action: str, actor: str, detail: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """审计留痕（kind=dynamic_baseline；失败降级内存留痕不阻断）。"""
+        if self._audit_log is None:
+            if not self._audit_tried:
+                try:
+                    from myquant.monitoring.audit_log import AuditLogStore
+                    self._audit_log = AuditLogStore()
+                except Exception as e:  # noqa: BLE001 —— 审计不可用降级
+                    logger.warning("[calibrate] 审计存储不可用（降级内存留痕）: %s", e)
+                self._audit_tried = True
+            if self._audit_log is None:
+                return None
+        try:
+            return self._audit_log.append(
+                "dynamic_baseline", f"calibrate:{sub_action}", actor, dict(detail or {})
+            )
+        except Exception as e:  # noqa: BLE001 —— 审计失败不阻断校准
+            logger.warning("[calibrate] 审计留痕失败: %s", e)
+            return None
+
+
+def _read_calibrator_config() -> Dict[str, Any]:
+    """读取 slo.dynamic_baseline.calibrator 配置（R-04 外置；缺省算法参数保守）。"""
+    try:
+        from myquant.core.settings import get_monitoring_config
+        cfg = get_monitoring_config().get("slo", {}).get("dynamic_baseline", {}) or {}
+        cal = cfg.get("calibrator") or {}
+        if not isinstance(cal, dict):
+            cal = {}
+    except Exception:  # noqa: BLE001 —— 配置读取失败用算法默认（不编造业务阈值）
+        cal = {}
+    return {
+        "method": str(cal.get("method", "zscore")) if cal.get("method") else "zscore",
+        "k": float(cal.get("k", CAL_DEFAULT_K)) if cal.get("k") is not None else CAL_DEFAULT_K,
+        "quantile_low": (
+            float(cal.get("quantile_low", CAL_DEFAULT_QUANTILE_LOW))
+            if cal.get("quantile_low") is not None else CAL_DEFAULT_QUANTILE_LOW
+        ),
+        "quantile_high": (
+            float(cal.get("quantile_high", CAL_DEFAULT_QUANTILE_HIGH))
+            if cal.get("quantile_high") is not None else CAL_DEFAULT_QUANTILE_HIGH
+        ),
+        "min_samples": (
+            int(cal.get("min_samples", CAL_DEFAULT_MIN_SAMPLES))
+            if cal.get("min_samples") is not None else CAL_DEFAULT_MIN_SAMPLES
+        ),
+        "apply_mode": (
+            str(cal.get("apply_mode", "shadow"))
+            if str(cal.get("apply_mode", "shadow")) in CAL_MODES else "shadow"
+        ),
+    }
 
 
 # ═══════════════════════════════════════════════
@@ -915,6 +1486,55 @@ def _run_self_test() -> int:
     except ValueError:
         bad3 = True
     check("8) 非法 combine 拒绝", bad3)
+
+    # ── D-3 阈值自动校准（回写#245）──
+    cal = ThresholdCalibrator(
+        method="zscore", k=3.0, min_samples=5, apply_mode="shadow",
+        clock=clock,
+    )
+    series_pts = [(ts(k), 100.0 + (k % 7) - 3.0) for k in range(60)]
+    rec = cal.calibrate_from_history("s3", "trend_up", series_pts)
+    check("9) shadow 校准出建议", rec is not None and rec.status == CAL_STATUS_PROPOSED)
+    bounds0 = cal.resolve("s3", "trend_up")
+    check("9) shadow 建议未生效", bounds0 is None)
+    cal.apply_proposal(rec.calibration_id, actor="trader", reason="确认")
+    bounds1 = cal.resolve("s3", "trend_up")
+    check("9) 人工确认后生效", bounds1 is not None and bounds1[0] < bounds1[1])
+    # 人工覆盖优先
+    cal.set_manual_thresholds("s3", "trend_up", 80.0, 120.0, actor="trader", reason="人工覆盖")
+    bounds2 = cal.resolve("s3", "trend_up")
+    check("9) 人工覆盖优先", bounds2 == (80.0, 120.0))
+    # 回滚人工覆盖
+    ov_id = next(r["calibration_id"] for r in cal.history() if r["override"])
+    check("9) 人工覆盖可回滚", cal.rollback(ov_id, actor="ops", reason="恢复") is True)
+    bounds3 = cal.resolve("s3", "trend_up")
+    check("9) 回滚后恢复校准阈值", bounds3 is not None and bounds3 != (80.0, 120.0))
+    # 不足样本不校准
+    rec2 = cal.calibrate_from_history("s4", "trend_down", [(ts(k), 1.0) for k in range(3)])
+    check("9) 不足样本不校准", rec2 is None)
+    # 常量序列不校准（退化区间不编造）
+    rec3 = cal.calibrate_from_history("s5", "trend_up", [(ts(k), 5.0) for k in range(10)])
+    check("9) 常量序列不校准", rec3 is None)
+    # 校准历史可查（审计）：s3 proposed→applied 1 条 + 人工覆盖 1 条（回滚就地改状态）+ regime 切换校准 1 条
+    check("9) 校准历史可查", len(cal.history()) >= 3)
+    # DynamicBaseline 挂接校准器：regime 切换后阈值自适应（基于该 regime 已积累历史）
+    db5 = DynamicBaseline(window=20, k=3.0, min_samples=5, yoy_lag=5, clock=clock,
+                          alert_manager=am, metrics_collector=met, calibrator=cal)
+    for k in range(10):
+        db5.record("s3", ts(k), 100.0 + (k % 7) - 3.0)   # default regime 积累
+    db5.set_regime("trend_up")                            # 新 regime 尚无历史 → 冷启动不校准
+    check("9) 新 regime 冷启动不校准", not any(
+        r["regime"] == "trend_up" and r["status"] == CAL_STATUS_PROPOSED
+        for r in cal.history()
+    ))
+    for k in range(10, 16):
+        db5.record("s3", ts(k), 98.0 + (k % 3) - 1.0)     # trend_up regime 积累 6 样本
+    db5.set_regime("range")                               # 切走
+    db5.set_regime("trend_up")                            # 切回 → 用已积累历史自动校准
+    check("9) regime 切换触发校准", any(
+        r["regime"] == "trend_up" and r["status"] == CAL_STATUS_PROPOSED
+        for r in cal.history()
+    ))
 
     print("=" * 60)
     print(f"dynamic_baseline.py 自测: {passed} 项通过")
