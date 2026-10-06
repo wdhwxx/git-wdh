@@ -49,9 +49,11 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from datetime import time as dtime
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 
+from myquant.core.constants import SeverityLevel
 from myquant.core.logger import get_logger
+from myquant.core.settings import get_monitoring_config
 from myquant.models.trade import Order, OrderSide
 
 logger = get_logger("risk.rules")
@@ -810,3 +812,610 @@ def create_default_library() -> RiskRuleLibrary:
     library.add_rule(BlacklistRule())
     library.add_rule(CashAvailabilityRule(min_cash_reserve=1000))
     return library
+
+
+# ═══════════════════════════════════════════════
+#  限额使用率监控（B-3，回写#223）
+# ═══════════════════════════════════════════════
+# 验收口径（施工总清单 B-3 行 + P0-2 锁定表风控行）：
+#   限额使用率引用 P0-2 锁定清单（usage >= 80% 预警、usage > 95% 强告警，LOCKED）；
+#   集中度/杠杆/单票仓位限额分别设值并纳入指标与告警；
+#   限额使用率指标进入 /api/metrics，超阈值分级告警；阈值取自 P0-2 锁定表。
+#
+# 阈值真源 R-04：config/settings.yaml 的 monitoring.slo.risk 块，
+#   读取入口 myquant.core.settings.get_monitoring_config()，代码内不硬编码业务阈值。
+#   - position_limit_usage_warn=0.80  （预警线，LOCKED）
+#   - position_limit_usage_alert=0.95 （强告警线，LOCKED；语义以 usage > 0.95 为准）
+#   - concentration_limit / leverage_limit / single_stock_position_limit
+#       （PENDING_CAL，当前为 ~/None → 该维度"未启用"，不告警、不编造数值）
+#
+# 与本文件既有规则类（PositionLimitRule 等"下单前风控"）的关系：
+#   既有规则在 check_order 路径做"拒单"硬约束；本监控类是"监控侧 usage 度量 + 告警"，
+#   只观测已发生的持仓/资金快照、不拦截订单，二者互不改动行为。
+
+#: 受监控的三个限额维度
+DIM_CONCENTRATION: str = "concentration"   # 集中度
+DIM_LEVERAGE: str = "leverage"            # 杠杆
+DIM_SINGLE_STOCK: str = "single_stock"    # 单票仓位
+_ALL_DIMENSIONS: tuple = (DIM_CONCENTRATION, DIM_LEVERAGE, DIM_SINGLE_STOCK)
+
+#: 各维度对应的使用率指标名（GAUGE；BuiltinMetrics 登记由主控 Wave2 统一做）
+METRIC_LIMIT_USAGE: Dict[str, str] = {
+    DIM_CONCENTRATION: "limit_usage_concentration",
+    DIM_LEVERAGE: "limit_usage_leverage",
+    DIM_SINGLE_STOCK: "limit_usage_single_stock",
+}
+
+#: 告警 category（与 alerting.py category="risk" 一致，走风控 Runbook 兜底）
+_ALERT_CATEGORY: str = "risk"
+
+
+def get_limit_usage_metrics_registration() -> List[Dict[str, Any]]:
+    """
+    返回限额使用率指标注册清单（供主控 Wave2 统一登记 BuiltinMetrics）。
+
+    本监控类经 get_metrics_collector().set_gauge 懒加载写入指标（_ensure_metric
+    自动建 GAUGE），但指标的正式登记（名称/类型/标签/描述）由主控统一收口，
+    本函数仅返回声明清单。
+
+    Returns:
+        list[dict]: 每项含 name / type / labels / description。
+    """
+    return [
+        {
+            "name": METRIC_LIMIT_USAGE[DIM_CONCENTRATION],
+            "type": "GAUGE",
+            "labels": ["dimension", "enabled"],
+            "description": (
+                "集中度限额使用率（最大单标的市值/总资产 ÷ concentration_limit）；"
+                "enabled=false 表示该维度未配置限额（PENDING_CAL）"
+            ),
+        },
+        {
+            "name": METRIC_LIMIT_USAGE[DIM_LEVERAGE],
+            "type": "GAUGE",
+            "labels": ["dimension", "enabled"],
+            "description": (
+                "杠杆限额使用率（总市值/净资产 ÷ leverage_limit）；"
+                "enabled=false 表示该维度未配置限额（PENDING_CAL）"
+            ),
+        },
+        {
+            "name": METRIC_LIMIT_USAGE[DIM_SINGLE_STOCK],
+            "type": "GAUGE",
+            "labels": ["dimension", "enabled"],
+            "description": (
+                "单票仓位限额使用率（最大单票市值/总资产 ÷ single_stock_position_limit）；"
+                "enabled=false 表示该维度未配置限额（PENDING_CAL）"
+            ),
+        },
+    ]
+
+
+class LimitUsageMonitor:
+    """
+    限额使用率监控器（监控侧 usage 度量 + 分级告警，B-3）。
+
+    对集中度 / 杠杆 / 单票仓位三个维度，基于"已发生"的持仓/资金快照计算使用率，
+    并对照 P0-2 锁定阈值分级告警；只观测、不拦截订单（与下单前风控规则职责分离）。
+
+    口径（按现有数据可得性定，docstring 显式注明）:
+      - 集中度 exposure = 最大单标的市值 / 总资产
+      - 单票仓位 exposure = 最大单票市值 / 总资产
+          （集中度与单票仓位同源于"最大单标的市值/总资产"这一事实量，但分别对照
+          concentration_limit 与 single_stock_position_limit 两条独立政策线，故分设指标与告警）
+      - 杠杆 exposure = 总市值 / 净资产(equity)
+          （A股现金账户无融资融券时总市值≤净资产，usage≤1；若数据可得则按此等效口径）
+
+    使用率与分级（阈值 R-04，读 slo.risk）:
+      usage = exposure / 该维度限额
+      - usage <  warn(0.80)        → 正常，不告警
+      - warn <= usage <= alert    → WARNING（P2 级预警）
+      - usage >  alert(0.95)      → ERROR（P1 级强告警；语义以严格大于 95% 为准）
+
+    未启用维度：该维度限额配置为 None（PENDING_CAL）→ 不告警，指标以 enabled=false
+    输出"未配置"语义，绝不编造阈值数值。
+
+    防未来：只消费传入/已注入 getter 返回的"当前及已发生"持仓与资金快照，
+    不引用任何未来 bar / 预测价格。
+
+    使用方式:
+        mon = LimitUsageMonitor()
+        mon.attach_snapshot_source(portfolio.get_account, portfolio.get_positions_snapshot)
+        result = mon.collect()      # POLL 巡检入口；check_order 路径也可顺带调用
+    """
+
+    def __init__(
+        self,
+        warn_threshold: Optional[float] = None,
+        alert_threshold: Optional[float] = None,
+        concentration_limit: Optional[float] = None,
+        leverage_limit: Optional[float] = None,
+        single_stock_limit: Optional[float] = None,
+        alert_manager: Any = None,
+        metrics_collector: Any = None,
+        account_getter: Optional[Callable[[], Dict[str, Any]]] = None,
+        positions_getter: Optional[Callable[[], List[Dict[str, Any]]]] = None,
+    ) -> None:
+        """
+        Parameters
+        ----------
+        warn_threshold : float | None
+            预警线使用率（如 0.80）。None 读 slo.risk.position_limit_usage_warn。
+        alert_threshold : float | None
+            强告警线使用率（如 0.95，usage > 此值为 ERROR）。
+            None 读 slo.risk.position_limit_usage_alert。
+        concentration_limit / leverage_limit / single_stock_limit : float | None
+            各维度限额（分母）。None 读 slo.risk.concentration_limit / leverage_limit /
+            single_stock_position_limit；读到 None（~）则该维度"未启用"。
+        alert_manager : AlertManager | None
+            告警管理器；None 延迟取 get_alert_manager()。
+        metrics_collector : MetricsCollector | None
+            指标采集器；None 延迟取 get_metrics_collector()（进 /api/metrics）。
+        account_getter : Callable[[], dict] | None
+            只读账户快照源（如 portfolio.get_account），返回含 total_assets/
+            market_value/equity 的 dict。
+        positions_getter : Callable[[], list[dict]] | None
+            只读持仓快照源（如 portfolio.get_positions_snapshot），返回持仓 dict 列表。
+            每个持仓 dict 须含 symbol 与 market_value（或 quantity/market_price 兜底）。
+
+        Raises
+        ------
+        ValueError : 分级阈值非法（warn/alert 不在 (0,1]、alert <= warn）时抛出。
+        """
+        slo = get_monitoring_config().get("slo", {}).get("risk", {}) or {}
+
+        self._warn: float = (
+            float(warn_threshold) if warn_threshold is not None
+            else float(slo.get("position_limit_usage_warn", 0.80))
+        )
+        self._alert: float = (
+            float(alert_threshold) if alert_threshold is not None
+            else float(slo.get("position_limit_usage_alert", 0.95))
+        )
+        # 各维度限额：显式注入 > slo 配置；读到 None（PENDING_CAL）→ 未启用
+        self._limits: Dict[str, Optional[float]] = {
+            DIM_CONCENTRATION: self._resolve_limit(concentration_limit, slo.get("concentration_limit")),
+            DIM_LEVERAGE: self._resolve_limit(leverage_limit, slo.get("leverage_limit")),
+            DIM_SINGLE_STOCK: self._resolve_limit(single_stock_limit, slo.get("single_stock_position_limit")),
+        }
+
+        # 防御式校验（拒绝脏配置运行）
+        if not (0.0 < self._warn <= 1.0):
+            raise ValueError(f"position_limit_usage_warn 必须在 (0,1]，实际 {self._warn!r}")
+        if not (0.0 < self._alert <= 1.0):
+            raise ValueError(f"position_limit_usage_alert 必须在 (0,1]，实际 {self._alert!r}")
+        if self._alert <= self._warn:
+            raise ValueError(
+                f"alert 线必须 > warn 线，实际 warn={self._warn!r} alert={self._alert!r}"
+            )
+
+        self._alert_manager = alert_manager
+        self._metrics_collector = metrics_collector
+        self._account_getter = account_getter
+        self._positions_getter = positions_getter
+        logger.debug(
+            "LimitUsageMonitor 初始化: warn=%.2f alert=%.2f limits=%s",
+            self._warn, self._alert, self._limits,
+        )
+
+    @staticmethod
+    def _resolve_limit(explicit: Optional[float], slo_value: Any) -> Optional[float]:
+        """
+        解析单维度限额：显式注入优先；否则取 slo 配置；~ / None / 非法 → None（未启用）。
+
+        绝不把 None 编造为数值。
+        """
+        if explicit is not None:
+            v = float(explicit)
+            return v if v > 0 else None
+        if slo_value is None:
+            return None
+        try:
+            v = float(slo_value)
+        except (TypeError, ValueError):
+            logger.warning("限额配置非法（已忽略，维度未启用）: %r", slo_value)
+            return None
+        return v if v > 0 else None
+
+    # ── 快照源装配 ──────────────────────────────────────────
+    def attach_snapshot_source(
+        self,
+        account_getter: Optional[Callable[[], Dict[str, Any]]] = None,
+        positions_getter: Optional[Callable[[], List[Dict[str, Any]]]] = None,
+    ) -> None:
+        """
+        装配只读持仓/资金快照源（POLL 巡检时自动取用）。
+
+        Parameters
+        ----------
+        account_getter : Callable[[], dict] | None
+            账户资金快照 getter（如 portfolio.get_account）。
+        positions_getter : Callable[[], list[dict]] | None
+            持仓快照 getter（如 portfolio.get_positions_snapshot）。
+        """
+        if account_getter is not None and not callable(account_getter):
+            raise ValueError("account_getter 必须是可调用对象")
+        if positions_getter is not None and not callable(positions_getter):
+            raise ValueError("positions_getter 必须是可调用对象")
+        self._account_getter = account_getter
+        self._positions_getter = positions_getter
+
+    # ── 快照抽取（防御式；只取已发生事实）────────────────────
+    @staticmethod
+    def _position_market_value(pos: Dict[str, Any]) -> float:
+        """
+        从持仓 dict 取市值：优先 market_value，兜底 |quantity|*market_price。
+
+        防未来：只取快照中已记录的数量与最新市场价，不预测价格。
+        """
+        mv = pos.get("market_value")
+        if mv is not None:
+            try:
+                return max(0.0, float(mv))
+            except (TypeError, ValueError):
+                pass
+        try:
+            qty = abs(float(pos.get("quantity", 0.0)))
+            price = float(pos.get("market_price", 0.0))
+            return max(0.0, qty * price)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _pull_snapshot(
+        self,
+        account: Optional[Dict[str, Any]],
+        positions: Optional[List[Dict[str, Any]]],
+    ) -> Dict[str, Any]:
+        """
+        合并显式传入快照与注入 getter 快照，抽取计算所需事实量。
+
+        Returns
+        -------
+        dict : {total_assets, market_value, equity, max_single_value, positions_count}
+            缺失/非法量记 0.0，不编造。
+        """
+        acct: Dict[str, Any] = {}
+        if account is not None:
+            acct = dict(account)
+        elif self._account_getter is not None:
+            try:
+                got = self._account_getter()
+                if isinstance(got, dict):
+                    acct = got
+            except Exception as e:  # noqa: BLE001
+                logger.warning("读取账户快照失败（按空账户处理）: %s", e)
+                acct = {}
+
+        pos_list: List[Dict[str, Any]] = []
+        if positions is not None:
+            pos_list = list(positions)
+        elif self._positions_getter is not None:
+            try:
+                got = self._positions_getter()
+                if isinstance(got, list):
+                    pos_list = list(got)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("读取持仓快照失败（按空持仓处理）: %s", e)
+                pos_list = []
+
+        def _num(key: str, default: float = 0.0) -> float:
+            try:
+                return float(acct.get(key, default))
+            except (TypeError, ValueError):
+                return default
+
+        total_assets = max(0.0, _num("total_assets"))
+        market_value = max(0.0, _num("market_value"))
+        equity = max(0.0, _num("equity", total_assets))  # 净资产缺省回退总资产
+
+        max_single_value = 0.0
+        sum_pos_value = 0.0
+        for pos in pos_list:
+            if not isinstance(pos, dict):
+                continue
+            mv = self._position_market_value(pos)
+            sum_pos_value += mv
+            if mv > max_single_value:
+                max_single_value = mv
+        # 账户总市值字段缺省时，用持仓市值合计兜底
+        if market_value <= 0.0:
+            market_value = sum_pos_value
+
+        return {
+            "total_assets": total_assets,
+            "market_value": market_value,
+            "equity": equity,
+            "max_single_value": max_single_value,
+            "positions_count": len(pos_list),
+        }
+
+    # ── 使用率计算 ───────────────────────────────────────────
+    def _compute_usages(self, snap: Dict[str, Any]) -> Dict[str, Optional[float]]:
+        """
+        由快照事实量计算各维度使用率（usage = exposure / limit）。
+
+        Returns
+        -------
+        dict : {dimension: usage|None}。
+            维度未启用（limit=None）→ None；事实量不足（分母<=0）→ 该维度 None，不编造。
+        """
+        total_assets = snap["total_assets"]
+        equity = snap["equity"]
+        market_value = snap["market_value"]
+        max_single = snap["max_single_value"]
+
+        usages: Dict[str, Optional[float]] = {}
+        for dim in _ALL_DIMENSIONS:
+            limit = self._limits.get(dim)
+            if limit is None:
+                usages[dim] = None  # 未启用
+                continue
+            if dim == DIM_CONCENTRATION:
+                exposure = (max_single / total_assets) if total_assets > 0 else 0.0
+            elif dim == DIM_SINGLE_STOCK:
+                exposure = (max_single / total_assets) if total_assets > 0 else 0.0
+            elif dim == DIM_LEVERAGE:
+                exposure = (market_value / equity) if equity > 0 else 0.0
+            else:  # pragma: no cover - 防御
+                usages[dim] = None
+                continue
+            usages[dim] = exposure / limit if limit > 0 else None
+        return usages
+
+    # ── 告警接线 ────────────────────────────────────────────
+    def _fire_alert(self, level: SeverityLevel, dimension: str, usage: float) -> None:
+        """
+        发送分级告警（category=risk，dedup_key=limit:<dimension>:<level>）。
+
+        说明：B-3 要求 dedup_key=limit:<dimension>；这里追加级别后缀，
+        保证 usage 由 0.85 升至 0.97 时 ERROR 不被 WARNING 的去重窗口吞掉（升级必达）。
+        details 含 usage/limit 及配置来源（R-04）。
+        """
+        mgr = self._alert_manager
+        if mgr is None:
+            from myquant.monitoring.alerting import get_alert_manager
+            mgr = get_alert_manager()
+        limit = self._limits[dimension]
+        level_cn = "强告警" if level == SeverityLevel.ERROR else "预警"
+        mgr.alert(
+            level=level,
+            message=(
+                f"[limit-usage] {dimension} 限额使用率 {usage:.1%} "
+                f"（限额 {limit:.3f}）{level_cn}"
+            ),
+            source="risk.limit_usage",
+            category=_ALERT_CATEGORY,
+            details={
+                "dimension": dimension,
+                "usage": round(usage, 4),
+                "limit": limit,
+                "warn_threshold": self._warn,
+                "alert_threshold": self._alert,
+                "configured_from": "config/settings.yaml monitoring.slo.risk",
+            },
+            deduplication_key=f"limit:{dimension}:{'error' if level == SeverityLevel.ERROR else 'warn'}",
+        )
+
+    # ── 指标写入（懒加载 collector）──────────────────────────
+    def _write_metrics(self, usages: Dict[str, Optional[float]]) -> None:
+        """
+        经 set_gauge 写入三个使用率指标（进 /api/metrics）。
+
+        未启用维度写 0.0 + labels enabled=false（输出"未配置"语义，不编造数值）。
+        """
+        col = self._metrics_collector
+        if col is None:
+            try:
+                from myquant.monitoring.metrics_collector import get_metrics_collector
+                col = get_metrics_collector()
+                self._metrics_collector = col
+            except Exception as e:  # noqa: BLE001
+                logger.warning("获取 metrics_collector 失败（指标未写入）: %s", e)
+                return
+        for dim in _ALL_DIMENSIONS:
+            usage = usages.get(dim)
+            enabled = usage is not None
+            try:
+                col.set_gauge(
+                    METRIC_LIMIT_USAGE[dim],
+                    round(usage, 4) if usage is not None else 0.0,
+                    labels={"dimension": dim, "enabled": "true" if enabled else "false"},
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"限额使用率指标 {dim} 写入失败（不阻断检测）: %s", e)
+
+    # ── 核心入口：POLL 巡检 / check_order 顺带调用 ───────────
+    def check(
+        self,
+        account: Optional[Dict[str, Any]] = None,
+        positions: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """
+        计算三类使用率 → 分级告警 → 写指标（事件/周期触发入口）。
+
+        Parameters
+        ----------
+        account : dict | None
+            账户资金快照；None 取注入的 account_getter。
+        positions : list[dict] | None
+            持仓快照；None 取注入的 positions_getter。
+
+        Returns
+        -------
+        dict : 各维度 usage、是否启用、触发的告警级别。
+        """
+        snap = self._pull_snapshot(account, positions)
+        usages = self._compute_usages(snap)
+        self._write_metrics(usages)
+
+        fired: Dict[str, str] = {}
+        for dim in _ALL_DIMENSIONS:
+            usage = usages.get(dim)
+            if usage is None:
+                continue  # 未启用：不告警
+            # 分级：> alert → ERROR(P1)；>= warn → WARNING(P2)
+            if usage > self._alert:
+                self._fire_alert(SeverityLevel.ERROR, dim, usage)
+                fired[dim] = "ERROR"
+            elif usage >= self._warn:
+                self._fire_alert(SeverityLevel.WARNING, dim, usage)
+                fired[dim] = "WARNING"
+        return {
+            "snapshot": snap,
+            "usages": {d: (round(u, 4) if u is not None else None) for d, u in usages.items()},
+            "enabled": {d: self._limits.get(d) is not None for d in _ALL_DIMENSIONS},
+            "fired": fired,
+        }
+
+    def collect(
+        self,
+        account: Optional[Dict[str, Any]] = None,
+        positions: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """collect() = check()（POLL 巡检周期入口的别名）。"""
+        return self.check(account=account, positions=positions)
+
+    def get_status(self) -> Dict[str, Any]:
+        """返回监控配置快照（阈值/各维度限额/启用状态），供巡检报告/看板暴露。"""
+        return {
+            "warn_threshold": self._warn,
+            "alert_threshold": self._alert,
+            "limits": dict(self._limits),
+            "enabled": {d: self._limits.get(d) is not None for d in _ALL_DIMENSIONS},
+            "configured_from": "config/settings.yaml monitoring.slo.risk",
+        }
+
+
+# ═══════════════════════════════════════════════
+#  LimitUsageMonitor __main__ 自测 demo
+# ═══════════════════════════════════════════════
+def _run_limit_usage_self_test() -> int:
+    """模块自测：注入假告警/假指标与固定快照，验证 0.5/0.85/0.97 分级与未启用语义。"""
+    passed = 0
+    failures: List[str] = []
+
+    def check(name: str, cond: bool, info: str = "") -> None:
+        nonlocal passed
+        if cond:
+            passed += 1
+        else:
+            failures.append(f"{name} {info}")
+
+    class _FakeAlert:
+        def __init__(self) -> None:
+            self.calls: list = []
+
+        def alert(self, **kw):
+            self.calls.append(kw)
+            return 1
+
+    class _FakeMetrics:
+        def __init__(self) -> None:
+            self.gauges: Dict[str, float] = {}
+            self.labels: Dict[str, dict] = {}
+
+        def set_gauge(self, name: str, value: float, labels=None):
+            self.gauges[name] = float(value)
+            self.labels[name] = labels or {}
+
+    # 构造快照：总资产 100 万，最大单票 S1 市值=max_single，另有 S2=10 万（更小，不反超）；
+    # 总市值=max_single+10 万，净资产=100 万。
+    #   集中度/单票 exposure = max_single/100万；杠杆 exposure = 总市值/净资产
+    def snap(max_single: float, total_assets: float = 1_000_000.0,
+             equity: float = 1_000_000.0):
+        other = 100_000.0
+        market_value = max_single + other
+        account = {"total_assets": total_assets, "market_value": market_value, "equity": equity}
+        positions = [
+            {"symbol": "S1", "market_value": max_single},
+            {"symbol": "S2", "market_value": other},
+        ]
+        return account, positions
+
+    # 1) usage=0.5（最大单票 15 万/限额 30 万）→ 不告警
+    am1, met1 = _FakeAlert(), _FakeMetrics()
+    mon1 = LimitUsageMonitor(
+        warn_threshold=0.80, alert_threshold=0.95,
+        concentration_limit=0.30, leverage_limit=1.0, single_stock_limit=0.30,
+        alert_manager=am1, metrics_collector=met1,
+    )
+    acct, pos = snap(150_000.0)  # 15万/30万 = 0.5
+    r1 = mon1.check(account=acct, positions=pos)
+    check("1) usage=0.5 不告警", am1.calls == [] and r1["fired"] == {}, f"calls={am1.calls} fired={r1['fired']}")
+
+    # 2) usage=0.85（最大单票 25.5 万/限额 30 万）→ WARNING
+    am2, met2 = _FakeAlert(), _FakeMetrics()
+    mon2 = LimitUsageMonitor(
+        warn_threshold=0.80, alert_threshold=0.95,
+        concentration_limit=0.30, leverage_limit=1.0, single_stock_limit=0.30,
+        alert_manager=am2, metrics_collector=met2,
+    )
+    acct, pos = snap(255_000.0)  # 25.5万/30万 = 0.85
+    r2 = mon2.check(account=acct, positions=pos)
+    warns = [c for c in am2.calls if c["level"] == SeverityLevel.WARNING]
+    check("2) usage=0.85 触发 WARNING", len(warns) >= 1 and r2["fired"].get("concentration") == "WARNING",
+          f"calls={am2.calls} fired={r2['fired']}")
+
+    # 3) usage=0.97（最大单票 29.1 万/限额 30 万）→ ERROR
+    am3, met3 = _FakeAlert(), _FakeMetrics()
+    mon3 = LimitUsageMonitor(
+        warn_threshold=0.80, alert_threshold=0.95,
+        concentration_limit=0.30, leverage_limit=1.0, single_stock_limit=0.30,
+        alert_manager=am3, metrics_collector=met3,
+    )
+    acct, pos = snap(291_000.0)  # 29.1万/30万 = 0.97
+    r3 = mon3.check(account=acct, positions=pos)
+    errs = [c for c in am3.calls if c["level"] == SeverityLevel.ERROR]
+    check("3) usage=0.97 触发 ERROR", len(errs) >= 1 and r3["fired"].get("concentration") == "ERROR",
+          f"calls={am3.calls} fired={r3['fired']}")
+
+    # 4) 未配置维度（limit=None）→ 不告警、指标 enabled=false
+    am4, met4 = _FakeAlert(), _FakeMetrics()
+    mon4 = LimitUsageMonitor(
+        warn_threshold=0.80, alert_threshold=0.95,
+        concentration_limit=None, leverage_limit=1.0, single_stock_limit=None,
+        alert_manager=am4, metrics_collector=met4,
+    )
+    acct, pos = snap(291_000.0)
+    r4 = mon4.check(account=acct, positions=pos)
+    conc_calls = [c for c in am4.calls if c["details"]["dimension"] == "concentration"]
+    check("4) 未配置集中度维度不告警", conc_calls == [] and r4["enabled"]["concentration"] is False,
+          f"calls={conc_calls} enabled={r4['enabled']}")
+    check("4) 未配置维度指标 enabled=false", met4.labels.get("limit_usage_concentration", {}).get("enabled") == "false",
+          f"labels={met4.labels}")
+
+    # 5) 指标写入 collector 可查
+    check("5) 三指标已写入 collector",
+          met3.gauges.get("limit_usage_concentration") == 0.97
+          and "limit_usage_leverage" in met3.gauges
+          and "limit_usage_single_stock" in met3.gauges,
+          f"gauges={met3.gauges}")
+
+    # 6) 指标注册清单含三 GAUGE
+    reg = get_limit_usage_metrics_registration()
+    check("6) 指标注册清单=3 项 GAUGE", len(reg) == 3 and all(r["type"] == "GAUGE" for r in reg),
+          f"reg={reg}")
+
+    # 7) 非法阈值抛 ValueError
+    raised = False
+    try:
+        LimitUsageMonitor(warn_threshold=0.95, alert_threshold=0.80, alert_manager=_FakeAlert())
+    except ValueError:
+        raised = True
+    check("7) alert<=warn 抛 ValueError", raised, "")
+
+    print("=" * 60)
+    print(f"rules.py LimitUsageMonitor 自测: {passed} 项通过")
+    if failures:
+        for f in failures:
+            print(f"  ✗ {f}")
+        print(f"失败 {len(failures)} 项")
+        return 1
+    print("全部通过 ✅")
+    print("=" * 60)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_run_limit_usage_self_test())
