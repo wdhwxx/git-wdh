@@ -1171,10 +1171,12 @@ def create_app(
         x_user: Optional[str] = Header(None, alias="X-User"),
     ):
         """
-        复位熔断（A-16 RBAC / B-6 预留：需 reset_circuit_breaker 权限，仅 admin）。
+        复位熔断（A-16 RBAC / B-6 接线：需 reset_circuit_breaker 权限，仅 admin）。
 
-        端点先鉴权（越权 403 + 审计 deny）；熔断复位逻辑随 B-6 接线，鉴权通过后
-        返回 501（不伪造成功）。
+        端点先鉴权（越权 403 + 审计 deny）；鉴权通过后调用
+        CircuitBreaker.reset(actor, reason) 恢复开仓能力并返回真实结果。
+        熔断实例优先取服务容器 "circuit_breaker"（实盘进程注入带真实
+        broker/risk_manager 的实例），缺失则懒加载全局单例（复位仍可用）。
         """
         guard = _get_rbac_guard()
         allowed, reason = guard.check(
@@ -1188,11 +1190,32 @@ def create_app(
                     error="Forbidden", message=f"无权复位熔断：{reason}",
                 ).model_dump(),
             )
-        return JSONResponse(
-            status_code=501,
-            content={"success": False, "code": 501,
-                     "message": "熔断复位未接线：随 B-6 熔断线配置后可用", "data": {}},
-        )
+        try:
+            from myquant.monitoring.circuit_breaker import (
+                get_circuit_breaker,
+            )
+            cb = _container.get("circuit_breaker")
+            if cb is None:
+                cb = get_circuit_breaker()
+                _container.register("circuit_breaker", cb)
+            # 审计库取服务容器注入值（与 RBAC guard 同源），保证复位留痕落同一库
+            cb_audit = getattr(cb, "_audit", None)
+            if cb_audit is None:
+                store = _container.get("audit_log_store")
+                if store is not None:
+                    cb.attach_audit_store(store)
+            reset_result = cb.reset(
+                actor=x_user or "anonymous",
+                reason="人工复位（经 API RBAC 鉴权）",
+            )
+            return ApiResponse.success(
+                data=reset_result,
+                message=("熔断已复位，开仓恢复" if reset_result.get("was_tripped")
+                         else "熔断未处于触发状态，已确认复位"),
+            )
+        except Exception as e:
+            logger.error(f"[api] 熔断复位失败: {e}")
+            return ApiResponse.error(code=500, message="熔断复位失败")
 
     logger.info(f"[api] FastAPI应用创建成功: {title} v{version}")
     return app

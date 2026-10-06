@@ -11,8 +11,8 @@ test_rbac.py - A-16 监控面访问控制 RBAC 单元测试
        - viewer/auditor → 403 且审计表无成功动作（留 deny）
        - operator/admin → 成功
        - 不传角色 → 成功（既有调用方兼容）
-  5. 受控写操作占位：modify_config / reset_circuit_breaker
-       - viewer → 403；admin → 501（鉴权通过后未接线）
+  5. 受控写操作：modify_config / reset_circuit_breaker
+       - viewer → 403；admin → 阈值仍 501；熔断复位已接线（B-6）→ 成功+留痕
   6. current_role_can / set_current_role（看板按钮禁用判定）
 
 运行方式:
@@ -241,10 +241,32 @@ class TestGatedPlaceholders:
         assert resp.status_code == 403
         assert "deny:reset_circuit_breaker" in _audit_actions(temp_audit)
 
-    def test_admin_reset_circuit_gated_501(self, app) -> None:
-        ep = _find_endpoint(app, "/api/monitor/circuit/reset", "POST")
-        resp = _run(ep, x_user_role="admin", x_user="op")
-        assert resp.status_code == 501
+    def test_admin_reset_circuit_wired(self, app, temp_audit) -> None:
+        """B-6 接线后：admin 鉴权通过 → 真实复位成功（非 501），且复位留审计。"""
+        # 复位前先触发一次熔断（容器内注入一个 tripped 的熔断线），验证真实回滚链路
+        from myquant.api.dependencies.get_services import get_service_container
+        from myquant.monitoring.circuit_breaker import (
+            CircuitBreaker, reset_circuit_breaker_singleton,
+        )
+        reset_circuit_breaker_singleton()
+        cb = CircuitBreaker(alert_manager=None, audit_store=temp_audit)
+        cb.trip(reason="测试：风控击穿")
+        container = get_service_container()
+        container.register("circuit_breaker", cb)
+        try:
+            ep = _find_endpoint(app, "/api/monitor/circuit/reset", "POST")
+            resp = _run(ep, x_user_role="admin", x_user="op")
+            # 鉴权通过 → 真实复位成功（ApiResponse，无 501）
+            assert not hasattr(resp, "status_code") or resp.status_code == 200
+            assert not cb.tripped
+            # 复位留痕：kind=circuit, action=reset
+            circuit_actions = [
+                r["action"] for r in temp_audit.query(kind="circuit", limit=50)
+            ]
+            assert "reset" in circuit_actions
+        finally:
+            container.unregister("circuit_breaker")
+            reset_circuit_breaker_singleton()
 
 
 # ═══════════════════════════════════════════════

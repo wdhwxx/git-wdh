@@ -479,6 +479,9 @@ class RiskManager:
         self._dq_global_resume_signals: int = 0         # 全局暂停期间的连续恢复信号数
         self._dq_symbol_resume_signals: Dict[str, int] = {}  # 单标的暂停期间的连续恢复信号数
 
+        # ═══ 熔断线联动（B-6）：标记"熔断自己造成的禁开仓"，复位时只回滚它 ═══
+        self._circuit_paused: bool = False
+
         logger.info(
             f"风控管理器初始化: 规则数={len(self._library.rule_names)}, "
             f"状态={self._status.value}, "
@@ -791,6 +794,64 @@ class RiskManager:
                 symbol=sym,
                 reason="标的数据质量暂停已解除",
             )
+
+    # ═══════════════════════════════════════════
+    #  熔断线联动（B-6）：可回滚的禁开仓 / 恢复开仓
+    # ═══════════════════════════════════════════
+
+    def pause_for_circuit_breaker(self, reason: str) -> bool:
+        """
+        熔断触发：禁止新开仓（幂等，可回滚）。
+
+        仅在当前允许新开仓时才置 PAUSED 并打 _circuit_paused 标记；
+        若已因其他原因（数据质量/手动）暂停，则不重复置位、返回 False。
+        复位时由 resume_from_circuit_breaker 仅回滚此标记，避免误清其他暂停。
+
+        Parameters
+        ----------
+        reason : str
+            熔断原因
+
+        Returns
+        -------
+        bool : 是否本次新置为暂停（False=原本就不可开仓）
+        """
+        if not self.can_open_position():
+            logger.info(f"[risk] 熔断禁开仓：当前已不可开仓，幂等跳过 ({reason})")
+            return False
+        self.pause(f"熔断线禁开仓: {reason}")
+        self._circuit_paused = True
+        return True
+
+    def resume_from_circuit_breaker(self, reason: str = "熔断复位") -> bool:
+        """
+        熔断复位：恢复新开仓（仅回滚熔断自己造成的暂停，可回滚）。
+
+        若熔断此前并未造成暂停（_circuit_paused=False），则不动全局状态、
+        返回 False，避免误清数据质量/手动暂停。
+
+        Parameters
+        ----------
+        reason : str
+            复位原因
+
+        Returns
+        -------
+        bool : 是否本次执行了恢复（False=熔断未造成暂停，无需回滚）
+        """
+        if not self._circuit_paused:
+            logger.info("[risk] 熔断复位：熔断未造成暂停，幂等跳过")
+            return False
+        self._circuit_paused = False
+        # 复用既有 resume()：恢复到 NORMAL 并发布 RISK_RESUMED 事件
+        self.resume()
+        logger.info(f"[risk] 熔断复位，已恢复开仓: {reason}")
+        return True
+
+    @property
+    def circuit_paused(self) -> bool:
+        """是否因熔断线被禁开仓（可观测）。"""
+        return self._circuit_paused
 
     def _set_status(self, status: RiskStatus, reason: str) -> None:
         """设置风控状态（内部方法）"""
@@ -1744,6 +1805,8 @@ class RiskManager:
         self._dq_global_pause_symbol = ""
         self._dq_global_resume_signals = 0
         self._dq_symbol_resume_signals.clear()
+        # B-6：清除熔断禁开仓标记
+        self._circuit_paused = False
         # 发布恢复事件（供实盘引擎/API消费，任务12-B）
         self._publish_pause_event(
             paused=False,

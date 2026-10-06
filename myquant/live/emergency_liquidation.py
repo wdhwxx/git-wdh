@@ -29,6 +29,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from myquant.core.logger import get_logger
+from myquant.core.event_bus import Event, EventType
 from myquant.models.trade import Order, OrderSide, OrderStatus, OrderType
 
 logger = get_logger("live.emergency_liquidation")
@@ -48,11 +49,20 @@ class EmergencyLiquidationService:
         get_positions / submit_order 能力）
     strategy_id : str
         平仓订单归属策略标识（默认 emergency_liquidation，便于审计区分）
+    event_bus : Any
+        可选事件总线（B-6 联动）：真实全平（executed=True）后发布
+        EventType.EMERGENCY_LIQUIDATION 事件，供告警/熔断联动消费。None 则不发布。
     """
 
-    def __init__(self, broker: Any, strategy_id: str = "emergency_liquidation") -> None:
+    def __init__(
+        self,
+        broker: Any,
+        strategy_id: str = "emergency_liquidation",
+        event_bus: Any = None,
+    ) -> None:
         self._broker = broker
         self._strategy_id = strategy_id
+        self._event_bus = event_bus
 
     # ─────────────────────────────────────────────
     #  主入口
@@ -145,6 +155,10 @@ class EmergencyLiquidationService:
                 f"计划={report['liquidation']['planned']} "
                 f"失败={report['liquidation']['failed']}"
             )
+            # B-6 联动：真实全平（executed=True）后发布紧急强平事件，
+            # 供告警（A-8 → CRITICAL）/ 熔断联动消费；dry_run 不发布。
+            if report["executed"]:
+                self._publish_emergency_event(report)
         except Exception as e:  # noqa: BLE001 - 顶层兜底：任何异常都进报告不崩溃
             report["errors"].append(f"一键平仓执行异常: {e}")
             report["ok"] = False
@@ -176,6 +190,44 @@ class EmergencyLiquidationService:
             report["errors"].append(report["connect"]["error"])
             logger.error(f"[emergency_liquidation] 连接异常: {e}")
             return False
+
+    # ─────────────────────────────────────────────
+    #  B-6 联动：发布紧急强平事件
+    # ─────────────────────────────────────────────
+
+    def _publish_emergency_event(self, report: Dict[str, Any]) -> None:
+        """
+        真实全平后发布 EMERGENCY_LIQUIDATION 事件（B-6 联动）。
+
+        供告警闭环（A-8 → CRITICAL）与熔断线消费。事件 data 只携带本次
+        已发生的平仓结果（防未来）；发布失败记 error 不影响平仓报告。
+
+        Parameters
+        ----------
+        report : Dict[str, Any]
+            execute() 生成的结构化报告
+        """
+        if self._event_bus is None:
+            return
+        try:
+            event = Event(
+                event_type=EventType.EMERGENCY_LIQUIDATION,
+                data={
+                    "ok": report.get("ok"),
+                    "mode": report.get("mode"),
+                    "executed": report.get("executed"),
+                    "total_symbols": report.get("liquidation", {}).get("total_symbols"),
+                    "success": report.get("liquidation", {}).get("success"),
+                    "failed": report.get("liquidation", {}).get("failed"),
+                    "cancelled_orders": len(report.get("cancelled_orders", [])),
+                    "reason": "熔断线/人工紧急全平",
+                },
+                source="emergency_liquidation",
+            )
+            self._event_bus.publish(event)
+            logger.info("[emergency_liquidation] 已发布 EMERGENCY_LIQUIDATION 事件")
+        except Exception as e:  # noqa: BLE001 - 发布失败不阻断平仓主流程
+            logger.error(f"[emergency_liquidation] 发布强平事件失败: {e}")
 
     # ─────────────────────────────────────────────
     #  步骤2：撤全部挂单
