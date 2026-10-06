@@ -104,6 +104,11 @@ monitoring:
       storage_headroom_min_pct: ~      # 存储余量下限（低于即 P2 预警），PENDING_CAL
       strategy_count_limit: ~          # 策略容量上限（超过即 P2 预警），PENDING_CAL
 
+    # ── 动态基线（C-6 冷启动静态阈值上下限；待实盘校准后填死，禁止编造）──
+    dynamic_baseline:
+      static_low: ~                   # 冷启动静态阈值下限（低于即异常告警），PENDING_CAL
+      static_high: ~                  # 冷启动静态阈值上限（高于即异常告警），PENDING_CAL
+
     # ── 引擎心跳（R-02 硬约束：N×心跳间隔必须 <60s 才能保住 MTTD<1min）──
     engine_heartbeat:
       hang_judge_window_seconds: 60    # 判定窗口上限 <60s，LOCKED
@@ -114,6 +119,7 @@ monitoring:
     margin:
       strong_flat_distance_pct: ~      # 强平价距离百分比（接近强平 → P0 告警），PENDING_CAL
       funding_rate_threshold: ~        # 资金费率阈值（持仓隔夜成本），PENDING_CAL
+      margin_usage_ratio_threshold: ~  # 保证金占用率阈值（占用超阈 → P0 强平预警/防爆仓），PENDING_CAL
 
     # ── 交易所限流/频控（A-12 滑动窗口计数报单/查询/撤单；接近阈值 P1 预警+到阈值前自动暂停开仓）──
     exchange_rate_limit:
