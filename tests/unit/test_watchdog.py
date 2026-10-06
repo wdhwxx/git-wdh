@@ -17,7 +17,11 @@ from datetime import datetime
 import pytest
 
 from myquant.core.constants import SeverityLevel
-from myquant.monitoring.watchdog import EngineHeartbeatWatcher, StalenessDetector
+from myquant.monitoring.watchdog import (
+    BrokerConnectionWatcher,
+    EngineHeartbeatWatcher,
+    StalenessDetector,
+)
 from myquant.utils.time_utils import TZ_SHANGHAI, TradingCalendar
 
 
@@ -288,3 +292,119 @@ class TestEngineHeartbeatWatcherA5:
                 consecutive_misses=5, hang_judge_window_seconds=60,
                 alert_manager=_FakeAlert(),
             )
+
+
+class TestBrokerConnectionWatcherA6:
+    """A-6 券商连接状态监控（事件触发路径，不等 60s 周期）。"""
+
+    def test_健康到断连_立即P0告警(self) -> None:
+        """on_state(True)→on_state(False) 转换点立即 CRITICAL（事件路径）。"""
+        am = _FakeAlert()
+        bw = BrokerConnectionWatcher(object(), alert_manager=am)
+        bw.on_state(True)          # 初始健康
+        am.calls.clear()
+        r = bw.on_state(False)     # 断连转换
+        assert r["transition"] == "connected->disconnected"
+        assert len(am.calls) == 1
+        assert am.calls[0]["level"] == SeverityLevel.CRITICAL
+
+    def test_告警带category_broker与runbook(self) -> None:
+        """告警携带 category=broker 与 runbook_id（触发 Runbook）。"""
+        am = _FakeAlert()
+        bw = BrokerConnectionWatcher(object(), alert_manager=am)
+        bw.on_state(True)
+        am.calls.clear()
+        bw.on_state(False)
+        a = am.calls[0]
+        assert a["category"] == "broker"
+        assert a["details"]["runbook_id"]
+        assert a["deduplication_key"] == "watchdog:broker_disconnected"
+
+    def test_初始即断连不重复告警(self) -> None:
+        """首次采样即断连（initial）不告警——只在健康→不健康转换点告警。"""
+        am = _FakeAlert()
+        bw = BrokerConnectionWatcher(object(), alert_manager=am)
+        r = bw.on_state(False)  # initial，无前序健康态
+        assert r["transition"] == "initial"
+        assert am.calls == []
+
+    def test_重连发恢复(self) -> None:
+        am = _FakeAlert()
+        bw = BrokerConnectionWatcher(object(), alert_manager=am)
+        bw.on_state(True)
+        bw.on_state(False)
+        am.calls.clear()
+        r = bw.on_state(True)
+        assert r["transition"] == "disconnected->connected"
+        assert any(a["level"] == SeverityLevel.INFO for a in am.calls)
+
+    def test_poll_once读假券商(self) -> None:
+        """poll_once 读 broker.is_connected（属性 duck-typing）驱动转换。"""
+        class FakeBroker:
+            def __init__(self):
+                self.is_connected = True
+        broker = FakeBroker()
+        am = _FakeAlert()
+        bw = BrokerConnectionWatcher(broker, alert_manager=am)
+        bw.poll_once()  # connected
+        broker.is_connected = False
+        am.calls.clear()
+        r = bw.poll_once()
+        assert r["connected"] is False
+        assert am.calls[0]["level"] == SeverityLevel.CRITICAL
+
+    def test_读取异常按未连接(self) -> None:
+        """is_connected 抛异常时按未连接处理，不崩溃。"""
+        class BadBroker:
+            @property
+            def is_connected(self):
+                raise RuntimeError("boom")
+        bw = BrokerConnectionWatcher(BadBroker(), alert_manager=_FakeAlert())
+        connected = bw._read_connected()
+        assert connected is False
+
+    def test_无券商对象安全(self) -> None:
+        bw = BrokerConnectionWatcher(None, alert_manager=_FakeAlert())
+        assert bw._read_connected() is False
+
+
+class TestSchedulerBrokerPatrolA6:
+    """A-6 巡检兜底：_patrol_job broker 健康→不健康转换点 P0/CRITICAL。"""
+
+    def test_巡检broker断连转换触发P0(self, monkeypatch) -> None:
+        from myquant.live.scheduler import LiveScheduler, attach_engine
+
+        class FakeBroker:
+            def __init__(self):
+                self.is_connected = True
+
+        broker = FakeBroker()
+        calls: list = []
+        monkeypatch.setattr(
+            "myquant.monitoring.alerting.get_alert_manager",
+            lambda: type("AM", (), {"alert": lambda self, **kw: calls.append(kw) or 1})(),
+        )
+        # health_checker 健康，不干扰 broker 闭环
+        hc = type("HC", (), {
+            "run_all": lambda self: [],
+            "get_summary": lambda self: {"is_healthy": True, "is_critical": False},
+        })()
+        monkeypatch.setattr("myquant.monitoring.health_check.get_health_checker", lambda: hc)
+
+        sched = LiveScheduler()
+        # 隔离落库/元监控副作用（不碰 quant.db）
+        monkeypatch.setattr("myquant.live.scheduler.HealthPatrol._record_report_metrics", lambda self, r: None)
+        monkeypatch.setattr("myquant.live.scheduler.HealthPatrol._run_meta_monitor", lambda self, r: None)
+        monkeypatch.setattr("myquant.monitoring.metrics_history.MetricsHistoryStore", lambda: object())
+        tasks = attach_engine(sched, broker=broker)
+        patrol = sched.get_task(tasks["patrol"])
+        patrol.func()  # 第一次：broker 健康 → 不应有 broker 告警
+        broker_alerts = [c for c in calls if c.get("category") == "broker"]
+        assert broker_alerts == []
+        # broker 断连 → 第二次巡检应触发 P0/CRITICAL（转换点）
+        broker.is_connected = False
+        patrol.func()
+        broker_alerts = [c for c in calls if c.get("category") == "broker"]
+        assert len(broker_alerts) == 1
+        assert broker_alerts[0]["level"].name == "CRITICAL"
+        assert broker_alerts[0]["details"]["runbook_id"]

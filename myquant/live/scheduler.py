@@ -1771,6 +1771,27 @@ def attach_engine(
         except Exception as e:  # noqa: BLE001
             logger.warning(f"[attach] A-5 引擎心跳看门狗装配失败（不阻断巡检）: {e}")
 
+        # A-6（回写#210）：券商连接事件路径——BaseBroker 无连接推送回调，
+        # 故以快速轮询(5s)+健康→不健康转换点实现事件路径：断连即 P0/CRITICAL。
+        # 周期巡检 _check_broker 仅兜底（见 _patrol_job 内 broker 告警闭环）。
+        try:
+            from myquant.core.settings import get_monitoring_config
+            if get_monitoring_config().get("watchdog", {}).get("enabled", False):
+                from myquant.monitoring.watchdog import (
+                    BrokerConnectionWatcher, BROKER_PROBE_INTERVAL_SECONDS,
+                )
+                bw = BrokerConnectionWatcher(broker)
+                scheduler.add_interval_task(
+                    bw.poll_once, name="券商连接看门狗",
+                    interval_seconds=BROKER_PROBE_INTERVAL_SECONDS,
+                )
+                logger.info("[attach] A-6 券商连接看门狗已装配")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[attach] A-6 券商连接看门狗装配失败（不阻断巡检）: {e}")
+
+        # A-6 巡检兜底：记录 broker 上一周期健康状态（健康→不健康转换点触发 P0）
+        _broker_prev_healthy: List[bool] = [True]
+
         def _patrol_job(**kw) -> None:  # noqa: ARG001
             report = patrol.build_report(
                 engine=engine,
@@ -1785,6 +1806,36 @@ def attach_engine(
             )
             if report["status"] != PATROL_HEALTHY:
                 logger.warning(f"[attach] 巡检非健康: {report['status']}")
+
+            # A-6（回写#210）：券商连接状态巡检告警闭环（兜底）。
+            # 现 _patrol_job 原仅按 health_checker 告警；此处让 broker 检查项在
+            # 健康→不健康转换点也走 AlertManager，发 P0/CRITICAL（category=broker
+            # + details.runbook_id）。与事件路径共用去重键，窗口内不重复刷屏。
+            try:
+                from myquant.core.constants import SeverityLevel as _SL
+                from myquant.monitoring.alerting import get_alert_manager as _gam
+                from myquant.monitoring.watchdog import RUNBOOK_BROKER_DISCONNECT
+                broker_item = report.get("checks", {}).get("broker", {})
+                broker_status = broker_item.get("status", PATROL_HEALTHY)
+                broker_healthy = broker_status == PATROL_HEALTHY
+                if (not broker_healthy) and _broker_prev_healthy[0]:
+                    # 健康→不健康转换点：交易中断 P0
+                    _gam().alert(
+                        level=_SL.CRITICAL,
+                        message=f"[patrol] 券商连接异常（交易中断 P0）: {broker_item.get('detail', {})}",
+                        source="live.scheduler",
+                        category="broker",
+                        details={
+                            "runbook_id": RUNBOOK_BROKER_DISCONNECT,
+                            "status": broker_status,
+                            "detail": broker_item.get("detail", {}),
+                        },
+                        deduplication_key="watchdog:broker_disconnected",
+                    )
+                    logger.error("[attach] A-6 券商连接不健康（巡检兜底 P0 告警）")
+                _broker_prev_healthy[0] = broker_healthy
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"[attach] A-6 券商巡检告警闭环异常: {e}")
 
             # KP-P5-03: 监控告警闭环——HealthChecker 巡检非 healthy 经告警管理器 alert
             try:

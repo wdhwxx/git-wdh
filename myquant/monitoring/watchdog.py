@@ -47,6 +47,10 @@ P99_SAMPLE_WINDOW: int = 200
 STALENESS_PROBE_INTERVAL_SECONDS: float = 10.0
 #: A-5 引擎 get_status() 单次探针超时上限（秒；超过视为无响应/僵死）
 ENGINE_PROBE_TIMEOUT_SECONDS: float = 3.0
+#: A-6 券商连接快速探测默认间隔（秒；事件路径须远小于 60s 巡检周期）
+BROKER_PROBE_INTERVAL_SECONDS: float = 5.0
+#: A-6 券商断连 Runbook 标识（告警携带 category=broker + runbook_id 触发 Runbook）
+RUNBOOK_BROKER_DISCONNECT: str = "RB-BROKER-DISCONNECT-001"
 
 
 # ═══════════════════════════════════════════════
@@ -556,6 +560,137 @@ class EngineHeartbeatWatcher:
 
 
 # ═══════════════════════════════════════════════
+#  A-6 券商连接状态监控（回写#210，EVENT 转换路径）
+# ═══════════════════════════════════════════════
+class BrokerConnectionWatcher:
+    """
+    券商连接状态监控（EVENT 转换路径，R-02）。
+
+    BaseBroker 无连接状态推送回调，故以"快速轮询 + 健康→不健康转换点"实现
+    事件路径：``on_state(connected)`` 在 connected 由 True→False 时立即触发
+    P0/CRITICAL 告警（category=broker，details 带 runbook_id）；由 False→True
+    时发 INFO 恢复。周期巡检 ``_check_broker`` 仅作兜底。
+
+    防未来：仅依据"当前"连接状态做转换判定，不预测网络。
+    """
+
+    def __init__(
+        self,
+        broker: Any,
+        alert_manager: Any = None,
+        runbook_id: str = RUNBOOK_BROKER_DISCONNECT,
+    ) -> None:
+        """
+        Parameters
+        ----------
+        broker : BaseBroker | None
+            券商对象（须有 is_connected 属性/方法）。None 时不轮询。
+        alert_manager : AlertManager | None
+            告警管理器；None 延迟取 get_alert_manager()。
+        runbook_id : str
+            断连 Runbook 标识（随告警 details 携带，触发 Runbook）。
+        """
+        self._broker = broker
+        self._alert_manager = alert_manager
+        self._runbook_id = runbook_id
+        self._last_connected: Optional[bool] = None  # None=尚未采样
+        self._disconnect_alerted: bool = False
+
+    def _read_connected(self) -> bool:
+        """读取券商连接状态（兼容属性与方法两种 duck-typing）。异常视为未连接。"""
+        if self._broker is None:
+            return False
+        try:
+            conn = getattr(self._broker, "is_connected", None)
+            if callable(conn):
+                conn = conn()
+            return bool(conn)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"读取券商连接状态异常（按未连接处理）: {e}")
+            return False
+
+    def poll_once(self) -> Dict[str, Any]:
+        """快速轮询一次连接状态并驱动转换判定（事件路径入口）。"""
+        connected = self._read_connected()
+        return self.on_state(connected)
+
+    def on_state(self, connected: bool, now: Optional[float] = None) -> Dict[str, Any]:
+        """
+        连接状态转换判定（事件触发核心；单测可直接注入 True→False 验证）。
+
+        Parameters
+        ----------
+        connected : bool
+            当前是否已连接。
+        now : float | None
+            采样时刻（None 取系统时钟；防未来：仅记录当前）。
+
+        Returns
+        -------
+        dict : {"connected": bool, "transition": str}
+            transition ∈ {"none", "connected->disconnected",
+                          "disconnected->connected", "initial"}。
+        """
+        ts = now if now is not None else time.time()
+        transition = "none"
+        if self._last_connected is None:
+            transition = "initial"
+        elif connected != self._last_connected:
+            transition = "connected->disconnected" if not connected else "disconnected->connected"
+
+        if transition == "connected->disconnected":
+            self._fire_disconnect_alert(ts)
+        elif transition == "disconnected->connected":
+            self._recover()
+
+        self._last_connected = bool(connected)
+        return {"connected": bool(connected), "transition": transition}
+
+    def _fire_disconnect_alert(self, ts: float) -> None:
+        """券商断连 P0/CRITICAL 告警（带 category=broker + runbook_id）。"""
+        mgr = self._alert_manager
+        if mgr is None:
+            from myquant.monitoring.alerting import get_alert_manager
+            mgr = get_alert_manager()
+        mgr.alert(
+            level=SeverityLevel.CRITICAL,
+            message="[watchdog] 券商连接断开（交易中断 P0）",
+            source="monitoring.watchdog",
+            category="broker",
+            details={
+                "runbook_id": self._runbook_id,
+                "connected": False,
+                "disconnected_at": ts,
+            },
+            deduplication_key="watchdog:broker_disconnected",
+        )
+        self._disconnect_alerted = True
+
+    def _recover(self) -> None:
+        """券商重连恢复：发 INFO 恢复。"""
+        try:
+            from myquant.monitoring.alerting import get_alert_manager
+            mgr = self._alert_manager or get_alert_manager()
+            mgr.alert(
+                level=SeverityLevel.INFO,
+                message="[watchdog] 券商连接已恢复",
+                source="monitoring.watchdog",
+                category="broker",
+                details={"runbook_id": self._runbook_id, "connected": True},
+                deduplication_key="recovered:watchdog:broker_disconnected",
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"券商连接恢复告警失败: {e}")
+        finally:
+            self._disconnect_alerted = False
+
+    @property
+    def last_connected(self) -> Optional[bool]:
+        """最近一次采样的连接状态（供巡检兜底比对）。"""
+        return self._last_connected
+
+
+# ═══════════════════════════════════════════════
 #  __main__ 自测
 # ═══════════════════════════════════════════════
 def _run_self_test() -> int:
@@ -643,6 +778,20 @@ def _run_self_test() -> int:
         r = hb2.probe()
     check("A5 连续5次无响应判 hung", r["hung"] is True and r["miss_count"] == 5, f"r={r}")
     check("A5 僵死发 ERROR 告警", any(a["level"].name == "ERROR" for a in alerts), f"alerts={alerts}")
+
+    # ── A-6 BrokerConnectionWatcher ──
+    from myquant.monitoring.watchdog import BrokerConnectionWatcher
+    bw = BrokerConnectionWatcher(object(), alert_manager=FakeAlert())
+    alerts.clear()
+    bw.on_state(True)
+    r1 = bw.on_state(False)  # 健康→不健康转换
+    check("A6 True->False 转换", r1["transition"] == "connected->disconnected", f"r1={r1}")
+    check("A6 断连发 CRITICAL 告警", any(a["level"].name == "CRITICAL" for a in alerts), f"alerts={alerts}")
+    check("A6 告警带 runbook/category",
+          any(a.get("category") == "broker" and a.get("details", {}).get("runbook_id") for a in alerts),
+          f"alerts={alerts}")
+    r2 = bw.on_state(True)  # 恢复
+    check("A6 恢复转换", r2["transition"] == "disconnected->connected", f"r2={r2}")
 
     print("=" * 60)
     print(f"watchdog.py 自测: {passed} 项通过")
