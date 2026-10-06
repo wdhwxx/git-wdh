@@ -438,6 +438,7 @@ Pythonwdhmm/
 
 │   ├── 验收_B包保钱包.py            # ✨【回写#230】B-10 B 包保钱包验收薄入口：argparse（--out 默认 docs/监控档案/B包保钱包验收_20261006.json + --db + --mode）+ find_project_root + 调 myquant/monitoring/b_acceptance.py（B-1~B-9 九项验收），控制台逐项摘要 + JSON 报告；业务逻辑零写入脚本
 
+│   ├── 验收_D包自治.py             # ✨【回写#251】D-9 D 包验收薄入口：argparse（--out）+ 调 myquant/monitoring/d_acceptance.py（D-1~D-8 验收清单逐项断言），控制台逐项 PASS/FAIL + JSON 报告；业务逻辑零写入脚本
 │   ├── 验收_C包保Alpha.py           # ✨【回写#241】C-12 C 包保 Alpha 验收薄入口：argparse（--out 默认 docs/监控档案/C包保Alpha验收_<日期>.json + --db + --mode）+ find_project_root + 调 myquant/monitoring/c_acceptance.py（C-1~C-11 验收项），控制台逐项摘要 + JSON 报告；业务逻辑零写入脚本
 
 │   ├── 故障演练/季频故障演练.py      # ✨【回写#248】D-6 混沌工程与故障演练薄入口：argparse（--select FI-01…FI-07 + --out + --db + --list）+ find_project_root + 调 myquant/monitoring/chaos_drill.py（复用 P0-8 FI-01~07 用例库，逐用例注入→MTTx 计时→TP/FP/FN 分类→复盘报告 JSON），季度演练落盘；业务逻辑零写入脚本
@@ -555,6 +556,7 @@ Pythonwdhmm/
 
     │   │   ├── test_m1_acceptance.py # ✨【回写#220】A-15 M1 保命验收测试（12 项）：四环覆盖率 100%、A-15-Min（FI-01/03/04/05 检出走事件路径）、A-15-Full（FI-01~05 检出 + MTTx 预算逐用例 + 事件路径非巡检 + 分类达标）、时间戳单调防未来、同 runner 连跑 min→full 去重隔离、非法 mode 抛错✅已完成
 
+    │   │   ├── test_d_acceptance.py # ✨【回写#251】D-9 D 包验收测试（5 项）：D-6 混沌演练 FI-01~07 全捕获；D-7 配置 apply→rollback 恢复上一版本（init/apply/rollback 变更史 3 条）；D-8 灾备演练四项全通过；验收项结果 JSON 可序列化、字段齐全（item/criterion/passed/detail/evidence）✅已完成
     │   │   ├── test_disaster_drill.py # ✨【回写#250】D-8 元监控与灾备测试（9 项）：SQLite 备份→删活库→恢复（行数/采样/消息逐条一致）；RabbitMQ 持久化（全量不丢失、顺序一致、内容保存）；告警通道切换（主故障→备接管不丢失/主未故障不算切换）；FI-07 临界抽动（单次超时 degraded 不误判/连续判死）；run 四项全通过 + 报告 JSON 可序列化落盘✅已完成
     │   │   ├── test_config_as_code.py # ✨【回写#249】D-7 监控即代码测试（12 项）：KNOWN_ITEMS=4 类配置项；discover 识别 .yaml 与 .example.yaml/无文件项；initialize 打 v1+幂等；apply（版本+1/上一版本快照 prev_content/写盘 <item>.yaml）+变更关联告警 category=config/同版本 dedup 只告警一次；rollback（恢复最后一次变更前内容/无上一版本 rolled_back=False/多次 apply 后正确回滚到最近上一版本）；history JSON 可序列化；防御式（空内容/未知项拒绝）✅已完成
     │   │   ├── test_chaos_drill.py  # ✨【回写#248】D-6 混沌工程测试（16 项）：P0-8 用例库复用（FI-01~07 齐 + 字段完整 + list_fi_cases 同源）；预算解析（MTTD<1min/MTTA<5min/KPI-8 无预算）；核心编排（捕获即 TP + MTTx 计时 + 落库确认/解决闭环、注入失败/未捕获=FN 不阻断、重复注册拒绝、复盘报告 JSON 落盘、预算 met_* 标志）；内置用例（全 7 注册按 P0-8 顺序、7 用例全部捕获 TP 可演示、select 子集过滤）；FI-07 外部心跳（单次超时 degraded 不判死 R-08、连续多次超时判死）✅已完成
@@ -1231,6 +1233,7 @@ Pythonwdhmm/
 
     │   ├── chaos_drill.py           # ✨【回写#248】D-6 混沌工程与故障演练（monitoring/ 段）：ChaosDrillRunner 季度演练编排——复用 P0-8 FI-01~07 标准故障注入用例库（R-01 同库，字段取自 measurability.FI_CASES 不另立）→ 逐用例注入（注入函数返回 InjectOutcome，经 manager._history 定位本轮告警）→ 按 P0-8 ② 口径 MTTD/MTTA/MTTR 系统时间戳计时（KPI 预算解析 _budget_for，met_* 达标标志）→ 按 P0-8 ① 口径 TP/FP/FN 分类（捕获=TP，注入失败/未捕获=FN）→ 复盘报告 JSON（detect_rate/accuracy/avg_mttx/replay_suggestions）；隔离环境=临时 AlertStore + 真实 AlertManager；build_builtin_cases 接线 FI-01~07 真实路径（FI-01 StalenessDetector 断流 / FI-02 引擎僵死心跳 / FI-03 券商断连 / FI-04 伪造拒单 ORDER_REJECTED / FI-05 持仓差异 reconcile / FI-06 主通道故障落盘兜底 / FI-07 外部心跳连续超时判死 R-08）；审计 kind=chaos_drill 失败降级不阻断；防未来（只消费已发生时间戳）；__main__ 自测
 
+    │   ├── d_acceptance.py        # ✨【回写#251】D-9 D 包验收（monitoring/ 段）：DAcceptanceRunner D-1~D-8 验收清单逐项断言（隔离环境）——D-1 编排/D-2 动作库/D-3 阈值校准/D-4 风险再分配/D-5 参数调整（各自专项单测套件为验收证据，子进程 pytest 全绿）+D-6 混沌演练 FI-01~07 全捕获（ChaosDrillRunner 集成）/D-7 配置版本化 apply→rollback（MonitoringConfigRegistry 集成）/D-8 灾备演练四项全通过（DisasterDrillRunner 集成）；验收报告 JSON（逐项 passed/证据可入库）+ 审计 kind=d_acceptance 失败降级不阻断；防未来（只消费已发生事实）
     │   ├── disaster_drill.py       # ✨【回写#250】D-8 元监控与灾备（monitoring/ 段）：DisasterDrillRunner 年度灾备演练——verify_sqlite_backup_restore SQLite 备份→破坏→恢复验证（行数/采样一致）；verify_rabbitmq_durability 持久化消息载体（fsync 落盘复刻队列语义）崩溃重启全量恢复；verify_channel_failover 主告警通道故障→备通道接管（落盘兕底）；verify_heartbeat_no_false_positive FI-07 临界网络抽动不误判“主进程死”（复用 meta_monitor.ExternalHeartbeatGuard，单次超时 degraded不判死、连续多次判死 R-08）；演练报告 JSON（逐项 passed/证据可入库）；审计 kind=disaster_drill 失败降级不阻断；防未来（只消费已发生事实；全部在临时目录，不触砰真实数据）
     │   ├── config_as_code.py        # ✨【回写#249】D-7 监控即代码完善（monitoring/ 段）：MonitoringConfigRegistry——config/monitoring 4 类配置（dashboard/alert_rules/runbooks/collectors）yaml 版本化（P0-6 完成态）；initialize 现有配置打初始版本 v1（幂等不改内容）/discover 盘点/get_version 当前版本 sha256；apply 应用新配置（版本+1 + 留存上一版本内容快照 prev_content + 写盘 <item>.yaml）/rollback 恢复最后一次变更前内容快照（不依赖 git）/history 完整变更史（JSON 可序列化可追溯）；**变更关联监控**——每次 apply/rollback 经独立告警通道 category=config、source=config_as_code 留痕（dedup_key=config:<action>:<item>:<version> 同次变更只告警一次），审计 kind=config_as_code 失败降级不阻断；防御式（未知配置项/空内容拒绝）；防未来（applied_at 一律系统时钟当前时刻）；__main__ 自测
     │   ├── rate_limit_monitor.py        # ✨【回写#216】A-12 交易所限流/频控监控：ExchangeRateLimitMonitor 滑动窗口（order/query/cancel 分别）计数已发生动作→接近阈值 P1 预警+到阈值前自动暂停开仓（可回滚留痕）、达上限 ERROR、窗口回落自动恢复；阈值读 slo.exchange_rate_limit（LOCKED 初值）；指标 rate_limit_orders/queries/cancels_total 进 /api/metrics；__main__ 自测 9 项
@@ -3872,3 +3875,10 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
    c. 新增 tests/unit/test_disaster_drill.py（9 项）：SQLite 备份恢复（删活库/恢复后行数与采样一致、消息逐条一致）；RabbitMQ 持久化（全量不丢失、顺序一致、内容保留）；告警通道切换（主故障→备接管不丢失、主未故障不算切换）；FI-07 临界抖动（单次超时 degraded 不误判、停写连续判死）；run 四项全通过 + 报告 JSON 可序列化落盘。
    d. 验证结果：py_compile 通过；薄入口自测（真实演练落盘 4 项全 PASS：sqlite_backup_restore/rabbitmq_durability/channel_failover/fi07_heartbeat_no_false_positive）；单测 9 项全绿；既有测试未破坏；全量 pytest 结果见提交后终验。
    e. 纪律遵守：先更新蓝图目录树（monitoring 段 disaster_drill.py + scripts/ 段新增 灾备演练/年度灾备演练.py + tests/unit 段 test_disaster_drill.py）再创建文件（蓝图优先）；无蓝图外新文件；业务逻辑归 myquant；未重复实现 meta_monitor 已有能力（ExternalHeartbeatGuard R-08 直接复用）；演练全在临时目录不触碰真实数据；严格防未来；任务后 git 提交（commit message 引用 #250）。
+
+## #251 · 2026-10-07 · D-9 D 包验收（D-1~D-8 验收清单逐项断言）
+   a. 新增 myquant/monitoring/d_acceptance.py（monitoring/ 段登记 #251）：DAcceptanceRunner——隔离环境逐项断言 D-1~D-8 验收清单并产出 JSON 验收报告（可入库）：D-1 自动化响应编排 / D-2 自愈动作库（各自身专项单测 test_action_engine.py 全绿为验收证据，子进程 pytest）、D-3 阈值自动校准（test_threshold_calibration.py）、D-4 风险预算再分配（test_risk_reallocation.py）、D-5 参数动态调整（test_param_tuner.py）；D-6 混沌工程与故障演练（ChaosDrillRunner 集成：P0-8 FI-01~07 逐用例演练全部捕获 7 TP/0 FN）、D-7 监控即代码完善（MonitoringConfigRegistry 集成：配置 apply→rollback 恢复上一版本内容，变更史 init/apply/rollback 可追溯）、D-8 元监控与灾备（DisasterDrillRunner 集成：SQLite 备份恢复/RabbitMQ 持久化/告警通道切换/FI-07 临界不误判 四项全通过）；审计 kind=d_acceptance 失败降级不阻断；防未来（只消费已发生事实，时间戳一律系统时钟）。
+   b. 新增 scripts/验收_D包自治.py（scripts/ 段登记 #251）：argparse（--out 验收报告落盘）+ 调 DAcceptanceRunner.run/write_report，控制台逐项 PASS/FAIL + JSON 报告；业务逻辑零写入脚本。
+   c. 新增 tests/unit/test_d_acceptance.py（5 项）：D-6 混沌演练 FI-01~07 全捕获；D-7 配置 apply→rollback 恢复上一版本（变更史 3 条）；D-8 灾备演练四项全通过；验收项结果 JSON 可序列化、字段齐全（item/criterion/passed/detail/evidence）。
+   d. 验证结果：py_compile 通过；D-6/D-7/D-8 集成验收单测 5 项全绿；D-1~D-5 专项单测套件（action_engine 82 项/threshold_calibration 37 项/risk_reallocation 40 项/param_tuner 36 项）经 run() 子进程 pytest 全绿为验收证据；全量 pytest 结果见提交后终验。
+   e. 纪律遵守：先更新蓝图目录树（monitoring 段 d_acceptance.py + scripts 段 验收_D包自治.py + tests/unit 段 test_d_acceptance.py）再创建文件（蓝图优先）；无蓝图外新文件；业务逻辑归 myquant；验收复用各 D 模块既有能力不重写；严格防未来；任务后 git 提交（commit message 引用 #251）。
