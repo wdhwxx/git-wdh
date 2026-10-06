@@ -356,6 +356,25 @@ def create_app(
         store = _container.get("audit_log_store")
         return RbacGuard(audit_store=store)
 
+    # ── B-2：时序库 / 对账器解析（注入优先；未注入则惰性默认实例，只读端点）──
+    def _get_history_store() -> Any:
+        """获取指标时序库（服务容器 "metrics_history_store" 注入优先，否则默认库）。"""
+        store = _container.get("metrics_history_store")
+        if store is None:
+            from myquant.monitoring.metrics_history import MetricsHistoryStore
+            store = MetricsHistoryStore()
+            _container.register("metrics_history_store", store)
+        return store
+
+    def _get_reconciler() -> Any:
+        """获取账户对账器（容器 "account_reconciler" 注入优先，否则全局惰性单例）。"""
+        recon = _container.get("account_reconciler")
+        if recon is None:
+            from myquant.monitoring.account_reconciler import get_account_reconciler
+            recon = get_account_reconciler()
+            _container.register("account_reconciler", recon)
+        return recon
+
     # CORS配置（C1修复：通配符 * 与 allow_credentials=True 是无效组合，
     # 改为环境变量白名单；KP-P1-05：缺省不开放——未设置/为空则不挂 CORS 中间件）
     _cors_raw = os.environ.get("QUANT_CORS_ORIGINS", "")
@@ -1216,6 +1235,51 @@ def create_app(
         except Exception as e:
             logger.error(f"[api] 熔断复位失败: {e}")
             return ApiResponse.error(code=500, message="熔断复位失败")
+
+    # ═══════════════════════════════════════════
+    #  B-2：PnL 快照 + 当日权益曲线（只读；防脏门：冻结期间 PnL 不更新）
+    # ═══════════════════════════════════════════
+
+    @app.get("/api/monitor/pnl", response_model=ApiResponse, tags=["监控"])
+    async def monitor_pnl():
+        """
+        最新 PnL 快照 + 对账状态（B-2，只读视图）。
+
+        返回时序库中最新一点的总资产/可用/持仓市值/已实现/未实现 PnL，以及
+        AccountReconciler.to_dict（consistent/frozen/last_diff）——冻结状态下
+        PnL 不更新（防脏门），看板据此提示"对账冻结中"。无数据时各 PnL 项为
+        None（不伪造）。【防未来】只回放已落库历史点。
+        """
+        try:
+            from myquant.monitoring.metrics_collector import get_latest_pnl_snapshot
+            store = _get_history_store()
+            recon = _get_reconciler()
+            data = get_latest_pnl_snapshot(store=store, reconciler=recon)
+            return ApiResponse.success(data=data, message="最新 PnL 快照")
+        except Exception as e:
+            logger.error(f"[api] PnL 快照查询失败: {e}")
+            return ApiResponse.error(code=500, message="PnL 快照查询失败")
+
+    @app.get("/api/monitor/equity_curve", response_model=ApiResponse, tags=["监控"])
+    async def monitor_equity_curve():
+        """
+        当日权益曲线回放（B-2，只读视图）。
+
+        基于 metrics_history 当日序列（local 当日零点 → 当前时刻，升序）回放
+        live_total_assets 曲线；敏感值经 query() 解密回读。空序列返回空列表（不
+        伪造点位）。【防未来】右闭取当前时刻，只回放当日已落库点。
+        """
+        try:
+            from myquant.monitoring.metrics_collector import replay_intraday_equity_curve
+            store = _get_history_store()
+            points = replay_intraday_equity_curve(store=store)
+            return ApiResponse.success(
+                data={"points": points, "count": len(points)},
+                message="当日权益曲线",
+            )
+        except Exception as e:
+            logger.error(f"[api] 当日权益曲线回放失败: {e}")
+            return ApiResponse.error(code=500, message="当日权益曲线回放失败")
 
     logger.info(f"[api] FastAPI应用创建成功: {title} v{version}")
     return app

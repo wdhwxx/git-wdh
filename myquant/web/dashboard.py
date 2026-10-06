@@ -47,6 +47,7 @@ TODO(后续迭代):
 from __future__ import annotations
 
 import sys
+import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
@@ -160,6 +161,8 @@ class MonitorCenterDataProvider:
         alert_manager: Optional[Any] = None,
         health_checker: Optional[Any] = None,
         metrics_collector: Optional[Any] = None,
+        metrics_history_store: Optional[Any] = None,
+        account_reconciler: Optional[Any] = None,
     ):
         """
         Parameters
@@ -170,10 +173,16 @@ class MonitorCenterDataProvider:
             健康检查器（None 则系统级状态回退为 unknown，不崩溃）
         metrics_collector : MetricsCollector | None
             指标采集器（None 懒加载全局单例）
+        metrics_history_store : MetricsHistoryStore | None
+            指标时序库（B-2 权益曲线/PnL 回放；None 懒加载默认库）
+        account_reconciler : AccountReconciler | None
+            账户对账器（B-2/B-8 对账状态；None 则对账状态回退 unknown）
         """
         self._alert_manager = alert_manager
         self._health_checker = health_checker
         self._metrics_collector = metrics_collector
+        self._history_store = metrics_history_store
+        self._account_reconciler = account_reconciler
 
     # ── 依赖懒加载 ──
 
@@ -394,6 +403,73 @@ class MonitorCenterDataProvider:
             "metric_cards": self.get_metric_cards(),
             "trading_continuity": self.get_trading_continuity(),
         }
+
+    # ═══════════════════════════════════════════
+    #  B-2：PnL 快照 + 对账状态 + 当日权益曲线（与 /api/monitor 同源）
+    # ═══════════════════════════════════════════
+
+    def get_reconciliation_status(self) -> Dict[str, Any]:
+        """
+        账户对账状态（B-2/B-8 对账视图）。
+
+        数据源 AccountReconciler.to_dict；未注入对账器 → unknown（不谎报一致）。
+        【防未来】只读当前已发生的对账状态，不预测。
+
+        Returns
+        -------
+        dict : {account_id/consistent/frozen/in_flight/last_check_ts/last_diff/...}
+               未注入时返回 {"available": False}。
+        """
+        recon = self._account_reconciler
+        if recon is None:
+            try:
+                from myquant.monitoring.account_reconciler import get_account_reconciler
+                recon = get_account_reconciler()
+                self._account_reconciler = recon
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"[web] 对账器获取失败: {e}")
+                return {"available": False}
+        try:
+            return recon.to_dict()
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"[web] 对账状态读取失败: {e}")
+            return {"available": False}
+
+    def get_pnl_snapshot(self) -> Dict[str, Any]:
+        """
+        最新 PnL 快照（B-2 资金 PnL 视图；与 /api/monitor/pnl 同源）。
+
+        时序库最新一点的总资产/可用/持仓市值/已实现/未实现 PnL；冻结期间
+        不更新（防脏门）。无数据时各项 None（不伪造）。
+
+        Returns
+        -------
+        dict : {"pnl": {...}, "ts", "account_id", "reconciliation"}
+        """
+        from myquant.monitoring.metrics_collector import get_latest_pnl_snapshot
+        store = self._history_store
+        recon = self._account_reconciler
+        try:
+            return get_latest_pnl_snapshot(store=store, reconciler=recon)
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"[web] PnL 快照读取失败: {e}")
+            return {"pnl": {}, "ts": None, "account_id": None, "reconciliation": None}
+
+    def get_intraday_equity_curve(self) -> List[Dict[str, Any]]:
+        """
+        当日权益曲线（B-2：时序回放，升序）。
+
+        Returns
+        -------
+        list[dict] : [{"ts": epoch秒, "equity": 总资产}]；无数据返回 []
+        """
+        from myquant.monitoring.metrics_collector import replay_intraday_equity_curve
+        store = self._history_store
+        try:
+            return replay_intraday_equity_curve(store=store)
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"[web] 当日权益曲线回放失败: {e}")
+            return []
 
 
 
@@ -1118,6 +1194,52 @@ class Dashboard:
         with col_c3:
             st.metric("券商连接", cont["broker_connection"].get("state", "unknown"))
 
+        st.markdown("---")
+
+        # ── 区块5：PnL 快照 + 对账状态（B-2；防脏门：冻结期间 PnL 不更新）──
+        st.subheader("💰 资金 PnL 与对账状态")
+        pnl_view = provider.get_pnl_snapshot()
+        pnl = pnl_view.get("pnl", {}) or {}
+        recon = pnl_view.get("reconciliation") or provider.get_reconciliation_status()
+        recon_frozen = bool(recon.get("frozen")) if recon else False
+        recon_consistent = bool(recon.get("consistent")) if recon else None
+        col_p1, col_p2, col_p3, col_p4, col_p5 = st.columns(5)
+        with col_p1:
+            st.metric("总资产", pnl.get("total_assets") if pnl.get("total_assets") is not None else "—")
+        with col_p2:
+            st.metric("可用资金", pnl.get("available_cash") if pnl.get("available_cash") is not None else "—")
+        with col_p3:
+            st.metric("持仓市值", pnl.get("position_market_value") if pnl.get("position_market_value") is not None else "—")
+        with col_p4:
+            st.metric("已实现PnL", pnl.get("realized_pnl") if pnl.get("realized_pnl") is not None else "—")
+        with col_p5:
+            st.metric("未实现PnL", pnl.get("unrealized_pnl") if pnl.get("unrealized_pnl") is not None else "—")
+        if recon:
+            st.caption(
+                f"对账: consistent={recon_consistent} frozen={recon_frozen} "
+                f"in_flight={recon.get('in_flight')} account={recon.get('account_id')}"
+            )
+        if recon_frozen:
+            st.warning("⚠️ 账户对账冻结中：PnL 已暂停写入时序库（防脏数据门）")
+
+        st.markdown("---")
+
+        # ── 区块6：当日权益曲线（B-2：时序回放）──
+        st.subheader("📈 当日权益曲线")
+        curve = provider.get_intraday_equity_curve()
+        if curve:
+            try:
+                st.line_chart({
+                    "ts": [p["ts"] for p in curve],
+                    "equity": [p["equity"] for p in curve],
+                }, x="ts", y="equity", use_container_width=True)
+            except Exception as e:  # Streamlit 版本差异时退化为数据表
+                logger.warning(f"[web] 权益曲线绘图降级为数据表: {e}")
+                st.dataframe(curve, use_container_width=True)
+            st.caption(f"当日 {len(curve)} 个权益采样点（防脏门一致后才采集）")
+        else:
+            st.info("当日暂无权益曲线数据（PnL 尚未采集 / 对账不一致被门控）")
+
     # ═══════════════════════════════════════════
     #  页面：数据
     # ═══════════════════════════════════════════
@@ -1394,6 +1516,69 @@ def _run_self_test() -> int:
     payload = provider.build_overview_payload()
     check("聚合 payload 四键", set(payload.keys()) ==
           {"health", "alerts", "metric_cards", "trading_continuity"})
+
+    # ══ B-2：对账状态 / PnL 快照 / 当日权益曲线回放（临时库，不落真实 quant.db）══
+    import tempfile
+
+    class _FakeReconciler:
+        """假对账器（to_dict 语义对齐 AccountReconciler）。"""
+
+        def to_dict(self):
+            return {"account_id": "default", "consistent": True, "frozen": False,
+                    "in_flight": False, "last_check_ts": 1.0, "last_diff": None}
+
+    tmpdir = tempfile.mkdtemp()
+    try:
+        from pathlib import Path
+
+        from myquant.database.connection import DatabaseConnection
+        from myquant.monitoring.field_crypto import FieldCrypto
+        from myquant.monitoring.metrics_collector import (
+            BuiltinMetrics as _B2,
+            _today_start_ts,
+        )
+        from myquant.monitoring.metrics_history import MetricsHistoryStore
+
+        conn = DatabaseConnection(str(Path(tmpdir) / "b2.db"))
+        store = MetricsHistoryStore(connection=conn)
+        store.attach_field_crypto(FieldCrypto(key_file=str(Path(tmpdir) / "k")))
+        now_t = time.time()
+        # 写两个当日权益点（敏感名，经加密落库）
+        store.save_metric(_B2.LIVE_TOTAL_ASSETS, 1_000_000.0,
+                          labels={"account_id": "default"}, timestamp=now_t - 120)
+        store.save_metric(_B2.LIVE_TOTAL_ASSETS, 1_001_000.0,
+                          labels={"account_id": "default"}, timestamp=now_t - 60)
+        store.save_metric(_B2.LIVE_REALIZED_PNL, 5000.0,
+                          labels={"account_id": "default"}, timestamp=now_t - 60)
+
+        recon = _FakeReconciler()
+        p = MonitorCenterDataProvider(
+            alert_manager=am, metrics_collector=_FakeCollector([]),
+            metrics_history_store=store, account_reconciler=recon,
+        )
+        curve = p.get_intraday_equity_curve()
+        check("当日权益曲线2点", len(curve) == 2, str(len(curve)))
+        check("权益曲线升序", curve[0]["equity"] == 1_000_000.0, str(curve[:1]))
+        snap = p.get_pnl_snapshot()
+        check("PnL 快照总资产=最新", snap["pnl"]["total_assets"] == 1_001_000.0,
+              str(snap["pnl"]["total_assets"]))
+        check("PnL 快照已实现=5000", snap["pnl"]["realized_pnl"] == 5000.0)
+        check("对账状态一致", snap["reconciliation"]["consistent"] is True)
+        st = p.get_reconciliation_status()
+        check("对账状态 frozen=False", st.get("frozen") is False)
+        # 空库防御：空时序库回放不抛、返回空（graceful，不碰真实 quant.db）
+        empty_conn = DatabaseConnection(str(Path(tmpdir) / "empty.db"))
+        empty_store = MetricsHistoryStore(connection=empty_conn)
+        p_empty = MonitorCenterDataProvider(
+            alert_manager=am, metrics_collector=_FakeCollector([]),
+            metrics_history_store=empty_store,
+        )
+        check("空库→权益曲线 graceful", p_empty.get_intraday_equity_curve() == [])
+        check("空库→PnL graceful", p_empty.get_pnl_snapshot().get("pnl") is not None)
+        empty_conn.close_all()
+        conn.close_all()
+    except Exception as e:  # 自测兜底：记录失败而非崩溃
+        check("B-2 自测异常", False, repr(e))
 
     logger.info("Dashboard 自测结果: %d 通过, %d 失败", passed, failed)
     return 0 if failed == 0 else 1

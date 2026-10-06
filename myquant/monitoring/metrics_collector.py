@@ -262,6 +262,43 @@ class BuiltinMetrics:
     # 安全监控（A-13：按事件类型计数进 /api/metrics；P0-7 不含密钥原文）
     SECURITY_EVENTS_TOTAL = "security_events_total"
 
+    # ══ B-2 实盘资金/PnL 指标（权益曲线时序回放；资金类落时序库经 BASE-9 加密）══
+    # 防脏门：仅当账户对账一致（未冻结）时才写入时序库（collect_pnl_snapshot）。
+    LIVE_TOTAL_ASSETS = "live_total_assets"                 # 总资产（权益曲线主序列）
+    LIVE_AVAILABLE_CASH = "live_available_cash"             # 可用资金
+    LIVE_POSITION_MARKET_VALUE = "live_position_market_value"  # 持仓市值
+    LIVE_REALIZED_PNL = "live_realized_pnl"                 # 已实现盈亏
+    LIVE_UNREALIZED_PNL = "live_unrealized_pnl"             # 未实现盈亏
+
+    # ══ Wave1 各分片指标注册清单（B-1~B-9；名以各模块实际常量为准，类型按语义）══
+    # B-3 限额使用率（GAUGE；labels: dimension/enabled）
+    LIMIT_USAGE_CONCENTRATION = "limit_usage_concentration"
+    LIMIT_USAGE_LEVERAGE = "limit_usage_leverage"
+    LIMIT_USAGE_SINGLE_STOCK = "limit_usage_single_stock"
+    # B-4/5 执行链路延迟/滑点 + 拒单（P99/均值 GAUGE；累计计数 COUNTER）
+    EXEC_SIGNAL_TO_FILL_P99_MS = "execution_signal_to_fill_p99_ms"
+    EXEC_ACK_P99_MS = "execution_ack_p99_ms"
+    EXEC_SIGNAL_TO_SUBMIT_P99_MS = "execution_signal_to_submit_p99_ms"
+    EXEC_SUBMIT_TO_FILL_P99_MS = "execution_submit_to_fill_p99_ms"
+    SLIPPAGE_BUY_PCT = "slippage_buy_pct"
+    SLIPPAGE_SELL_PCT = "slippage_sell_pct"
+    SLIPPAGE_BUY_P99_PCT = "slippage_buy_p99_pct"
+    SLIPPAGE_SELL_P99_PCT = "slippage_sell_p99_pct"
+    ORDER_REJECT_RATE = "order_reject_rate"
+    ORDERS_SUBMITTED_TOTAL = "orders_submitted_total"
+    ORDERS_REJECTED_TOTAL = "orders_rejected_total"
+    # B-7 数据新鲜度 SLI（GAUGE；新鲜度 lag 带 data_key 标签）
+    DATA_FRESHNESS_LAG_SECONDS = "data_freshness_lag_seconds"
+    DATA_GAP_COUNT = "data_gap_count"
+    FACTOR_SYNC_DELAY_SECONDS = "factor_sync_delay_seconds"
+    FINANCIAL_SYNC_DELAY_SECONDS = "financial_sync_delay_seconds"
+    # B-9 保证金监控（GAUGE）
+    MARGIN_USAGE_RATIO = "margin_usage_ratio"
+    MAINTENANCE_MARGIN = "maintenance_margin"
+    LIQUIDATION_DISTANCE_PCT = "liquidation_distance_pct"
+    FUNDING_RATE = "funding_rate"
+    FUNDING_COST_ESTIMATE = "funding_cost_estimate"
+
     # 质量等级数值映射（0=excellent, 1=good, 2=fair, 3=poor, 4=critical）
     QUALITY_GRADE_MAP = {
         "excellent": 0,
@@ -509,6 +546,81 @@ class MetricsCollector:
                       "Total security events detected by security monitor "
                       "(login_failed/unauthorized_access/credential_change/secret_exposure)",
                       label_names=["event_type"])
+
+        # ── B-2 实盘资金/PnL 指标（GAUGE；防脏门：对账一致才写时序库）──
+        self.register(BuiltinMetrics.LIVE_TOTAL_ASSETS, MetricType.GAUGE,
+                      "Live account total assets (equity curve primary series; reconciled, frozen-gated)",
+                      label_names=["account_id"])
+        self.register(BuiltinMetrics.LIVE_AVAILABLE_CASH, MetricType.GAUGE,
+                      "Live account available cash",
+                      label_names=["account_id"])
+        self.register(BuiltinMetrics.LIVE_POSITION_MARKET_VALUE, MetricType.GAUGE,
+                      "Live aggregate position market value",
+                      label_names=["account_id"])
+        self.register(BuiltinMetrics.LIVE_REALIZED_PNL, MetricType.GAUGE,
+                      "Live realized PnL (reconciled, frozen-gated)",
+                      label_names=["account_id"])
+        self.register(BuiltinMetrics.LIVE_UNREALIZED_PNL, MetricType.GAUGE,
+                      "Live unrealized PnL (reconciled, frozen-gated)",
+                      label_names=["account_id"])
+
+        # ── B-3 限额使用率（GAUGE；enabled=false 表示该维度未配置限额 PENDING_CAL）──
+        self.register(BuiltinMetrics.LIMIT_USAGE_CONCENTRATION, MetricType.GAUGE,
+                      "Concentration limit usage ratio (max single-symbol exposure / total assets)",
+                      label_names=["dimension", "enabled"])
+        self.register(BuiltinMetrics.LIMIT_USAGE_LEVERAGE, MetricType.GAUGE,
+                      "Leverage limit usage ratio (total market value / net assets)",
+                      label_names=["dimension", "enabled"])
+        self.register(BuiltinMetrics.LIMIT_USAGE_SINGLE_STOCK, MetricType.GAUGE,
+                      "Single-stock position limit usage ratio",
+                      label_names=["dimension", "enabled"])
+
+        # ── B-4/5 执行链路延迟/滑点/拒单（P99 与均值 GAUGE；累计 COUNTER）──
+        self.register(BuiltinMetrics.EXEC_SIGNAL_TO_FILL_P99_MS, MetricType.GAUGE,
+                      "P99 signal-to-fill latency in milliseconds")
+        self.register(BuiltinMetrics.EXEC_ACK_P99_MS, MetricType.GAUGE,
+                      "P99 order-send-to-ack latency in milliseconds")
+        self.register(BuiltinMetrics.EXEC_SIGNAL_TO_SUBMIT_P99_MS, MetricType.GAUGE,
+                      "P99 signal-to-submit latency in milliseconds")
+        self.register(BuiltinMetrics.EXEC_SUBMIT_TO_FILL_P99_MS, MetricType.GAUGE,
+                      "P99 submit-to-fill latency in milliseconds")
+        self.register(BuiltinMetrics.SLIPPAGE_BUY_PCT, MetricType.GAUGE,
+                      "Mean buy slippage in percent (positive = paid more than ref)")
+        self.register(BuiltinMetrics.SLIPPAGE_SELL_PCT, MetricType.GAUGE,
+                      "Mean sell slippage in percent (negative = sold below ref)")
+        self.register(BuiltinMetrics.SLIPPAGE_BUY_P99_PCT, MetricType.GAUGE,
+                      "P99 buy slippage in percent")
+        self.register(BuiltinMetrics.SLIPPAGE_SELL_P99_PCT, MetricType.GAUGE,
+                      "P99 sell slippage in percent")
+        self.register(BuiltinMetrics.ORDER_REJECT_RATE, MetricType.GAUGE,
+                      "Order rejection rate over recent window (rejected / submitted)")
+        self.register(BuiltinMetrics.ORDERS_SUBMITTED_TOTAL, MetricType.COUNTER,
+                      "Total orders submitted (cumulative)")
+        self.register(BuiltinMetrics.ORDERS_REJECTED_TOTAL, MetricType.COUNTER,
+                      "Total orders rejected (cumulative)")
+
+        # ── B-7 数据新鲜度 SLI（GAUGE；lag 按 data_key 标签）──
+        self.register(BuiltinMetrics.DATA_FRESHNESS_LAG_SECONDS, MetricType.GAUGE,
+                      "Latest data freshness lag in seconds (per data key)",
+                      label_names=["data_key"])
+        self.register(BuiltinMetrics.DATA_GAP_COUNT, MetricType.GAUGE,
+                      "Count of daily data gaps detected")
+        self.register(BuiltinMetrics.FACTOR_SYNC_DELAY_SECONDS, MetricType.GAUGE,
+                      "Factor data sync delay in seconds")
+        self.register(BuiltinMetrics.FINANCIAL_SYNC_DELAY_SECONDS, MetricType.GAUGE,
+                      "Financial data sync delay in seconds")
+
+        # ── B-9 保证金监控（GAUGE）──
+        self.register(BuiltinMetrics.MARGIN_USAGE_RATIO, MetricType.GAUGE,
+                      "Margin usage ratio in percent (occupied margin / equity)")
+        self.register(BuiltinMetrics.MAINTENANCE_MARGIN, MetricType.GAUGE,
+                      "Maintenance margin requirement")
+        self.register(BuiltinMetrics.LIQUIDATION_DISTANCE_PCT, MetricType.GAUGE,
+                      "Distance to liquidation in percent")
+        self.register(BuiltinMetrics.FUNDING_RATE, MetricType.GAUGE,
+                      "Current funding rate")
+        self.register(BuiltinMetrics.FUNDING_COST_ESTIMATE, MetricType.GAUGE,
+                      "Estimated funding cost (overnight)")
 
         return self
 
@@ -1875,3 +1987,298 @@ def reset_metrics_collector() -> None:
     """重置全局指标采集器（测试用）"""
     global _global_collector
     _global_collector = None
+
+
+# ═══════════════════════════════════════════════
+#  B-2：PnL 采集（防脏门）+ 时序回放（权益曲线 / 最新快照）
+# ═══════════════════════════════════════════════
+
+#: B-2 写入时序库的 PnL/资金指标清单（GAUGE；4 个命中 BASE-9 敏感名需加密落盘）
+PNL_EQUITY_METRICS: tuple = (
+    BuiltinMetrics.LIVE_TOTAL_ASSETS,
+    BuiltinMetrics.LIVE_AVAILABLE_CASH,
+    BuiltinMetrics.LIVE_POSITION_MARKET_VALUE,
+    BuiltinMetrics.LIVE_REALIZED_PNL,
+    BuiltinMetrics.LIVE_UNREALIZED_PNL,
+)
+
+#: 指标名 → portfolio.get_account() 字段映射（防脏门通过后读取一致状态）
+_PNL_FIELD_MAP: Dict[str, str] = {
+    BuiltinMetrics.LIVE_TOTAL_ASSETS: "total_assets",
+    BuiltinMetrics.LIVE_AVAILABLE_CASH: "available_cash",
+    BuiltinMetrics.LIVE_POSITION_MARKET_VALUE: "market_value",
+    BuiltinMetrics.LIVE_REALIZED_PNL: "realized_pnl",
+    BuiltinMetrics.LIVE_UNREALIZED_PNL: "unrealized_pnl",
+}
+
+
+def _today_start_ts(now_ts: Optional[float] = None) -> float:
+    """本地时区当日零点 epoch 秒（防未来：仅作为"当日曲线"左闭起点）。"""
+    now_t = time.time() if now_ts is None else float(now_ts)
+    lt = time.localtime(now_t)
+    return time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1))
+
+
+def _default_history_store() -> Any:
+    """惰性构建时序库实例（默认项目库；测试注入临时库）。"""
+    from myquant.monitoring.metrics_history import MetricsHistoryStore
+    return MetricsHistoryStore()
+
+
+def _save_pnl_rows(store: Any, rows: List[Dict[str, Any]]) -> int:
+    """
+    落库 PnL 批次；敏感名命中但未绑 FieldCrypto 时自动绑定后重试一次（BASE-9）。
+
+    资金/持仓/PnL 命中敏感名（asset/position/pnl）必须加密落盘；默认时序库未绑
+    加密器时拒绝明文落盘，此处按 BASE-9"首次自动生成密钥"语义补绑后重试。
+
+    Returns:
+        int : 实际写入行数。
+
+    Raises:
+        Exception: 非"拒绝明文落盘"类错误向上抛出（调用方记日志不阻断 POLL）。
+    """
+    try:
+        return store.save_batch(rows)
+    except ValueError as e:
+        if "拒绝明文落盘" in str(e) and getattr(store, "_field_crypto", None) is None:
+            from myquant.monitoring.field_crypto import FieldCrypto
+            store.attach_field_crypto(FieldCrypto())
+            logger.warning(
+                "[metrics] PnL 敏感指标落库：自动绑定 FieldCrypto（BASE-9，首次自动生成密钥）"
+            )
+            return store.save_batch(rows)
+        raise
+
+
+def collect_pnl_snapshot(
+    portfolio: Any,
+    reason: str = "periodic",
+    reconciler: Optional[Any] = None,
+    store: Optional[Any] = None,
+    collector: Optional[Any] = None,
+    timestamp: Optional[float] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    采集一次 PnL/资金快照并落时序库（B-2 POLL 入口；防脏门）。
+
+    防脏数据门：先经 LivePortfolio.record_pnl_snapshot——账户对账冻结（差异未
+    人工解除）时返回 None 且不写时序库（portfolio 侧已经 reconciler 审计留痕
+    action="pnl_block"）；一致（未冻结）后才把总资产/可用/持仓市值/已实现/未实现
+    PnL 落 MetricsHistoryStore，并联动 MetricsCollector 的 live_* GAUGE。
+
+    【防未来】timestamp 默认取当前采集时刻；只读当前已发生账户状态，不预测。
+
+    Parameters
+    ----------
+    portfolio : LivePortfolio
+        实盘账户（须具备 record_pnl_snapshot/get_account 接口）
+    reason : str
+        记录触发原因（periodic/settle/manual，仅留痕）
+    reconciler : AccountReconciler | None
+        对账器（None 由 portfolio 内部解析注入/全局单例）
+    store : MetricsHistoryStore | None
+        时序库（None 惰性默认库）
+    collector : MetricsCollector | None
+        指标采集器（None 不联动 /api/metrics；传入则 set_gauge 5 个 live_* 指标）
+    timestamp : float | None
+        采集时刻（epoch 秒；None=当前时刻）
+
+    Returns
+    -------
+    dict | None :
+        冻结被拒 → {"written": False, "blocked": True, ...}；
+        成功 → {"written": True, "rows": n, "account_id", "values": {...}, "ts"}；
+        portfolio 缺失等非法入参 → None。
+    """
+    if portfolio is None:
+        logger.error("[metrics] collect_pnl_snapshot 拒绝：portfolio 为 None")
+        return None
+
+    ts = time.time() if timestamp is None else float(timestamp)
+
+    # ── 防脏门：冻结时 portfolio.record_pnl_snapshot 返回 None 并已留痕 ──
+    try:
+        gate = portfolio.record_pnl_snapshot(reason)
+    except Exception as e:  # 采集异常不阻断 POLL 主流程
+        logger.error("[metrics] PnL 防脏门调用异常（不写库）: %s", e)
+        return {"written": False, "blocked": True, "reason": reason, "ts": ts,
+                "error": "gate_exception"}
+    if gate is None:
+        logger.warning(
+            "[metrics] PnL 采集被防脏门拒绝（对账冻结），不写时序库: reason=%s", reason,
+        )
+        return {"written": False, "blocked": True, "reason": reason, "ts": ts}
+
+    # ── 门通过：读取一致状态快照 ──
+    try:
+        acct = portfolio.get_account()
+    except Exception as e:
+        logger.error("[metrics] PnL 账户快照读取失败: %s", e)
+        return {"written": False, "blocked": False, "reason": reason, "ts": ts,
+                "error": "read_account"}
+
+    account_id = str(acct.get("account_id", "default"))
+    values: Dict[str, float] = {}
+    rows: List[Dict[str, Any]] = []
+    for metric_name, field in _PNL_FIELD_MAP.items():
+        val = acct.get(field, 0.0)
+        try:
+            val_f = float(val)
+        except (TypeError, ValueError):
+            logger.error("[metrics] PnL 字段 %s 非法值 %r，记 0.0", field, val)
+            val_f = 0.0
+        values[metric_name] = val_f
+        rows.append({
+            "name": metric_name,
+            "value": val_f,
+            "labels": {"account_id": account_id},
+            "timestamp": ts,
+        })
+
+    # ── 落时序库（敏感名自动加密；失败不阻断 POLL）──
+    history = store if store is not None else _default_history_store()
+    written = 0
+    write_error: Optional[str] = None
+    try:
+        written = _save_pnl_rows(history, rows)
+    except Exception as e:  # noqa: BLE001
+        write_error = str(e)
+        logger.error("[metrics] PnL 落时序库失败（不阻断 POLL）: %s", e)
+
+    # ── 联动实时采集器（/api/metrics 当前值）──
+    if collector is not None and write_error is None:
+        try:
+            for metric_name, val_f in values.items():
+                collector.set_gauge(metric_name, val_f, labels={"account_id": account_id})
+        except Exception as e:  # noqa: BLE001
+            logger.error("[metrics] PnL 联动采集器失败: %s", e)
+
+    return {
+        "written": write_error is None,
+        "blocked": False,
+        "rows": written,
+        "account_id": account_id,
+        "values": values,
+        "total_pnl": values[BuiltinMetrics.LIVE_REALIZED_PNL]
+                     + values[BuiltinMetrics.LIVE_UNREALIZED_PNL],
+        "reason": reason,
+        "ts": ts,
+        "error": write_error,
+    }
+
+
+def get_latest_pnl_snapshot(
+    store: Optional[Any] = None,
+    reconciler: Optional[Any] = None,
+    account_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    读取最新 PnL 快照（时序库各指标最新一点）+ 对账状态（B-2 / B-8 资金 PnL 视图）。
+
+    【防未来】只查询当前已落库的历史点，不预测；无数据时各项为 None（不伪造）。
+
+    Parameters
+    ----------
+    store : MetricsHistoryStore | None
+        时序库（None 惰性默认库）
+    reconciler : AccountReconciler | None
+        对账器（None 则对账状态回退 unknown，不伪造）
+    account_id : str | None
+        账户标签过滤；None 不限标签
+
+    Returns
+    -------
+    dict : {"pnl": {total_assets/available_cash/position_market_value/
+            realized_pnl/unrealized_pnl/total_pnl}, "ts", "account_id",
+            "reconciliation": {...}|None}
+    """
+    history = store if store is not None else _default_history_store()
+    labels = {"account_id": account_id} if account_id else None
+    pnl: Dict[str, Optional[float]] = {
+        "total_assets": None,
+        "available_cash": None,
+        "position_market_value": None,
+        "realized_pnl": None,
+        "unrealized_pnl": None,
+        "total_pnl": None,
+    }
+    latest_ts: float = 0.0
+    for metric_name, field in _PNL_FIELD_MAP.items():
+        try:
+            rows = history.query(name=metric_name, labels=labels, order="desc", limit=1)
+        except Exception as e:  # noqa: BLE001
+            logger.error("[metrics] PnL 最新值查询失败（%s）: %s", metric_name, e)
+            rows = []
+        if rows:
+            row = rows[0]
+            pnl[field] = row["value"]
+            latest_ts = max(latest_ts, float(row["timestamp"]))
+
+    if pnl["realized_pnl"] is not None and pnl["unrealized_pnl"] is not None:
+        pnl["total_pnl"] = pnl["realized_pnl"] + pnl["unrealized_pnl"]
+
+    if reconciler is not None and hasattr(reconciler, "to_dict"):
+        try:
+            reconciliation: Optional[Dict[str, Any]] = reconciler.to_dict()
+        except Exception as e:  # noqa: BLE001
+            logger.error("[metrics] 对账状态读取失败: %s", e)
+            reconciliation = None
+    else:
+        reconciliation = None
+
+    return {
+        "pnl": pnl,
+        "ts": latest_ts if latest_ts > 0 else None,
+        "account_id": account_id,
+        "reconciliation": reconciliation,
+    }
+
+
+def replay_intraday_equity_curve(
+    store: Optional[Any] = None,
+    account_id: Optional[str] = None,
+    metric_name: str = BuiltinMetrics.LIVE_TOTAL_ASSETS,
+    now_ts: Optional[float] = None,
+    max_points: int = 1440,
+) -> List[Dict[str, Any]]:
+    """
+    回放当日权益曲线（B-2：基于 metrics_history 当日序列，升序）。
+
+    【防未来】左闭起点取本地当日零点，右闭取 now_ts（当前时刻）；只回放
+    当日已落库点。敏感指标（total_assets）经 query() 解密回读真实值；
+    当日为高精度原始点，不降采样（query_downsampled 拒绝敏感名聚合）。
+
+    Parameters
+    ----------
+    store : MetricsHistoryStore | None
+        时序库（None 惰性默认库）
+    account_id : str | None
+        账户标签过滤；None 不限
+    metric_name : str
+        权益序列指标名（默认 live_total_assets）
+    now_ts : float | None
+        当前时刻（epoch 秒；None=当前时刻）
+    max_points : int
+        最大返回点数（>0）
+
+    Returns
+    -------
+    list[dict] : [{"ts": epoch秒, "equity": 总资产}] 升序；无数据返回 []
+    """
+    if max_points <= 0:
+        raise ValueError(f"max_points 必须为正整数，收到 {max_points}")
+    history = store if store is not None else _default_history_store()
+    end_ts = time.time() if now_ts is None else float(now_ts)
+    start_ts = _today_start_ts(end_ts)
+    labels = {"account_id": account_id} if account_id else None
+    try:
+        rows = history.query(
+            name=metric_name, labels=labels,
+            start_ts=start_ts, end_ts=end_ts,
+            order="asc", limit=max_points,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.error("[metrics] 当日权益曲线回放失败: %s", e)
+        return []
+    return [{"ts": float(r["timestamp"]), "equity": float(r["value"])} for r in rows]
