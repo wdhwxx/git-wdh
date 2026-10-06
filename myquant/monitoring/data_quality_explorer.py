@@ -27,9 +27,12 @@ data_quality_explorer.py - 数据质量探查器（纯Python数据层）
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+import time
+from typing import Any, Callable, Dict, List, Optional
 
+from myquant.core.constants import SeverityLevel
 from myquant.core.logger import get_logger
+from myquant.core.settings import get_monitoring_config
 
 logger = get_logger("monitoring.data_quality_explorer")
 
@@ -286,3 +289,657 @@ class DataQualityExplorer:
             f"DataQualityExplorer(connection={self._connection!r}, "
             f"collector={self._collector!r})"
         )
+
+
+# ═══════════════════════════════════════════════════════════════
+#  B-7：数据新鲜度 SLI（L2 增强，事件/周期）（回写#227）
+# ═══════════════════════════════════════════════════════════════
+#
+# 验收口径（施工总清单 B-7 行）：
+#   - 数据新鲜度引用 P0-2 锁定清单（<1min、缺口=0，LOCKED）；每日数据缺口统计；
+#     因子/财务同步任务延迟监控（分别设值）。
+#   - 验收 = 数据新鲜度指标可查，缺口/延迟超阈值告警；阈值取自 P0-2（R-04 唯一真源）。
+#
+# 阈值真源（R-04）：config/settings.yaml monitoring.slo.data 块，
+#   读取入口 myquant.core.settings.get_monitoring_config()：
+#     freshness_max_seconds = 60   （LOCKED 硬约束：新鲜度 <1min，必须生效）
+#     gap_allowed           = 0   （LOCKED 硬约束：缺口 =0，缺口>0 即告警）
+#     factor_sync_delay_max_seconds   = ~（None，PENDING_CAL 待实盘校准 → 不告警、不编造数值）
+#     financial_sync_delay_max_seconds = ~（None，PENDING_CAL 待实盘校准 → 不告警、不编造数值）
+#
+# 缺口口径：应到数据点缺失的统计。本类不臆造调度计划；缺口数量由注入的 gap_provider
+#   （只读外部已统计的缺口快照）或 record_gap() 显式登记提供，按日聚合（date 键取
+#   ISO "YYYY-MM-DD"，字典序即时间序）。当前评估缺口 = 最新一个日期键的缺口数量。
+#
+# 防未来函数：
+#   - 新鲜度滞后 = max(0, now - 最新已到达数据时间戳)，只消费"已发生"数据；
+#     未来时间戳（时钟偏差）被截断为 0，不计负滞后、不误告警。
+#   - 缺口/同步延迟只统计"已缺失/已完成"事实，不预测下一笔到达。
+
+# ── 常量（非业务阈值；业务阈值一律来自 settings.yaml R-04）──
+#: 告警分类 / 来源
+SLI_CATEGORY_DATA_QUALITY: str = "data_quality"
+SLI_SOURCE_DATA_FRESHNESS: str = "monitoring.data_quality"
+
+#: 指标名（set_gauge 自动建指标；BuiltinMetrics 登记由主控 Wave2 统一做）
+METRIC_FRESHNESS_LAG_SECONDS: str = "data_freshness_lag_seconds"
+METRIC_DATA_GAP_COUNT: str = "data_gap_count"
+METRIC_FACTOR_SYNC_DELAY_SECONDS: str = "factor_sync_delay_seconds"
+METRIC_FINANCIAL_SYNC_DELAY_SECONDS: str = "financial_sync_delay_seconds"
+
+#: 新鲜度超阈严重度分级系数：lag > freshness_max × 该系数 → ERROR(P1)，否则 WARNING(P2)
+FRESHNESS_ERROR_MULTIPLE: float = 2.0
+
+
+def _none_to_float(value: Any) -> Optional[float]:
+    """
+    把配置值安全转 float；None 或非法值统一回退 None（PENDING_CAL 维度=不启用）。
+
+    Parameters
+    ----------
+    value : Any
+        配置原始值（yaml 的 ~ → None，或数值）。
+
+    Returns
+    -------
+    float | None : 转成功返回 float；None/非法返回 None。
+    """
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        logger.warning("同步延迟阈值非法（%r），按未配置处理（不告警）", value)
+        return None
+
+
+class DataFreshnessSli:
+    """
+    数据新鲜度 SLI（B-7，事件/周期触发）。
+
+    度量三件事（阈值全部读 monitoring.slo.data，R-04）：
+      1. 新鲜度滞后：按标的/数据类统计"最新已到达数据时间戳 vs 当前时间"的滞后秒数；
+         滞后 > freshness_max_seconds(60s, LOCKED) → 告警（超 2× 升 ERROR/P1，否则 WARNING/P2）。
+      2. 每日数据缺口：按日聚合应到而缺失的数据点数量；缺口 > gap_allowed(0, LOCKED)
+         → ERROR/P1 告警（缺口=0 是硬约束，任何缺口即 P1）。
+      3. 因子/财务同步任务延迟：分别设值；阈值未配置(None)=PENDING_CAL → 该维度不告警、
+         不编造数值；已配置且延迟超限 → WARNING(P2) 告警。
+
+    指标（经 get_metrics_collector().set_gauge 写入，进 /api/metrics）：
+      data_freshness_lag_seconds / data_gap_count /
+      factor_sync_delay_seconds / financial_sync_delay_seconds
+
+    触发：poll()/collect() 供周期巡检；attach_event_bus() 订阅数据到达事件
+      （EventType.DATA_LOADED）到达即触发一次 poll（事件驱动兜底周期）。
+
+    防未来：只消费"已发生"的最新时间戳/缺口/同步完成时刻，滞后截断为非负，不预测。
+    """
+
+    def __init__(
+        self,
+        freshness_max_seconds: Optional[float] = None,
+        gap_allowed: Optional[int] = None,
+        factor_sync_delay_max_seconds: Optional[float] = None,
+        financial_sync_delay_max_seconds: Optional[float] = None,
+        latest_timestamp_provider: Optional[Callable[[], Dict[str, float]]] = None,
+        gap_provider: Optional[Callable[[], Dict[str, int]]] = None,
+        alert_manager: Any = None,
+        metrics_collector: Any = None,
+        clock: Optional[Callable[[], float]] = None,
+    ) -> None:
+        """
+        Parameters
+        ----------
+        freshness_max_seconds : float | None
+            新鲜度滞后上限（秒，LOCKED=60）。None 读 slo.data.freshness_max_seconds。
+        gap_allowed : int | None
+            允许缺口数（LOCKED=0）。None 读 slo.data.gap_allowed。
+        factor_sync_delay_max_seconds : float | None
+            因子同步延迟上限（秒）。None 读 slo.data.factor_sync_delay_max_seconds；
+            读到 None=PENDING_CAL → 该维度不告警、不编造数值。
+        financial_sync_delay_max_seconds : float | None
+            财务同步延迟上限（秒）。同上。
+        latest_timestamp_provider : Callable[[], dict[str, float]] | None
+            "最新数据时间戳提供者"回调：返回 {data_key: 最新到达 epoch 秒}。
+            data_key 一般为 "标的:数据类"（如 "SH600000:1d"）。None 缺省返回空快照
+            （无数据场景防御：不编造时间戳、不误告警）。
+        gap_provider : Callable[[], dict[str, int]] | None
+            "每日缺口统计"回调：返回 {date(YYYY-MM-DD): 当日缺口数量}。None 缺省空。
+        alert_manager : AlertManager | None
+            告警管理器；None 延迟取 get_alert_manager()。
+        metrics_collector : MetricsCollector | None
+            指标采集器；None 延迟取 get_metrics_collector()。
+        clock : Callable[[], float] | None
+            当前时间戳函数（测试注入）；None 用 time.time。
+
+        Raises
+        ------
+        ValueError : freshness_max_seconds<=0 / gap_allowed<0 / 已配置的同步延迟<=0 时抛出
+            （拒绝脏配置运行；LOCKED 硬约束必须生效）。
+        """
+        slo_data = get_monitoring_config().get("slo", {}).get("data", {}) or {}
+
+        self._freshness_max: float = (
+            float(freshness_max_seconds) if freshness_max_seconds is not None
+            else float(slo_data.get("freshness_max_seconds", 60))
+        )
+        self._gap_allowed: int = (
+            int(gap_allowed) if gap_allowed is not None
+            else int(slo_data.get("gap_allowed", 0))
+        )
+        # 因子/财务同步延迟：PENDING_CAL 未配置(None) → 维度关闭，不告警不编造
+        self._factor_delay_max: Optional[float] = (
+            _none_to_float(factor_sync_delay_max_seconds)
+            if factor_sync_delay_max_seconds is not None
+            else _none_to_float(slo_data.get("factor_sync_delay_max_seconds"))
+        )
+        self._financial_delay_max: Optional[float] = (
+            _none_to_float(financial_sync_delay_max_seconds)
+            if financial_sync_delay_max_seconds is not None
+            else _none_to_float(slo_data.get("financial_sync_delay_max_seconds"))
+        )
+
+        # 防御式校验（LOCKED 硬约束：freshness 60s / gap 0 必须生效）
+        if self._freshness_max <= 0:
+            raise ValueError(
+                f"freshness_max_seconds 必须 > 0，实际 {self._freshness_max!r}"
+            )
+        if self._gap_allowed < 0:
+            raise ValueError(
+                f"gap_allowed 必须 >= 0，实际 {self._gap_allowed!r}"
+            )
+        for _name, _v in (
+            ("factor_sync_delay_max_seconds", self._factor_delay_max),
+            ("financial_sync_delay_max_seconds", self._financial_delay_max),
+        ):
+            if _v is not None and _v <= 0:
+                raise ValueError(f"{_name} 必须 > 0 或 None，实际 {_v!r}")
+
+        self._clock: Callable[[], float] = clock if clock is not None else time.time
+        self._alert_manager = alert_manager
+        self._metrics_collector = metrics_collector
+
+        # 数据源可注入；缺省=空快照（无数据场景防御）
+        self._latest_provider: Callable[[], Dict[str, float]] = (
+            latest_timestamp_provider if latest_timestamp_provider is not None
+            else lambda: {}
+        )
+        self._gap_provider: Callable[[], Dict[str, int]] = (
+            gap_provider if gap_provider is not None else lambda: {}
+        )
+
+        # 内部状态（全部为"已发生"事实）
+        self._daily_gaps: Dict[str, int] = {}
+        self._factor_sync_last_ts: Optional[float] = None
+        self._financial_sync_last_ts: Optional[float] = None
+        self._handler_ids: List[str] = []
+        logger.debug(
+            "DataFreshnessSli 初始化: freshness_max=%.0fs gap_allowed=%d "
+            "factor_delay_max=%r financial_delay_max=%r",
+            self._freshness_max, self._gap_allowed,
+            self._factor_delay_max, self._financial_delay_max,
+        )
+
+    # ── 事件/周期登记入口 ─────────────────────────────────────
+    def record_gap(self, date: str, count: int) -> None:
+        """
+        登记某一交易日的数据缺口数量（缺口口径=应到数据点缺失）。
+
+        Parameters
+        ----------
+        date : str
+            交易日，ISO "YYYY-MM-DD"（字典序即时间序）。
+        count : int
+            当日缺口数量（>=0）。
+
+        Raises
+        ------
+        ValueError : date 为空或 count<0 时抛出。
+        """
+        if not date or not isinstance(date, str):
+            raise ValueError(f"gap date 必须是非空字符串，实际 {date!r}")
+        c = int(count)
+        if c < 0:
+            raise ValueError(f"gap count 必须 >= 0，实际 {c!r}")
+        self._daily_gaps[date] = c
+
+    def record_gaps(self, daily: Dict[str, int]) -> None:
+        """批量登记每日缺口（覆盖同日已有值）。"""
+        if not isinstance(daily, dict):
+            raise ValueError(f"daily gaps 必须是 dict，实际 {type(daily)!r}")
+        for d, c in daily.items():
+            self.record_gap(str(d), int(c))
+
+    def record_factor_sync(self, ts: Optional[float] = None) -> None:
+        """登记一次因子同步任务完成时刻（事件入口；防未来：仅记录已发生时刻）。"""
+        self._factor_sync_last_ts = float(self._clock() if ts is None else ts)
+
+    def record_financial_sync(self, ts: Optional[float] = None) -> None:
+        """登记一次财务同步任务完成时刻（事件入口；防未来：仅记录已发生时刻）。"""
+        self._financial_sync_last_ts = float(self._clock() if ts is None else ts)
+
+    # ── 事件总线：数据到达即触发一次评估 ──────────────────────
+    def attach_event_bus(self, bus: Any) -> None:
+        """
+        订阅 EventBus 数据到达事件（DATA_LOADED），到达即 poll() 一次（事件驱动）。
+
+        Parameters
+        ----------
+        bus : EventBus
+            事件总线。订阅失败记 warning，不阻断（poll() 仍可被周期巡检调用）。
+        """
+        if bus is None:
+            return
+        try:
+            from myquant.core.event_bus import EventType
+
+            self._handler_ids.append(
+                bus.subscribe(EventType.DATA_LOADED, self._on_data_arrived)
+            )
+            logger.info("DataFreshnessSli 已订阅 EventBus DATA_LOADED")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"DataFreshnessSli 订阅 EventBus 失败（poll 仍可用）: {e}")
+
+    def _on_data_arrived(self, event: Any) -> None:
+        """数据到达事件回调：触发一次新鲜度/缺口/延迟评估（异常不向上炸断总线）。"""
+        try:
+            self.poll()
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"数据到达事件触发 poll 异常: {e}")
+
+    # ── 纯查询（不告警、不写指标）─────────────────────────────
+    def latest_lag_seconds(self) -> Dict[str, float]:
+        """返回各 data_key 当前新鲜度滞后秒数（纯查询；防未来：仅截至 now 时刻）。"""
+        return self._compute_lag_map(self._clock())
+
+    def daily_gap_stats(self) -> Dict[str, int]:
+        """返回每日缺口聚合统计快照（登记值 + gap_provider 当日值合并）。"""
+        return self._merged_daily_gaps()
+
+    def current_gap_count(self) -> int:
+        """当前评估缺口数 = 最新一个日期键（YYYY-MM-DD 字典序最大）的缺口数量。"""
+        return self._latest_gap_count(self._merged_daily_gaps())
+
+    # ── 主入口：周期巡检 / 事件驱动 ───────────────────────────
+    def poll(self) -> Dict[str, Any]:
+        """
+        一轮采集：新鲜度滞后 + 每日缺口 + 因子/财务同步延迟 → 写指标 + 分级告警。
+
+        Returns
+        -------
+        dict : 当前 SLI 状态快照（各 key 滞后、每日缺口、当前缺口数、各延迟维度值）。
+        """
+        now = self._clock()
+
+        # 1) 新鲜度滞后（按标的/数据类分别）
+        lag_map = self._compute_lag_map(now)
+        max_lag = 0.0
+        for key, lag in lag_map.items():
+            self._write_gauge(
+                METRIC_FRESHNESS_LAG_SECONDS, lag, labels={"data_key": key}
+            )
+            max_lag = max(max_lag, lag)
+            self._evaluate_freshness(key, lag)
+
+        # 2) 每日数据缺口
+        daily = self._merged_daily_gaps()
+        gap_count = self._latest_gap_count(daily)
+        self._write_gauge(METRIC_DATA_GAP_COUNT, float(gap_count))
+        self._evaluate_gap(gap_count)
+
+        # 3) 因子/财务同步延迟（未配置维度跳过，不告警不编造）
+        factor_delay = self._evaluate_sync(
+            "factor", now, self._factor_delay_max, self._factor_sync_last_ts
+        )
+        financial_delay = self._evaluate_sync(
+            "financial", now, self._financial_delay_max, self._financial_sync_last_ts
+        )
+
+        return {
+            "freshness_max_seconds": self._freshness_max,
+            "gap_allowed": self._gap_allowed,
+            "latest_lag_seconds": lag_map,
+            "max_lag_seconds": round(max_lag, 3),
+            "daily_gap_stats": daily,
+            "current_gap_count": gap_count,
+            "factor_sync_delay_seconds": factor_delay,
+            "financial_sync_delay_seconds": financial_delay,
+        }
+
+    #: collect() 与 poll() 等价（事件/周期两种触发语义共用一轮采集）
+    collect = poll
+
+    def get_status(self) -> Dict[str, Any]:
+        """返回监控状态快照（供巡检报告/看板暴露；纯查询不告警）。"""
+        now = self._clock()
+        daily = self._merged_daily_gaps()
+        return {
+            "freshness_max_seconds": self._freshness_max,
+            "gap_allowed": self._gap_allowed,
+            "factor_sync_delay_max_seconds": self._factor_delay_max,
+            "financial_sync_delay_max_seconds": self._financial_delay_max,
+            "latest_lag_seconds": self._compute_lag_map(now),
+            "daily_gap_stats": daily,
+            "current_gap_count": self._latest_gap_count(daily),
+        }
+
+    # ── 内部计算 ─────────────────────────────────────────────
+    def _compute_lag_map(self, now: float) -> Dict[str, float]:
+        """
+        计算各 data_key 新鲜度滞后。
+
+        防未来：滞后 = max(0, now - 最新已到达时间戳)；未来时间戳（时钟偏差）截断为 0，
+        本行使用的数据截至 now 时刻（只消费已到达数据）。
+        """
+        try:
+            raw = self._latest_provider() or {}
+        except Exception as e:  # noqa: BLE001
+            logger.warning("latest_timestamp_provider 读取失败（按无数据处理）: %s", e)
+            return {}
+        result: Dict[str, float] = {}
+        for key, ts in raw.items():
+            try:
+                t = float(ts)
+            except (TypeError, ValueError):
+                logger.warning("跳过非法时间戳 data_key=%r ts=%r", key, ts)
+                continue
+            lag = now - t
+            if lag < 0:  # 防未来：未来时间戳不计负滞后
+                lag = 0.0
+            result[str(key)] = lag
+        return result
+
+    def _merged_daily_gaps(self) -> Dict[str, int]:
+        """合并登记缺口与 gap_provider 当日缺口（同日期相加）。"""
+        merged: Dict[str, int] = dict(self._daily_gaps)
+        try:
+            for d, c in (self._gap_provider() or {}).items():
+                k = str(d)
+                merged[k] = merged.get(k, 0) + int(c)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("gap_provider 读取失败（仅用已登记缺口）: %s", e)
+        return merged
+
+    @staticmethod
+    def _latest_gap_count(daily: Dict[str, int]) -> int:
+        """当前评估缺口 = 最新日期键（YYYY-MM-DD 字典序最大）的缺口数量；无数据=0。"""
+        if not daily:
+            return 0
+        latest_date = max(daily.keys())
+        return int(daily[latest_date])
+
+    # ── 评估与告警 ───────────────────────────────────────────
+    def _evaluate_freshness(self, key: str, lag: float) -> None:
+        """新鲜度超阈分级告警：>2× 上限 ERROR(P1)，否则 WARNING(P2)。"""
+        if lag <= self._freshness_max:
+            return
+        level = (
+            SeverityLevel.ERROR
+            if lag > self._freshness_max * FRESHNESS_ERROR_MULTIPLE
+            else SeverityLevel.WARNING
+        )
+        self._alert(
+            level=level,
+            message=(
+                f"[data-freshness] {key} 数据滞后 {lag:.0f}s 超过上限 "
+                f"{self._freshness_max:.0f}s"
+            ),
+            details={
+                "data_key": key,
+                "lag_seconds": round(lag, 3),
+                "freshness_max_seconds": self._freshness_max,
+            },
+            dedup_key=f"freshness:{key}",
+        )
+
+    def _evaluate_gap(self, gap_count: int) -> None:
+        """缺口 > gap_allowed（LOCKED=0）→ ERROR(P1)：任何缺口即硬约束被破坏。"""
+        if gap_count <= self._gap_allowed:
+            return
+        self._alert(
+            level=SeverityLevel.ERROR,
+            message=(
+                f"[data-gap] 数据缺口 {gap_count} 超过允许值 {self._gap_allowed}"
+                f"（缺口=0 为 LOCKED 硬约束）"
+            ),
+            details={
+                "gap_count": gap_count,
+                "gap_allowed": self._gap_allowed,
+            },
+            dedup_key="data_gap:exceeded",
+        )
+
+    def _evaluate_sync(
+        self,
+        kind: str,
+        now: float,
+        max_delay: Optional[float],
+        last_ts: Optional[float],
+    ) -> Optional[float]:
+        """
+        因子/财务同步延迟评估。
+
+        max_delay=None（PENDING_CAL 未配置）→ 维度关闭，不告警、不编造数值。
+        last_ts=None（无同步记录）→ 防御跳过。延迟超配置值 → WARNING(P2) 告警。
+        """
+        if max_delay is None:
+            return None  # PENDING_CAL：待实盘校准，不告警不编造
+        if last_ts is None:
+            return None  # 无同步记录，防御不编造
+        delay = now - last_ts
+        if delay < 0:  # 防未来
+            delay = 0.0
+        metric = (
+            METRIC_FACTOR_SYNC_DELAY_SECONDS if kind == "factor"
+            else METRIC_FINANCIAL_SYNC_DELAY_SECONDS
+        )
+        self._write_gauge(metric, delay)
+        if delay > max_delay:
+            self._alert(
+                level=SeverityLevel.WARNING,
+                message=(
+                    f"[data-sync] {kind} 同步延迟 {delay:.0f}s 超过上限 {max_delay:.0f}s"
+                ),
+                details={
+                    "kind": kind,
+                    "delay_seconds": round(delay, 3),
+                    "max_delay_seconds": max_delay,
+                },
+                dedup_key=f"{kind}_sync:delay",
+            )
+        return delay
+
+    # ── 指标/告警基础设施（懒加载，采集器/管理器不可用仅记 warning 不阻断）──
+    def _write_gauge(
+        self, name: str, value: float, labels: Optional[Dict[str, str]] = None
+    ) -> None:
+        """set_gauge 写指标（进 /api/metrics）；失败记 warning 不阻断检测。"""
+        col = self._metrics_collector
+        if col is None:
+            try:
+                from myquant.monitoring.metrics_collector import get_metrics_collector
+                col = get_metrics_collector()
+                self._metrics_collector = col
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"获取 metrics_collector 失败（指标 {name} 未写入）: {e}")
+                return
+        try:
+            col.set_gauge(name, float(value), labels=labels)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"指标 {name} 写入失败（不阻断检测）: {e}")
+
+    def _alert(
+        self,
+        level: SeverityLevel,
+        message: str,
+        details: Dict[str, Any],
+        dedup_key: str,
+    ) -> None:
+        """经 get_alert_manager().alert 发告警（category=data_quality）；失败记 warning 不阻断。"""
+        mgr = self._alert_manager
+        if mgr is None:
+            try:
+                from myquant.monitoring.alerting import get_alert_manager
+                mgr = get_alert_manager()
+                self._alert_manager = mgr
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"获取 alert_manager 失败（告警未发送: {message}）: {e}")
+                return
+        try:
+            mgr.alert(
+                level=level,
+                message=message,
+                source=SLI_SOURCE_DATA_FRESHNESS,
+                category=SLI_CATEGORY_DATA_QUALITY,
+                details=details,
+                deduplication_key=dedup_key,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"告警发送失败（不阻断检测）: {e}")
+
+    def __repr__(self) -> str:
+        return (
+            f"DataFreshnessSli(freshness_max={self._freshness_max!r}, "
+            f"gap_allowed={self._gap_allowed!r}, "
+            f"factor_delay_max={self._factor_delay_max!r}, "
+            f"financial_delay_max={self._financial_delay_max!r})"
+        )
+
+
+# ═══════════════════════════════════════════════
+#  __main__ 自测 demo（注入固定时钟/假告警/假采集器）
+# ═══════════════════════════════════════════════
+def _run_freshness_self_test() -> int:
+    """模块自测 demo：验证新鲜度分级告警/缺口硬约束/同步延迟分维/防未来。"""
+    passed = 0
+    failures: List[str] = []
+
+    def check(name: str, cond: bool, info: str = "") -> None:
+        nonlocal passed
+        if cond:
+            passed += 1
+        else:
+            failures.append(f"{name} {info}")
+
+    class _FakeAlert:
+        def __init__(self) -> None:
+            self.calls: list = []
+
+        def alert(self, **kw):
+            self.calls.append(kw)
+            return 1
+
+    class _FakeMetrics:
+        def __init__(self) -> None:
+            self.gauges: dict = {}
+
+        def set_gauge(self, name, value, labels=None):
+            self.gauges[(name, tuple(sorted((labels or {}).items())))] = value
+
+    clock_now = [1000.0]
+
+    def clock() -> float:
+        return clock_now[0]
+
+    am = _FakeAlert()
+    met = _FakeMetrics()
+
+    # 1) 新鲜数据（lag=10 < 60）→ 不告警，指标=10
+    sli = DataFreshnessSli(
+        latest_timestamp_provider=lambda: {"SH600000:1d": 990.0},
+        alert_manager=am, metrics_collector=met, clock=clock,
+    )
+    st = sli.poll()
+    check("1) 新鲜数据不告警", am.calls == [], f"calls={am.calls}")
+    check("1) lag 指标=10", st["latest_lag_seconds"]["SH600000:1d"] == 10.0, f"st={st}")
+
+    # 2) 过期数据（lag=100，介于 60~120）→ WARNING
+    am.calls.clear()
+    sli2 = DataFreshnessSli(
+        latest_timestamp_provider=lambda: {"SH600000:1d": 900.0},
+        alert_manager=am, metrics_collector=_FakeMetrics(), clock=clock,
+    )
+    sli2.poll()
+    w = [c for c in am.calls if c["deduplication_key"] == "freshness:SH600000:1d"]
+    check("2) 过期触发 WARNING", len(w) == 1 and w[0]["level"].name == "WARNING", f"calls={am.calls}")
+
+    # 3) 严重过期（lag=200 > 120=2×60）→ ERROR
+    am.calls.clear()
+    sli3 = DataFreshnessSli(
+        latest_timestamp_provider=lambda: {"SH600000:1d": 800.0},
+        alert_manager=am, metrics_collector=_FakeMetrics(), clock=clock,
+    )
+    sli3.poll()
+    e = [c for c in am.calls if c["deduplication_key"] == "freshness:SH600000:1d"]
+    check("3) 严重过期触发 ERROR", len(e) == 1 and e[0]["level"].name == "ERROR", f"calls={am.calls}")
+
+    # 4) 缺口>0（gap_allowed=0 LOCKED）→ ERROR(P1)
+    am.calls.clear()
+    sli4 = DataFreshnessSli(
+        alert_manager=am, metrics_collector=_FakeMetrics(), clock=clock,
+    )
+    sli4.record_gap("2026-10-06", 2)
+    sli4.poll()
+    g = [c for c in am.calls if c["deduplication_key"] == "data_gap:exceeded"]
+    check("4) 缺口>0 触发 ERROR(P1)", len(g) == 1 and g[0]["level"].name == "ERROR", f"calls={am.calls}")
+
+    # 5) 每日缺口统计正确（最新日期键=2026-10-06 → 当前缺口=2）
+    check("5) 每日缺口聚合正确", sli4.daily_gap_stats() == {"2026-10-06": 2}, f"st={sli4.daily_gap_stats()}")
+    check("5) 当前缺口=2", sli4.current_gap_count() == 2, "")
+
+    # 6) 因子/财务延迟未配置(None) → 不告警不编造
+    am.calls.clear()
+    sli6 = DataFreshnessSli(
+        alert_manager=am, metrics_collector=_FakeMetrics(), clock=clock,
+    )
+    sli6.record_factor_sync(ts=0.0)       # 很久之前，但阈值未配置
+    sli6.record_financial_sync(ts=0.0)
+    st6 = sli6.poll()
+    check("6) 未配置延迟维度不告警", am.calls == [], f"calls={am.calls}")
+    check("6) 未配置维度不编造数值", st6["factor_sync_delay_seconds"] is None, f"st={st6}")
+
+    # 7) 注入配置 factor=10s，延迟=100s → WARNING 告警 + 指标写入
+    am.calls.clear()
+    met7 = _FakeMetrics()
+    sli7 = DataFreshnessSli(
+        factor_sync_delay_max_seconds=10.0,
+        alert_manager=am, metrics_collector=met7, clock=clock,
+    )
+    sli7.record_factor_sync(ts=900.0)   # clock=1000 → delay=100 > 10
+    st7 = sli7.poll()
+    fs = [c for c in am.calls if c["deduplication_key"] == "factor_sync:delay"]
+    check("7) 因子延迟超阈触发 WARNING", len(fs) == 1, f"calls={am.calls}")
+    check("7) 因子延迟指标=100", st7["factor_sync_delay_seconds"] == 100.0, f"st={st7}")
+
+    # 8) 防未来：最新时间戳在未来（ts=1100 > now=1000）→ lag 截断 0，不告警
+    am.calls.clear()
+    sli8 = DataFreshnessSli(
+        latest_timestamp_provider=lambda: {"SH600000:1d": 1100.0},
+        alert_manager=am, metrics_collector=_FakeMetrics(), clock=clock,
+    )
+    st8 = sli8.poll()
+    check("8) 未来时间戳 lag 截断 0", st8["latest_lag_seconds"]["SH600000:1d"] == 0.0, f"st={st8}")
+    check("8) 未来时间戳不误告警", am.calls == [], f"calls={am.calls}")
+
+    # 9) 防御式非法阈值抛错
+    raised = False
+    try:
+        DataFreshnessSli(freshness_max_seconds=0, alert_manager=_FakeAlert())
+    except ValueError:
+        raised = True
+    check("9) 非法 freshness_max 抛 ValueError", raised, "")
+
+    print("=" * 60)
+    print(f"data_quality_explorer.DataFreshnessSli 自测: {passed} 项通过")
+    if failures:
+        for f in failures:
+            print(f"  ✗ {f}")
+        print(f"失败 {len(failures)} 项")
+        return 1
+    print("全部通过 ✅")
+    print("=" * 60)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_run_freshness_self_test())
