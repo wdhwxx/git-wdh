@@ -1210,6 +1210,10 @@ class AlertManager:
         self._store: Optional["AlertStore"] = store
         self._store_enabled: bool = store_enabled
 
+        # A-9 告警通道冗余：未投递计数 + 逐通道投递顺序留痕（降级顺序可观测/元监控）
+        self._undelivered_count: int = 0
+        self._last_channel_attempts: List[Dict[str, Any]] = []
+
     def attach_store(self, store: "AlertStore") -> "AlertManager":
         """绑定告警持久化存储（BASE-1：发送落库/状态同步/双读）。"""
         self._store = store
@@ -1406,18 +1410,37 @@ class AlertManager:
                     exc_info=True,
                 )
 
-        # 通道路由 + 多通道分发
+        # 通道路由 + 多通道分发（A-9：按配置顺序逐通道尝试，记录投递结果=降级顺序留痕）
         channels = self._route_channels(alert.level)
         sent_count = 0
+        attempts: List[Dict[str, Any]] = []
         for channel in channels:
+            ok = False
             try:
-                if channel.send(alert):
-                    sent_count += 1
+                ok = bool(channel.send(alert))
             except Exception as e:
+                # 通道发送抛异常：记 error 并计入通道失败统计（不阻断其余通道）
                 logger.error(f"告警通道 [{channel.name}] 发送异常: {e}", exc_info=True)
+                try:
+                    channel._record_failure(str(e))
+                except Exception:
+                    pass
+            if ok:
+                sent_count += 1
+            attempts.append({"name": channel.name, "success": ok})
+
+        # A-9：逐通道投递顺序留痕（供元监控/单测校验降级顺序：主通道先试、失败转备用）
+        self._last_channel_attempts = attempts
+
+        # A-9 P0 冗余保证：CRITICAL 告警必须至少 2 通道可达；不足记 warning 留痕（元监控）
+        if alert.level == SeverityLevel.CRITICAL and sent_count < 2:
+            logger.warning(
+                f"[A-9] P0 告警仅 {sent_count} 通道可达（<2），冗余不足: {alert.summary()}"
+            )
 
         if sent_count == 0:
-            # KP-P5-05: 未投递回退写 logs/alerts_undelivered.log（不静默丢失）
+            # KP-P5-05 + A-9: 未投递回退写 logs/alerts_undelivered.log（含完整告警内容，不静默丢失）
+            self._undelivered_count += 1
             _write_undelivered(alert)
             if self._channels:
                 logger.warning(f"告警未通过任何通道发送: {alert.summary()} (可用通道={len(self._channels)})")
@@ -2322,6 +2345,9 @@ class AlertManager:
             "escalation_time": self._alert_rule.escalation_time,
             "callbacks_count": len(self._on_alert_callbacks),
             "store_enabled": self._store is not None and self._store_enabled,
+            # A-9 告警通道冗余元监控计数
+            "undelivered_count": self._undelivered_count,
+            "last_channel_attempts": self._last_channel_attempts,
         }
 
     def __repr__(self) -> str:
@@ -2402,8 +2428,8 @@ def configure_notification_channels(manager: AlertManager) -> int:
                 )
             )
             added += 1
-        # Webhook 通道（feishu / wecom）
-        for wh_name in ("feishu", "wecom"):
+        # Webhook 通道（feishu / wecom / dingtalk；A-9 告警通道冗余，按配置顺序装配）
+        for wh_name in ("feishu", "wecom", "dingtalk"):
             wh = channels.get(wh_name) or {}
             url = wh.get("webhook") if isinstance(wh, dict) else None
             if url:
@@ -2483,20 +2509,27 @@ def _apply_alert_config(manager: AlertManager) -> int:
 
 
 def _write_undelivered(alert: Alert) -> None:
-    """KP-P5-05: 告警未通过任何通道投递时回退写 logs/alerts_undelivered.log。"""
+    """KP-P5-05 + A-9: 告警未通过任何通道投递时回退写 logs/alerts_undelivered.log。
+
+    A-9 完善：落盘含完整告警内容（级别/来源/分类/去重键/消息/details JSON，
+    含 symbol/order_id/原因等关键字段），不静默丢失任何上下文。
+    写入失败记 error 不阻断主流程（告警投递已尽力，落盘是最后兜底）。
+    """
     try:
         from myquant.core.settings import get_settings
         log_dir = get_settings().project_root / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         line = (
-            f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] "
+            f"[{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(alert.timestamp))}] "
             f"[{alert.level.value}] source={alert.source} "
-            f"category={alert.category} {alert.message}\n"
+            f"category={alert.category} dedup_key={alert.deduplication_key} "
+            f"message={alert.message} "
+            f"details={json.dumps(alert.details, ensure_ascii=False)}\n"
         )
         with open(log_dir / "alerts_undelivered.log", "a", encoding="utf-8") as fh:
             fh.write(line)
     except Exception as e:
-        logger.warning(f"写入未投递告警日志失败: {e}")
+        logger.error(f"写入未投递告警日志失败: {e}", exc_info=True)
 
 
 def reset_alert_manager() -> None:
