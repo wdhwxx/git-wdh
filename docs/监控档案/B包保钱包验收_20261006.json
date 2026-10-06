@@ -1,0 +1,74 @@
+{
+  "source": "验收_B包保钱包",
+  "generated_at": "2026-10-06T14:44:13",
+  "report": {
+    "mode": "full",
+    "items": [
+      {
+        "item": "B-1",
+        "pass": true,
+        "detail": "一致快照: consistent=True, cash_diff=0; 现金差1分: frozen=True, audit_freeze=True; 容差=0.0",
+        "threshold_source": "config key: slo.reconciliation.realtime_diff_tolerance (LOCKED=0)"
+      },
+      {
+        "item": "B-2",
+        "pass": true,
+        "detail": "一致快照返回dict=True; 权益曲线回放点数=1; 冻结时返回None=True",
+        "threshold_source": "config key: B-2 PnL 快照一致性 + MetricsHistoryStore 回放 (FieldCrypto 语义按 BASE-9)"
+      },
+      {
+        "item": "B-3",
+        "pass": true,
+        "detail": "0.97使用率→ERROR(P1)=True, dedup_key=limit:*=True; 0.5使用率→无告警=True; warn=0.8, alert=0.95",
+        "threshold_source": "config keys: slo.risk.position_limit_usage_warn=0.8, position_limit_usage_alert=0.95"
+      },
+      {
+        "item": "B-4",
+        "pass": true,
+        "detail": "四段延迟P99非None=True; ACK P99=30.0ms>20.0ms→P2(WARNING)=True",
+        "threshold_source": "config key: slo.trading.order_ack_delay_p99_ms=20.0"
+      },
+      {
+        "item": "B-5",
+        "pass": true,
+        "detail": "拒单率1%>0.1%→P2(WARNING)=True; 飙升检测 N/窗口=PENDING_CAL(未配置) → 只跑绝对阈值,不编造",
+        "threshold_source": "config keys: slo.trading.order_reject_rate_max=0.001, reject_rate_surge_multiple/window=PENDING_CAL"
+      },
+      {
+        "item": "B-6",
+        "pass": true,
+        "detail": "RISK_VIOLATION→禁开仓=True, 撤单数=2, 审计trip=True; auto_liquidate默认关=True; reset→恢复开仓=True, 审计reset=True",
+        "threshold_source": "熔断动作链=禁开仓+撤单+审计(kind=circuit); auto_liquidate默认False(人工确认)"
+      },
+      {
+        "item": "B-7",
+        "pass": true,
+        "detail": "滞后90s>60.0s→P2(WARNING)=True; 缺口1>0→P1(ERROR)=True; 新鲜数据→无告警=True",
+        "threshold_source": "config keys: slo.data.freshness_max_seconds=60.0, gap_allowed=0"
+      },
+      {
+        "item": "B-8",
+        "pass": true,
+        "detail": "四键齐全=True; keys=['execution', 'limit_usage', 'pnl', 'reconciliation']; reconciliation视图=有",
+        "threshold_source": "B-8 驾驶舱四视图同源断言（API/看板同源）"
+      },
+      {
+        "item": "B-9",
+        "pass": true,
+        "detail": "PENDING_CAL时不告警=True; 显式配置+接近强平→P0/CRITICAL(margin)=True; 当前配置 strong_flat_distance_pct=None, margin_usage_ratio_threshold=None → PENDING_CAL(不告警不编造)",
+        "threshold_source": "config keys: slo.margin.strong_flat_distance_pct=None, margin_usage_ratio_threshold=None (PENDING_CAL=None → 不告警不编造)"
+      }
+    ],
+    "summary": {
+      "passed": 9,
+      "failed": 0,
+      "total": 9
+    },
+    "generated_at": "2026-10-06T14:44:13+0800",
+    "caveats": [
+      "B-9 保证金阈值当前为 PENDING_CAL（slo.margin 未配置）；本验收按'不告警不编造'语义验证默认行为，显式配置后 P0/CRITICAL 闭环已演示。",
+      "B-5 拒单率飙升检测（reject_rate_surge_multiple/window）当前为 PENDING_CAL；本验收只跑绝对阈值 0.1%，不编造飙升参数。"
+    ]
+  },
+  "overall_pass": true
+}
