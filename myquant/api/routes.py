@@ -349,6 +349,13 @@ def create_app(
         """获取告警管理器（M4修复：委托依赖注入层）"""
         return _di_get_alert_manager()
 
+    # ── A-16 RBAC：审计库解析（注入优先；未注入则守卫仅记 logger，不阻断）──
+    def _get_rbac_guard() -> Any:
+        """构建 RBAC 守卫：审计库取服务容器 "audit_log_store"（测试注入临时库）。"""
+        from myquant.api.middleware.auth import RbacGuard
+        store = _container.get("audit_log_store")
+        return RbacGuard(audit_store=store)
+
     # CORS配置（C1修复：通配符 * 与 allow_credentials=True 是无效组合，
     # 改为环境变量白名单；KP-P1-05：缺省不开放——未设置/为空则不挂 CORS 中间件）
     _cors_raw = os.environ.get("QUANT_CORS_ORIGINS", "")
@@ -949,9 +956,30 @@ def create_app(
 
     @app.post("/api/alerts/{alert_id}/ack", response_model=ApiResponse[AlertAckData],
               response_model_exclude_none=True, tags=["监控"])
-    async def ack_alert(alert_id: str):
-        """确认告警（不存在返回404）"""
+    async def ack_alert(
+        alert_id: str,
+        x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+        x_user: Optional[str] = Header(None, alias="X-User"),
+    ):
+        """
+        确认告警（A-16 RBAC：需 ack_alerts 权限；越权 403 且留审计 deny 痕迹）。
+
+        不传 X-User-Role → 默认 admin（单人系统降级，保持既有调用方可用）。
+        不存在返回404。
+        """
         try:
+            guard = _get_rbac_guard()
+            allowed, reason = guard.check(
+                role=x_user_role, permission="ack_alerts",
+                actor=x_user or "anonymous", resource=f"alert:{alert_id}",
+            )
+            if not allowed:
+                return JSONResponse(
+                    status_code=403,
+                    content=ErrorResponse(
+                        error="Forbidden", message=f"无权确认告警：{reason}",
+                    ).model_dump(),
+                )
             am = _get_alert_manager()
             ok = am.acknowledge(alert_id)
             if not ok:
@@ -967,9 +995,30 @@ def create_app(
 
     @app.post("/api/alerts/{alert_id}/resolve", response_model=ApiResponse[AlertResolveData],
               response_model_exclude_none=True, tags=["监控"])
-    async def resolve_alert(alert_id: str):
-        """解决告警（不存在返回404）"""
+    async def resolve_alert(
+        alert_id: str,
+        x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+        x_user: Optional[str] = Header(None, alias="X-User"),
+    ):
+        """
+        解决告警（A-16 RBAC：需 resolve_alerts 权限；越权 403 且留审计 deny 痕迹）。
+
+        不传 X-User-Role → 默认 admin（单人系统降级，保持既有调用方可用）。
+        不存在返回404。
+        """
         try:
+            guard = _get_rbac_guard()
+            allowed, reason = guard.check(
+                role=x_user_role, permission="resolve_alerts",
+                actor=x_user or "anonymous", resource=f"alert:{alert_id}",
+            )
+            if not allowed:
+                return JSONResponse(
+                    status_code=403,
+                    content=ErrorResponse(
+                        error="Forbidden", message=f"无权解决告警：{reason}",
+                    ).model_dump(),
+                )
             am = _get_alert_manager()
             ok = am.resolve(alert_id)
             if not ok:
@@ -1081,6 +1130,69 @@ def create_app(
         except Exception as e:
             logger.error(f"[api] 监控中心总览失败: {e}")
             return ApiResponse.error(code=500, message="监控中心总览失败")
+
+    # ═══════════════════════════════════════════
+    #  A-16 受控写操作占位（改阈值 / 复位熔断）：先 RBAC 鉴权，未接线 501
+    # ═══════════════════════════════════════════
+
+    @app.post("/api/monitor/config/threshold", response_model=ApiResponse, tags=["监控"])
+    async def update_monitor_threshold(
+        x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+        x_user: Optional[str] = Header(None, alias="X-User"),
+    ):
+        """
+        修改监控阈值（A-16 RBAC：需 modify_config 权限，仅 admin）。
+
+        阈值唯一真源为 config/settings.yaml monitoring 块（R-04）；本端点尚未
+        接线，鉴权通过后返回 501（不伪造成功）。越权 → 403 + 审计 deny。
+        """
+        guard = _get_rbac_guard()
+        allowed, reason = guard.check(
+            role=x_user_role, permission="modify_config",
+            actor=x_user or "anonymous", resource="monitor:config:threshold",
+        )
+        if not allowed:
+            return JSONResponse(
+                status_code=403,
+                content=ErrorResponse(
+                    error="Forbidden", message=f"无权修改阈值：{reason}",
+                ).model_dump(),
+            )
+        return JSONResponse(
+            status_code=501,
+            content={"success": False, "code": 501,
+                     "message": "阈值修改未接线：需对接 settings.yaml monitoring 块后可用",
+                     "data": {}},
+        )
+
+    @app.post("/api/monitor/circuit/reset", response_model=ApiResponse, tags=["监控"])
+    async def reset_circuit_breaker(
+        x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+        x_user: Optional[str] = Header(None, alias="X-User"),
+    ):
+        """
+        复位熔断（A-16 RBAC / B-6 预留：需 reset_circuit_breaker 权限，仅 admin）。
+
+        端点先鉴权（越权 403 + 审计 deny）；熔断复位逻辑随 B-6 接线，鉴权通过后
+        返回 501（不伪造成功）。
+        """
+        guard = _get_rbac_guard()
+        allowed, reason = guard.check(
+            role=x_user_role, permission="reset_circuit_breaker",
+            actor=x_user or "anonymous", resource="monitor:circuit:reset",
+        )
+        if not allowed:
+            return JSONResponse(
+                status_code=403,
+                content=ErrorResponse(
+                    error="Forbidden", message=f"无权复位熔断：{reason}",
+                ).model_dump(),
+            )
+        return JSONResponse(
+            status_code=501,
+            content={"success": False, "code": 501,
+                     "message": "熔断复位未接线：随 B-6 熔断线配置后可用", "data": {}},
+        )
 
     logger.info(f"[api] FastAPI应用创建成功: {title} v{version}")
     return app
