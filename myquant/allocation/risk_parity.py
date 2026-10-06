@@ -64,7 +64,10 @@ TODO(后续迭代):
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+import time
+import uuid
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from myquant.allocation.base import (
     AllocationConstraints,
@@ -597,3 +600,607 @@ class RiskParityAllocator(AllocatorBase):
                 "asset_count": n,
             },
         )
+
+
+# ═══════════════════════════════════════════════════════════════
+#  D-4 风险预算再分配（回写#246）
+# ═══════════════════════════════════════════════════════════════
+# 目的：基于监控反馈（滚动绩效/波动/环境匹配）在多策略间再分配风险预算——
+# 低匹配/高回撤/负绩效策略自动降配，把释放的预算按质量分重新分配到其他策略。
+# 再分配有上限约束（每策略权重上限 max_weights、单步最大降幅 max_step、
+# 单次总调幅上限 max_total_shift、权重下限 min_weight）与审批留痕。
+# 安全模型（对齐 D-1 三阶段）：mode=shadow 只出建议（proposed），经 approve
+# 人工确认后 applied；mode=auto 自动生效（安全测试后放开）。
+# 再分配可审计（reallocation_history 全量留痕 + AuditLogStore kind=risk_realloc）、
+# 可回滚（rollback 恢复 weights_before）。
+# 防未来：只消费已发生的监控反馈（滚动绩效/波动率/环境匹配分），不预测未来。
+
+# 再分配状态
+REALLOC_STATUS_PROPOSED = "proposed"
+REALLOC_STATUS_APPLIED = "applied"
+REALLOC_STATUS_REJECTED = "rejected"
+REALLOC_STATUS_ROLLED_BACK = "rolled_back"
+REALLOC_MODES = ("shadow", "auto")
+
+# 算法参数（非业务阈值；构造可注入）
+REALLOC_DEFAULT_MIN_WEIGHT: float = 0.05       # 每策略权重下限
+REALLOC_DEFAULT_MAX_STEP: float = 0.10         # 单策略单次最大降幅（单步护栏）
+REALLOC_DEFAULT_MAX_TOTAL_SHIFT: float = 0.20  # 单次总调幅上限（护栏）
+REALLOC_DEFAULT_MATCH_SCORE_MIN: float = 60.0  # 环境匹配分下限（低于 → 降配惩罚）
+REALLOC_DEFAULT_SCORE_MATCH_WEIGHT: float = 0.6  # 质量分=匹配权重×匹配分 + (1-权重)×风险项
+REALLOC_DEFAULT_LOW_MATCH_PENALTY: float = 0.5   # 低匹配惩罚系数
+REALLOC_DEFAULT_NEGATIVE_PERF_PENALTY: float = 0.7  # 负绩效惩罚系数
+REALLOC_DEFAULT_HISTORY_LIMIT: int = 500
+REALLOC_MAX_ITER: int = 20                        # 约束重归一化迭代上限
+
+
+@dataclass
+class ReallocationRecord:
+    """
+    一次风险预算再分配的全链路留痕（JSON 可序列化）。
+
+    Attributes
+    ----------
+    realloc_id : str
+        再分配记录唯一 ID（审批/回滚句柄）。
+    weights_before : dict
+        再分配前权重（应用时有效）。
+    weights_after : dict
+        再分配后的目标权重。
+    status : str
+        proposed / applied / rejected / rolled_back。
+    feedback : dict
+        触发再分配的监控反馈快照（策略 → 滚动绩效/波动率/环境匹配）。
+    scores : dict
+        各策略质量分（算法定义，0~1）。
+    caps : dict
+        上限约束明细（min_weight/max_step/max_total_shift/max_weights）。
+    mode : str
+        shadow / auto。
+    actor : str
+        操作者。
+    reason : str
+        原因。
+    created_at / decided_at : float
+        提议/决策时刻（当前时点，防未来）。
+    """
+
+    realloc_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+    weights_before: Dict[str, float] = field(default_factory=dict)
+    weights_after: Dict[str, float] = field(default_factory=dict)
+    status: str = REALLOC_STATUS_PROPOSED
+    feedback: Dict[str, Any] = field(default_factory=dict)
+    scores: Dict[str, float] = field(default_factory=dict)
+    caps: Dict[str, Any] = field(default_factory=dict)
+    mode: str = REALLOC_MODES[0]
+    actor: str = "system"
+    reason: str = ""
+    created_at: float = field(default_factory=time.time)
+    decided_at: Optional[float] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """序列化（JSON 可读）。"""
+        return {
+            "realloc_id": self.realloc_id,
+            "weights_before": dict(self.weights_before),
+            "weights_after": dict(self.weights_after),
+            "status": self.status,
+            "feedback": dict(self.feedback),
+            "scores": dict(self.scores),
+            "caps": dict(self.caps),
+            "mode": self.mode,
+            "actor": self.actor,
+            "reason": self.reason,
+            "created_at": self.created_at,
+            "decided_at": self.decided_at,
+        }
+
+
+class RiskBudgetReallocator:
+    """
+    基于监控反馈的多策略风险预算再分配器（D-4）。
+
+    用法:
+        from myquant.allocation.risk_parity import RiskBudgetReallocator
+        rr = RiskBudgetReallocator(mode="shadow")          # shadow 只出建议
+        rec = rr.propose({"a": 0.5, "b": 0.5}, {
+            "a": {"rolling_perf": 0.12, "volatility": 0.10, "regime_match": 90},
+            "b": {"rolling_perf": -0.05, "volatility": 0.30, "regime_match": 30},
+        }, actor="system", reason="月度再平衡")
+        rr.approve(rec.realloc_id, actor="risk_owner", reason="确认")  # 生效
+        weights = rr.effective_weights()                   # 生效权重
+        rr.rollback(rec.realloc_id, actor="ops", reason="回滚")       # 恢复
+
+    质量分（算法定义，非业务阈值）：
+      score = 0.6×match_norm + 0.4×(1 - risk_norm)；
+      低匹配（regime_match < match_score_min）×0.5；负绩效（rolling_perf<0）×0.7；
+      无监控反馈的策略质量分=0（低证据降配，受 max_step/下限护栏约束）。
+    目标权重：按质量分比例分配 → 上限/下限约束迭代重归一化 → 单步降幅与总调幅
+    护栏 → 归一化到和=1（尾差归最大者）。
+    """
+
+    def __init__(
+        self,
+        min_weight: float = REALLOC_DEFAULT_MIN_WEIGHT,
+        max_step: float = REALLOC_DEFAULT_MAX_STEP,
+        max_total_shift: float = REALLOC_DEFAULT_MAX_TOTAL_SHIFT,
+        match_score_min: float = REALLOC_DEFAULT_MATCH_SCORE_MIN,
+        max_weights: Optional[Dict[str, float]] = None,
+        score_match_weight: float = REALLOC_DEFAULT_SCORE_MATCH_WEIGHT,
+        low_match_penalty: float = REALLOC_DEFAULT_LOW_MATCH_PENALTY,
+        negative_perf_penalty: float = REALLOC_DEFAULT_NEGATIVE_PERF_PENALTY,
+        mode: str = REALLOC_MODES[0],
+        audit_log: Any = None,
+        clock: Optional[Callable[[], float]] = None,
+        max_history: int = REALLOC_DEFAULT_HISTORY_LIMIT,
+    ) -> None:
+        """
+        Parameters
+        ----------
+        min_weight : float
+            每策略权重下限（0<=min_weight<1/n 语义由调用方保证，构造仅校验范围）。
+        max_step : float
+            单策略单次最大降幅（护栏，>0）。
+        max_total_shift : float
+            单次总调幅上限（护栏，>0）。
+        match_score_min : float
+            环境匹配分下限（低于 → 低匹配降配惩罚，[0,100]）。
+        max_weights : dict | None
+            每策略权重上限 {strategy: max_weight}（护栏，>0 且 <1）。
+        score_match_weight : float
+            质量分中匹配分权重（0~1；风险项权重=1-该值）。
+        low_match_penalty : float
+            低匹配惩罚系数（(0,1]）。
+        negative_perf_penalty : float
+            负绩效惩罚系数（(0,1]）。
+        mode : str
+            shadow（只出建议，需 approve 人工确认）/ auto（自动生效）。
+        audit_log : AuditLogStore | None
+            审计存储（kind=risk_realloc）；None 惰性尝试，失败降级内存留痕。
+        clock : Callable[[], float] | None
+            当前时间戳函数（测试注入）；None 用 time.time。
+        max_history : int
+            再分配历史留存上限（正整数）。
+        """
+        for name, v in (
+            ("min_weight", min_weight), ("max_step", max_step),
+            ("max_total_shift", max_total_shift), ("match_score_min", match_score_min),
+        ):
+            try:
+                fv = float(v)
+            except (TypeError, ValueError):
+                raise ValueError(f"{name} 必须为数值，收到 {v!r}") from None
+            if fv < 0:
+                raise ValueError(f"{name} 不能为负，收到 {v!r}")
+        if float(max_step) <= 0 or float(max_total_shift) <= 0:
+            raise ValueError("max_step/max_total_shift 必须 >0")
+        if float(match_score_min) > 100:
+            raise ValueError(f"match_score_min 不能超过 100，收到 {match_score_min!r}")
+        try:
+            sw = float(score_match_weight)
+        except (TypeError, ValueError):
+            raise ValueError(f"score_match_weight 必须为数值，收到 {score_match_weight!r}") from None
+        if not (0.0 <= sw <= 1.0):
+            raise ValueError(f"score_match_weight 必须在 [0,1]，收到 {score_match_weight!r}")
+        for name, v in (("low_match_penalty", low_match_penalty),
+                        ("negative_perf_penalty", negative_perf_penalty)):
+            try:
+                pv = float(v)
+            except (TypeError, ValueError):
+                raise ValueError(f"{name} 必须为数值，收到 {v!r}") from None
+            if not (0.0 < pv <= 1.0):
+                raise ValueError(f"{name} 必须在 (0,1]，收到 {v!r}")
+        if mode not in REALLOC_MODES:
+            raise ValueError(f"mode 必须为 {REALLOC_MODES}，收到 {mode!r}")
+        if not isinstance(max_history, int) or max_history <= 0:
+            raise ValueError(f"max_history 必须为正整数，收到 {max_history!r}")
+
+        self._min_weight: float = float(min_weight)
+        self._max_step: float = float(max_step)
+        self._max_total_shift: float = float(max_total_shift)
+        self._match_score_min: float = float(match_score_min)
+        self._max_weights: Dict[str, float] = dict(max_weights or {})
+        for s, cap in self._max_weights.items():
+            try:
+                cap_f = float(cap)
+            except (TypeError, ValueError):
+                raise ValueError(f"max_weights[{s}] 必须为数值，收到 {cap!r}") from None
+            if not (0.0 < cap_f <= 1.0):
+                raise ValueError(f"max_weights[{s}] 必须在 (0,1]，收到 {cap!r}")
+            self._max_weights[s] = cap_f
+        self._score_match_weight: float = sw
+        self._low_match_penalty: float = float(low_match_penalty)
+        self._negative_perf_penalty: float = float(negative_perf_penalty)
+        self._mode: str = mode
+        self._audit_log: Any = audit_log
+        self._audit_tried: bool = audit_log is not None
+        self._clock: Callable[[], float] = clock if clock is not None else time.time
+        self._max_history: int = int(max_history)
+
+        self._effective: Optional[Dict[str, float]] = None
+        self._history: List[ReallocationRecord] = []
+        self._by_id: Dict[str, ReallocationRecord] = {}
+
+        logger.debug(
+            "RiskBudgetReallocator 初始化: mode=%s min_weight=%.2f max_step=%.2f "
+            "max_total_shift=%.2f match_score_min=%.1f",
+            self._mode, self._min_weight, self._max_step,
+            self._max_total_shift, self._match_score_min,
+        )
+
+    # ── 质量分（算法定义）──────────────────────────────────────
+
+    def _normalize_input_weights(self, weights: Dict[str, float]) -> Dict[str, float]:
+        """校验并归一化输入权重（有限、>=0、和>0 → 归一化和=1）。"""
+        if not isinstance(weights, dict) or not weights:
+            raise ValueError("weights 必须为非空 dict")
+        total = 0.0
+        for s, w in weights.items():
+            try:
+                wf = float(w)
+            except (TypeError, ValueError):
+                raise ValueError(f"weights[{s}] 必须为数值，收到 {w!r}") from None
+            if not math.isfinite(wf) or wf < 0:
+                raise ValueError(f"weights[{s}] 必须为非负有限数，收到 {w!r}")
+            total += wf
+        if total <= 0:
+            raise ValueError("weights 之和必须 >0")
+        return {s: round(float(w) / total, 6) for s, w in weights.items()}
+
+    def _validate_feedback(
+        self, feedback: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """校验监控反馈（有限数；非法字段防御式忽略并告警）。"""
+        if not isinstance(feedback, dict):
+            raise ValueError(f"feedback 必须为 dict，收到 {type(feedback).__name__}")
+        cleaned: Dict[str, Any] = {}
+        for s, info in feedback.items():
+            if not isinstance(info, dict):
+                logger.warning("[realloc] %s 反馈非 dict，忽略", s)
+                continue
+            item: Dict[str, Any] = {}
+            for key in ("rolling_perf", "volatility", "regime_match"):
+                if key in info:
+                    try:
+                        val = float(info[key])
+                    except (TypeError, ValueError):
+                        logger.warning("[realloc] %s.%s 非法，忽略", s, key)
+                        continue
+                    if not math.isfinite(val):
+                        logger.warning("[realloc] %s.%s 非有限数，忽略", s, key)
+                        continue
+                    item[key] = val
+            cleaned[s] = item
+        return cleaned
+
+    def _compute_scores(self, feedback: Dict[str, Any]) -> Dict[str, float]:
+        """
+        各策略质量分（算法定义，0~1）：
+          match_norm = clip(regime_match, 0, 100)/100；
+          risk_norm = volatility / max(volatilities, 1e-9)（全为 0 时 risk_norm=0）；
+          score = score_match_weight×match_norm + (1-score_match_weight)×(1-risk_norm)；
+          低匹配（regime_match < match_score_min）×low_match_penalty；
+          负绩效（rolling_perf < 0）×negative_perf_penalty；
+          无反馈字段（缺 regime_match/volatility）→ 对应项取 0（低证据降配）。
+        """
+        scores: Dict[str, float] = {}
+        volatilities = [
+            float(info["volatility"])
+            for info in feedback.values()
+            if "volatility" in info and info["volatility"] >= 0
+        ]
+        max_vol = max(volatilities, default=0.0)
+        for s, info in feedback.items():
+            match_raw = info.get("regime_match")
+            match_norm = (
+                max(0.0, min(100.0, float(match_raw))) / 100.0
+                if match_raw is not None else 0.0
+            )
+            vol = info.get("volatility")
+            risk_norm = (float(vol) / max_vol) if (vol is not None and max_vol > 0) else 0.0
+            risk_norm = max(0.0, min(1.0, risk_norm))
+            score = (
+                self._score_match_weight * match_norm
+                + (1.0 - self._score_match_weight) * (1.0 - risk_norm)
+            )
+            if match_raw is not None and float(match_raw) < self._match_score_min:
+                score *= self._low_match_penalty
+            perf = info.get("rolling_perf")
+            if perf is not None and float(perf) < 0:
+                score *= self._negative_perf_penalty
+            scores[s] = max(0.0, min(1.0, score))
+        return scores
+
+    def _build_target(self, weights: Dict[str, float], scores: Dict[str, float]) -> Dict[str, float]:
+        """
+        目标权重计算：按质量分比例分配 → 上限/下限约束迭代重归一化 →
+        单步降幅护栏 → 总调幅护栏 → 归一化到和=1。
+        """
+        names = list(weights.keys())
+        total = sum(scores.get(s, 0.0) for s in names)
+        if total <= 1e-12:
+            # 全部质量分为 0（无差异化依据）→ 不调整（不编造）
+            return dict(weights)
+        # 1. 按质量分比例分配
+        target = {s: round(total_w := (scores.get(s, 0.0) / total), 6) for s in names}
+        # 2. 上限/下限约束迭代重归一化（护栏：不超上限、不低于下限）
+        for _ in range(REALLOC_MAX_ITER):
+            clamped = {}
+            for s in names:
+                t = target.get(s, 0.0)
+                cap = self._max_weights.get(s, 1.0)
+                t = max(self._min_weight, min(t, cap))
+                clamped[s] = t
+            residual = 1.0 - sum(clamped.values())
+            if abs(residual) < 1e-9:
+                target = clamped
+                break
+            # 把残差按质量分比例分给未触顶/未触底策略
+            free = [
+                s for s in names
+                if (residual > 0 and clamped[s] < self._max_weights.get(s, 1.0))
+                or (residual < 0 and clamped[s] > self._min_weight)
+            ]
+            free_score = sum(scores.get(s, 0.0) for s in free)
+            if free_score <= 1e-12:
+                target = clamped
+                break
+            target = {
+                s: clamped[s] + residual * (scores.get(s, 0.0) / free_score)
+                if s in free else clamped[s]
+                for s in names
+            }
+        # 3. 单步降幅护栏：单策略单次最大降幅
+        adjusted = dict(target)
+        for s in names:
+            delta = adjusted[s] - weights.get(s, 0.0)
+            if delta < -self._max_step:
+                adjusted[s] = weights.get(s, 0.0) - self._max_step
+        # 4. 总调幅护栏：单次总调幅上限
+        shift = sum(abs(adjusted.get(s, 0.0) - weights.get(s, 0.0)) for s in names)
+        if shift > self._max_total_shift and shift > 1e-12:
+            factor = self._max_total_shift / shift
+            adjusted = {
+                s: weights.get(s, 0.0)
+                + (adjusted.get(s, 0.0) - weights.get(s, 0.0)) * factor
+                for s in names
+            }
+        # 5. 归一化到和=1（尾差归最大权重策略，保留尾差精度保证和=1）
+        total2 = sum(adjusted.values())
+        if total2 <= 0:
+            return dict(weights)
+        normalized = {s: max(self._min_weight, v / total2) for s, v in adjusted.items()}
+        total3 = sum(normalized.values())
+        if total3 > 1e-9:
+            normalized = {s: v / total3 for s, v in normalized.items()}
+        rounded = {s: round(v, 6) for s, v in normalized.items()}
+        diff = 1.0 - sum(rounded.values())
+        biggest = max(rounded, key=rounded.get)
+        if abs(diff) >= 1e-6:
+            rounded[biggest] = round(rounded[biggest] + diff, 6)
+        else:
+            # 尾差小于 6 位小数半单位：round 会吞掉 → 最大者保留尾差全精度
+            rounded[biggest] = rounded[biggest] + diff
+        return rounded
+
+    # ── 再分配流程（shadow 提议 → approve 生效 / auto 直接生效）──
+
+    def _caps_summary(self) -> Dict[str, Any]:
+        return {
+            "min_weight": self._min_weight,
+            "max_step": self._max_step,
+            "max_total_shift": self._max_total_shift,
+            "match_score_min": self._match_score_min,
+            "max_weights": dict(self._max_weights),
+        }
+
+    def _build_record(
+        self,
+        weights: Dict[str, float],
+        feedback: Dict[str, Any],
+        actor: str,
+        reason: str,
+    ) -> ReallocationRecord:
+        weights_norm = self._normalize_input_weights(weights)
+        feedback_clean = self._validate_feedback(feedback)
+        scores = self._compute_scores(feedback_clean)
+        # 无监控反馈的策略 → 质量分 0（低证据降配，受 max_step/下限护栏约束）
+        for s in weights_norm:
+            if s not in scores:
+                scores[s] = 0.0
+        target = self._build_target(weights_norm, scores)
+        return ReallocationRecord(
+            weights_before=dict(weights_norm),
+            weights_after=dict(target),
+            feedback=dict(feedback_clean),
+            scores={s: round(v, 6) for s, v in scores.items()},
+            caps=self._caps_summary(),
+            mode=self._mode,
+            actor=actor,
+            reason=reason,
+            created_at=self._clock(),
+        )
+
+    def propose(
+        self,
+        weights: Dict[str, float],
+        feedback: Dict[str, Any],
+        actor: str = "system",
+        reason: str = "",
+    ) -> ReallocationRecord:
+        """
+        提出再分配建议（shadow 模式；需 approve 人工确认后生效）。
+
+        Raises
+        ------
+        ValueError : 权重/反馈非法、actor 为空时抛出。
+        """
+        if not (actor or "").strip():
+            raise ValueError("propose actor 不能为空")
+        rec = self._build_record(weights, feedback, actor, reason)
+        rec.status = REALLOC_STATUS_PROPOSED
+        self._record(rec)
+        self._audit("realloc", "proposed", actor, rec.to_dict())
+        return rec
+
+    def approve(
+        self,
+        realloc_id: str,
+        actor: str = "system",
+        reason: str = "人工确认再分配生效",
+    ) -> ReallocationRecord:
+        """
+        人工确认再分配生效（shadow 模式；对应 D-1 confirm 阶段）。
+
+        Raises
+        ------
+        ValueError : 记录不存在/非 proposed/actor 为空时抛出。
+        """
+        realloc_id = (realloc_id or "").strip()
+        if not realloc_id:
+            raise ValueError("approve realloc_id 不能为空")
+        if not (actor or "").strip():
+            raise ValueError("approve actor 不能为空")
+        rec = self._by_id.get(realloc_id)
+        if rec is None or rec.status != REALLOC_STATUS_PROPOSED:
+            raise ValueError(f"再分配记录 {realloc_id} 不存在或非 proposed")
+        rec.status = REALLOC_STATUS_APPLIED
+        rec.decided_at = self._clock()
+        rec.actor = actor
+        rec.reason = reason
+        self._effective = dict(rec.weights_after)
+        self._audit("realloc", "approved", actor, rec.to_dict())
+        return rec
+
+    def reject(
+        self,
+        realloc_id: str,
+        actor: str = "system",
+        reason: str = "人工否决",
+    ) -> ReallocationRecord:
+        """人工否决再分配建议（不生效）。"""
+        realloc_id = (realloc_id or "").strip()
+        if not realloc_id:
+            raise ValueError("reject realloc_id 不能为空")
+        if not (actor or "").strip():
+            raise ValueError("reject actor 不能为空")
+        rec = self._by_id.get(realloc_id)
+        if rec is None or rec.status != REALLOC_STATUS_PROPOSED:
+            raise ValueError(f"再分配记录 {realloc_id} 不存在或非 proposed")
+        rec.status = REALLOC_STATUS_REJECTED
+        rec.decided_at = self._clock()
+        rec.actor = actor
+        rec.reason = reason
+        self._audit("realloc", "rejected", actor, rec.to_dict())
+        return rec
+
+    def apply_auto(
+        self,
+        weights: Dict[str, float],
+        feedback: Dict[str, Any],
+        actor: str = "system",
+        reason: str = "",
+    ) -> ReallocationRecord:
+        """自动生效再分配（auto 模式；安全测试通过后放开）。"""
+        if not (actor or "").strip():
+            raise ValueError("apply_auto actor 不能为空")
+        rec = self._build_record(weights, feedback, actor, reason)
+        rec.status = REALLOC_STATUS_APPLIED
+        rec.decided_at = self._clock()
+        self._effective = dict(rec.weights_after)
+        self._record(rec)
+        self._audit("realloc", "applied", actor, rec.to_dict())
+        return rec
+
+    def rollback(self, realloc_id: str, actor: str = "system", reason: str = "再分配回滚") -> bool:
+        """
+        回滚一次已生效再分配（恢复 weights_before；可回滚）。
+
+        Returns
+        -------
+        bool : 是否成功回滚（记录不存在/非 applied 返回 False）。
+        """
+        realloc_id = (realloc_id or "").strip()
+        if not realloc_id:
+            raise ValueError("rollback realloc_id 不能为空")
+        if not (actor or "").strip():
+            raise ValueError("rollback actor 不能为空")
+        rec = self._by_id.get(realloc_id)
+        if rec is None or rec.status != REALLOC_STATUS_APPLIED:
+            return False
+        self._effective = dict(rec.weights_before)
+        rec.status = REALLOC_STATUS_ROLLED_BACK
+        rec.decided_at = self._clock()
+        rec.actor = actor
+        rec.reason = reason
+        self._audit("realloc", "rolled_back", actor, rec.to_dict())
+        return True
+
+    # ── 观测 ───────────────────────────────────────────────────
+
+    def effective_weights(self) -> Optional[Dict[str, float]]:
+        """当前生效权重（未生效/未应用返回 None）。"""
+        if self._effective is None:
+            return None
+        return dict(self._effective)
+
+    def history(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """返回再分配全量留痕（JSON 可序列化；可审计/可查）。"""
+        if not isinstance(limit, int) or limit <= 0:
+            raise ValueError(f"history limit 必须为正整数，收到 {limit!r}")
+        return [r.to_dict() for r in self._history[-limit:]]
+
+    def summary(self) -> Dict[str, Any]:
+        """再分配器状态汇总。"""
+        return {
+            "mode": self._mode,
+            "effective_applied": self._effective is not None,
+            "proposed_total": sum(
+                1 for r in self._history if r.status == REALLOC_STATUS_PROPOSED
+            ),
+            "applied_total": sum(
+                1 for r in self._history if r.status == REALLOC_STATUS_APPLIED
+            ),
+            "rejected_total": sum(
+                1 for r in self._history if r.status == REALLOC_STATUS_REJECTED
+            ),
+            "rolled_back_total": sum(
+                1 for r in self._history if r.status == REALLOC_STATUS_ROLLED_BACK
+            ),
+            "history_total": len(self._history),
+        }
+
+    # ── 内部 ───────────────────────────────────────────────────
+
+    def _record(self, rec: ReallocationRecord) -> ReallocationRecord:
+        """留痕（上限裁剪最旧）。"""
+        self._history.append(rec)
+        self._by_id[rec.realloc_id] = rec
+        if len(self._history) > self._max_history:
+            drop = self._history[: -self._max_history]
+            self._history = self._history[-self._max_history:]
+            for r in drop:
+                self._by_id.pop(r.realloc_id, None)
+        return rec
+
+    def _audit(
+        self, action: str, sub_action: str, actor: str, detail: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """审计留痕（kind=risk_realloc；失败降级内存留痕不阻断）。"""
+        if self._audit_log is None:
+            if not self._audit_tried:
+                try:
+                    from myquant.monitoring.audit_log import AuditLogStore
+                    self._audit_log = AuditLogStore()
+                except Exception as e:  # noqa: BLE001 —— 审计不可用降级
+                    logger.warning("[realloc] 审计存储不可用（降级内存留痕）: %s", e)
+                self._audit_tried = True
+            if self._audit_log is None:
+                return None
+        try:
+            return self._audit_log.append(
+                "risk_realloc", f"realloc:{sub_action}", actor, dict(detail or {})
+            )
+        except Exception as e:  # noqa: BLE001 —— 审计失败不阻断再分配
+            logger.warning("[realloc] 审计留痕失败: %s", e)
+            return None

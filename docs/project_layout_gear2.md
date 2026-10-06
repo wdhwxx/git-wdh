@@ -637,6 +637,8 @@ Pythonwdhmm/
 
 │   │   ├── test_allocation.py        # 组合资金分配逻辑（63项）✅已完成
 
+│   │   ├── test_risk_reallocation.py # ✨【回写#246】D-4 风险预算再分配测试（40 项）：构造防御（负参数/非法 mode/非法 max_weights/history limit）；输入校验（空/非有限/负权重/零和/非 dict 反馈/actor 必填/非法反馈字段防御式忽略）；质量分（优质>劣质/低匹配与负绩效惩罚/缺反馈=0 低证据降配/全等质量分不调整不编造）；目标权重（比例分配/每策略上限/下限兜底/单步降幅护栏/总调幅护栏/和=1 尾差归最大）；审批留痕（shadow 提议不生效/approve 生效/reject 否决/auto 直接生效/重复 approve 拒绝/回滚恢复旧权重/非 applied 与未知回滚 False）；留痕审计（history JSON 可序列化/limit 校验/上限裁剪/审计写入/审计失败不阻断/summary）；action_engine 集成（执行器注册/缺注入 not_supported/dry-run 预检不真实执行/执行与回滚/低匹配降配全链路可审计）✅已完成
+
 │   │   ├── test_logger.py            # ✨【回写】统一日志配置与data_quality专用通道测试（路由/级别阈值/双写/结构化字段/统一告警API，18项）✅已完成
 
 │   │   ├── test_backtest_consistency_v5.py  # ✨【V5·P3】三模式一致性校验测试（event/vectorized/mixed同参数同数据比对收益曲线与成交，差异超阈值即失败，28项）
@@ -1076,7 +1078,7 @@ Pythonwdhmm/
 
     │   ├── equal_weight.py           # 等权分配
 
-    │   ├── risk_parity.py            # 风险平价
+    │   ├── risk_parity.py            # 风险平价；✨【回写#246】D-4 风险预算再分配：RiskBudgetReallocator——基于监控反馈（滚动绩效 rolling_perf/波动率 volatility/环境匹配 regime_match）在多策略间再分配风险预算，低匹配/高回撤/负绩效策略自动降配（质量分=匹配权重×匹配分+(1-权重)×(1-风险项)，低匹配×0.5/负绩效×0.7惩罚），释放预算按质量分重分配；上限约束护栏（每策略权重上限 max_weights/单策略单次最大降幅 max_step/单次总调幅上限 max_total_shift/权重下限 min_weight）；安全模型对齐 D-1（mode=shadow 只出建议 proposed 需 approve 人工确认生效/reject 否决，auto 自动生效）；可审计（reallocation_history 全量留痕 JSON 可序列化 + AuditLogStore kind=risk_realloc，审计失败降级不阻断）、可回滚（rollback 恢复 weights_before）；无监控反馈策略质量分=0 低证据降配、全部质量分=0 不调整不编造；防未来（只消费已发生监控反馈，时间戳一律当前时点）；ReallocationRecord 留痕记录；action_engine 追加 ReallocateRiskBudgetExecutor（action_type=reallocate_risk，注入 reallocate_fn/rollback_fn 接线，缺注入 not_supported KP-M02，dry-run 演练先行）
 
     │   └── target_volatility.py      # 目标波动率
 
@@ -1246,7 +1248,7 @@ Pythonwdhmm/
 
     │   ├── regime_matcher.py        # ✨【回写#242】C-3 环境匹配度评分（周期/POLL，非 MTTD 类）：RegimeMatcher——基于 RSRS 等 regime 指标识别市场环境（复用 indicators/rsrs.py 的 classify_regime 5 档：trend_up/trend_down/mild_up/mild_down/range）；策略-环境匹配评分（0~100 算法矩阵，trend/range 风格 × 环境档位）；低匹配（< slo.regime_matcher.match_score_min）→ P2/WARNING 告警（category=regime、dedup=regime:match:<strategy>、details 附匹配分/环境/降频降仓建议）；阈值读 settings.yaml monitoring.slo.regime_matcher（PENDING_CAL=None 不告警不编造，R-04）；指标 regime_state/regime_match_score 经 set_gauge 进 /api/metrics（REGISTERED_METRICS）；observe_rsrs 严格防未来（拒绝未来时间戳，只消费已发生 RSRS 值，冷启动保守归 range 不误判方向）；__main__ 自测 28 项
 
-    │   ├── action_engine.py         # ✨【回写#243/#244】D-1 自动化响应编排规则引擎 + D-2 自愈动作库（monitoring/ 段）：ActionRule 规则（条件=告警级别/类别/来源/指标阈值 → 动作=暂停策略/切行情源/撤单/降仓/冻结/通知等）；三阶段安全模型 shadow 只读建议 → confirm 人工确认（pending approval 超时自动作废）→ auto 自动执行（安全测试通过后放开）；幂等 action_key + 冷却防抖 + 回滚方案（rollback_info + ActionExecutor.undo）；Kill Switch 独立于规则引擎一键停止（置位后 auto/approved 一律 blocked 留痕）；每次动作全链路留痕（执行历史 + AuditLogStore kind=action_engine 审计）；run_cycle 周期巡检未确认告警（AlertManager.get_unacknowledged）+ evaluate/handle_alert 事件入口；executor 注册表 register_action_executor（notify/pause_strategy 通用 + D-2 场景动作库：switch_data_source/stop_signal_generation/rollback_data_version/notify_trader，缺注入回调不假成功 KP-M02）；阈值/模式读 settings.yaml monitoring.action_engine（R-04 外置，attach_engine 装配默认 False 保守）；__main__ 自测
+    │   ├── action_engine.py         # ✨【回写#243/#244】D-1 自动化响应编排规则引擎 + D-2 自愈动作库（monitoring/ 段）：ActionRule 规则（条件=告警级别/类别/来源/指标阈值 → 动作=暂停策略/切行情源/撤单/降仓/冻结/通知等）；三阶段安全模型 shadow 只读建议 → confirm 人工确认（pending approval 超时自动作废）→ auto 自动执行（安全测试通过后放开）；幂等 action_key + 冷却防抖 + 回滚方案（rollback_info + ActionExecutor.undo）；Kill Switch 独立于规则引擎一键停止（置位后 auto/approved 一律 blocked 留痕）；每次动作全链路留痕（执行历史 + AuditLogStore kind=action_engine 审计）；run_cycle 周期巡检未确认告警（AlertManager.get_unacknowledged）+ evaluate/handle_alert 事件入口；executor 注册表 register_action_executor（notify/pause_strategy 通用 + D-2 场景动作库：switch_data_source/stop_signal_generation/rollback_data_version/notify_trader + D-4 追加 reallocate_risk 风险预算再分配，缺注入回调不假成功 KP-M02）；阈值/模式读 settings.yaml monitoring.action_engine（R-04 外置，attach_engine 装配默认 False 保守）；__main__ 自测
 
     │
 
@@ -3816,3 +3818,11 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
    c. 新增 tests/unit/test_threshold_calibration.py（37 项）：构造防御；shadow 建议不生效/auto 立即生效；不足样本与常量序列不校准；quantile 法；非有限值/空历史；apply_proposal 确认与校验；人工覆盖优先级/参数校验；回滚恢复/撤覆盖/unknown/非 applied；解析优先级；per-regime 隔离；历史可审计/上限裁剪；审计失败不阻断；summary；配置真源；DynamicBaseline 集成（regime 切换触发校准/冷启动消费校准阈值/人工覆盖影响 anomaly 判定/to_dict 摘要/未挂接行为不变）。
    d. 验证结果：py_compile 通过；模块 __main__ 自测 52 项全绿；单测 37 项全绿 + 既有 test_dynamic_baseline.py 37 项回归零破坏；全量 pytest 结果见提交后终验（基线 3192 passed/2 skipped/0 failed）。
    e. 纪律遵守：先更新蓝图目录树（monitoring 段 dynamic_baseline.py 条目 #235 追加 #245 + tests/unit 段 test_threshold_calibration.py）再创建文件（蓝图优先）；无蓝图外新文件（校准器并入既有 dynamic_baseline.py，同 C-6 watchdog 累计式回写）；业务逻辑归 myquant；校准参数读配置真源（算法参数非业务阈值，业务阈值 PENDING_CAL 不编造）；严格防未来（只消费已发生历史观测，时间戳一律当前时点）；任务后 git 提交（commit message 引用 #245）。
+
+246. ✨【回写记录·2026-10-06·D-4 风险预算再分配】【回写#246】
+   事实来源：本次落地，代码级核验：《量化系统监控模块施工总清单_V1.2.md》D-4 行验收口径（基于反馈[滚动绩效/波动/环境匹配]多策略再分配风险预算，上限约束+审批留痕，低匹配/高回撤自动降配且可审计）+ docs/代码变更治理规则.md + docs/py文件代码规则.md。
+   a. myquant/allocation/risk_parity.py 追加 D-4（allocation/ 段 risk_parity.py 条目追加 #246；文件原 TODO"风险预算 Risk Budgeting"落点，文件内累计式回写）：新增 RiskBudgetReallocator（基于监控反馈的多策略风险预算再分配器）+ ReallocationRecord（再分配全链路留痕，JSON 可序列化）；再分配算法=质量分（score=score_match_weight×match_norm+(1-score_match_weight)×(1-risk_norm)，低匹配 regime_match<match_score_min ×low_match_penalty，负绩效 rolling_perf<0 ×negative_perf_penalty，无监控反馈策略质量分=0 低证据降配）→ 按质量分比例分配 → 上限约束迭代重归一化（每策略上限 max_weights/权重下限 min_weight）→ 单策略单次最大降幅 max_step 护栏 → 单次总调幅上限 max_total_shift 护栏 → 归一化到和=1（尾差归最大权重策略保留尾差精度）；全部质量分=0 不调整（不编造）；安全模型对齐 D-1：mode=shadow 只出建议 proposed（需 approve 人工确认生效/reject 否决），mode=auto 自动生效（安全测试后放开）；可审计（reallocation_history 上限裁剪 + AuditLogStore kind=risk_realloc，审计失败降级不阻断）、可回滚（rollback 恢复 weights_before，非 applied/未知返回 False）；effective_weights/history(limit)/summary 观测；构造防御（负参数/非法 mode/max_weights/penalty/history）；防未来（只消费已发生监控反馈，created_at/decided_at 一律当前时点，clock 可注入）。
+   b. myquant/monitoring/action_engine.py 追加 ReallocateRiskBudgetExecutor（monitoring/ 段 action_engine.py 条目 #243/#244 追加 #246；D-1 文件内同文件扩展）：action_type=reallocate_risk，注入 reallocate_fn/rollback_fn 接线（业务类 RiskBudgetReallocator 由部署方接线），缺注入返回 not_supported 不假成功 KP-M02；dry-run 预检演练先行；执行→undo 回滚恢复旧权重→审计（kind=action_engine）全链路。
+   c. 新增 tests/unit/test_risk_reallocation.py（40 项）：构造防御；输入权重/反馈校验（非法字段防御式忽略）；质量分算法（优质>劣质/低匹配与负绩效惩罚/缺反馈=0/全等质量分不调整）；目标权重（上限/下限/单步降幅/总调幅护栏/和=1）；审批留痕（shadow 提议不生效/approve/reject/auto/重复 approve 拒绝/回滚恢复）；留痕审计（JSON 可序列化/上限裁剪/审计写入/审计失败不阻断/summary）；action_engine 集成（执行器注册/缺注入 not_supported/dry-run/执行回滚/低匹配降配全链路可审计）。
+   d. 验证结果：py_compile 通过；单测 40 项全绿 + 既有 test_allocation.py 63 项 + test_action_engine.py 82 项回归零破坏（185 passed）；全量 pytest 结果见提交后终验（基线 3192 passed/2 skipped/0 failed）。
+   e. 纪律遵守：先更新蓝图目录树（allocation 段 risk_parity.py 条目追加 #246 + action_engine.py 条目追加 #246 + tests/unit 段 test_risk_reallocation.py）再创建文件（蓝图优先）；无蓝图外新文件；业务逻辑归 myquant（再分配业务类归 allocation/，动作引擎接线归 monitoring/，未改 allocation/base.py）；算法参数为模块常量可构造注入（业务阈值不编造，监控反馈由调用方注入）；严格防未来（只消费已发生监控反馈，时间戳一律当前时点）；任务后 git 提交（commit message 引用 #246）。

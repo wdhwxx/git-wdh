@@ -868,6 +868,88 @@ class NotifyTraderExecutor(ActionExecutor):
 
 
 # ═══════════════════════════════════════════════════════════════
+#  D-4 风险预算再分配执行器（回写#246）
+# ═══════════════════════════════════════════════════════════════
+# 业务类 RiskBudgetReallocator 在 myquant/allocation/risk_parity.py；
+# 本执行器提供动作引擎接线（注入 reallocate_fn 回调，缺注入不假成功 KP-M02）。
+
+@register_action_executor
+class ReallocateRiskBudgetExecutor(ActionExecutor):
+    """
+    基于监控反馈的多策略风险预算再分配（可回滚）。
+
+    params 支持：reallocate_fn（callable，必填，执行再分配——调用方注入
+    RiskBudgetReallocator 接线）、rollback_fn（callable，回滚恢复旧权重）、
+    weights（当前权重 {strategy: weight}）、feedback（监控反馈快照）、
+    reason（再分配原因）。
+    """
+
+    action_type = "reallocate_risk"
+
+    def execute(
+        self,
+        ctx: Dict[str, Any],
+        params: Dict[str, Any],
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        params = dict(params or {})
+        reallocate_fn = params.get("reallocate_fn")
+        rollback_fn = params.get("rollback_fn")
+        weights = params.get("weights")
+        feedback = params.get("feedback")
+        reason = str(params.get("reason", ""))
+        if not callable(reallocate_fn):
+            return {
+                "status": STATUS_NOT_SUPPORTED,
+                "message": "未注入 reallocate_fn（不假成功，KP-M02）",
+                "details": {"reason": reason},
+                "rollback_info": None,
+            }
+        rollback_info: Dict[str, Any] = {
+            "has_rollback": callable(rollback_fn),
+            "reason": reason,
+        }
+        if callable(rollback_fn):
+            rollback_info["rollback_fn"] = rollback_fn
+        if dry_run:
+            return {
+                "status": STATUS_EXECUTED,
+                "message": "dry-run：将按监控反馈再分配风险预算（未真实执行）",
+                "details": {"dry_run": True, "reason": reason},
+                "rollback_info": rollback_info,
+            }
+        try:
+            result = reallocate_fn(weights=weights, feedback=feedback, reason=reason)
+            return {
+                "status": STATUS_EXECUTED,
+                "message": "风险预算再分配已执行",
+                "details": {"reason": reason, "result": result or {}},
+                "rollback_info": rollback_info,
+            }
+        except Exception as e:  # noqa: BLE001 —— 再分配异常如实报告
+            return {
+                "status": STATUS_FAILED,
+                "message": f"风险预算再分配失败: {e}",
+                "details": {"reason": reason, "error": str(e)},
+                "rollback_info": rollback_info,
+            }
+
+    def undo(self, rollback_info: Dict[str, Any]) -> bool:
+        """回滚：调用注入的 rollback_fn 恢复旧权重；未注入返回 False。"""
+        rollback_fn = (rollback_info or {}).get("rollback_fn")
+        if not callable(rollback_fn):
+            logger.warning("[action] 风险预算再分配回滚失败：未注入 rollback_fn")
+            return False
+        try:
+            rollback_fn()
+            logger.info("[action] 风险预算已恢复（回滚完成）")
+            return True
+        except Exception as e:  # noqa: BLE001
+            logger.error("[action] 风险预算回滚失败: %s", e)
+            return False
+
+
+# ═══════════════════════════════════════════════════════════════
 #  规则引擎（D-1）
 # ═══════════════════════════════════════════════════════════════
 
