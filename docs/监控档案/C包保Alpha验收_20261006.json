@@ -1,0 +1,190 @@
+{
+  "acceptance": "C-12 C包保Alpha验收",
+  "generated_at": "2026-10-06T21:22:28.279369+08:00",
+  "report_date": "2026-10-06",
+  "environment": {
+    "python": "3.12.13",
+    "platform": "win32",
+    "isolated": true,
+    "fixed_clock_used": true,
+    "quant_db_touched": false
+  },
+  "items": [
+    {
+      "item": "C-1",
+      "name": "模型漂移（PSI/KS 三态 + 日频预警）",
+      "verdict": "pass",
+      "summary": "healthy=healthy drift=drift not_configured=not_configured daily_alerted=True",
+      "measured": {
+        "psi": 0.0,
+        "ks": 0.15,
+        "healthy_status": "healthy",
+        "drift_status": "drift",
+        "not_configured_status": "not_configured",
+        "daily": {
+          "drift": true,
+          "status": "drift",
+          "psi": 1.690857,
+          "ks": 1.0,
+          "alerted": true
+        },
+        "alert_calls": 1
+      },
+      "error": null
+    },
+    {
+      "item": "C-2",
+      "name": "滚动绩效（滚动收益/回撤/胜率 + 日内告警）",
+      "verdict": "pass",
+      "summary": "recorded=10 points, panel_json=True, alerts=0",
+      "measured": {
+        "points": 10,
+        "alert_calls": 0,
+        "panel_keys": []
+      },
+      "error": null
+    },
+    {
+      "item": "C-4",
+      "name": "信号衰减（滚动 IC/密度/无效占比 + P1P2 分级）",
+      "verdict": "pass",
+      "summary": "healthy_ic=1.0 alerts_h=0; decay_ic=-1.0 alerts_d=2",
+      "measured": {
+        "healthy_ic": 1.0,
+        "decay_ic": -1.0,
+        "healthy_alerts": 0,
+        "decay_alerts": 2
+      },
+      "error": null
+    },
+    {
+      "item": "C-5",
+      "name": "归因（四维归因 + 回测/实盘对比 + self_consistent 对账）",
+      "verdict": "pass",
+      "summary": "self_consistent=True ratio_sum=1.0 top_contrib=150.0 abs_diff=-15.0 bucket=2023-11-15",
+      "measured": {
+        "self_consistent": true,
+        "ratio_sum": 1.0,
+        "top_group": "trend_a",
+        "top_contribution": 150.0,
+        "risk_groups": 2,
+        "abs_diff": -15.0,
+        "bucket": "2023-11-15"
+      },
+      "error": null
+    },
+    {
+      "item": "C-6",
+      "name": "动态基线（滚动基线/同环比/冷启动兜底/regime）",
+      "verdict": "pass",
+      "summary": "warm=12 in_band_event=None outlier_event=yes",
+      "measured": {
+        "warm_points": 12,
+        "in_band_is_none": true,
+        "outlier_detected": true,
+        "anomaly_count": 1,
+        "regime": "default"
+      },
+      "error": null
+    },
+    {
+      "item": "C-7",
+      "name": "根因（同窗聚合/依赖抑制/事件驱动）",
+      "verdict": "pass",
+      "summary": "incident_total=1 suppressed_total=1",
+      "measured": {
+        "incident_total": 1,
+        "suppressed_total": 1
+      },
+      "error": null
+    },
+    {
+      "item": "C-8",
+      "name": "容量（外推预测/剩余天数/headroom 告警）",
+      "verdict": "pass",
+      "summary": "points=9 strategies=3 alerts=0",
+      "measured": {
+        "alert_calls": 0,
+        "panel_keys": [
+          "alert_triggered",
+          "backtest_peak_memory_mb",
+          "degraded",
+          "headroom_min_pct",
+          "last_poll_time",
+          "projection",
+          "strategy_count",
+          "strategy_count_limit"
+        ]
+      },
+      "error": null
+    },
+    {
+      "item": "C-9",
+      "name": "告警治理（聚合分组/依赖抑制/元监控独立冷却）",
+      "verdict": "pass",
+      "summary": "root_allowed=True upper_reason=dependency_suppressed meta2_reason=meta_cooldown_suppressed",
+      "measured": {
+        "root_allowed": true,
+        "upper_reason": "dependency_suppressed",
+        "meta2_reason": "meta_cooldown_suppressed",
+        "summary": {
+          "allowed_total": 2,
+          "suppressed_total": 2,
+          "suppressed_by_dependency": 1,
+          "suppressed_by_baseline": 0,
+          "suppressed_by_meta_cooldown": 1,
+          "aggregated_total": 0,
+          "suppression_window_seconds": 60.0,
+          "aggregation_window_seconds": 60.0,
+          "meta_cooldown_seconds": 120.0,
+          "dependency_suppression_enabled": true,
+          "baseline_noise_reduction_enabled": false,
+          "root_categories_seen": [
+            "watchdog"
+          ]
+        }
+      },
+      "error": null
+    },
+    {
+      "item": "C-10",
+      "name": "信号一致性（逐笔对齐/偏差率/超阈告警/one-sided）",
+      "verdict": "pass",
+      "summary": "healthy_rate=0.0 alerts_h=0; deviation_alert=True",
+      "measured": {
+        "healthy_mismatch_rate": 0.0,
+        "healthy_alerts": 0,
+        "deviation_alert_triggered": true
+      },
+      "error": null
+    },
+    {
+      "item": "C-11",
+      "name": "数据血缘（决策=关闭/远期，#240 已回写）",
+      "verdict": "pass",
+      "summary": "磁盘存在 data_lineage.py=False（预期 False；决策项非代码验收）",
+      "measured": {
+        "path": "D:\\Projects\\Pythonwdhmm\\myquant\\monitoring\\data_lineage.py",
+        "exists": false,
+        "decision": "closed_deferred",
+        "ticket": "#240"
+      },
+      "error": null
+    }
+  ],
+  "false_positive": {
+    "healthy_runs": 5,
+    "false_positive_alerts": 0,
+    "false_positive_rate": 0.0,
+    "tp": 7,
+    "fn": 0,
+    "positive_cases": 7,
+    "note": "P0-8：健康输入序列上的告警数（预期 0 误报）；TP/FN 来自隔离注入的已知异常检出（漂移告警/依赖抑制/meta 冷却/基线离群/一致性偏差）。"
+  },
+  "totals": {
+    "pass": 10,
+    "fail": 0,
+    "total": 10
+  },
+  "overall_pass": true
+}
