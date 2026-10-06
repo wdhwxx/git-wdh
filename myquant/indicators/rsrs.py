@@ -472,6 +472,112 @@ class RSRS(IndicatorBase):
 
 
 # ─────────────────────────────────────────────
+# C-3 环境识别（regime 分类）— 追加能力，零改动既有接口
+# ─────────────────────────────────────────────
+
+#: 趋势置信 R² 下限（算法参数，非业务告警阈值；业务阈值见 slo.regime_matcher）：
+#: r2 >= 此值且 z-score 超阈才判定为"趋势"环境，否则保守归"震荡"（防误判趋势）
+REGIME_TREND_R2_MIN: float = 0.30
+
+
+def classify_regime(
+    rsrs_value: float,
+    r2_value: float,
+    buy_threshold: float = 0.7,
+    sell_threshold: float = -0.7,
+    trend_r2_min: float = REGIME_TREND_R2_MIN,
+) -> str:
+    """
+    基于 RSRS 单点值识别市场环境（C-3 环境匹配评分输入）。
+
+    本函数为纯判定、无状态；输入必须是"已发生"的 RSRS 值
+    （调用方保证防未来：只传当前时点及之前已计算出的 rsrs/r2，见规则铁律 11）。
+    本行使用的数据截至该 RSRS 值对应的时间戳 t 时刻。
+
+    Args:
+        rsrs_value: RSRS 标准化 z-score（已发生）。
+        r2_value: 对应回归决定系数 R²（已发生；NaN=数据不足按震荡处理）。
+        buy_threshold: 买入阈值（> 且结构强 → 强势上升）。
+        sell_threshold: 卖出阈值（< 且结构强 → 强势下降）。
+        trend_r2_min: 趋势置信 R² 下限；r2 低于此值即使 z-score 超阈也归震荡。
+
+    Returns:
+        环境档位（5 档）:
+          - "trend_up"  ：强势上升（rsrs>buy 且 r2>=trend_r2_min）
+          - "trend_down"：强势下降（rsrs<sell 且 r2>=trend_r2_min）
+          - "mild_up"   ：温和上升（0<rsrs<=buy）
+          - "mild_down" ：温和下降（sell<=rsrs<0）
+          - "range"     ：震荡（|rsrs|<=0、信号强但结构弱、或输入非法/NaN 保守归此档）
+
+    Raises:
+        ValueError: rsrs_value/r2_value 非有限数值（NaN 之外的 inf）或阈值非法时抛出。
+    """
+    if buy_threshold <= sell_threshold:
+        raise ValueError(
+            f"buy_threshold 必须大于 sell_threshold，收到 buy={buy_threshold} sell={sell_threshold}"
+        )
+    if trend_r2_min < 0.0 or trend_r2_min > 1.0:
+        raise ValueError(f"trend_r2_min 必须在 [0,1]，收到 {trend_r2_min}")
+
+    if not np.isfinite(rsrs_value) or not np.isfinite(r2_value):
+        # NaN（数据不足）/inf（非法）→ 保守归震荡，不误判趋势方向
+        return "range"
+
+    if rsrs_value > buy_threshold:
+        return "trend_up" if r2_value >= trend_r2_min else "range"
+    if rsrs_value < sell_threshold:
+        return "trend_down" if r2_value >= trend_r2_min else "range"
+    if rsrs_value > 0.0:
+        return "mild_up"
+    if rsrs_value < 0.0:
+        return "mild_down"
+    return "range"
+
+
+def regime_from_series(
+    rsrs_series: pd.Series,
+    r2_series: pd.Series,
+    buy_threshold: float = 0.7,
+    sell_threshold: float = -0.7,
+    trend_r2_min: float = REGIME_TREND_R2_MIN,
+) -> pd.Series:
+    """
+    批量对 RSRS/R² 序列逐行分类市场环境（C-3 环境匹配评分输入）。
+
+    输入序列须为"已发生"的 RSRS/R²（调用方保证防未来；批量场景建议先
+    shift(1)/对齐到已收盘 bar，与 RSRS.calculate 的输出列一一对应）。
+    本行使用的数据截至序列各索引对应的 t 时刻。
+
+    Args:
+        rsrs_series: RSRS z-score 序列。
+        r2_series: 对应 R² 序列（与 rsrs_series 同索引等长）。
+        buy_threshold / sell_threshold / trend_r2_min: 见 classify_regime。
+
+    Returns:
+        与输入等长的分类序列（元素为环境档位字符串；非法输入行保守为 "range"）。
+
+    Raises:
+        ValueError: 两序列长度不一致或索引不对齐时抛出。
+    """
+    if len(rsrs_series) != len(r2_series):
+        raise ValueError(
+            f"rsrs_series 与 r2_series 长度不一致: {len(rsrs_series)} vs {len(r2_series)}"
+        )
+    if not rsrs_series.index.equals(r2_series.index):
+        raise ValueError("rsrs_series 与 r2_series 索引不对齐")
+
+    def _cls(rs: float, r2: float) -> str:
+        return classify_regime(
+            float(rs), float(r2), buy_threshold, sell_threshold, trend_r2_min
+        )
+
+    return pd.Series(
+        [_cls(r, r2) for r, r2 in zip(rsrs_series.tolist(), r2_series.tolist())],
+        index=rsrs_series.index,
+    )
+
+
+# ─────────────────────────────────────────────
 # 自测 Demo
 # ─────────────────────────────────────────────
 

@@ -586,6 +586,8 @@ Pythonwdhmm/
 
     │   │   ├── test_c_acceptance.py # ✨【回写#241】C-12 C 包验收测试：C-1~C-11 逐项断言/隔离环境重建跨 run 去重/阈值真源引用/防未来时间戳/异常如实记录不吞✅已完成
 
+    │   │   ├── test_regime_matcher.py # ✨【回写#242】C-3 环境匹配度评分测试（42 项）：classify_regime/regime_from_series 5 档环境识别（强趋势/温和/震荡/NaN 保守/阈值防御）；当前环境判定（最新已发生 RSRS）；匹配评分矩阵契约；低匹配 P2/WARNING 告警契约（category=regime、dedup=regime:match:<strategy>、details 附匹配分/环境/降频降仓建议）；阈值未配置不告警不编造（R-04）；防未来拒绝未来 RSRS 观测；冷启动保守归 range 不误判；防御校验（负阈值/非法风格/inf）；指标 set_gauge 注册✅已完成
+
     │   │   ├── test_alert_escalation.py # ✨【回写#214】A-10 告警分级与升级测试（20 项）：P0~P3 统一映射与非法值防御、runbook_id 显式字段提升/默认映射/落库贯通、超时未确认 WARNING→ERROR 且落库 acked+escalated（无通道仍升级补缺）、已确认/已解决/未超时/开关关闭不重复升级、A-7 对账事件装配接线✅已完成
 
     │   │   ├── test_rate_limit_monitor.py # ✨【回写#216】A-12 交易所限流监控测试（15 项）：滑动窗口计数/窗口外样本剔除/动作隔离、未达预警线不告警、达预警线 P1+暂停钩子调用、达上限 ERROR、窗口回落自动恢复、指标递增、防御式校验、阈值读 slo.exchange_rate_limit✅已完成
@@ -952,7 +954,7 @@ Pythonwdhmm/
     │   ├── volatility.py             # ATR、Volatility（收益率波动率，三因子之波动率因子）、BollingerBands（布林带）；✨【回写#97】F-10 波动率稳健化与自适应：Volatility 增 method（std 默认零变化/ewma 两档自适应 λ 0.94-0.85 RiskMetrics 方差递推/robust 滚动 MAD 1.4826 稳健估计）+ winsorize 开关（expanding MAD clip 输出前去极值，边界仅含截至 t 历史防未来）；新增 ExtremeRegime 指标（滚动绝对收益分位超阈值 → regime 0/1 极端行情区制标记）；update() 流式同步支持 ewma（实盘 O(1)）
     │   ├── tradability.py            # ✨【回写#98】F-11 可交易性过滤：filter_tradable 共享过滤函数（当日停牌/近 N 日均成交额阈值/一字涨跌停），因子管线与 ML 特征层共享；规则独立开关、列缺失自动跳过（防御式零变化）；返回 (mask, stats) 拒因统计供验收对比入档；仅用 ≤t 数据（rolling 因果防未来）
 
-    │   └── rsrs.py                   # ✨【#3】RSRS阻力支撑相对强度指标（系统核心择时指标）：线性回归high=α+β*low，β为原始斜率+z-score标准化；参数period=18/norm_window=60/buy=0.7/sell=-0.7；输出rsrs(z-score)/rsrs_raw(β)/rsrs_r2(R²)/signal四列；防未来函数铁律：β用iloc[i-period:i]不含第i根，批量calculate先算含当日β再整体shift(1)，流式update用不含当前bar的最近period根，validate_no_lookahead()自校验；@register_indicator注册，回测批量+实盘流式共用同一逻辑（实盘无缝对接）；✨【V5·P0】闭式OLS纯向量化重构（np.linalg.lstsq→闭式解，无Python循环，批量计算吞吐大幅提升）
+    │   └── rsrs.py                   # ✨【#3】RSRS阻力支撑相对强度指标（系统核心择时指标）：线性回归high=α+β*low，β为原始斜率+z-score标准化；参数period=18/norm_window=60/buy=0.7/sell=-0.7；输出rsrs(z-score)/rsrs_raw(β)/rsrs_r2(R²)/signal四列；防未来函数铁律：β用iloc[i-period:i]不含第i根，批量calculate先算含当日β再整体shift(1)，流式update用不含当前bar的最近period根，validate_no_lookahead()自校验；@register_indicator注册，回测批量+实盘流式共用同一逻辑（实盘无缝对接）；✨【V5·P0】闭式OLS纯向量化重构（np.linalg.lstsq→闭式解，无Python循环，批量计算吞吐大幅提升）；✨【回写#242】C-3 追加环境识别纯函数（零改动既有接口）——classify_regime 单点 5 档环境分类（trend_up/trend_down/mild_up/mild_down/range，严格 >/< 超买卖阈+ R²≥trend_r2_min 才判强趋势，信号强但结构弱保守归 range，NaN/inf 保守 range）+ regime_from_series 批量分类（长度/索引对齐防御），供 monitoring/regime_matcher.py 消费（防未来由调用方保证只传已发生 RSRS 值）
 
     │   ├── factor_cache.py           # ✨【V5·P0】三级因子缓存：L1进程内dict（LRU）→L2磁盘（cache/factor目录，parquet+元数据校验）→L3永久缓存（指纹一致则复用）；读路径穿透式逐级命中，写路径回填上级；--no-cache-sync跳过写回；联动data_fingerprint指纹与memory_watcher内存水位；✨【回写#101】F-13 L2 改目录分层存储（{factor_name}/{symbol}/{params_hash}_{fp_short}.parquet）消灭下划线因子名解析歧义；nofp 无指纹场景短 TTL 封顶 1 小时 + WARNING 告警
 
@@ -1237,6 +1239,8 @@ Pythonwdhmm/
     │   ├── signal_consistency.py    # ✨【回写#239】C-10 回测实盘逐笔信号一致性（批任务）：SignalConsistencyChecker——回测信号与实盘信号逐笔对比（同参数同时间窗），偏差率监控（偏差=方向/价格/时间错配样本占比）；偏差超阈值 → 回测实盘偏差告警（附偏差明细）；阈值引用 P0-2 slo.backtest_consistency.signal_deviation_rate_max（PENDING_CAL=None 不告警不编造，R-04/R-05）；防未来（只对比已发生信号）；__main__ 自测
 
     │   ├── c_acceptance.py          # ✨【回写#241】C-12 C 包验收业务逻辑：CAcceptanceRunner（隔离环境=临时 AlertStore+真实 AlertManager+真实 EventBus）——C-1~C-11 验收项逐项断言（漂移预警/滚动绩效/信号衰减曲线/归因对比/动态基线 anomaly/根因聚合/容量预警/降噪准确率 P0-8 口径/信号一致性），阈值全部引用 get_monitoring_config() 真源；每次 run() 重建隔离跨 run 去重；防未来时间戳；JSON 报告结构；__main__ 自测
+
+    │   ├── regime_matcher.py        # ✨【回写#242】C-3 环境匹配度评分（周期/POLL，非 MTTD 类）：RegimeMatcher——基于 RSRS 等 regime 指标识别市场环境（复用 indicators/rsrs.py 的 classify_regime 5 档：trend_up/trend_down/mild_up/mild_down/range）；策略-环境匹配评分（0~100 算法矩阵，trend/range 风格 × 环境档位）；低匹配（< slo.regime_matcher.match_score_min）→ P2/WARNING 告警（category=regime、dedup=regime:match:<strategy>、details 附匹配分/环境/降频降仓建议）；阈值读 settings.yaml monitoring.slo.regime_matcher（PENDING_CAL=None 不告警不编造，R-04）；指标 regime_state/regime_match_score 经 set_gauge 进 /api/metrics（REGISTERED_METRICS）；observe_rsrs 严格防未来（拒绝未来时间戳，只消费已发生 RSRS 值，冷启动保守归 range 不误判方向）；__main__ 自测 28 项
 
     │
 
@@ -3775,3 +3779,11 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
     d. 验证结果：实跑 JSON——overall_pass=True、10 pass/0 fail、false_positive_alerts=0、TP=7/FN=0、generated_at=2026-10-06T21:22:28（environment.isolated=true/fixed_clock_used=true/quant_db_touched=false）；py_compile 通过；__main__ 自测 0 失败。
     e. 纪律：无蓝图外文件（3 文件均预登记 #241 现闭合）；阈值隔离用常量外置非业务真源；防未来固定时钟注入；不污染 quant.db（quant_db_touched=false）。
     f. 全量 pytest 收尾核验 3192 passed/2 skipped/0 failed 无回归。
+
+237. ✨【回写记录·2026-10-06·C-3 环境匹配度评分】【回写#242】
+   事实来源：本次落地，代码级核验：《量化系统监控模块施工总清单_V1.2.md》C-3 行验收口径（基于 RSRS 等 regime 指标识别市场环境；策略-环境匹配评分；低匹配 → 降频/降仓建议告警；验收=匹配评分进入指标与看板，低匹配产生 P2 预警）+ docs/监控档案/SLO与阈值锁定清单_P0-2.md（无 regime 阈值，新增 slo.regime_matcher 块 PENDING_CAL 不编造）。
+   a. 新增 myquant/monitoring/regime_matcher.py（RegimeMatcher，周期/POLL 非 MTTD 类，monitoring/ 段登记 #242）：observe_rsrs 摄入已发生 RSRS 值（严格防未来拒绝未来时间戳，冷启动保守归 range 不误判方向）；当前环境 = 最近一个已发生 RSRS 值经 classify_regime 判定的档位；策略-环境匹配评分 0~100 算法矩阵（trend 风格×trend_up=100×range=40、range 风格×range=100×trend=40，模块常量非业务阈值）；低匹配（< slo.regime_matcher.match_score_min）→ P2/WARNING（category=regime、source=monitoring.regime_matcher、dedup=regime:match:<strategy>、details 附匹配分/环境/降频降仓建议）；阈值读 settings.yaml monitoring.slo.regime_matcher（match_score_min/trend_r2_min，PENDING_CAL=None 不告警不编造，构造注入优先 R-04）；指标 regime_state（环境编码 3/2/0/-2/-3）/regime_match_score（labels=strategy）经 set_gauge 动态注册进 /api/metrics（REGISTERED_METRICS 未改 metrics_collector.py）；防御式校验（match_score_min>=0、trend_r2_min∈[0,1]、buy>sell、空策略名/非法风格/inf 显式报错）；__main__ 自测 28 项。
+   b. 追加 myquant/indicators/rsrs.py 环境识别纯函数（零改动既有接口，indicators/ 段条目追加 #242）：classify_regime（单点 5 档：trend_up/trend_down/mild_up/mild_down/range；严格 >/< 超买卖阈且 R²≥trend_r2_min 才判强趋势，信号强但结构弱保守归 range；NaN/inf 保守 range；阈值非法显式报错）+ regime_from_series（批量分类，长度/索引对齐防御）+ REGIME_TREND_R2_MIN 算法默认常量（非业务阈值）。
+   c. 新增 tests/unit/test_regime_matcher.py（42 项）：classify_regime/regime_from_series 全档位+边界（等于阈值=温和档与 RSRS 信号语义一致）+防御；当前环境判定（最新已发生值/弱结构保守/冷启动）；匹配评分矩阵契约（5 档×2 风格全覆盖）；低匹配 P2 告警契约（category/dedup/level/details 附建议）+高匹配不告警+阈值未配置不告警不编造+告警失败不阻断；防未来拒绝未来点/接受过去与当前/inf 拒绝；防御校验（负阈值/越界 R²/反转买卖阈/空策略名/非法风格/非正 max_points）；指标 set_gauge（state 编码+labels=strategy）；to_dict/summary/缓存上限/构造注入优先/配置 PENDING_CAL 语义。
+   d. 验证结果：py_compile 三文件通过；模块 __main__ 自测 28 项全绿；单测 42 passed；指标既有回归 170 passed（rsrs/indicator 筛选）零破坏；全量 pytest 结果见提交后终验（基线 3192 passed/2 skipped/0 failed）。
+   e. 纪律遵守：先更新蓝图目录树（monitoring 段 regime_matcher.py + tests/unit 段 test_regime_matcher.py + indicators 段 rsrs.py 追加）再创建文件（蓝图优先）；无蓝图外文件；业务逻辑归 myquant；阈值引用配置真源（slo.regime_matcher PENDING_CAL 不编造，评分矩阵为算法定义非业务阈值）；严格防未来（只消费已发生 RSRS 值，observe 拒绝未来时间戳）；告警只调 get_alert_manager().alert() 不改 alerting.py；任务后 git 提交（commit message 引用 #242）。

@@ -109,6 +109,11 @@ monitoring:
       static_low: ~                   # 冷启动静态阈值下限（低于即异常告警），PENDING_CAL
       static_high: ~                  # 冷启动静态阈值上限（高于即异常告警），PENDING_CAL
 
+    # ── 环境匹配（C-3，基于 RSRS 识别市场环境 + 策略-环境匹配评分；待实盘校准后填死，禁止编造）──
+    regime_matcher:
+      match_score_min: ~              # 策略-环境匹配评分下限（低于即 P2 预警：降频/降仓建议），PENDING_CAL
+      trend_r2_min: ~                 # 趋势置信 R² 下限（覆盖算法默认 0.30；低于则保守归震荡），PENDING_CAL
+
     # ── 引擎心跳（R-02 硬约束：N×心跳间隔必须 <60s 才能保住 MTTD<1min）──
     engine_heartbeat:
       hang_judge_window_seconds: 60    # 判定窗口上限 <60s，LOCKED
