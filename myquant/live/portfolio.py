@@ -240,6 +240,11 @@ class LivePortfolio:
         self._recon_broker: Any = None
         self._recon_handler_ids: List[str] = []
 
+        # B-1：账户对账器（AccountReconciler）注入点。None 时事件回调走 A-7
+        # 同步核对兜底（既有单测依赖同步语义）；注入后事件回调改为异步投递，
+        # 且 PnL 防脏门据其冻结状态拒绝脏 PnL 记录。
+        self._account_reconciler: Any = None
+
         logger.info(
             f"实时持仓管理初始化: account={account_id}, "
             f"初始资金={initial_capital:,.0f}"
@@ -493,6 +498,67 @@ class LivePortfolio:
         """
         pos = self._positions.get(symbol)
         return pos.pnl_ratio if pos else 0.0
+
+    # ═══════════════════════════════════════════
+    #  PnL 防脏门（B-1，B-2 依赖）
+    # ═══════════════════════════════════════════
+
+    def _resolve_reconciler(self) -> Any:
+        """解析对账器状态源：优先注入实例，否则取全局惰性单例（避免循环依赖）。
+
+        Returns:
+            AccountReconciler | None: 对账器；获取失败返回 None（门视为放行，
+            不因监控组件缺失阻断正常 PnL 记录）。
+        """
+        if self._account_reconciler is not None:
+            return self._account_reconciler
+        try:
+            from myquant.monitoring.account_reconciler import get_account_reconciler
+            return get_account_reconciler()
+        except Exception as e:  # 对账器不可用不阻断 PnL 主流程
+            logger.warning("[portfolio] 惰性获取对账器失败，PnL 门视为放行: %s", e)
+            return None
+
+    @_locked
+    def record_pnl_snapshot(self, reason: str = "periodic") -> Optional[Dict[str, Any]]:
+        """记录一次 PnL 快照（B-2 消费入口）；账户对账冻结时拒绝并留痕。
+
+        B-1 PnL 防脏门：当账户对账器报告账户冻结（差异未人工解除，is_frozen）时，
+        拒绝 PnL 记录并经对账器审计留痕（action="pnl_block"），防止脏对账状态下
+        写入不可信 PnL；一致（未冻结）后才允许记录。对账器缺失时视为放行。
+
+        Parameters
+        ----------
+        reason : str
+            记录触发原因（periodic / settle / manual 等，仅留痕用）。
+
+        Returns
+        -------
+        dict | None :
+            一致时返回 PnL 快照（realized/unrealized/total_pnl/ts/reason）；
+            冻结被拒时返回 None。
+        """
+        reconciler = self._resolve_reconciler()
+        if reconciler is not None and getattr(reconciler, "is_frozen", False):
+            logger.warning(
+                "[portfolio] PnL 记录被防脏门拒绝（账户对账冻结）: account=%s reason=%s",
+                self._account_id, reason,
+            )
+            try:
+                reconciler.note_pnl_blocked(reason)
+            except Exception as e:  # 留痕失败不阻断拒绝判定
+                logger.error("[portfolio] PnL 拒绝留痕失败: %s", e)
+            return None
+
+        return {
+            "account_id": self._account_id,
+            "realized_pnl": round(self.get_realized_pnl(), 2),
+            "unrealized_pnl": round(self.get_unrealized_pnl(), 2),
+            "total_pnl": round(self.get_total_pnl(), 2),
+            "total_assets": round(self.get_total_assets(), 2),
+            "ts": time.time(),  # 记录时刻（当前时点，防未来）
+            "reason": reason,
+        }
 
     # ═══════════════════════════════════════════
     #  账户总览
@@ -802,7 +868,13 @@ class LivePortfolio:
         return removed
 
     def _on_reconciliation_event(self, event: Any) -> None:
-        """事件驱动对账回调：用注入的 broker 数据源核对一次（只读 diff + 告警/INFO）。
+        """事件驱动对账回调：用注入的 broker 数据源核对一次。
+
+        B-1：若已注入 AccountReconciler，则把核对投递到对账器的异步线程池
+        （handler 立即返回，不阻塞事件流；同 account 在途去重）——核对仍复用
+        ``reconcile_vs_broker``（A-7 告警路径兼容）。若未注入对账器（A-7 既有
+        用法 / 既有单测），退回同步 ``reconcile_vs_broker``，保持既有告警与断言
+        语义不变。
 
         防未来：只消费"已发生"的成交/持仓变更事件（业务发生时刻 event_ts），
         不引用任何未来数据。异常仅记日志，不阻断事件流/交易。
@@ -815,10 +887,41 @@ class LivePortfolio:
         broker = self._recon_broker
         if broker is None:
             return
+        reconciler = self._account_reconciler
+        if reconciler is not None:
+            # B-1 异步路径：投递即返回，核对在对账器线程池执行（非阻塞事件流）
+            try:
+                reconciler.request_realtime_reconciliation(portfolio=self, broker=broker)
+            except Exception as e:  # 投递异常不得阻断事件流
+                logger.error("[portfolio] 异步对账投递异常（不阻断事件流）: %s", e)
+            return
+        # A-7 兼容路径：同步核对（既有单测依赖 publish 后立即告警的同步语义）
         try:
             self.reconcile_vs_broker(broker)
         except Exception as e:  # 对账异常不得阻断事件流
             logger.error("[portfolio] 事件驱动对账异常（不阻断事件流）: %s", e)
+
+    def set_account_reconciler(self, reconciler: Any) -> None:
+        """注入 B-1 账户对账器（AccountReconciler）。
+
+        注入后：事件回调改为异步投递核对（非阻塞事件流）；PnL 防脏门据其
+        ``is_frozen`` 状态拒绝脏 PnL 记录。传 None 可恢复 A-7 同步兜底路径。
+
+        Parameters
+        ----------
+        reconciler : AccountReconciler | None
+            账户对账器实例（鸭子类型，避免硬导入循环依赖）。
+        """
+        self._account_reconciler = reconciler
+        logger.info(
+            "[portfolio] B-1 账户对账器%s: account=%s",
+            "已注入" if reconciler is not None else "已移除", self._account_id,
+        )
+
+    @property
+    def account_reconciler(self) -> Any:
+        """当前注入的账户对账器（None=A-7 同步兜底路径）。"""
+        return self._account_reconciler
 
     @_locked
     def apply_trade(self, trade: Trade) -> None:
