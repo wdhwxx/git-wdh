@@ -387,13 +387,113 @@ def _parse_level(level: Any) -> SeverityLevel:
 
 # ── D-1 通用执行器 ─────────────────────────────────────────────
 
+def _dispatch_notification(
+    ctx: Dict[str, Any],
+    params: Dict[str, Any],
+    dry_run: bool,
+    default_level: str,
+    default_category: str,
+    action_label: str,
+) -> Dict[str, Any]:
+    """
+    通用告警投递（Notify/NotifyTrader 共用；通知不可撤销）。
+
+    Parameters
+    ----------
+    ctx : dict
+        执行上下文（alert_manager/rule_id/alert_summary）。
+    params : dict
+        level/message/category/source/dedup_key/runbook_id/details。
+    dry_run : bool
+        影子演练（只预检不真实投递）。
+    default_level : str
+        缺省级别名（如 WARNING/CRITICAL）。
+    default_category : str
+        缺省类别（如 action_engine/execution）。
+    action_label : str
+        审计用动作标签（notify / notify_trader）。
+
+    Returns
+    -------
+    dict : 执行结果（契约同 ActionExecutor.execute）。
+    """
+    params = dict(params or {})
+    try:
+        level = _parse_level(params.get("level", default_level))
+    except ValueError as e:
+        return {
+            "status": STATUS_FAILED,
+            "message": str(e),
+            "details": {"params": params},
+            "rollback_info": None,
+        }
+    manager = ctx.get("alert_manager")
+    if manager is None:
+        try:
+            from myquant.monitoring.alerting import get_alert_manager
+            manager = get_alert_manager()
+        except Exception as e:  # noqa: BLE001 —— 告警管理器缺失降级 not_supported
+            logger.warning("[action] %s 执行器取告警管理器失败: %s", action_label, e)
+            return {
+                "status": STATUS_NOT_SUPPORTED,
+                "message": "告警管理器不可用（通知无法投递）",
+                "details": {},
+                "rollback_info": None,
+            }
+    message = str(params.get("message", "自动化响应编排通知"))
+    details: Dict[str, Any] = {
+        "level": level.name,
+        "message": message,
+        "category": params.get("category", default_category),
+        "dedup_key": params.get("dedup_key", ""),
+        "dry_run": dry_run,
+    }
+    if dry_run:
+        return {
+            "status": STATUS_EXECUTED,
+            "message": "dry-run：通知预检通过（未真实投递）",
+            "details": details,
+            "rollback_info": None,
+        }
+    try:
+        channels = manager.alert(
+            level=level,
+            message=message,
+            source=str(params.get("source", "monitoring.action_engine")),
+            category=str(params.get("category", default_category)),
+            details={
+                "action_type": action_label,
+                "rule_id": ctx.get("rule_id", ""),
+                "trigger_alert": ctx.get("alert_summary", ""),
+                **(params.get("details") if isinstance(params.get("details"), dict) else {}),
+            },
+            deduplication_key=str(params.get("dedup_key", "")),
+            runbook_id=str(params.get("runbook_id", "")),
+        )
+        details["channels"] = channels
+        return {
+            "status": STATUS_EXECUTED,
+            "message": f"通知已投递 {channels} 通道",
+            "details": details,
+            "rollback_info": None,
+        }
+    except Exception as e:  # noqa: BLE001 —— 投递异常如实报告
+        details["error"] = str(e)
+        return {
+            "status": STATUS_FAILED,
+            "message": f"通知投递失败: {e}",
+            "details": details,
+            "rollback_info": None,
+        }
+
+
 @register_action_executor
 class NotifyExecutor(ActionExecutor):
     """
     通用通知动作（经 AlertManager 投递；通知不可撤销）。
 
     params 支持：level（INFO/WARNING/ERROR/CRITICAL，默认 WARNING）、
-    message、category、source、dedup_key、runbook_id。
+    message、category、source、dedup_key、runbook_id、details。
     """
 
     action_type = "notify"
@@ -404,74 +504,12 @@ class NotifyExecutor(ActionExecutor):
         params: Dict[str, Any],
         dry_run: bool = False,
     ) -> Dict[str, Any]:
-        params = dict(params or {})
-        try:
-            level = _parse_level(params.get("level", "WARNING"))
-        except ValueError as e:
-            return {
-                "status": STATUS_FAILED,
-                "message": str(e),
-                "details": {"params": params},
-                "rollback_info": None,
-            }
-        manager = ctx.get("alert_manager")
-        if manager is None:
-            try:
-                from myquant.monitoring.alerting import get_alert_manager
-                manager = get_alert_manager()
-            except Exception as e:  # noqa: BLE001 —— 告警管理器缺失降级 not_supported
-                logger.warning("[action] notify 执行器取告警管理器失败: %s", e)
-                return {
-                    "status": STATUS_NOT_SUPPORTED,
-                    "message": "告警管理器不可用（notify 无法投递）",
-                    "details": {},
-                    "rollback_info": None,
-                }
-        message = str(params.get("message", "自动化响应编排通知"))
-        details: Dict[str, Any] = {
-            "level": level.name,
-            "message": message,
-            "category": params.get("category", "action_engine"),
-            "dedup_key": params.get("dedup_key", ""),
-            "dry_run": dry_run,
-        }
-        if dry_run:
-            return {
-                "status": STATUS_EXECUTED,
-                "message": "dry-run：通知预检通过（未真实投递）",
-                "details": details,
-                "rollback_info": None,
-            }
-        try:
-            channels = manager.alert(
-                level=level,
-                message=message,
-                source=str(params.get("source", "monitoring.action_engine")),
-                category=str(params.get("category", "action_engine")),
-                details={
-                    "action_type": "notify",
-                    "rule_id": ctx.get("rule_id", ""),
-                    "trigger_alert": ctx.get("alert_summary", ""),
-                    **(params.get("details") if isinstance(params.get("details"), dict) else {}),
-                },
-                deduplication_key=str(params.get("dedup_key", "")),
-                runbook_id=str(params.get("runbook_id", "")),
-            )
-            details["channels"] = channels
-            return {
-                "status": STATUS_EXECUTED,
-                "message": f"通知已投递 {channels} 通道",
-                "details": details,
-                "rollback_info": None,
-            }
-        except Exception as e:  # noqa: BLE001 —— 投递异常如实报告
-            details["error"] = str(e)
-            return {
-                "status": STATUS_FAILED,
-                "message": f"通知投递失败: {e}",
-                "details": details,
-                "rollback_info": None,
-            }
+        return _dispatch_notification(
+            ctx, params, dry_run,
+            default_level="WARNING",
+            default_category="action_engine",
+            action_label="notify",
+        )
 
     def undo(self, rollback_info: Dict[str, Any]) -> bool:
         """通知类动作不可撤销（如实返回 False）。"""
@@ -550,6 +588,283 @@ class PauseStrategyExecutor(ActionExecutor):
         except Exception as e:  # noqa: BLE001
             logger.error("[action] 回滚恢复 %s 失败: %s", target, e)
             return False
+
+
+# ═══════════════════════════════════════════════════════════════
+#  D-2 自愈动作库（场景动作执行器）
+# ═══════════════════════════════════════════════════════════════
+# 场景矩阵（回写#244）：
+#   - 行情中断（market_staleness）   → switch_data_source（切备用行情源，可回滚）
+#                                     / pause_strategy（暂停相关策略，可回滚）
+#   - 拒单率飙升（execution/reject）  → pause_strategy（暂停策略，可回滚）
+#                                     / notify_trader（通知交易员，不可撤销）
+#   - 数据质量异常（data_quality）    → stop_signal_generation（停止信号生成，可回滚）
+#                                     / rollback_data_version（回滚数据版本，可回滚）
+# 每个动作先 shadow 演练（dry_run 预检），再逐步放开（confirm→auto）；
+# 缺注入回调返回 not_supported（KP-M02 不假成功）；执行留痕 + undo 恢复 + 审计。
+
+@register_action_executor
+class SwitchDataSourceExecutor(ActionExecutor):
+    """
+    行情中断→切换备用行情源（可回滚）。
+
+    params 支持：switch_fn（callable，必填，切到备用源）、restore_fn
+    （callable，回滚回主源）、target_source（当前源名）、backup_source
+    （备用源名）、target（策略/引擎目标）。
+    """
+
+    action_type = "switch_data_source"
+
+    def execute(
+        self,
+        ctx: Dict[str, Any],
+        params: Dict[str, Any],
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        params = dict(params or {})
+        switch_fn = params.get("switch_fn")
+        restore_fn = params.get("restore_fn")
+        target_source = str(params.get("target_source", "?"))
+
+        def _base_rollback() -> Dict[str, Any]:
+            rb: Dict[str, Any] = {
+                "target_source": target_source,
+                "backup_source": str(params.get("backup_source", "?")),
+                "has_restore": callable(restore_fn),
+            }
+            if callable(restore_fn):
+                rb["restore_fn"] = restore_fn
+            return rb
+
+        if not callable(switch_fn):
+            return {
+                "status": STATUS_NOT_SUPPORTED,
+                "message": f"未注入 switch_fn（不假成功，KP-M02），源={target_source}",
+                "details": {"target_source": target_source},
+                "rollback_info": None,
+            }
+        rollback_info = _base_rollback()
+        if dry_run:
+            return {
+                "status": STATUS_EXECUTED,
+                "message": f"dry-run：将切行情源 {target_source} → "
+                           f"{params.get('backup_source', '?')}（未真实执行）",
+                "details": {"target_source": target_source, "dry_run": True},
+                "rollback_info": rollback_info,
+            }
+        try:
+            switch_fn()
+            return {
+                "status": STATUS_EXECUTED,
+                "message": f"已切换行情源 → {params.get('backup_source', '?')}",
+                "details": {"target_source": target_source,
+                            "backup_source": params.get("backup_source", "?")},
+                "rollback_info": rollback_info,
+            }
+        except Exception as e:  # noqa: BLE001 —— 切换异常如实报告
+            return {
+                "status": STATUS_FAILED,
+                "message": f"切换行情源失败: {e}",
+                "details": {"target_source": target_source, "error": str(e)},
+                "rollback_info": rollback_info,
+            }
+
+    def undo(self, rollback_info: Dict[str, Any]) -> bool:
+        """回滚：调用注入的 restore_fn 切回主源；未注入返回 False。"""
+        restore_fn = (rollback_info or {}).get("restore_fn")
+        target_source = (rollback_info or {}).get("target_source", "?")
+        if not callable(restore_fn):
+            logger.warning(
+                "[action] 切源回滚失败：未注入 restore_fn（源=%s）", target_source
+            )
+            return False
+        try:
+            restore_fn()
+            logger.info("[action] 行情源已切回 %s（回滚完成）", target_source)
+            return True
+        except Exception as e:  # noqa: BLE001
+            logger.error("[action] 切源回滚 %s 失败: %s", target_source, e)
+            return False
+
+
+@register_action_executor
+class StopSignalGenerationExecutor(ActionExecutor):
+    """
+    数据质量异常→停止信号生成（可回滚）。
+
+    params 支持：stop_fn（callable，必填，关闭信号闸门）、resume_fn
+    （callable，回滚重开闸门）、target（策略/引擎目标）。
+    """
+
+    action_type = "stop_signal_generation"
+
+    def execute(
+        self,
+        ctx: Dict[str, Any],
+        params: Dict[str, Any],
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        params = dict(params or {})
+        stop_fn = params.get("stop_fn")
+        resume_fn = params.get("resume_fn")
+        target = str(params.get("target", "engine"))
+        if not callable(stop_fn):
+            return {
+                "status": STATUS_NOT_SUPPORTED,
+                "message": f"未注入 stop_fn（不假成功，KP-M02），目标={target}",
+                "details": {"target": target},
+                "rollback_info": None,
+            }
+        rollback_info: Dict[str, Any] = {"target": target, "has_resume": callable(resume_fn)}
+        if callable(resume_fn):
+            rollback_info["resume_fn"] = resume_fn
+        if dry_run:
+            return {
+                "status": STATUS_EXECUTED,
+                "message": f"dry-run：将停止 {target} 信号生成（未真实执行）",
+                "details": {"target": target, "dry_run": True},
+                "rollback_info": rollback_info,
+            }
+        try:
+            stop_fn()
+            return {
+                "status": STATUS_EXECUTED,
+                "message": f"已停止 {target} 信号生成",
+                "details": {"target": target},
+                "rollback_info": rollback_info,
+            }
+        except Exception as e:  # noqa: BLE001 —— 停止异常如实报告
+            return {
+                "status": STATUS_FAILED,
+                "message": f"停止 {target} 信号生成失败: {e}",
+                "details": {"target": target, "error": str(e)},
+                "rollback_info": rollback_info,
+            }
+
+    def undo(self, rollback_info: Dict[str, Any]) -> bool:
+        """回滚：调用注入的 resume_fn 重开信号闸门；未注入返回 False。"""
+        resume_fn = (rollback_info or {}).get("resume_fn")
+        target = (rollback_info or {}).get("target", "?")
+        if not callable(resume_fn):
+            logger.warning("[action] 信号闸门回滚失败：未注入 resume_fn（目标=%s）", target)
+            return False
+        try:
+            resume_fn()
+            logger.info("[action] %s 信号生成已恢复（回滚完成）", target)
+            return True
+        except Exception as e:  # noqa: BLE001
+            logger.error("[action] 信号闸门回滚 %s 失败: %s", target, e)
+            return False
+
+
+@register_action_executor
+class RollbackDataVersionExecutor(ActionExecutor):
+    """
+    数据质量异常→回滚数据版本（可回滚）。
+
+    params 支持：rollback_fn（callable，必填，回滚到历史数据版本）、
+    restore_fn（callable，恢复原版本）、current_version、target_version、
+    target（数据集/模块）。
+    """
+
+    action_type = "rollback_data_version"
+
+    def execute(
+        self,
+        ctx: Dict[str, Any],
+        params: Dict[str, Any],
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        params = dict(params or {})
+        rollback_fn = params.get("rollback_fn")
+        restore_fn = params.get("restore_fn")
+        current_version = str(params.get("current_version", "?"))
+        target_version = str(params.get("target_version", "?"))
+        target = str(params.get("target", "data"))
+        if not callable(rollback_fn):
+            return {
+                "status": STATUS_NOT_SUPPORTED,
+                "message": f"未注入 rollback_fn（不假成功，KP-M02），目标={target}",
+                "details": {"target": target, "current_version": current_version},
+                "rollback_info": None,
+            }
+        rollback_info: Dict[str, Any] = {
+            "target": target,
+            "current_version": current_version,
+            "target_version": target_version,
+            "has_restore": callable(restore_fn),
+        }
+        if callable(restore_fn):
+            rollback_info["restore_fn"] = restore_fn
+        if dry_run:
+            return {
+                "status": STATUS_EXECUTED,
+                "message": f"dry-run：将回滚 {target} 数据 {current_version} → "
+                           f"{target_version}（未真实执行）",
+                "details": {"target": target, "dry_run": True},
+                "rollback_info": rollback_info,
+            }
+        try:
+            rollback_fn()
+            return {
+                "status": STATUS_EXECUTED,
+                "message": f"已回滚 {target} 数据版本 → {target_version}",
+                "details": {"target": target, "current_version": current_version,
+                            "target_version": target_version},
+                "rollback_info": rollback_info,
+            }
+        except Exception as e:  # noqa: BLE001 —— 回滚异常如实报告
+            return {
+                "status": STATUS_FAILED,
+                "message": f"回滚 {target} 数据版本失败: {e}",
+                "details": {"target": target, "error": str(e)},
+                "rollback_info": rollback_info,
+            }
+
+    def undo(self, rollback_info: Dict[str, Any]) -> bool:
+        """回滚：调用注入的 restore_fn 恢复原版本；未注入返回 False。"""
+        restore_fn = (rollback_info or {}).get("restore_fn")
+        target = (rollback_info or {}).get("target", "?")
+        if not callable(restore_fn):
+            logger.warning("[action] 数据版本回滚失败：未注入 restore_fn（目标=%s）", target)
+            return False
+        try:
+            restore_fn()
+            logger.info("[action] %s 数据版本已恢复（回滚完成）", target)
+            return True
+        except Exception as e:  # noqa: BLE001
+            logger.error("[action] 数据版本恢复 %s 失败: %s", target, e)
+            return False
+
+
+@register_action_executor
+class NotifyTraderExecutor(ActionExecutor):
+    """
+    拒单率飙升→通知交易员（经 AlertManager 投递 CRITICAL 执行类告警；不可撤销）。
+
+    params 支持：level（默认 CRITICAL）、message、category（默认 execution）、
+    source、dedup_key、runbook_id、details（可附拒单率/拒单明细）。
+    """
+
+    action_type = "notify_trader"
+
+    def execute(
+        self,
+        ctx: Dict[str, Any],
+        params: Dict[str, Any],
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        return _dispatch_notification(
+            ctx, params, dry_run,
+            default_level="CRITICAL",
+            default_category="execution",
+            action_label="notify_trader",
+        )
+
+    def undo(self, rollback_info: Dict[str, Any]) -> bool:
+        """通知交易员动作不可撤销（如实返回 False）。"""
+        logger.info("[action] notify_trader 动作不可撤销（rollback_info=%s）", rollback_info)
+        return False
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -1,11 +1,13 @@
 # 文件名：tests/unit/test_action_engine.py
 """
-D-1 自动化响应编排规则引擎测试（回写#243）
-=============================================
+D-1 自动化响应编排规则引擎 + D-2 自愈动作库测试（回写#243/#244）
+==================================================================
 覆盖：规则注册/校验、字典归一化、条件匹配（级别/类别/来源/指标 AND 语义）、
 三阶段安全模型（shadow 只读 / confirm 人工确认 / auto 自动执行）、Kill Switch
 独立停止、冷却防抖、幂等、回滚（pause→resume 还原 / notify 不可撤销）、
 run_cycle 周期巡检、全链路留痕（执行历史 + 审计）、缺注入回调不假成功（KP-M02）、
+D-2 自愈动作库（行情中断→切备用行情源/暂停策略、拒单率飙升→暂停策略/通知交易员、
+数据质量异常→停止信号生成/回滚数据版本：dry-run 演练→执行→undo 恢复→审计）、
 单例 get/reset。全部注入假执行器/假告警管理器/内存审计，不碰 quant.db。
 """
 
@@ -30,7 +32,11 @@ from myquant.monitoring.action_engine import (
     ActionRule,
     ActionResult,
     NotifyExecutor,
+    NotifyTraderExecutor,
     PauseStrategyExecutor,
+    RollbackDataVersionExecutor,
+    StopSignalGenerationExecutor,
+    SwitchDataSourceExecutor,
     get_action_engine,
     get_action_executor,
     list_action_types,
@@ -806,3 +812,288 @@ class TestSingleton:
             assert get_action_engine() is not engine
         finally:
             reset_action_engine()
+
+
+# ═══════════════════════════════════════════════════════════════
+#  D-2 自愈动作库（回写#244）
+# ═══════════════════════════════════════════════════════════════
+
+class TestSwitchDataSource:
+    """行情中断→切换备用行情源（可回滚）。"""
+
+    def test_dry_run_precheck_without_switch(self) -> None:
+        state: List[str] = ["main"]
+
+        def switch() -> None:
+            state[0] = "backup"
+
+        def restore() -> None:
+            state[0] = "main"
+
+        out = SwitchDataSourceExecutor().execute(
+            ctx={},
+            params={"switch_fn": switch, "restore_fn": restore,
+                    "target_source": "main", "backup_source": "backup"},
+            dry_run=True,
+        )
+        assert out["status"] == STATUS_EXECUTED
+        assert state == ["main"]  # 演练不真实切换
+
+    def test_execute_switches_and_undo_restores(self) -> None:
+        state: List[str] = ["main"]
+
+        def switch() -> None:
+            state[0] = "backup"
+
+        def restore() -> None:
+            state[0] = "main"
+
+        ex = SwitchDataSourceExecutor()
+        out = ex.execute(
+            ctx={},
+            params={"switch_fn": switch, "restore_fn": restore,
+                    "target_source": "main", "backup_source": "backup"},
+        )
+        assert out["status"] == STATUS_EXECUTED
+        assert state == ["backup"]
+        assert ex.undo(out["rollback_info"]) is True
+        assert state == ["main"]
+
+    def test_missing_switch_fn_not_supported(self) -> None:
+        out = SwitchDataSourceExecutor().execute(
+            ctx={}, params={"target_source": "main"}
+        )
+        assert out["status"] == STATUS_NOT_SUPPORTED  # KP-M02
+
+    def test_undo_without_restore_false(self) -> None:
+        out = SwitchDataSourceExecutor().execute(
+            ctx={}, params={"switch_fn": lambda: None, "target_source": "main"}
+        )
+        assert out["status"] == STATUS_EXECUTED
+        assert SwitchDataSourceExecutor().undo(out["rollback_info"]) is False
+
+    def test_scenario_trigger_action_restore_audit(self) -> None:
+        """完整场景：行情中断告警 → auto 切源 → 审计 → undo 恢复。"""
+        state: List[str] = ["main"]
+        audit = _AuditRecorder()
+
+        def switch() -> None:
+            state[0] = "backup"
+
+        def restore() -> None:
+            state[0] = "main"
+
+        engine = ActionEngine(mode="auto", audit_log=audit)
+        engine.register_rule(ActionRule(
+            rule_id="ds1",
+            condition={"categories": ["market_staleness"], "levels": ["ERROR"]},
+            action={"type": "switch_data_source",
+                    "params": {"switch_fn": switch, "restore_fn": restore,
+                               "target_source": "main", "backup_source": "backup"}},
+        ))
+        results = engine.handle_alert(
+            _alert(deduplication_key="watchdog:staleness-d2")
+        )
+        assert results[0].status == STATUS_EXECUTED
+        assert state == ["backup"]
+        assert any("executed" in r["action"] for r in audit.records)  # 审计
+        assert engine.rollback(results[0].action_id, actor="ops") is True
+        assert state == ["main"]
+        assert any("rollback" in r["action"] for r in audit.records)
+
+
+class TestStopSignalGeneration:
+    """数据质量异常→停止信号生成（可回滚）。"""
+
+    def test_dry_run_precheck(self) -> None:
+        stopped: List[str] = []
+
+        def stop() -> None:
+            stopped.append("engine")
+
+        def resume() -> None:
+            stopped.clear()
+
+        out = StopSignalGenerationExecutor().execute(
+            ctx={}, params={"stop_fn": stop, "resume_fn": resume, "target": "engine"},
+            dry_run=True,
+        )
+        assert out["status"] == STATUS_EXECUTED
+        assert stopped == []
+
+    def test_execute_stops_and_undo_resumes(self) -> None:
+        stopped: List[str] = []
+
+        def stop() -> None:
+            stopped.append("engine")
+
+        def resume() -> None:
+            stopped.clear()
+
+        ex = StopSignalGenerationExecutor()
+        out = ex.execute(
+            ctx={}, params={"stop_fn": stop, "resume_fn": resume, "target": "engine"}
+        )
+        assert out["status"] == STATUS_EXECUTED
+        assert stopped == ["engine"]
+        assert ex.undo(out["rollback_info"]) is True
+        assert stopped == []
+
+    def test_missing_stop_fn_not_supported(self) -> None:
+        out = StopSignalGenerationExecutor().execute(ctx={}, params={})
+        assert out["status"] == STATUS_NOT_SUPPORTED
+
+    def test_scenario_shadow_first(self) -> None:
+        """验收：先 shadow 演练（只读建议）再放开 auto。"""
+        stopped: List[str] = []
+
+        def stop() -> None:
+            stopped.append("engine")
+
+        def resume() -> None:
+            stopped.clear()
+
+        engine = ActionEngine(mode="shadow")
+        engine.register_rule(ActionRule(
+            rule_id="ss1",
+            condition={"categories": ["data_quality"]},
+            action={"type": "stop_signal_generation",
+                    "params": {"stop_fn": stop, "resume_fn": resume,
+                               "target": "engine"}},
+        ))
+        results = engine.handle_alert(
+            _alert(category="data_quality", deduplication_key="dq:bad")
+        )
+        assert results[0].status == STATUS_PROPOSED  # shadow 只读
+        assert stopped == []
+
+
+class TestRollbackDataVersion:
+    """数据质量异常→回滚数据版本（可回滚）。"""
+
+    def test_dry_run_precheck(self) -> None:
+        version: List[str] = ["v3"]
+
+        def rollback_fn() -> None:
+            version[0] = "v2"
+
+        def restore_fn() -> None:
+            version[0] = "v3"
+
+        out = RollbackDataVersionExecutor().execute(
+            ctx={},
+            params={"rollback_fn": rollback_fn, "restore_fn": restore_fn,
+                    "current_version": "v3", "target_version": "v2"},
+            dry_run=True,
+        )
+        assert out["status"] == STATUS_EXECUTED
+        assert version == ["v3"]  # 演练不真实回滚
+
+    def test_execute_rollback_and_undo_restore(self) -> None:
+        version: List[str] = ["v3"]
+
+        def rollback_fn() -> None:
+            version[0] = "v2"
+
+        def restore_fn() -> None:
+            version[0] = "v3"
+
+        ex = RollbackDataVersionExecutor()
+        out = ex.execute(
+            ctx={},
+            params={"rollback_fn": rollback_fn, "restore_fn": restore_fn,
+                    "current_version": "v3", "target_version": "v2"},
+        )
+        assert out["status"] == STATUS_EXECUTED
+        assert version == ["v2"]
+        assert ex.undo(out["rollback_info"]) is True
+        assert version == ["v3"]
+
+    def test_missing_rollback_fn_not_supported(self) -> None:
+        out = RollbackDataVersionExecutor().execute(
+            ctx={}, params={"current_version": "v3"}
+        )
+        assert out["status"] == STATUS_NOT_SUPPORTED
+
+    def test_scenario_trigger_action_restore_audit(self) -> None:
+        """完整场景：数据质量异常 → auto 回滚版本 → 审计 → undo 恢复。"""
+        version: List[str] = ["v3"]
+        audit = _AuditRecorder()
+
+        def rollback_fn() -> None:
+            version[0] = "v2"
+
+        def restore_fn() -> None:
+            version[0] = "v3"
+
+        engine = ActionEngine(mode="auto", audit_log=audit)
+        engine.register_rule(ActionRule(
+            rule_id="rv1",
+            condition={"categories": ["data_quality"]},
+            action={"type": "rollback_data_version",
+                    "params": {"rollback_fn": rollback_fn, "restore_fn": restore_fn,
+                               "current_version": "v3", "target_version": "v2",
+                               "target": "factor_data"}},
+        ))
+        results = engine.handle_alert(
+            _alert(category="data_quality", deduplication_key="dq:corrupt")
+        )
+        assert results[0].status == STATUS_EXECUTED
+        assert version == ["v2"]
+        assert any("executed" in r["action"] for r in audit.records)
+        assert engine.rollback(results[0].action_id, actor="ops") is True
+        assert version == ["v3"]
+
+
+class TestNotifyTrader:
+    """拒单率飙升→通知交易员（不可撤销）。"""
+
+    def test_execute_sends_via_manager(self) -> None:
+        sink = _FakeAlertSink()
+        engine = ActionEngine(mode="auto")
+        engine._alert_manager = sink
+        engine.register_rule(ActionRule(
+            rule_id="nt1",
+            condition={"metrics": [{"name": "order_reject_rate", "op": ">",
+                                    "value": 0.01}]},
+            action={"type": "notify_trader",
+                    "params": {"message": "拒单率飙升", "dedup_key": "exec:reject"}},
+        ))
+        results = engine.evaluate(metrics={"order_reject_rate": 0.05})
+        assert results[0].status == STATUS_EXECUTED
+        assert results[0].details["channels"] == 2
+
+    def test_undo_false(self) -> None:
+        assert NotifyTraderExecutor().undo({"any": 1}) is False
+
+    def test_bad_level_failed(self) -> None:
+        out = NotifyTraderExecutor().execute(
+            ctx={}, params={"level": "PANIC"}, dry_run=False
+        )
+        assert out["status"] == STATUS_FAILED
+
+    def test_alert_channel_failure_failed(self) -> None:
+        """投递通道异常 → 如实报告 failed（不假成功）。"""
+
+        class _RaisingSink:
+            def alert(self, **kw: Any) -> int:
+                raise RuntimeError("channel down")
+
+        engine = ActionEngine(mode="auto")
+        engine._alert_manager = _RaisingSink()
+        engine.register_rule(ActionRule(
+            rule_id="nt2",
+            condition={"categories": ["execution"]},
+            action={"type": "notify_trader", "params": {"message": "拒单飙升"}},
+        ))
+        results = engine.handle_alert(
+            _alert(category="execution", deduplication_key="exec:reject")
+        )
+        assert results[0].status == STATUS_FAILED
+        assert "投递失败" in results[0].message
+
+    def test_registered_in_engine(self) -> None:
+        assert get_action_executor("notify_trader") is NotifyTraderExecutor
+        assert get_action_executor("switch_data_source") is SwitchDataSourceExecutor
+        assert get_action_executor("stop_signal_generation") is StopSignalGenerationExecutor
+        assert get_action_executor("rollback_data_version") is RollbackDataVersionExecutor
