@@ -1755,6 +1755,22 @@ def attach_engine(
         except Exception as e:  # noqa: BLE001
             logger.warning(f"[attach] A-4 行情活性看门狗装配失败（不阻断巡检）: {e}")
 
+        # A-5（回写#209）：引擎心跳看门狗——受同一 enabled 开关控制；
+        # 周期 probe() 调 engine.get_status()，连续 N 次无响应→僵死 P0/ERROR。
+        # 阈值全部读 monitoring.slo.engine_heartbeat（N×间隔=50s<60s，R-02/R-04）。
+        try:
+            from myquant.core.settings import get_monitoring_config
+            if get_monitoring_config().get("watchdog", {}).get("enabled", False):
+                from myquant.monitoring.watchdog import EngineHeartbeatWatcher
+                hb = EngineHeartbeatWatcher(engine)
+                scheduler.add_interval_task(
+                    hb.probe, name="引擎心跳看门狗",
+                    interval_seconds=hb.probe_interval_seconds,
+                )
+                logger.info("[attach] A-5 引擎心跳看门狗已装配")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[attach] A-5 引擎心跳看门狗装配失败（不阻断巡检）: {e}")
+
         def _patrol_job(**kw) -> None:  # noqa: ARG001
             report = patrol.build_report(
                 engine=engine,

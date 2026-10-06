@@ -27,6 +27,7 @@ watchdog.py - 交易看门狗（A-4 行情活性看门狗）
 
 from __future__ import annotations
 
+import threading
 import time
 from collections import deque
 from typing import Any, Callable, Deque, Dict, List, Optional
@@ -44,6 +45,8 @@ logger = get_logger("monitoring.watchdog")
 P99_SAMPLE_WINDOW: int = 200
 #: A-4 行情活性秒级兜底默认评估间隔（秒；远小于 patrol 60s）
 STALENESS_PROBE_INTERVAL_SECONDS: float = 10.0
+#: A-5 引擎 get_status() 单次探针超时上限（秒；超过视为无响应/僵死）
+ENGINE_PROBE_TIMEOUT_SECONDS: float = 3.0
 
 
 # ═══════════════════════════════════════════════
@@ -369,6 +372,190 @@ class StalenessDetector:
 
 
 # ═══════════════════════════════════════════════
+#  A-5 引擎心跳看门狗（回写#209）
+# ═══════════════════════════════════════════════
+class EngineHeartbeatWatcher:
+    """
+    引擎心跳看门狗（POLL，窗口须 <60s，R-02/R-04 硬约束）。
+
+    周期 ``probe()`` 调 ``engine.get_status()``：连续 ``consecutive_misses`` 次
+    无响应（抛异常 / 单次探针超时）→ 判定引擎僵死，发 P0/ERROR 告警。
+    恢复响应时计数清零并发 INFO 恢复。
+
+    阈值（R-04，全部读 monitoring.slo.engine_heartbeat，禁止代码内自定义）:
+      - probe_interval_seconds    : 探测间隔（默认 10s）
+      - consecutive_misses        : 连续无响应次数（默认 5）
+      - hang_judge_window_seconds : 判定窗口上限（默认 60s）；
+        防御式校验 consecutive_misses × probe_interval 须 < window，否则 warning
+        （保住 MTTD<1min，R-02 硬约束）。
+
+    防未来：仅探测"当前"引擎是否响应，不预测引擎状态。
+    """
+
+    def __init__(
+        self,
+        engine: Any,
+        probe_interval_seconds: Optional[float] = None,
+        consecutive_misses: Optional[int] = None,
+        hang_judge_window_seconds: Optional[float] = None,
+        probe_timeout_seconds: float = ENGINE_PROBE_TIMEOUT_SECONDS,
+        alert_manager: Any = None,
+        clock: Optional[Callable[[], float]] = None,
+    ) -> None:
+        """
+        Parameters
+        ----------
+        engine : LiveEngine | None
+            实盘引擎（须有 get_status()）。None 时 probe 视为未接入。
+        probe_interval_seconds / consecutive_misses / hang_judge_window_seconds :
+            None 时读 monitoring.slo.engine_heartbeat（R-04 唯一真源）。
+        probe_timeout_seconds : float
+            单次 get_status() 超时上限（秒）；超过视为无响应。
+        alert_manager : AlertManager | None
+            告警管理器；None 延迟取 get_alert_manager()。
+
+        Raises
+        ------
+        ValueError : 阈值非法（非正数）时抛出。
+        """
+        slo = get_monitoring_config().get("slo", {}).get("engine_heartbeat", {})
+        self._probe_interval: float = (
+            float(probe_interval_seconds) if probe_interval_seconds is not None
+            else float(slo.get("probe_interval_seconds", 10))
+        )
+        self._miss_limit: int = (
+            int(consecutive_misses) if consecutive_misses is not None
+            else int(slo.get("consecutive_misses", 5))
+        )
+        self._window: float = (
+            float(hang_judge_window_seconds) if hang_judge_window_seconds is not None
+            else float(slo.get("hang_judge_window_seconds", 60))
+        )
+        if self._probe_interval <= 0 or self._miss_limit <= 0 or self._window <= 0:
+            raise ValueError(
+                f"引擎心跳阈值非法（须>0）: interval={self._probe_interval}, "
+                f"misses={self._miss_limit}, window={self._window}"
+            )
+        # R-02 硬约束：N×间隔 必须 < 判定窗口（保住 MTTD<1min）
+        if self._miss_limit * self._probe_interval >= self._window:
+            logger.warning(
+                "R-02 约束告警: consecutive_misses(%d)×probe_interval(%.0f)=%.0fs "
+                ">= hang_judge_window(%.0fs)，MTTD 将 >1min，请校准 slo.engine_heartbeat",
+                self._miss_limit, self._probe_interval,
+                self._miss_limit * self._probe_interval, self._window,
+            )
+
+        self._engine = engine
+        self._probe_timeout: float = float(probe_timeout_seconds)
+        self._alert_manager = alert_manager
+        self._clock: Callable[[], float] = clock if clock is not None else time.time
+        self._miss_count: int = 0
+        self._hang_alerted: bool = False
+        logger.debug(
+            "EngineHeartbeatWatcher: interval=%.0fs misses=%d window=%.0fs",
+            self._probe_interval, self._miss_limit, self._window,
+        )
+
+    @property
+    def probe_interval_seconds(self) -> float:
+        """探测间隔（供调度器注册周期任务用）。"""
+        return self._probe_interval
+
+    def _single_probe(self) -> bool:
+        """
+        单次探针：调 engine.get_status()，返回是否响应。
+
+        - engine 无 get_status → False（未接入，按无响应处理）。
+        - get_status() 抛异常 → False。
+        - get_status() 在 probe_timeout 内未返回（僵死）→ False。
+        """
+        if self._engine is None:
+            return False
+        func = getattr(self._engine, "get_status", None)
+        if not callable(func):
+            return False
+
+        box: Dict[str, Any] = {}
+
+        def _run() -> None:
+            try:
+                box["status"] = func()
+            except Exception as e:  # noqa: BLE001
+                box["error"] = e
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        t.join(self._probe_timeout)
+        if t.is_alive():
+            return False  # 超时未返回 → 僵死
+        if "error" in box:
+            return False
+        return True
+
+    def probe(self) -> Dict[str, Any]:
+        """
+        执行一次心跳探测并维护连续无响应计数。
+
+        Returns
+        -------
+        dict : {"responding": bool, "miss_count": int, "hung": bool}
+            hung=True 表示已连续 miss 达上限（引擎僵死）。
+        """
+        ok = self._single_probe()
+        if ok:
+            self._miss_count = 0
+            if self._hang_alerted:
+                self._recover()
+        else:
+            self._miss_count += 1
+
+        hung = self._miss_count >= self._miss_limit
+        if hung and not self._hang_alerted:
+            self._fire_hang_alert()
+        return {"responding": ok, "miss_count": self._miss_count, "hung": hung}
+
+    def _fire_hang_alert(self) -> None:
+        """引擎僵死 P0/ERROR 告警（去重键固定，窗口内不刷屏）。"""
+        mgr = self._alert_manager
+        if mgr is None:
+            from myquant.monitoring.alerting import get_alert_manager
+            mgr = get_alert_manager()
+        mgr.alert(
+            level=SeverityLevel.ERROR,
+            message=(
+                f"[watchdog] 引擎僵死：连续 {self._miss_count} 次 get_status() 无响应"
+                f"（窗口 {self._miss_limit * self._probe_interval:.0f}s < {self._window:.0f}s）"
+            ),
+            source="monitoring.watchdog",
+            category="engine",
+            details={
+                "consecutive_misses": self._miss_count,
+                "probe_interval_seconds": self._probe_interval,
+                "hang_judge_window_seconds": self._window,
+            },
+            deduplication_key="watchdog:engine_hung",
+        )
+        self._hang_alerted = True
+
+    def _recover(self) -> None:
+        """引擎恢复响应：发 INFO 恢复并清僵死标记。"""
+        try:
+            from myquant.monitoring.alerting import get_alert_manager
+            mgr = self._alert_manager or get_alert_manager()
+            mgr.alert(
+                level=SeverityLevel.INFO,
+                message="[watchdog] 引擎心跳已恢复",
+                source="monitoring.watchdog",
+                category="engine",
+                deduplication_key="recovered:watchdog:engine_hung",
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"引擎心跳恢复告警失败: {e}")
+        finally:
+            self._hang_alerted = False
+
+
+# ═══════════════════════════════════════════════
 #  __main__ 自测
 # ═══════════════════════════════════════════════
 def _run_self_test() -> int:
@@ -431,6 +618,31 @@ def _run_self_test() -> int:
         det.on_bar(ts=dt)
     p99 = det.get_stats()["bar_interval_p99_seconds"]
     check("A4 P99 统计可计算", p99 is not None and p99 > 0, f"p99={p99}")
+
+    # ── A-5 EngineHeartbeatWatcher ──
+    class AliveEngine:
+        def get_status(self):
+            return {"state": "RUNNING"}
+
+    class HangEngine:
+        def get_status(self):
+            raise RuntimeError("boom")
+
+    hb = EngineHeartbeatWatcher(
+        AliveEngine(), probe_interval_seconds=10, consecutive_misses=5,
+        hang_judge_window_seconds=60, alert_manager=FakeAlert(),
+    )
+    r = hb.probe()
+    check("A5 存活引擎响应", r["responding"] and r["miss_count"] == 0, f"r={r}")
+    hb2 = EngineHeartbeatWatcher(
+        HangEngine(), probe_interval_seconds=10, consecutive_misses=5,
+        hang_judge_window_seconds=60, alert_manager=FakeAlert(),
+    )
+    alerts.clear()
+    for _ in range(5):
+        r = hb2.probe()
+    check("A5 连续5次无响应判 hung", r["hung"] is True and r["miss_count"] == 5, f"r={r}")
+    check("A5 僵死发 ERROR 告警", any(a["level"].name == "ERROR" for a in alerts), f"alerts={alerts}")
 
     print("=" * 60)
     print(f"watchdog.py 自测: {passed} 项通过")

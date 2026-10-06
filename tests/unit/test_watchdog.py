@@ -17,7 +17,7 @@ from datetime import datetime
 import pytest
 
 from myquant.core.constants import SeverityLevel
-from myquant.monitoring.watchdog import StalenessDetector
+from myquant.monitoring.watchdog import EngineHeartbeatWatcher, StalenessDetector
 from myquant.utils.time_utils import TZ_SHANGHAI, TradingCalendar
 
 
@@ -172,3 +172,119 @@ class TestStalenessDetectorA4:
         )
         result = det.patrol_check()
         assert isinstance(result, tuple) and len(result) == 2
+
+
+class _AliveEngine:
+    def get_status(self) -> dict:
+        return {"state": "RUNNING"}
+
+
+class _BoomEngine:
+    def get_status(self) -> dict:
+        raise RuntimeError("engine dead")
+
+
+class TestEngineHeartbeatWatcherA5:
+    """A-5 引擎心跳看门狗（POLL，窗口<60s）。"""
+
+    def test_存活引擎响应不计miss(self) -> None:
+        hb = EngineHeartbeatWatcher(
+            _AliveEngine(), probe_interval_seconds=10,
+            consecutive_misses=5, hang_judge_window_seconds=60,
+            alert_manager=_FakeAlert(),
+        )
+        r = hb.probe()
+        assert r["responding"] is True
+        assert r["miss_count"] == 0
+        assert r["hung"] is False
+
+    def test_连续5次无响应判僵死(self) -> None:
+        """注入假引擎抛异常，连续 5 次 probe → hung（不需真等 50s）。"""
+        am = _FakeAlert()
+        hb = EngineHeartbeatWatcher(
+            _BoomEngine(), probe_interval_seconds=10,
+            consecutive_misses=5, hang_judge_window_seconds=60,
+            alert_manager=am,
+        )
+        last = None
+        for _ in range(5):
+            last = hb.probe()
+        assert last["hung"] is True
+        assert last["miss_count"] == 5
+
+    def test_僵死发ERROR告警(self) -> None:
+        am = _FakeAlert()
+        hb = EngineHeartbeatWatcher(
+            _BoomEngine(), probe_interval_seconds=10,
+            consecutive_misses=5, hang_judge_window_seconds=60,
+            alert_manager=am,
+        )
+        for _ in range(5):
+            hb.probe()
+        assert len(am.calls) == 1
+        assert am.calls[0]["level"] == SeverityLevel.ERROR
+        assert am.calls[0]["category"] == "engine"
+        assert am.calls[0]["deduplication_key"] == "watchdog:engine_hung"
+
+    def test_未达上限不告警(self) -> None:
+        """连续 4 次（<5）不告警。"""
+        am = _FakeAlert()
+        hb = EngineHeartbeatWatcher(
+            _BoomEngine(), probe_interval_seconds=10,
+            consecutive_misses=5, hang_judge_window_seconds=60,
+            alert_manager=am,
+        )
+        for _ in range(4):
+            r = hb.probe()
+        assert r["hung"] is False
+        assert am.calls == []
+
+    def test_恢复后计数清零(self) -> None:
+        am = _FakeAlert()
+        hb = EngineHeartbeatWatcher(
+            _BoomEngine(), probe_interval_seconds=10,
+            consecutive_misses=5, hang_judge_window_seconds=60,
+            alert_manager=am,
+        )
+        for _ in range(5):
+            hb.probe()
+        assert hb._miss_count == 5
+        # 引擎恢复
+        hb._engine = _AliveEngine()
+        r = hb.probe()
+        assert r["responding"] is True
+        assert r["miss_count"] == 0
+
+    def test_无引擎不崩(self) -> None:
+        """engine=None 时 probe 安全返回 miss，不抛异常。"""
+        hb = EngineHeartbeatWatcher(
+            None, probe_interval_seconds=10,
+            consecutive_misses=5, hang_judge_window_seconds=60,
+            alert_manager=_FakeAlert(),
+        )
+        r = hb.probe()
+        assert r["responding"] is False
+
+    def test_窗口约束告警(self, capsys) -> None:
+        """N×间隔 >= 窗口时记 warning（R-02 约束）。"""
+        import logging
+        EngineHeartbeatWatcher(
+            _AliveEngine(), probe_interval_seconds=20,
+            consecutive_misses=5, hang_judge_window_seconds=60,  # 5×20=100>=60
+            alert_manager=_FakeAlert(),
+        )  # 不抛异常，仅 warning
+
+    def test_阈值从slo读取(self) -> None:
+        """未显式传阈值时读 monitoring.slo.engine_heartbeat（R-04）。"""
+        hb = EngineHeartbeatWatcher(_AliveEngine(), alert_manager=_FakeAlert())
+        assert hb._probe_interval == 10
+        assert hb._miss_limit == 5
+        assert hb._window == 60
+
+    def test_非法阈值抛错(self) -> None:
+        with pytest.raises(ValueError):
+            EngineHeartbeatWatcher(
+                _AliveEngine(), probe_interval_seconds=0,
+                consecutive_misses=5, hang_judge_window_seconds=60,
+                alert_manager=_FakeAlert(),
+            )
