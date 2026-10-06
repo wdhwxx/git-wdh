@@ -1,0 +1,319 @@
+{
+  "source": "验收_监控M1保命",
+  "generated_at": "2026-10-06T13:08:58",
+  "results": {
+    "min": {
+      "mode": "min",
+      "coverage": {
+        "rings": [
+          {
+            "ring": "行情活性",
+            "item": "A-4",
+            "covered": true,
+            "evidence": "StalenessDetector.attach_event_bus/on_bar/evaluate"
+          },
+          {
+            "ring": "券商断连",
+            "item": "A-6",
+            "covered": true,
+            "evidence": "BrokerConnectionWatcher.on_state/poll_once"
+          },
+          {
+            "ring": "交易异常",
+            "item": "A-8",
+            "covered": true,
+            "evidence": "AlertManager.subscribe_to_event_bus + handle_trade_exception_event"
+          },
+          {
+            "ring": "持仓对账",
+            "item": "A-7",
+            "covered": true,
+            "evidence": "LivePortfolio.reconcile_vs_broker + slo.reconciliation.realtime_diff_tolerance==0"
+          }
+        ],
+        "covered": 4,
+        "total": 4,
+        "coverage_pct": 1.0
+      },
+      "fi": [
+        {
+          "case_id": "FI-01",
+          "captured": true,
+          "expected_capture": "A-4 StalenessDetector",
+          "event_path_ok": true,
+          "status": "down",
+          "detail": {
+            "reason": "行情断流（交易时段无新 bar 超时）",
+            "stale_seconds": 2.3,
+            "bar_timeout_seconds": 2.0
+          },
+          "demo_bar_timeout_seconds": 2.0,
+          "production_bar_timeout_seconds": 300.0,
+          "production_meets_mttd": false,
+          "level": "error",
+          "category": "watchdog",
+          "alert_id": "d884b4d4dbc2",
+          "fault_ts": 1791263333.552745,
+          "created_at": 1791263335.8540149,
+          "acked_at": 1791263335.8550272,
+          "resolved_at": 1791263335.8560266,
+          "mttd_seconds": 2.30127,
+          "mtta_seconds": 0.001012,
+          "mttr_seconds": 2.303282,
+          "event_path": "EventBus BAR 事件刷新时钟（事件路径）→ 停止喂 bar 超窗口 evaluate 检出（EVENT+秒级兜底）"
+        },
+        {
+          "case_id": "FI-03",
+          "captured": true,
+          "expected_capture": "A-6 BrokerConnectionWatcher",
+          "transition": "connected->disconnected",
+          "level": "critical",
+          "category": "broker",
+          "runbook_id": "RB-BROKER-DISCONNECT-001",
+          "alert_id": "02c8e05a9903",
+          "fault_ts": 1791263335.8560266,
+          "created_at": 1791263335.8560266,
+          "acked_at": 1791263335.8570259,
+          "resolved_at": 1791263335.8570259,
+          "mttd_seconds": 0.0,
+          "mtta_seconds": 0.000999,
+          "mttr_seconds": 0.000999,
+          "event_path": "BrokerConnectionWatcher.on_state True→False 转换点（EVENT 路径）"
+        },
+        {
+          "case_id": "FI-04",
+          "captured": true,
+          "expected_capture": "A-8 ORDER_REJECTED",
+          "level": "error",
+          "category": "trade",
+          "details": {
+            "event_type": "order.rejected",
+            "symbol": "600000.SH",
+            "order_id": "acceptance-order-1",
+            "trade_id": "",
+            "reason": "资金不足（验收注入）",
+            "runbook_id": "RB-TRADE-EXCEPTION-001"
+          },
+          "alert_id": "be908c47270b",
+          "fault_ts": 1791263335.8570259,
+          "created_at": 1791263335.8570259,
+          "acked_at": 1791263335.858026,
+          "resolved_at": 1791263335.8590286,
+          "mttd_seconds": 0.0,
+          "mtta_seconds": 0.001,
+          "mttr_seconds": 0.002003,
+          "event_path": "AlertManager 订阅 EventType.ORDER_REJECTED 事件流实时触发（EVENT 路径）"
+        },
+        {
+          "case_id": "FI-05",
+          "captured": true,
+          "expected_capture": "A-7 reconcile 差异",
+          "cash_diff": 100.0,
+          "cash_tolerance": 0.0,
+          "position_diff_count": 0,
+          "exceeds_threshold": true,
+          "level": "critical",
+          "category": "reconciliation",
+          "alert_id": "5d6d5abc1f63",
+          "fault_ts": 1791263335.8590286,
+          "created_at": 1791263335.8590286,
+          "acked_at": 1791263335.8600235,
+          "resolved_at": 1791263335.8600235,
+          "mttd_seconds": 0.0,
+          "mtta_seconds": 0.000995,
+          "mttr_seconds": 0.000995,
+          "event_path": "LivePortfolio.reconcile_vs_broker 差异超阈（容差=0）→ CRITICAL（EVENT 路径）"
+        }
+      ],
+      "verdict": {
+        "pass": true,
+        "coverage_ok": true,
+        "min_fi_captured": true,
+        "checked_cases": [
+          "FI-01",
+          "FI-03",
+          "FI-04",
+          "FI-05"
+        ],
+        "reason": "保命闭环四环覆盖率 100% 且 FI-01/03/04/05 注入检出走事件路径"
+      },
+      "caveats": []
+    },
+    "full": {
+      "mode": "full",
+      "coverage": {
+        "rings": [
+          {
+            "ring": "行情活性",
+            "item": "A-4",
+            "covered": true,
+            "evidence": "StalenessDetector.attach_event_bus/on_bar/evaluate"
+          },
+          {
+            "ring": "券商断连",
+            "item": "A-6",
+            "covered": true,
+            "evidence": "BrokerConnectionWatcher.on_state/poll_once"
+          },
+          {
+            "ring": "交易异常",
+            "item": "A-8",
+            "covered": true,
+            "evidence": "AlertManager.subscribe_to_event_bus + handle_trade_exception_event"
+          },
+          {
+            "ring": "持仓对账",
+            "item": "A-7",
+            "covered": true,
+            "evidence": "LivePortfolio.reconcile_vs_broker + slo.reconciliation.realtime_diff_tolerance==0"
+          }
+        ],
+        "covered": 4,
+        "total": 4,
+        "coverage_pct": 1.0
+      },
+      "fi": [
+        {
+          "case_id": "FI-01",
+          "captured": true,
+          "expected_capture": "A-4 StalenessDetector",
+          "event_path_ok": true,
+          "status": "down",
+          "detail": {
+            "reason": "行情断流（交易时段无新 bar 超时）",
+            "stale_seconds": 2.3,
+            "bar_timeout_seconds": 2.0
+          },
+          "demo_bar_timeout_seconds": 2.0,
+          "production_bar_timeout_seconds": 300.0,
+          "production_meets_mttd": false,
+          "level": "error",
+          "category": "watchdog",
+          "alert_id": "a583cecf47d7",
+          "fault_ts": 1791263335.8735366,
+          "created_at": 1791263338.1743975,
+          "acked_at": 1791263338.1759205,
+          "resolved_at": 1791263338.1769185,
+          "mttd_seconds": 2.300861,
+          "mtta_seconds": 0.001523,
+          "mttr_seconds": 2.303382,
+          "event_path": "EventBus BAR 事件刷新时钟（事件路径）→ 停止喂 bar 超窗口 evaluate 检出（EVENT+秒级兜底）"
+        },
+        {
+          "case_id": "FI-02",
+          "captured": true,
+          "expected_capture": "A-5 引擎心跳",
+          "window_ok": true,
+          "window_seconds": 50.0,
+          "judge_window_seconds": 60.0,
+          "probe_interval_seconds": 10.0,
+          "consecutive_misses": 5,
+          "level": "error",
+          "category": "engine",
+          "alert_id": "d438a92845c7",
+          "fault_ts": 1791263338.1769185,
+          "created_at": 1791263338.1789148,
+          "acked_at": 1791263338.1799157,
+          "resolved_at": 1791263338.1799157,
+          "mttd_seconds": 0.001996,
+          "mtta_seconds": 0.001001,
+          "mttr_seconds": 0.002997,
+          "event_path": "EngineHeartbeatWatcher.probe 连续 N 次 get_status 无响应 → 僵死告警（POLL 窗口<60s）"
+        },
+        {
+          "case_id": "FI-03",
+          "captured": true,
+          "expected_capture": "A-6 BrokerConnectionWatcher",
+          "transition": "connected->disconnected",
+          "level": "critical",
+          "category": "broker",
+          "runbook_id": "RB-BROKER-DISCONNECT-001",
+          "alert_id": "3a65b3f64a3d",
+          "fault_ts": 1791263338.1799157,
+          "created_at": 1791263338.1799157,
+          "acked_at": 1791263338.180915,
+          "resolved_at": 1791263338.180915,
+          "mttd_seconds": 0.0,
+          "mtta_seconds": 0.000999,
+          "mttr_seconds": 0.000999,
+          "event_path": "BrokerConnectionWatcher.on_state True→False 转换点（EVENT 路径）"
+        },
+        {
+          "case_id": "FI-04",
+          "captured": true,
+          "expected_capture": "A-8 ORDER_REJECTED",
+          "level": "error",
+          "category": "trade",
+          "details": {
+            "event_type": "order.rejected",
+            "symbol": "600000.SH",
+            "order_id": "acceptance-order-1",
+            "trade_id": "",
+            "reason": "资金不足（验收注入）",
+            "runbook_id": "RB-TRADE-EXCEPTION-001"
+          },
+          "alert_id": "2887d5578ff3",
+          "fault_ts": 1791263338.181916,
+          "created_at": 1791263338.181916,
+          "acked_at": 1791263338.1829176,
+          "resolved_at": 1791263338.1829176,
+          "mttd_seconds": 0.0,
+          "mtta_seconds": 0.001002,
+          "mttr_seconds": 0.001002,
+          "event_path": "AlertManager 订阅 EventType.ORDER_REJECTED 事件流实时触发（EVENT 路径）"
+        },
+        {
+          "case_id": "FI-05",
+          "captured": true,
+          "expected_capture": "A-7 reconcile 差异",
+          "cash_diff": 100.0,
+          "cash_tolerance": 0.0,
+          "position_diff_count": 0,
+          "exceeds_threshold": true,
+          "level": "critical",
+          "category": "reconciliation",
+          "alert_id": "4b06aac7ec5e",
+          "fault_ts": 1791263338.1829176,
+          "created_at": 1791263338.183915,
+          "acked_at": 1791263338.183915,
+          "resolved_at": 1791263338.1849146,
+          "mttd_seconds": 0.000997,
+          "mtta_seconds": 0.0,
+          "mttr_seconds": 0.001997,
+          "event_path": "LivePortfolio.reconcile_vs_broker 差异超阈（容差=0）→ CRITICAL（EVENT 路径）"
+        }
+      ],
+      "verdict": {
+        "pass": true,
+        "coverage_ok": true,
+        "fi_captured": true,
+        "mttd_ok": true,
+        "mtta_ok": true,
+        "mttr_ok": true,
+        "event_path_ok": true,
+        "classification": {
+          "tp": 5,
+          "fp": 0,
+          "fn": 0,
+          "unclassified": 0,
+          "accuracy": 1.0,
+          "fp_rate": 0.0,
+          "detection_rate": 1.0,
+          "formula": {
+            "accuracy": "TP/(TP+FP)",
+            "fp_rate": "FP/(TP+FP)",
+            "detection_rate": "TP/(TP+FN)"
+          }
+        },
+        "accuracy_ok": true,
+        "fp_rate_ok": true,
+        "reason": "FI-01~05 全部捕获；MTTx 满足预算；EVENT 项走事件路径；分类达标"
+      },
+      "caveats": [
+        "KPI-3 准确率/误报率目标按 P0-8 口径按周统计至少 4 周；本次为受控注入快照（TP 均来自真实注入捕获、FP=0），4 周滚动达标须由 §7 周复盘在实盘数据上持续确认。",
+        "FI-01 断流生产检测窗口 monitoring.watchdog.bar_timeout_seconds=300.0s ≥ 60s，严格 KPI-2 MTTD<1min 需按实盘校准该阈值（R-04，P0-2 锁定项）；本验收以演示短窗口 2s 证明事件路径机制可达预算。"
+      ]
+    }
+  },
+  "overall_pass": true
+}

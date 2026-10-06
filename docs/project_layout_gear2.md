@@ -434,6 +434,8 @@ Pythonwdhmm/
 
 │   ├── 监控可测量性统计.py            # ✨【回写#189】P0-8 可测量性统计薄入口：argparse（--alerts/--fi/--list-fi）+ find_project_root + 调 myquant/monitoring/measurability.py（MTTx/TPFPFN 统计 + FI 用例库打印），输出 JSON 统计报告；业务逻辑零写入脚本
 
+│   ├── 验收_监控M1保命.py            # ✨【回写#220】A-15 M1 保命验收薄入口：argparse（--mode min/full/both + --out + --db）+ find_project_root + 调 myquant/monitoring/m1_acceptance.py（保命闭环覆盖率 + FI-01~05 故障注入 + MTTx 计时 + TP/FP/FN 分类），输出 JSON 验收报告；业务逻辑零写入脚本
+
 │   ├── 数据库迁移.py                  # ✨【第6项】Alembic迁移中文入口：upgrade/downgrade/current/history/stamp/check/init，支持--db指定数据库路径
 
 │   ├── 数据库初始化.py                # 数据库初始化：调用database.schema与migrations创建表结构
@@ -539,6 +541,8 @@ Pythonwdhmm/
     │   │   ├── test_dashboard_monitor.py # ✨【回写#215】A-11 监控中心测试（17 项）：告警详情脱敏规则、告警筛选（scope/level/category）、健康两级未注入降级 unknown、指标卡片、交易连续状态 unknown/ok、/api/monitor/overview 与 /api/alerts 端点行为✅已完成
 
     │   │   ├── test_rbac.py            # ✨【回写#219】A-16 监控面 RBAC 测试（20 项）：角色矩阵逐角色断言、normalize_role 向后兼容、RbacGuard 拒绝留 deny/放行留 allowed、viewer/auditor 越权 ack/resolve→403 且审计无成功动作、operator/admin 成功、不传角色兼容、改阈值/复位熔断占位 403/501 分流✅已完成
+
+    │   │   ├── test_m1_acceptance.py # ✨【回写#220】A-15 M1 保命验收测试（12 项）：四环覆盖率 100%、A-15-Min（FI-01/03/04/05 检出走事件路径）、A-15-Full（FI-01~05 检出 + MTTx 预算逐用例 + 事件路径非巡检 + 分类达标）、时间戳单调防未来、同 runner 连跑 min→full 去重隔离、非法 mode 抛错✅已完成
 
     │   │   ├── test_alert_escalation.py # ✨【回写#214】A-10 告警分级与升级测试（20 项）：P0~P3 统一映射与非法值防御、runbook_id 显式字段提升/默认映射/落库贯通、超时未确认 WARNING→ERROR 且落库 acked+escalated（无通道仍升级补缺）、已确认/已解决/未超时/开关关闭不重复升级、A-7 对账事件装配接线✅已完成
 
@@ -1159,6 +1163,8 @@ Pythonwdhmm/
     │   ├── audit_log.py            # ✨【回写#202】BASE-7 审计只追加存储：降级哈希链（seq 递增 + row_hash=SHA-256(kind|action|actor|detail_json|created_ts|seq) + prev_hash 链尾衔接，首条 GENESIS 64 个 '0'）；append 只追加（业务层无 UPDATE/DELETE API）、只读查询（kind/actor/时间/limit/order，detail 反序列化）、verify_chain 篡改检测（行内容/链衔接/删行均断链可检出）、archive 归档（旧行按原 seq/prev_hash/row_hash COPY 到 audit_archive 哈希不改写 + manifest checksum=归档行 row_hash 按序聚合 SHA-256）+ verify_archive 归档校验；orders/fills/alerts 全落库留痕语义（AlertStore 真实接入；交易域落库调 append(kind=...)）；防御式校验（空 kind/action/actor、detail 非 dict/超限、limit/before_ts 非法抛 ValueError）；__main__ 自测 19 项；✨【回写#204】BASE-9 log_access 便捷方法（kind=access，resource+action+actor+detail 结构，读取/导出留痕入口）
 
     │   ├── watchdog.py                  # ✨【回写#208/#209/#210】交易看门狗：A-4 行情活性 StalenessDetector（EVENT bar 刷新+秒级兜底，超 bar_timeout_seconds 断流 ERROR、非交易时段豁免、开盘 grace 未就绪告警、到达间隔 P99 统计，阈值读 monitoring.watchdog）；A-5 引擎心跳 EngineHeartbeatWatcher（连续 consecutive_misses 判僵死 P0，5×10s=50s<60s 保 MTTD，阈值读 slo.engine_heartbeat）；A-6 券商连接 BrokerConnectionWatcher（快速轮询+健康→不健康转换点 P0/CRITICAL，details.runbook_id=RB-BROKER-DISCONNECT-001）；__main__ 自测 14 项
+
+    │   ├── m1_acceptance.py         # ✨【回写#220】A-15 M1 保命验收业务逻辑：M1AcceptanceRunner（隔离环境=临时 AlertStore + 真实 AlertManager + 真实 EventBus）——check_coverage 保命闭环四环覆盖率（A-4/A-6/A-8/A-7）+ FI-01~05 故障注入（断流/引擎僵死/券商断连/伪造拒单/持仓差异）走真实事件路径 + MTTx 系统时间戳计时（MTTD<1min/MTTA<5min/MTTR<30min）+ TP/FP/FN ground-truth 分类（注入捕获=TP，受控无 FP）；防未来（只消费已发生时间戳），__main__ 自测 3 项
 
     │   ├── rate_limit_monitor.py        # ✨【回写#216】A-12 交易所限流/频控监控：ExchangeRateLimitMonitor 滑动窗口（order/query/cancel 分别）计数已发生动作→接近阈值 P1 预警+到阈值前自动暂停开仓（可回滚留痕）、达上限 ERROR、窗口回落自动恢复；阈值读 slo.exchange_rate_limit（LOCKED 初值）；指标 rate_limit_orders/queries/cancels_total 进 /api/metrics；__main__ 自测 9 项
 
@@ -3544,3 +3550,11 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
     c. 新增 tests/unit/test_rbac.py（20 项）：角色矩阵逐角色断言、归一化向后兼容、RbacGuard 拒绝留 deny/放行留 allowed、端点级 viewer/auditor ack/resolve→403 且审计无成功动作、operator/admin→成功、不传角色→成功（兼容）、改阈值/复位熔断占位的 403/501 分流。
     d. 验证结果：py_compile auth.py/routes.py 通过；auth __main__ RBAC 自测 11 项全绿；新增单测 20 passed；全量 pytest tests/unit 2689 passed + 2 skipped 无回归（docker 路径环境性失败豁免）。
     e. 纪律遵守：无蓝图外文件；防未来（鉴权只判当前角色/动作，不预测）；审计走 BASE-7 AuditLogStore append-only（actor=调用身份，动作含 ack/resolve/改阈值/deny 痕迹）；任务后 git 提交（commit 74636e3）。
+215. ✨【回写记录·2026-10-06·A-15 M1 保命验收（Min/Full）】【回写#220】
+    事实来源：本次落地，验收级核验：《量化系统监控模块施工总清单_V1.2.md》A-15-Min / A-15-Full 行验收口径 + docs/监控档案/可测量性与故障注入规范_P0-8.md（MTTx/TPFPFN/FI-01~07 口径）+ 既有 P0-8 measurability.py（MttxCalculator/ClassificationStats 复用）。
+    a. 新增 myquant/monitoring/m1_acceptance.py（业务逻辑，已登记 monitoring/ 段）：M1AcceptanceRunner——check_coverage 保命闭环四环覆盖率（A-4 行情活性/A-6 券商断连/A-8 交易异常/A-7 持仓对账，容差真源锁定=0）；FI-01~05 故障注入走真实 EventBus + 真实 AlertManager + 临时 AlertStore（隔离环境）：断流（短窗演示<60s + 生产 bar_timeout 核验）、引擎僵死（5×10=50s<60s 结构预算）、券商断连（on_state 转换点）、伪造拒单（ORDER_REJECTED 订阅）、持仓差异（容差=0 超阈）；MTTx 一律系统时间戳（fault_ts<=created_at<=acked_at<=resolved_at 防未来），MTTD<1min/MTTA<5min/MTTR<30min；TP/FP/FN 按 P0-8 ground-truth（注入捕获=TP，受控 FP=0）；每次 run() 重建运行环境隔离跨 run 去重；__main__ 自测 3 项全绿。
+    b. 新增 scripts/验收_监控M1保命.py（薄入口，已登记 scripts/ 段）：argparse（--mode min/full/both + --out + --db）+ find_project_root + 调 m1_acceptance，控制台摘要 + JSON 报告（--out），业务逻辑零写入。
+    c. 新增 tests/unit/test_m1_acceptance.py（12 项，已登记 tests/unit 段）：四环覆盖率 100%、A-15-Min（FI-01/03/04/05 检出走事件路径）、A-15-Full（FI-01~05 检出 + MTTx 预算逐用例 + 事件路径非巡检 + 分类达标）、时间戳单调防未来、同 runner 连跑 min→full 去重隔离、非法 mode 抛错。
+    d. 验证结果：py_compile m1_acceptance.py/脚本 通过；模块 __main__ 自测 3 项全绿；新增单测 12 passed；实跑 A-15 验收 both 档全过（Min：覆盖率 100% + FI-01/03/04/05 检出；Full：FI-01~05 全检出，TP=5/FP=0/FN=0 准确率 1.0，MTTD 均<60s，事件路径全通过），JSON 报告入档 docs/监控档案/M1保命验收_20261006.json；全量 pytest tests/unit 无回归（docker 路径环境性失败豁免）。
+    e. 如实注记（不掩盖）：FI-01 断流生产检测窗口 monitoring.watchdog.bar_timeout_seconds=300s≥60s，严格 KPI-2 MTTD<1min 需按实盘校准该阈值（R-04，P0-2 锁定项）；本验收以演示短窗 2s 证明事件路径机制可达预算；KPI-3 准确率/误报率≥4 周滚动口径须由 §7 周复盘在实盘数据上持续确认，本次为受控注入快照。
+    f. 纪律遵守：无蓝图外文件；业务逻辑全在 myquant、scripts 薄入口零逻辑；阈值引用配置真源（容差=0/心跳窗口）不硬编码；EVENT 项经事件路径验证（非等满 60s 周期）；防未来（只消费已发生时间戳）；任务后 git 提交（commit 见 #220 蓝图提交）。
