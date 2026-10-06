@@ -1736,6 +1736,25 @@ def attach_engine(
         except Exception as e:  # noqa: BLE001
             logger.warning(f"元监控初始化失败（巡检不含元监控检查项）: {e}")
 
+        # A-4（回写#208）：行情活性看门狗——受 monitoring.watchdog.enabled 装配开关控制；
+        # enabled=false 时巡检不装配，但 StalenessDetector 类仍可独立实例化测试。
+        # bar 到达（EVENT）即刷新时钟；秒级 timer(10s) 兜底检出断流；非交易时段自动豁免。
+        try:
+            from myquant.core.settings import get_monitoring_config
+            if get_monitoring_config().get("watchdog", {}).get("enabled", False):
+                from myquant.core.event_bus import get_event_bus
+                from myquant.monitoring.watchdog import StalenessDetector, STALENESS_PROBE_INTERVAL_SECONDS
+                st = StalenessDetector()
+                st.attach_event_bus(get_event_bus())
+                patrol.add_check("market_staleness", st.patrol_check)
+                scheduler.add_interval_task(
+                    st.evaluate, name="行情活性看门狗",
+                    interval_seconds=STALENESS_PROBE_INTERVAL_SECONDS,
+                )
+                logger.info("[attach] A-4 行情活性看门狗已装配")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[attach] A-4 行情活性看门狗装配失败（不阻断巡检）: {e}")
+
         def _patrol_job(**kw) -> None:  # noqa: ARG001
             report = patrol.build_report(
                 engine=engine,
