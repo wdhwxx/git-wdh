@@ -96,6 +96,29 @@ STRATEGY_RESUME_ALERT_LEVEL: SeverityLevel = SeverityLevel.INFO
 
 
 # ═══════════════════════════════════════════════
+#  交易异常事件 → 告警映射（A-8 交易异常告警闭环）
+# ═══════════════════════════════════════════════
+#  - 触发模式 EVENT（R-02）：由事件流实时触发告警，不等周期巡检兜底。
+#  - 防未来：只响应"已发生"的交易异常事件（事件时间 = 业务发生时刻 event_ts），
+#    不预测未来可能发生的拒单/失败。
+#  - ORDER_REJECTED / ORDER_FAILED / FILL_REPORT_ERROR → ERROR（P1）
+#  - EMERGENCY_LIQUIDATION → CRITICAL（P0，最高优先级）
+TRADE_EXCEPTION_ALERT_LEVEL_MAP: Dict[str, SeverityLevel] = {
+    "order.rejected": SeverityLevel.ERROR,            # P1：拒单
+    "order.failed": SeverityLevel.ERROR,              # P1：订单发送/执行失败
+    "fill.report_error": SeverityLevel.ERROR,          # P1：成交回报异常
+    "emergency.liquidation": SeverityLevel.CRITICAL,  # P0：紧急强平
+}
+# A-8 需要订阅并自动告警的交易异常事件类型（顺序即订阅登记顺序）
+TRADE_EXCEPTION_ALERT_EVENT_TYPES: Tuple[str, ...] = (
+    "order.rejected",
+    "order.failed",
+    "fill.report_error",
+    "emergency.liquidation",
+)
+
+
+# ═══════════════════════════════════════════════
 #  告警数据类
 # ═══════════════════════════════════════════════
 
@@ -1477,6 +1500,31 @@ class AlertManager:
         )
         handler_ids.append(hid5)
 
+        # A-8 交易异常告警闭环：订阅 4 类交易异常事件，事件流实时触发告警（R-02）
+        hid6 = bus.subscribe(
+            EventType.ORDER_REJECTED,
+            lambda e: self.handle_trade_exception_event(e),
+        )
+        handler_ids.append(hid6)
+
+        hid7 = bus.subscribe(
+            EventType.ORDER_FAILED,
+            lambda e: self.handle_trade_exception_event(e),
+        )
+        handler_ids.append(hid7)
+
+        hid8 = bus.subscribe(
+            EventType.FILL_REPORT_ERROR,
+            lambda e: self.handle_trade_exception_event(e),
+        )
+        handler_ids.append(hid8)
+
+        hid9 = bus.subscribe(
+            EventType.EMERGENCY_LIQUIDATION,
+            lambda e: self.handle_trade_exception_event(e),
+        )
+        handler_ids.append(hid9)
+
         self._event_bus_subscribed = True
         self._event_bus_handler_ids = handler_ids
         logger.info(f"AlertManager 已订阅事件总线，handler_ids={handler_ids}")
@@ -1743,6 +1791,95 @@ class AlertManager:
 
         except Exception as e:
             logger.error(f"处理策略暂停事件异常: {e}", exc_info=True)
+            return None
+
+    def handle_trade_exception_event(self, event: Any) -> Optional[int]:
+        """
+        处理交易异常事件（A-8 交易异常告警闭环，触发模式 EVENT）
+
+        由事件流实时触发告警（不等周期巡检，R-02），覆盖：
+          - ORDER_REJECTED        → ERROR（P1），含 symbol/拒单原因（reject_reason）
+          - ORDER_FAILED         → ERROR（P1），含 symbol/order_id/失败原因
+          - FILL_REPORT_ERROR    → ERROR（P1），含 symbol/order_id/回报异常原因
+          - EMERGENCY_LIQUIDATION→ CRITICAL（P0），紧急强平最高优先级告警
+
+        去重键 ``trade:<event_type>:<order_id>``：同一订单的同类异常在去重窗口内
+        只告警一次，避免同单重复刷屏；order_id 缺失时退化为 symbol/unknown。
+
+        防未来：只消费已发生的事件（event_ts 为业务真实发生时刻），不预测。
+
+        Parameters
+        ----------
+        event : OrderEvent | SystemErrorEvent | Event
+            交易异常事件（强类型 OrderEvent 或通用 Event；兼容 data 字典兜底取字段）
+
+        Returns
+        -------
+        int | None : 成功投递的通道数量；处理异常时返回 None（不阻断事件流）
+        """
+        from myquant.core.event_bus import EventType
+
+        try:
+            et = getattr(event, "event_type", None)
+            et_name: str = et.value if isinstance(et, EventType) else str(et)
+            level = TRADE_EXCEPTION_ALERT_LEVEL_MAP.get(et_name, SeverityLevel.ERROR)
+
+            # 强类型字段优先，通用 Event 的 data 字典兜底
+            data = getattr(event, "data", None) or {}
+            symbol = getattr(event, "symbol", "") or (data.get("symbol") or "")
+            order_id = getattr(event, "order_id", "") or ""
+            trade_id = getattr(event, "trade_id", "") or ""
+            reason = (
+                getattr(event, "reject_reason", "")
+                or getattr(event, "error", "")
+                or data.get("reason")
+                or data.get("error")
+                or data.get("reject_reason")
+                or ""
+            )
+            reason = str(reason)
+
+            # 按事件类型生成人类可读消息
+            if et_name == "order.rejected":
+                message = (
+                    f"订单被拒单（{symbol or 'N/A'}）: {reason or '券商/风控拒单，无原因'}"
+                )
+            elif et_name == "order.failed":
+                message = (
+                    f"订单发送/执行失败（{symbol or 'N/A'}, order_id={order_id or 'N/A'}）: "
+                    f"{reason or '未知失败原因'}"
+                )
+            elif et_name == "fill.report_error":
+                message = (
+                    f"成交回报异常（{symbol or 'N/A'}, order_id={order_id or 'N/A'}）: "
+                    f"{reason or '成交回报对账/上报失败'}"
+                )
+            else:  # emergency.liquidation → P0
+                message = (
+                    f"[P0] 触发紧急强平（{symbol or 'N/A'}, order_id={order_id or 'N/A'}）: "
+                    f"{reason or '风险敞口超限，已自动强平'}"
+                )
+
+            dedup_key = f"trade:{et_name}:{order_id or symbol or 'unknown'}"
+
+            alert = Alert(
+                level=level,
+                message=message,
+                source="live_engine",
+                category="trade",
+                details={
+                    "event_type": et_name,
+                    "symbol": symbol,
+                    "order_id": order_id,
+                    "trade_id": trade_id,
+                    "reason": reason,
+                },
+                deduplication_key=dedup_key,
+            )
+            return self.send_alert(alert)
+
+        except Exception as e:
+            logger.error(f"处理交易异常事件告警失败: {e}", exc_info=True)
             return None
 
     def handle_pipeline_complete_event(self, event: Any) -> Optional[int]:

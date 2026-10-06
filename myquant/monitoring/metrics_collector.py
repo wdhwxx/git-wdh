@@ -251,6 +251,9 @@ class BuiltinMetrics:
     ENGINE_RISK_REJECTED_TOTAL = "engine_risk_rejected_total"
     ENGINE_ERRORS_TOTAL = "engine_errors_total"
 
+    # 交易异常告警闭环（A-8：事件到达即同步计数，按事件类型/级别打标签）
+    TRADE_EXCEPTION_ALERTS_TOTAL = "trade_exception_alerts_total"
+
     # 质量等级数值映射（0=excellent, 1=good, 2=fair, 3=poor, 4=critical）
     QUALITY_GRADE_MAP = {
         "excellent": 0,
@@ -478,6 +481,12 @@ class MetricsCollector:
                       "Total signals rejected by risk control (snapshot)")
         self.register(BuiltinMetrics.ENGINE_ERRORS_TOTAL, MetricType.GAUGE,
                       "Total errors in live engine (snapshot)")
+
+        # 交易异常告警闭环（A-8：拒单/失败/成交回报异常/强平事件计数）
+        self.register(BuiltinMetrics.TRADE_EXCEPTION_ALERTS_TOTAL, MetricType.COUNTER,
+                      "Total trade exception events triggering alerts "
+                      "(order.rejected/order.failed/fill.report_error/emergency.liquidation)",
+                      label_names=["event_type", "level"])
 
         return self
 
@@ -1611,6 +1620,53 @@ class MetricsCollector:
             return 0
 
     # ═══════════════════════════════════════════
+    #  A-8 交易异常告警闭环：交易异常事件计数（事件到达即同步计数）
+    # ═══════════════════════════════════════════
+
+    def collect_from_trade_exception_event(self, event: Any) -> int:
+        """
+        从交易异常事件采集计数指标（A-8，触发模式 EVENT）
+
+        事件到达即同步递增 ``trade_exception_alerts_total``，按
+        ``event_type``（order.rejected/order.failed/fill.report_error/
+        emergency.liquidation）与 ``level``（error/critical）打标签，
+        使拒单/成交失败/强平实时可观测（/api/metrics 与看板）。
+
+        防未来：只对"已发生"的交易异常事件计数（event_ts 为业务真实发生时刻）。
+
+        Parameters
+        ----------
+        event : OrderEvent | SystemErrorEvent | Event
+            交易异常事件（强类型或通用 Event；兼容 data 字典兜底取 event_type）
+
+        Returns
+        -------
+        int : 更新的指标数量（成功=1，异常=0）
+        """
+        try:
+            from myquant.core.event_bus import EventType
+            from myquant.monitoring.alerting import TRADE_EXCEPTION_ALERT_LEVEL_MAP
+
+            et = getattr(event, "event_type", None)
+            et_name: str = et.value if isinstance(et, EventType) else str(et)
+            level = TRADE_EXCEPTION_ALERT_LEVEL_MAP.get(et_name)
+            level_value = level.value if level is not None else "error"
+
+            self.inc_counter(
+                BuiltinMetrics.TRADE_EXCEPTION_ALERTS_TOTAL,
+                1.0,
+                labels={"event_type": et_name, "level": level_value},
+            )
+            self._collect_count += 1
+            logger.debug(
+                f"交易异常事件计数: event_type={et_name}, level={level_value}"
+            )
+            return 1
+        except Exception as e:
+            logger.error(f"采集交易异常事件指标失败: {e}", exc_info=True)
+            return 0
+
+    # ═══════════════════════════════════════════
     #  任务11核心：告警回调 + 事件总线自动订阅
     # ═══════════════════════════════════════════
 
@@ -1700,6 +1756,31 @@ class MetricsCollector:
             lambda e: self.collect_from_strategy_pause_event(e),
         )
         handler_ids.append(hid4)
+
+        # A-8：订阅交易异常事件，事件到达即同步计数（实时可观测）
+        hid5 = bus.subscribe(
+            EventType.ORDER_REJECTED,
+            lambda e: self.collect_from_trade_exception_event(e),
+        )
+        handler_ids.append(hid5)
+
+        hid6 = bus.subscribe(
+            EventType.ORDER_FAILED,
+            lambda e: self.collect_from_trade_exception_event(e),
+        )
+        handler_ids.append(hid6)
+
+        hid7 = bus.subscribe(
+            EventType.FILL_REPORT_ERROR,
+            lambda e: self.collect_from_trade_exception_event(e),
+        )
+        handler_ids.append(hid7)
+
+        hid8 = bus.subscribe(
+            EventType.EMERGENCY_LIQUIDATION,
+            lambda e: self.collect_from_trade_exception_event(e),
+        )
+        handler_ids.append(hid8)
 
         self._event_bus_subscribed = True
         self._event_bus_handler_ids = handler_ids

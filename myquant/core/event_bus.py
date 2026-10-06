@@ -67,6 +67,10 @@ class EventType(Enum):
     ORDER_PARTIAL = "order.partial_filled"
     ORDER_CANCELLED = "order.cancelled"
     ORDER_REJECTED = "order.rejected"
+    # ── 交易异常事件（A-8 交易异常告警闭环；取值沿用 order.* 点分命名风格）──
+    ORDER_FAILED = "order.failed"                    # 订单发送/执行失败（拒单之外的失败，P1）
+    FILL_REPORT_ERROR = "fill.report_error"           # 成交回报对账/上报异常（P1）
+    EMERGENCY_LIQUIDATION = "emergency.liquidation"  # 紧急强平（P0，最高优先级告警）
 
     # 持仓事件
     POSITION_UPDATE = "position.update"
