@@ -3711,3 +3711,67 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
     d. 新增 tests/unit/test_rolling_performance.py（17 项，临时库不碰 quant.db）：滚动收益/夏普/回撤/胜率/多策略分列；日内回撤/亏损超阈 WARNING（category=strategy、dedup、附值）/阈值未配置不告警不编造/健康不告警；metrics_history 真实临时库回放+策略标签过滤；防未来拒绝未来点/防御校验（空策略/负阈值/非有限权益/非法 store/空 metric_name）/record 幂等去重/set_gauge 按策略 labels。模块 __main__ 自测 15 项。
     e. 验证结果：py_compile 通过；新增单测 17 passed；全量 tests（unit+benchmarks）无回归（基线 2975 passed/2 skipped/1 failed 环境豁免，新增 17 项后只增不减）。
     f. 纪律遵守：无蓝图外文件（新模块 + 测试文件均登记目录树）；阈值引用配置真源（slo.strategy PENDING_CAL 不编造）；触发为周期巡检（R-02 非 MTTD 类）；防未来（record 拒绝未来绩效点，滚动/日内只消费已发生点）；任务后 git 提交（commit 见 #232 蓝图提交）。
+228. ✨【回写记录·2026-10-06·C-4 信号衰减监控】【回写#233】
+    事实来源：本次落地，代码级核验：《量化系统监控模块施工总清单_V1.2.md》C-4 行验收口径（信号后收益滚动 IC 衰减、信号密度下降、连续无效信号占比三指标；衰减超阈 P1/P2 分级预警并附衰减曲线）+ P0-2《SLO与阈值锁定清单》信号衰减行（滚动 IC/密度/无效占比阈值待校准，PENDING_CAL）+ commit 8252f65。
+    a. 新增 myquant/monitoring/signal_decay.py（monitoring/ 段登记 #233）：SignalDecayMonitor——信号质量退化检测，信号后收益滚动 IC、信号密度下降、连续无效信号占比三指标；防未来（只消费已发生信号/收益对）。
+    b. 告警契约：衰减超阈值 → P1/P2 分级预警（附衰减曲线数据）；阈值读 settings.yaml monitoring.slo.signal_decay（PENDING_CAL=None 不告警不编造，验收/测试显式注入阈值演示）；触发模式为周期/POLL（R-02 非 MTTD 类）。
+    c. 新增 tests/unit/test_signal_decay.py（21 项）：滚动 IC/信号密度/连续无效占比计算；衰减超阈 P1/P2 预警（显式注入阈值演示，配置 None 不告警不编造）；衰减曲线数据可输出；防未来；防御校验。
+    d. 验证结果：py_compile 通过；新增单测 21 passed；全量 pytest 收尾核验 3192 passed/2 skipped/0 failed 无回归（基线 3174 + C-12 新增 18 项）。
+    e. 纪律遵守：无蓝图外文件（模块+测试均登记目录树 #233）；阈值引用配置真源（PENDING_CAL 不编造）；触发为周期巡检（R-02 非 MTTD 类）；防未来（只消费已发生信号/收益对）；任务后 git 提交（commit 8252f65）。
+229. ✨【回写记录·2026-10-06·C-5 归因分析框架】【回写#234】
+    事实来源：本次落地，代码级核验：《量化系统监控模块施工总清单_V1.2.md》C-5 行验收口径（四维收益归因、实盘/回测同口径对比、归因日报摘要）+ P0-2 归因行（按策略/因子/标的/时段分组贡献）+ commit 94ea2d3。
+    a. 新增 myquant/monitoring/attribution.py（monitoring/ 段登记 #234）：AttributionAnalyzer 四维收益归因（strategy/factor/symbol/period 日周，组贡献值+占比+count+风险 std 占比，加总口径自洽对账 Σ组=总）+ 实盘/回测同口径逐维对比（abs_diff/rel_diff/缺失侧标注，bt=0 时 rel_diff=null）+ daily_summary() 结构化日报归因摘要 dict + visualization_data() 差异可视化数据；add_record 严格防未来。backtest/metrics.py 追加归因侧纯函数 group_contribution/group_risk_contribution/compare_attribution/period_bucket_of（既有 MetricsCalculator 零改动）。
+    b. 告警契约/触发模式：批任务（日报/可视化），非 MTTD 类（R-02）；差异表附口径说明与 self_consistent 对账。
+    c. 新增 tests/unit/test_attribution.py（31 项）；py_compile 三文件通过；__main__ 自测 22 项全绿；既有 metrics 回归 89 passed/1 skipped 环境豁免零破坏。
+    d. 验证结果：本人单测 31 passed；全量 pytest 收尾核验 3192 passed/2 skipped/0 failed 无回归。
+    e. 纪律遵守：无蓝图外文件（attribution.py+测试+backtest/metrics.py 说明均登记 #234）；纯函数归 backtest/metrics.py 复用不另起炉灶；防未来（只消费已发生收益序列）；任务后 git 提交（commit 94ea2d3）。
+230. ✨【回写记录·2026-10-06·C-6 动态基线+异常检测】【回写#235】
+    事实来源：本次落地，代码级核验：《量化系统监控模块施工总清单_V1.2.md》C-6 行验收口径（关键指标滚动基线+同环比+多条件组合判定+冷启动兜底+regime 自适应）+ P0-2 动态基线行 + R-04 真源补登记 slo.dynamic_baseline.static_low/static_high（PENDING_CAL）+ commit 1633a72。
+    a. 新增 myquant/monitoring/dynamic_baseline.py（monitoring/ 段登记 #235）：DynamicBaseline 滚动基线（zscore=mean±k×std / quantile 分位带，trailing window 严格只用当前点之前历史防未来）+ 同环比（mom 环比/yoy 同比变化率，分母 0→None 不编造）+ 多条件组合判定（AND/OR 可配，out_of_baseline/mom_ratio/yoy_ratio 规则结构可注入，缺省仅 out_of_baseline）+ 结构化 anomaly 事件（time/series/value/baseline_low/high/mean/ratio{mom,yoy}/conditions_hit/regime/cold_start，JSON 可序列化，同 series 同 ts 幂等只一条）+ 冷启动兜底（样本<min_samples 回退静态阈值，per-series 注入>static_default 注入>slo.dynamic_baseline.static_low/high 真源，PENDING_CAL=None 仅记录不告警不编造 R-04）+ regime 自适应（按 (series,regime) 独立缓冲，set_regime 切换留痕 regime_history，为 D-3 阈值自动校准打底）。
+    b. 告警契约：异常经 get_alert_manager().alert() WARNING（category=dynamic_baseline、source=monitoring.dynamic_baseline、dedup=dynamic_baseline:<series>:<regime> 防刷屏、details 附 anomaly 事件）；REGISTERED_METRICS 7 项经 set_gauge(labels=series,regime) 动态注册（未改 metrics_collector.py）；触发模式周期/POLL（R-02 非 MTTD 类）。
+    c. 新增 tests/unit/test_dynamic_baseline.py（37 项）；py_compile 两文件通过；__main__ 自测 42 项全绿。
+    d. 验证结果：本人单测 37 passed；全量 pytest 收尾核验 3192 passed/2 skipped/0 failed 无回归。
+    e. 纪律遵守：无蓝图外文件（模块+测试登记 #235）；阈值引用配置真源（slo.dynamic_baseline.static_low/high PENDING_CAL 不编造，R-04 已补登记）；触发为周期巡检（R-02）；防未来（trailing window 只用当前点之前历史）；任务后 git 提交（commit 1633a72）。
+231. ✨【回写记录·2026-10-06·C-7 根因分析（单机版）】【回写#236】
+    事实来源：本次落地，代码级核验：《量化系统监控模块施工总清单_V1.2.md》C-7 行验收口径（同窗聚合 incident、底层→上层依赖抑制、一次断流只一条根因告警走事件路径）+ P0-1 链路依赖行 + commit dd59ed8。
+    a. 新增 myquant/monitoring/incident_context.py（monitoring/ 段登记 #236）：IncidentContextEngine 同窗（默认 60s 可配）告警/指标/变更/日志聚合为一次 incident（incident_id/start_ts/end_ts/root_alert/related_alerts/metrics/changes/logs/status，JSON 可序列化）+ 底层→上层依赖抑制（watchdog 行情断流→data_quality/strategy，同窗底层命中时上层仅作 related 上下文不再单开根因 incident，依赖映射可注入扩展）+ 事件驱动（R-02）subscribe_to_event_bus 订阅真实 EventBus 告警类事件实时聚合，handle_alert/handle_metric/handle_change/handle_log 注入入口兜底。
+    b. 告警契约：根因判定后经 get_alert_manager().alert() 发 WARNING/ERROR（category=incident、source=monitoring.incident_context、dedup=incident:<id>、details 附上下文摘要）；incident_total/incident_suppressed_total COUNTER 经 get_metrics_collector() 动态注册（未改 metrics_collector.py）；触发为事件驱动（R-02 EVENT 类）。
+    c. 新增 tests/unit/test_incident_context.py（17 项：同窗聚合/依赖抑制/真实 EventBus 断流级联单根因/incident 结构/窗口边界/防未来/防御校验/指标注册）；py_compile 两文件通过；__main__ 自测 10 项全绿。
+    d. 验证结果：本人单测 17 passed；全量 pytest 收尾核验 3192 passed/2 skipped/0 failed 无回归。
+    e. 纪律遵守：无蓝图外文件（模块+测试登记 #236）；事件路径验证（一次断流单根因非风暴，R-02）；严格防未来（拒绝未来时间点、窗口按已观测水位线界定）；任务后 git 提交（commit dd59ed8）。
+232. ✨【回写记录·2026-10-06·C-8 容量预测】【回写#237】
+    事实来源：本次落地，代码级核验：《量化系统监控模块施工总清单_V1.2.md》C-8 行验收口径（数据量增长外推预测、回测/清洗资源占用估算、策略容量上限预警）+ P0-2 容量行（slo.capacity.growth_projection_days/headroom 阈值 PENDING_CAL）+ commit 1c01cd0。
+    a. 新增 myquant/monitoring/capacity.py（monitoring/ 段登记 #237）：CapacityMonitor 数据量增长最小二乘外推 N 天（N 读 slo.capacity.growth_projection_days 缺省 30）+ 预测值/剩余可用天数/headroom；estimate_backtest_usage/estimate_clean_usage 线性资源估算（单位成本=已观测事实，未观测 None 不编造，峰值内存实测复用 memory_watcher）；注册策略数 vs 上限。
+    b. 告警契约：余量<阈值/策略数超限 → WARNING 预警（category=capacity、source=monitoring.capacity、dedup=capacity:storage_headroom/strategy_count、details 附值，PENDING_CAL=None 只计算不告警不编造 R-04）；REGISTERED_METRICS 6 项（capacity_data_size_growth/estimated_days_remaining/strategy_count/backtest_peak_memory_mb/data_size_current_mb/storage_headroom_pct）经 set_gauge 动态注册（未改 metrics_collector.py）；触发为周期/POLL（R-02 非 MTTD 类）。
+    c. 新增 tests/unit/test_capacity.py（22 项）；__main__ 自测 31 项全绿。
+    d. 验证结果：本人单测 22 passed；全量 pytest 收尾核验 3192 passed/2 skipped/0 failed 无回归。
+    e. 纪律遵守：无蓝图外文件（模块+测试登记 #237）；阈值引用配置真源（PENDING_CAL 不编造）；防未来（拒绝未来落库点）；任务后 git 提交（commit 1c01cd0）。
+233. ✨【回写记录·2026-10-06·C-9 告警治理与降噪】【回写#238】
+    事实来源：本次落地，代码级核验：《量化系统监控模块施工总清单_V1.2.md》C-9 行验收口径（聚合分组+依赖抑制+动态基线降噪+元监控独立冷却+周复盘 TP/FP/FN 统计）+ P0-8 误报率口径（健康序列 0 误报，TP/FP/FN 周复盘）+ R-08 元监控独立冷却 + commit 8c07d7c。
+    a. 变更 myquant/monitoring/alerting.py（AlertGovernor 聚合分组+依赖抑制联动 C-7）+ myquant/monitoring/meta_monitor.py（元监控独立冷却 R-08）+ config/settings.yaml（降噪参数，PENDING_CAL 不编造）：告警治理与降噪闭环——聚合分组 + 依赖抑制（C-7）+ 动态基线降噪（C-6）+ 元监控独立冷却（R-08，dedup=meta:* 与业务告警隔离）+ 周复盘 TP/FP/FN 统计（P0-8）。
+    b. 告警契约：根因告警放行/依赖抑制/元监控冷却抑制三条路径可观测（allowed_total/suppressed_total/suppressed_by_dependency/suppressed_by_baseline/suppressed_by_meta_cooldown/aggregated_total）；触发为实时治理（R-02/R-08）。
+    c. 新增 tests/unit/test_alert_governance.py（30 项）。
+    d. 验证结果：本人单测 30 passed；全量 pytest 收尾核验 3192 passed/2 skipped/0 failed 无回归。
+    e. 纪律遵守：无蓝图外文件（alerting.py/meta_monitor.py/settings.yaml/测试均在蓝图内）；阈值/参数引用配置真源（PENDING_CAL 不编造）；元监控与业务告警冷却隔离（R-08）；任务后 git 提交（commit 8c07d7c）。
+234. ✨【回写记录·2026-10-06·C-10 回测实盘逐笔信号一致性】【回写#239】
+    事实来源：本次落地，代码级核验：《量化系统监控模块施工总清单_V1.2.md》C-10 行验收口径（回测/实盘信号逐笔对齐、偏差率=方向/价格/时间错配占比、偏差超阈告警附明细）+ P0-2/R-05 slo.backtest_consistency.signal_deviation_rate_max/deviation_window（PENDING_CAL）+ commit 3e8e73c。
+    a. 新增 myquant/monitoring/signal_consistency.py（monitoring/ 段登记 #239）：SignalConsistencyChecker 批任务逐笔对齐对比（run_comparison 供批任务调用，不接 scheduler）；对齐算法=signal_id 主对齐+(symbol,时间邻近 time_tolerance)模糊兜底，one-sided 单侧信号入明细但不进 aligned 分母；错配样本=方向不一致/价格差超 price_tolerance/时间漂移超 time_tolerance（容差可注入），偏差率=mismatched/aligned（aligned=0→0 不除零不编造）；窗口面板 total/aligned/mismatched/mismatch_rate/details（signal_id/ts/symbol/回测方向/实盘方向/回测价/实盘价/deviation_types）。
+    b. 告警契约：偏差率超阈经 get_alert_manager().alert() 发 WARNING（category=signal_consistency、source=monitoring.signal_consistency、dedup=signal_consistency:deviation_rate 防刷屏、details 附偏差率/阈值/偏差明细摘要前 20 条）；阈值真源 R-04/R-05 读 slo.backtest_consistency.signal_deviation_rate_max/deviation_window（PENDING_CAL=None 只计算不告警不编造，演示/测试显式注入阈值）；严格防未来拒绝 ts>now 未来点、配置 deviation_window 时按 now-window 过滤已发生点；REGISTERED_METRICS 4 项（total/aligned/mismatched/mismatch_rate）经 get_metrics_collector().set_gauge 动态注册（未改 metrics_collector.py）；触发为批任务（R-02 非 MTTD 类）。
+    c. 新增 tests/unit/test_signal_consistency.py（23 项：逐笔对齐/偏差率/错配明细/超阈告警附明细/None 不告警/健康不告警/防未来/防御校验/指标注册/one-sided/时间漂移）；py_compile 两文件通过；__main__ 自测 28 项全绿。
+    d. 验证结果：本人单测 23 passed；全量 pytest 收尾核验 3192 passed/2 skipped/0 failed 无回归。
+    e. 纪律遵守：无蓝图外文件（模块+测试登记 #239）；阈值引用配置真源（PENDING_CAL 不编造）；批任务不接 scheduler（R-02）；防未来（拒绝未来点、按 now-window 过滤已发生点）；任务后 git 提交（commit 3e8e73c）。
+235. ✨【回写记录·2026-10-06·C-11 数据血缘决策（关闭/远期）】【回写#240】
+    事实来源：本次决策，治理级核验：P0-1《链路盘点清单》中低频画像 + R-05 决策矩阵（数据血缘需求定位与优先级）。
+    a. 决策=关闭/远期（远期）——不创建 myquant/monitoring/data_lineage.py，无代码/测试落地。
+    b. 决策依据：数据血缘属中低频画像、无高价值即时消费方；按 R-05 决策矩阵=远期。
+    c. 启用条件：出现高频/高价值需求、或 D-3 阈值自动校准需血缘溯源时，恢复评估立项。
+    d. 验证：磁盘确认无 data_lineage.py（Test-Path=False；C-12 验收 C-11 项 measured.exists=False，decision=closed_deferred）。
+    e. 纪律：不建蓝图外文件，编号 #240 预留已闭合。
+236. ✨【回写记录·2026-10-06·C-12 C 包保Alpha验收】【回写#241】
+    事实来源：本次落地，验收级核验：《量化系统监控模块施工总清单_V1.2.md》C 包行验收口径 + P0-8 误报率口径（健康序列 0 误报，TP/FP/FN 统计）+ 实跑 JSON 报告 docs/监控档案/C包保Alpha验收_20261006.json。
+    a. 新增 myquant/monitoring/c_acceptance.py（CAcceptanceRunner：隔离环境=临时 AlertStore+真实 AlertManager+真实 EventBus，每次 run() 重建隔离跨 run 去重，异常不吞如实记录该项 failed；逐项断言覆盖 C-1~C-11 可验收项）+ scripts/验收_C包保Alpha.py（薄入口：argparse --out 默认 docs/监控档案/C包保Alpha验收_<日期>.json + --db + --mode + find_project_root，控制台逐项摘要+JSON 报告，业务逻辑零写入）+ tests/unit/test_c_acceptance.py。
+    b. 验收口径：10 项——C-1 模型漂移三态/日频告警、C-2 滚动绩效、C-4 信号衰减、C-5 归因、C-6 动态基线、C-7 根因+依赖抑制、C-8 容量、C-9 告警治理、C-10 一致性、C-11 决策项；P0-8 误报率=健康序列 0 误报，TP/FP/FN 统计。
+    c. 单测 18 项。
+    d. 验证结果：实跑 JSON——overall_pass=True、10 pass/0 fail、false_positive_alerts=0、TP=7/FN=0、generated_at=2026-10-06T21:22:28（environment.isolated=true/fixed_clock_used=true/quant_db_touched=false）；py_compile 通过；__main__ 自测 0 失败。
+    e. 纪律：无蓝图外文件（3 文件均预登记 #241 现闭合）；阈值隔离用常量外置非业务真源；防未来固定时钟注入；不污染 quant.db（quant_db_touched=false）。
+    f. 全量 pytest 收尾核验 3192 passed/2 skipped/0 failed 无回归。
