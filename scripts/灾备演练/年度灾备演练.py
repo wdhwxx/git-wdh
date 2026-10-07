@@ -14,11 +14,22 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 from typing import List, Optional
 
-from myquant.monitoring.disaster_drill import DEFAULT_DRILL_HEADER, DisasterDrillRunner
+# 允许从任意工作目录直接运行（含 scripts/灾备演练/ 目录，对齐 #254 验收_D包自治修复）；
+# 业务逻辑全部在 myquant（薄入口）
+_REPO_ROOT = Path(__file__).resolve().parents[2]  # scripts/灾备演练/ → 项目根
+while not (_REPO_ROOT / "myquant").is_dir() and _REPO_ROOT != _REPO_ROOT.parent:
+    _REPO_ROOT = _REPO_ROOT.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
-DEFAULT_REPORT_PATH = "docs/监控档案/灾备演练/年度灾备演练报告.json"
+from myquant.monitoring.disaster_drill import DEFAULT_DRILL_HEADER, DisasterDrillRunner  # noqa: E402
+
+# 默认输出为项目根绝对路径（修复：原相对路径从 scripts/ 子目录启动时
+# 会把报告写到 scripts/docs/监控档案/，与 docs/监控档案/ 正式落档分叉）
+DEFAULT_REPORT_PATH = str(_REPO_ROOT / "docs" / "监控档案" / "灾备演练" / "年度灾备演练报告.json")
 
 
 def build_parser() -> argparse.ArgumentParser:
