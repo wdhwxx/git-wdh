@@ -77,9 +77,16 @@ monitoring:
     strategy:      { intraday_drawdown_limit: ~ }
     model:         { psi_threshold: ~, ks_threshold: ~, ic_threshold: ~ }
     backtest_consistency: { signal_deviation_rate_max: ~, deviation_window: ~ }
+    signal_decay:  { ic_rolling_window: ~, ic_threshold: ~, density_min: ~, invalid_signal_ratio_max: ~ }   # C-4 施工期新增（回写#233）
+    capacity:      { growth_projection_days: ~, storage_headroom_min_pct: ~, strategy_count_limit: ~ }          # C-8 施工期新增（回写#237）
+    dynamic_baseline: { static_low: ~, static_high: ~ }                                                        # C-6 施工期新增（回写#235，另有 calibrator 算法参数块）
+    regime_matcher:{ match_score_min: ~, trend_r2_min: ~ }                                                     # C-3 施工期新增（回写#242）
     engine_heartbeat: { hang_judge_window_seconds: 60, probe_interval_seconds: 10, consecutive_misses: 5 }
-    margin:        { strong_flat_distance_pct: ~, funding_rate_threshold: ~ }
+    margin:        { strong_flat_distance_pct: ~, funding_rate_threshold: ~, margin_usage_ratio_threshold: ~ }  # B-9 施工期补字段（回写#229）
+    exchange_rate_limit: { window_seconds: 60, order_per_minute: 300, query_per_minute: 600, cancel_per_minute: 300, warn_ratio: 0.8 }  # A-12 施工期新增（回写#216）
 ```
+
+> 同步注记（#252 审计）：本节映射已与 `config/settings.yaml` 实际 `monitoring.slo` 对齐——补齐施工期新增子块（signal_decay/capacity/dynamic_baseline/regime_matcher/exchange_rate_limit）与 margin.margin_usage_ratio_threshold 字段；§2 锁定表语义不变，各子块阈值均为 PENDING_CAL（待实盘校准后填死，禁止编造）。
 
 ---
 

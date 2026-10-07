@@ -13,6 +13,7 @@ test_docker_min_privilege.py - 镜像构建与最小权限测试（KP-M01 / T-31
 from __future__ import annotations
 
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -66,7 +67,8 @@ class TestComposeLiveProbe:
         stale.write_text("{}", encoding="utf-8")
         old = time.time() - 100
         os.utime(stale, (old, old))
-        py = "D:/ProgramData/anaconda3/envs/conda_wdh/python.exe"
+        # 动态取当前解释器（Windows 路径硬编码会导致环境迁移后 FileNotFoundError）
+        py = sys.executable
         import subprocess
         assert subprocess.run([py, "-c", probe, str(fresh)], capture_output=True).returncode == 0
         assert subprocess.run([py, "-c", probe, str(stale)], capture_output=True).returncode == 1

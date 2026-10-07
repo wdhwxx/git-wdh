@@ -1669,6 +1669,9 @@ def attach_engine(
     monthly_governance_cron: str = "0 0 1 * *",
     enable_daily_model_drift: bool = True,
     daily_model_drift_cron: str = "30 4 * * *",
+    enable_weekly_review: bool = True,
+    weekly_review_cron: str = "0 9 * * 1",
+    weekly_review_output_dir: Optional[Path] = None,
     pause_on_critical: bool = False,
     enable_action_engine: bool = False,
     action_engine_interval: Optional[float] = None,
@@ -1708,11 +1711,19 @@ def attach_engine(
         需 engine 非空且有 broker_manager 时生效），对账调用 engine.resend_pending_orders()
     resend_pending_interval : float
         断线补单对账间隔（秒），默认 60
+    enable_weekly_review : bool
+        §7：是否注册每周告警复盘任务（R-01：TP/FP/FN + Top 告警 + 容量趋势
+        自动生成并落盘 outputs/weekly_reports/）
+    weekly_review_cron : str
+        周复盘 cron 表达式，默认 "0 9 * * 1"（周一 09:00）
+    weekly_review_output_dir : Path | None
+        周复盘报告输出目录（None 用模块默认 项目根/outputs/weekly_reports/）
 
     Returns
     -------
     Dict[str, str] : {"patrol": task_id, "daily_report": task_id, "t1_settle": task_id,
-                      "reconcile": task_id, "resend_pending": task_id}
+                      "reconcile": task_id, "resend_pending": task_id,
+                      "weekly_review": task_id}
     """
     task_ids: Dict[str, str] = {}
 
@@ -2036,6 +2047,43 @@ def attach_engine(
             cron_expr=daily_model_drift_cron,
         )
 
+    if enable_weekly_review:
+        # §7（R-01）：每周告警复盘——按 P0-8 口径自动统计 TP/FP/FN 与准确率/误报率/
+        # 检出率 + Top 告警 + 容量趋势，落盘 outputs/weekly_reports/（Markdown+JSON）。
+        # 业务逻辑全在 myquant/monitoring/weekly_review.py，此处仅装配；失败记 error
+        # 不阻断调度器（复盘尽力而为）。
+        def _weekly_review_job(**kw) -> None:  # noqa: ARG001
+            try:
+                from myquant.monitoring.alert_store import AlertStore
+                from myquant.monitoring.weekly_review import WeeklyReviewReport
+
+                alert_store = AlertStore()
+                metrics_store: Any = None
+                try:
+                    from myquant.monitoring.metrics_history import MetricsHistoryStore
+
+                    metrics_store = MetricsHistoryStore()
+                except Exception as mexc:  # noqa: BLE001
+                    logger.warning(f"[attach] 周复盘指标库不可用（容量趋势跳过）: {mexc}")
+                review = WeeklyReviewReport(alert_store, metrics_store=metrics_store)
+                report = review.generate()
+                path = review.save(
+                    report, output_dir=weekly_review_output_dir
+                )
+                logger.info(
+                    f"[attach] 每周告警复盘已生成: {path} "
+                    f"(TP={report['tp']} FP={report['fp']} FN={report['fn']} "
+                    f"达标={report['passed']})"
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error(f"[attach] 每周告警复盘生成异常: {exc}")
+
+        task_ids["weekly_review"] = scheduler.add_cron_task(
+            _weekly_review_job,
+            name="每周告警复盘",
+            cron_expr=weekly_review_cron,
+        )
+
     if enable_action_engine:
         # D-1（回写#243）：自动化响应编排规则引擎——周期巡检未确认告警 → 规则评估 →
         # shadow/confirm/auto 三阶段安全模型执行。装配默认关闭（自动化安全先行，需显式开启）。
@@ -2099,6 +2147,7 @@ def attach_engine(
         f"resend_pending={task_ids.get('resend_pending')}, "
         f"monthly_governance={task_ids.get('monthly_governance')}, "
         f"daily_model_drift={task_ids.get('daily_model_drift')}, "
+        f"weekly_review={task_ids.get('weekly_review')}, "
         f"action_engine={task_ids.get('action_engine')}"
     )
     return task_ids
