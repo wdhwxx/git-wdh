@@ -1,0 +1,41 @@
+{
+  "source": "P0-8 可测量性统计",
+  "inputs": {
+    "alerts_count": 0,
+    "fi_count": 5
+  },
+  "classification": {
+    "tp": 0,
+    "fp": 0,
+    "fn": 0,
+    "unclassified": 0,
+    "accuracy": null,
+    "fp_rate": null,
+    "detection_rate": null,
+    "formula": {
+      "accuracy": "TP/(TP+FP)",
+      "fp_rate": "FP/(TP+FP)",
+      "detection_rate": "TP/(TP+FN)"
+    }
+  },
+  "mttx": {
+    "mttd": {
+      "kind": "mttd",
+      "samples": 5,
+      "avg_seconds": 0.460771,
+      "max_seconds": 2.300861
+    },
+    "mtta": {
+      "kind": "mtta",
+      "samples": 0,
+      "avg_seconds": null,
+      "max_seconds": null
+    },
+    "mttr": {
+      "kind": "mttr",
+      "samples": 5,
+      "avg_seconds": 0.462075,
+      "max_seconds": 2.303382
+    }
+  }
+}

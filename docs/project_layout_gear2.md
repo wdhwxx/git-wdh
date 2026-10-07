@@ -3910,3 +3910,4 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
    c. 归位与清理：删除重复产物 scripts/docs/监控档案/B包保钱包验收_20261006.json（正式版 docs/监控档案/B包保钱包验收_20261006.json 保留，落档时间证据不受影响）；scripts/docs/ 空目录清理（git 不跟踪，删除后工作区无残留）。
    d. 验证结果：两脚本从 scripts/ 目录启动 `--help` 均正常显示项目根绝对默认路径；从 scripts/ 目录完整运行 验收_B包保钱包.py（--out 指向临时路径）exit=0、B-1~B-9 九项全过、未再生成 scripts/docs/（Test-Path 确认目录不存在）。
    e. 纪律遵守：改动文件均在蓝图目录树已标注（scripts 段 验收_B包保钱包.py 条目追加 #254 + 验收_D包自治.py 条目追加 #254）；无蓝图外新文件；业务逻辑归 myquant（薄入口零业务逻辑，本次仅修正默认路径与启动引导，未动业务模块）；任务后 git 提交（commit message 引用 #254）。
+   f. 补充项（可测量性统计报告入库）：docs/监控档案/可测量性统计_20261007.json——2026-10-07 运行 scripts/监控可测量性统计.py 产出（--fi 输入取自 M1 保命验收 FI-01~05 记录，字段映射至 P0-8 口径）：MTTD avg=0.4608s/max=2.3009s、MTTR avg=0.4621s/max=2.3034s（与 M1 验收内嵌 mttd_seconds/mttr_seconds 交叉验证一致）；classification 因本次未提供 --alerts 输入，TP/FP/FN=0、比率 null（样本不足不造数语义）；临时 FI 输入已清理。报告与 B/C/D/M1 验收报告同列入库（本提交 commit message 引用 #254 补充项）。
