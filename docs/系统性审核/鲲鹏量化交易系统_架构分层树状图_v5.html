@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>鲲鹏量化系统 myquant 架构分层树状图（7层 · 223文件）</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif; background: #f6f8fb; color: #16283a; }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 18px; }
+  .hero { background: #1e3a5f; color: #fff; padding: 14px 18px; border-radius: 8px; text-align: center; font-size: 19px; font-weight: 600; letter-spacing: .5px; }
+  .sub { text-align: center; color: #55677a; font-size: 13px; margin: 7px 0 16px; }
+  .layer { margin: 14px 0; border-left: 5px solid; border-radius: 6px; background: #fff; box-shadow: 0 1px 3px rgba(20,40,70,.08); }
+  .lay-head { padding: 8px 14px; font-size: 15px; font-weight: 600; }
+  .lay-note { padding: 0 14px 4px; font-size: 12px; color: #b03a3a; }
+  ul.tree { list-style: none; margin: 0; padding: 4px 0 8px 8px; }
+  ul.tree ul { list-style: none; margin: 0; padding-left: 20px; border-left: 1px dashed #d0d8e2; }
+  ul.tree li { padding: 1px 0; }
+  .d { font-weight: 600; }
+  .dname { color: #24506f; }
+  .fcount { color: #8a95a3; font-weight: 400; font-size: 12px; }
+  .f { font-weight: 400; }
+  .fname { color: #3c4a5a; }
+  .foot { margin-top: 14px; color: #55677a; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hero">myquant · 鲲鹏量化交易系统（文件级架构分层树）</div>
+  <div class="sub">223 个 .py 全展开 ｜ 7 层 ｜ 依赖单向向下 ｜ 门禁基线 v4.2（违规 37 · 真环 3）</div>
+<div class="layer" style="border-color:#1e3a5f;"><div class="lay-head" style="color:#1e3a5f;">myquant（根包） <span style="color:#5a6b7a;font-weight:400;">(1 文件)</span></div><ul class="tree">
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+</ul></div>
+<div class="layer" style="border-color:#4a6fa5;">
+<div class="lay-head" style="color:#4a6fa5;">L0 · 基础设施 <span style="color:#5a6b7a;font-weight:400;">（48 文件）</span></div>
+<div class="lay-note">⚠ 真环-1：core.event_bus ↔ utils.memory_pool</div>
+<ul class="tree">
+<li class="d">📁 <span class="dname">core</span> <span class="fcount">(16)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">async_runtime.py</span></li>
+<li class="f">📄 <span class="fname">cache.py</span></li>
+<li class="f">📄 <span class="fname">config_loader.py</span></li>
+<li class="f">📄 <span class="fname">constants.py</span></li>
+<li class="f">📄 <span class="fname">date_utils.py</span></li>
+<li class="f">📄 <span class="fname">event_bus.py</span></li>
+<li class="f">📄 <span class="fname">exceptions.py</span></li>
+<li class="f">📄 <span class="fname">light_lookahead_guard.py</span></li>
+<li class="f">📄 <span class="fname">logger.py</span></li>
+<li class="f">📄 <span class="fname">lookahead_guard.py</span></li>
+<li class="f">📄 <span class="fname">settings.py</span></li>
+<li class="d">📁 <span class="dname">transports</span> <span class="fcount">(4)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">base.py</span></li>
+<li class="f">📄 <span class="fname">rabbitmq_bus.py</span></li>
+<li class="f">📄 <span class="fname">redis_bus.py</span></li>
+</ul></li>
+</ul></li>
+<li class="d">📁 <span class="dname">database</span> <span class="fcount">(16)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">connection.py</span></li>
+<li class="f">📄 <span class="fname">queries.py</span></li>
+<li class="f">📄 <span class="fname">schema.py</span></li>
+<li class="f">📄 <span class="fname">trade_log.py</span></li>
+<li class="d">📁 <span class="dname">migrations</span> <span class="fcount">(11)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">env.py</span></li>
+<li class="d">📁 <span class="dname">versions</span> <span class="fcount">(9)</span>
+<ul>
+<li class="f">📄 <span class="fname">0001_initial_schema.py</span></li>
+<li class="f">📄 <span class="fname">0002_add_market_data_composite_index.py</span></li>
+<li class="f">📄 <span class="fname">0003_align_schema_divergence.py</span></li>
+<li class="f">📄 <span class="fname">0004_add_trade_ledger.py</span></li>
+<li class="f">📄 <span class="fname">0005_add_alerts.py</span></li>
+<li class="f">📄 <span class="fname">0006_add_metrics_history.py</span></li>
+<li class="f">📄 <span class="fname">0007_add_audit_log.py</span></li>
+<li class="f">📄 <span class="fname">0008_add_value_encrypted.py</span></li>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+</ul></li>
+</ul></li>
+</ul></li>
+<li class="d">📁 <span class="dname">utils</span> <span class="fcount">(16)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">cache_sync.py</span></li>
+<li class="f">📄 <span class="fname">cleanup_service.py</span></li>
+<li class="f">📄 <span class="fname">csv_utils.py</span></li>
+<li class="f">📄 <span class="fname">data_fingerprint.py</span></li>
+<li class="f">📄 <span class="fname">data_versioner.py</span></li>
+<li class="f">📄 <span class="fname">file_utils.py</span></li>
+<li class="f">📄 <span class="fname">math_utils.py</span></li>
+<li class="f">📄 <span class="fname">memory_pool.py</span></li>
+<li class="f">📄 <span class="fname">memory_watcher.py</span></li>
+<li class="f">📄 <span class="fname">parallel.py</span></li>
+<li class="f">📄 <span class="fname">performance_config.py</span></li>
+<li class="f">📄 <span class="fname">pickle_checker.py</span></li>
+<li class="f">📄 <span class="fname">time_utils.py</span></li>
+<li class="f">📄 <span class="fname">timer.py</span></li>
+<li class="f">📄 <span class="fname">trade_calendar.py</span></li>
+</ul></li>
+</ul></div>
+<div class="layer" style="border-color:#5b8db8;">
+<div class="lay-head" style="color:#5b8db8;">L1 · 数据访问 <span style="color:#5a6b7a;font-weight:400;">（27 文件）</span></div>
+<div class="lay-note">含 cleaner / sources 子模块（清洗、多源行情）</div>
+<ul class="tree">
+<li class="d">📁 <span class="dname">data_access</span> <span class="fcount">(27)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">factor_sync_service.py</span></li>
+<li class="f">📄 <span class="fname">factory.py</span></li>
+<li class="f">📄 <span class="fname">fetcher.py</span></li>
+<li class="f">📄 <span class="fname">financial_service.py</span></li>
+<li class="f">📄 <span class="fname">financial_sync_service.py</span></li>
+<li class="f">📄 <span class="fname">full_clean_service.py</span></li>
+<li class="f">📄 <span class="fname">loader.py</span></li>
+<li class="f">📄 <span class="fname">manager.py</span></li>
+<li class="f">📄 <span class="fname">provider.py</span></li>
+<li class="f">📄 <span class="fname">share_change_sync_service.py</span></li>
+<li class="d">📁 <span class="dname">cleaner</span> <span class="fcount">(9)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">bar_cleaner.py</span></li>
+<li class="f">📄 <span class="fname">base_cleaner.py</span></li>
+<li class="f">📄 <span class="fname">derived_metrics.py</span></li>
+<li class="f">📄 <span class="fname">error_codes.py</span></li>
+<li class="f">📄 <span class="fname">pipeline.py</span></li>
+<li class="f">📄 <span class="fname">quality_reporter.py</span></li>
+<li class="f">📄 <span class="fname">rules_loader.py</span></li>
+<li class="f">📄 <span class="fname">tick_cleaner.py</span></li>
+</ul></li>
+<li class="d">📁 <span class="dname">sources</span> <span class="fcount">(7)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">akshare_source.py</span></li>
+<li class="f">📄 <span class="fname">base.py</span></li>
+<li class="f">📄 <span class="fname">broker_source.py</span></li>
+<li class="f">📄 <span class="fname">composite_source.py</span></li>
+<li class="f">📄 <span class="fname">tdx_source.py</span></li>
+<li class="f">📄 <span class="fname">web_source.py</span></li>
+</ul></li>
+</ul></li>
+</ul></div>
+<div class="layer" style="border-color:#5f9e8f;">
+<div class="lay-head" style="color:#5f9e8f;">L2 · 领域模型·指标 <span style="color:#5a6b7a;font-weight:400;">（14 文件）</span></div>
+<ul class="tree">
+<li class="d">📁 <span class="dname">indicators</span> <span class="fcount">(10)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">factor_cache.py</span></li>
+<li class="f">📄 <span class="fname">factor_engine.py</span></li>
+<li class="f">📄 <span class="fname">factor_preprocessor.py</span></li>
+<li class="f">📄 <span class="fname">factor_validator.py</span></li>
+<li class="f">📄 <span class="fname">momentum.py</span></li>
+<li class="f">📄 <span class="fname">moving_average.py</span></li>
+<li class="f">📄 <span class="fname">rsrs.py</span></li>
+<li class="f">📄 <span class="fname">tradability.py</span></li>
+<li class="f">📄 <span class="fname">volatility.py</span></li>
+</ul></li>
+<li class="d">📁 <span class="dname">models</span> <span class="fcount">(4)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">backtest.py</span></li>
+<li class="f">📄 <span class="fname">market_data.py</span></li>
+<li class="f">📄 <span class="fname">trade.py</span></li>
+</ul></li>
+</ul></div>
+<div class="layer" style="border-color:#8a94a6;">
+<div class="lay-head" style="color:#8a94a6;">L2E · 引擎基座 <span style="color:#5a6b7a;font-weight:400;">（2 文件）</span></div>
+<div class="lay-note">与 L2 视为同级互通</div>
+<ul class="tree">
+<li class="d">📁 <span class="dname">engine</span> <span class="fcount">(2)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">base.py</span></li>
+</ul></li>
+</ul></div>
+<div class="layer" style="border-color:#b46a5a;">
+<div class="lay-head" style="color:#b46a5a;">L3 · 策略·回测·风控 <span style="color:#5a6b7a;font-weight:400;">（53 文件）</span></div>
+<div class="lay-note">同层互引最高层（129 处）</div>
+<ul class="tree">
+<li class="d">📁 <span class="dname">allocation</span> <span class="fcount">(5)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">base.py</span></li>
+<li class="f">📄 <span class="fname">equal_weight.py</span></li>
+<li class="f">📄 <span class="fname">risk_parity.py</span></li>
+<li class="f">📄 <span class="fname">target_volatility.py</span></li>
+</ul></li>
+<li class="d">📁 <span class="dname">backtest</span> <span class="fcount">(26)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">async_monte_carlo.py</span></li>
+<li class="f">📄 <span class="fname">batch_backtest.py</span></li>
+<li class="f">📄 <span class="fname">batch_report.py</span></li>
+<li class="f">📄 <span class="fname">candidate_pool.py</span></li>
+<li class="f">📄 <span class="fname">candidate_report.py</span></li>
+<li class="f">📄 <span class="fname">config_builder.py</span></li>
+<li class="f">📄 <span class="fname">consistency_check.py</span></li>
+<li class="f">📄 <span class="fname">dashboard_serializer.py</span></li>
+<li class="f">📄 <span class="fname">data_loader.py</span></li>
+<li class="f">📄 <span class="fname">engine.py</span></li>
+<li class="f">📄 <span class="fname">engine_benchmark.py</span></li>
+<li class="f">📄 <span class="fname">fee_common.py</span></li>
+<li class="f">📄 <span class="fname">fee_table.py</span></li>
+<li class="f">📄 <span class="fname">incremental_backtest.py</span></li>
+<li class="f">📄 <span class="fname">kunpeng_param_scanner.py</span></li>
+<li class="f">📄 <span class="fname">metrics.py</span></li>
+<li class="f">📄 <span class="fname">mixed_engine.py</span></li>
+<li class="f">📄 <span class="fname">monte_carlo.py</span></li>
+<li class="f">📄 <span class="fname">order_matcher.py</span></li>
+<li class="f">📄 <span class="fname">param_optimizer.py</span></li>
+<li class="f">📄 <span class="fname">pdf_report.py</span></li>
+<li class="f">📄 <span class="fname">recorder.py</span></li>
+<li class="f">📄 <span class="fname">report.py</span></li>
+<li class="f">📄 <span class="fname">survivorship_bias.py</span></li>
+<li class="f">📄 <span class="fname">vectorized_engine.py</span></li>
+</ul></li>
+<li class="d">📁 <span class="dname">ml</span> <span class="fcount">(8)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">feature_contract.py</span></li>
+<li class="f">📄 <span class="fname">features.py</span></li>
+<li class="f">📄 <span class="fname">inference_benchmark.py</span></li>
+<li class="f">📄 <span class="fname">inference_service.py</span></li>
+<li class="f">📄 <span class="fname">model_monitor.py</span></li>
+<li class="f">📄 <span class="fname">model_registry.py</span></li>
+<li class="f">📄 <span class="fname">training_pipeline.py</span></li>
+</ul></li>
+<li class="d">📁 <span class="dname">risk</span> <span class="fcount">(4)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">guardian.py</span></li>
+<li class="f">📄 <span class="fname">risk_manager.py</span></li>
+<li class="f">📄 <span class="fname">rules.py</span></li>
+</ul></li>
+<li class="d">📁 <span class="dname">strategies</span> <span class="fcount">(10)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">base.py</span></li>
+<li class="f">📄 <span class="fname">grid_strategy.py</span></li>
+<li class="f">📄 <span class="fname">kunpeng_strategy.py</span></li>
+<li class="f">📄 <span class="fname">ma_strategy.py</span></li>
+<li class="f">📄 <span class="fname">mean_reversion_strategy.py</span></li>
+<li class="f">📄 <span class="fname">momentum_strategy.py</span></li>
+<li class="f">📄 <span class="fname">multi_factor_strategy.py</span></li>
+<li class="f">📄 <span class="fname">param_tuner.py</span></li>
+<li class="f">📄 <span class="fname">registry.py</span></li>
+</ul></li>
+</ul></div>
+<div class="layer" style="border-color:#9e6aa5;">
+<div class="lay-head" style="color:#9e6aa5;">L4 · 实盘执行 <span style="color:#5a6b7a;font-weight:400;">（19 文件）</span></div>
+<div class="lay-note">违规主源方向 L4→L5（20 处）</div>
+<ul class="tree">
+<li class="d">📁 <span class="dname">execution</span> <span class="fcount">(4)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">base.py</span></li>
+<li class="f">📄 <span class="fname">sim_broker.py</span></li>
+<li class="f">📄 <span class="fname">state_machine.py</span></li>
+</ul></li>
+<li class="d">📁 <span class="dname">live</span> <span class="fcount">(15)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">acceptance.py</span></li>
+<li class="f">📄 <span class="fname">data_feed.py</span></li>
+<li class="f">📄 <span class="fname">emergency_liquidation.py</span></li>
+<li class="f">📄 <span class="fname">engine.py</span></li>
+<li class="f">📄 <span class="fname">portfolio.py</span></li>
+<li class="f">📄 <span class="fname">run_mode.py</span></li>
+<li class="f">📄 <span class="fname">scheduler.py</span></li>
+<li class="f">📄 <span class="fname">state_store.py</span></li>
+<li class="d">📁 <span class="dname">brokers</span> <span class="fcount">(6)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">base_broker.py</span></li>
+<li class="f">📄 <span class="fname">manager.py</span></li>
+<li class="f">📄 <span class="fname">paper_broker.py</span></li>
+<li class="f">📄 <span class="fname">ptrade_broker.py</span></li>
+<li class="f">📄 <span class="fname">qmt_broker.py</span></li>
+</ul></li>
+</ul></li>
+</ul></div>
+<div class="layer" style="border-color:#6aa56e;">
+<div class="lay-head" style="color:#6aa56e;">L5 · 监控 <span style="color:#5a6b7a;font-weight:400;">（35 文件）</span></div>
+<div class="lay-note">⚠ 真环-2（内部 4 模块）· 同层互引 113 · G2 拆包主战场</div>
+<ul class="tree">
+<li class="d">📁 <span class="dname">monitoring</span> <span class="fcount">(35)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">account_reconciler.py</span></li>
+<li class="f">📄 <span class="fname">action_engine.py</span></li>
+<li class="f">📄 <span class="fname">alert_store.py</span></li>
+<li class="f">📄 <span class="fname">alerting.py</span></li>
+<li class="f">📄 <span class="fname">attribution.py</span></li>
+<li class="f">📄 <span class="fname">audit_log.py</span></li>
+<li class="f">📄 <span class="fname">b_acceptance.py</span></li>
+<li class="f">📄 <span class="fname">c_acceptance.py</span></li>
+<li class="f">📄 <span class="fname">capacity.py</span></li>
+<li class="f">📄 <span class="fname">chaos_drill.py</span></li>
+<li class="f">📄 <span class="fname">circuit_breaker.py</span></li>
+<li class="f">📄 <span class="fname">config_as_code.py</span></li>
+<li class="f">📄 <span class="fname">d_acceptance.py</span></li>
+<li class="f">📄 <span class="fname">data_quality_explorer.py</span></li>
+<li class="f">📄 <span class="fname">disaster_drill.py</span></li>
+<li class="f">📄 <span class="fname">dynamic_baseline.py</span></li>
+<li class="f">📄 <span class="fname">execution_stats.py</span></li>
+<li class="f">📄 <span class="fname">field_crypto.py</span></li>
+<li class="f">📄 <span class="fname">health_check.py</span></li>
+<li class="f">📄 <span class="fname">incident_context.py</span></li>
+<li class="f">📄 <span class="fname">m1_acceptance.py</span></li>
+<li class="f">📄 <span class="fname">margin_monitor.py</span></li>
+<li class="f">📄 <span class="fname">measurability.py</span></li>
+<li class="f">📄 <span class="fname">meta_monitor.py</span></li>
+<li class="f">📄 <span class="fname">metrics_collector.py</span></li>
+<li class="f">📄 <span class="fname">metrics_history.py</span></li>
+<li class="f">📄 <span class="fname">rate_limit_monitor.py</span></li>
+<li class="f">📄 <span class="fname">regime_matcher.py</span></li>
+<li class="f">📄 <span class="fname">rolling_performance.py</span></li>
+<li class="f">📄 <span class="fname">security_monitor.py</span></li>
+<li class="f">📄 <span class="fname">signal_consistency.py</span></li>
+<li class="f">📄 <span class="fname">signal_decay.py</span></li>
+<li class="f">📄 <span class="fname">watchdog.py</span></li>
+<li class="f">📄 <span class="fname">weekly_review.py</span></li>
+</ul></li>
+</ul></div>
+<div class="layer" style="border-color:#b49a4a;">
+<div class="lay-head" style="color:#b49a4a;">L6 · 对外层 <span style="color:#5a6b7a;font-weight:400;">（24 文件）</span></div>
+<div class="lay-note">⚠ gui 零覆盖重灾区（5 个文件 0%）</div>
+<ul class="tree">
+<li class="d">📁 <span class="dname">api</span> <span class="fcount">(10)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">cli.py</span></li>
+<li class="f">📄 <span class="fname">routes.py</span></li>
+<li class="d">📁 <span class="dname">dependencies</span> <span class="fcount">(2)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">get_services.py</span></li>
+</ul></li>
+<li class="d">📁 <span class="dname">middleware</span> <span class="fcount">(3)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">auth.py</span></li>
+<li class="f">📄 <span class="fname">rate_limit.py</span></li>
+</ul></li>
+<li class="d">📁 <span class="dname">models</span> <span class="fcount">(2)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">schemas.py</span></li>
+</ul></li>
+</ul></li>
+<li class="d">📁 <span class="dname">gui</span> <span class="fcount">(12)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">backtest_config_dialog.py</span></li>
+<li class="f">📄 <span class="fname">batch_backtest_tab.py</span></li>
+<li class="f">📄 <span class="fname">cleanup_dialog.py</span></li>
+<li class="f">📄 <span class="fname">data_clean_dialog.py</span></li>
+<li class="f">📄 <span class="fname">data_download_dialog.py</span></li>
+<li class="f">📄 <span class="fname">main_window.py</span></li>
+<li class="f">📄 <span class="fname">paper_run_dialog.py</span></li>
+<li class="d">📁 <span class="dname">widgets</span> <span class="fcount">(4)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">kline_item.py</span></li>
+<li class="f">📄 <span class="fname">plot_helper.py</span></li>
+<li class="f">📄 <span class="fname">side_panel.py</span></li>
+</ul></li>
+</ul></li>
+<li class="d">📁 <span class="dname">web</span> <span class="fcount">(2)</span>
+<ul>
+<li class="f">📄 <span class="fname">__init__.py</span></li>
+<li class="f">📄 <span class="fname">dashboard.py</span></li>
+</ul></li>
+</ul></div>
+
+  <div class="foot">合计 <b>223</b> 个 .py（子包 222 + 根包 1）。子包 __init__ 共 28 个。数据来源：对项目全量只读扫描（v5.1 权威基线，配套文档《鲲鹏量化交易系统_架构分层治理方案_v5.md》§2.1b）。</div>
+</div>
+</body>
+</html>
