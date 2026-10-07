@@ -1,0 +1,106 @@
+{
+  "acceptance_id": "2c73884d3e2e",
+  "title": "D 包自治验收报告",
+  "run_at": 1791334412.112868,
+  "items": [
+    {
+      "item": "D-1",
+      "criterion": "自动化响应编排（三阶段安全模型+Kill Switch）",
+      "passed": true,
+      "detail": "专项单测 tests/unit/test_action_engine.py 全绿（82 passed/0 collected）",
+      "evidence": {
+        "exit": 0,
+        "passed": 82,
+        "collected": 0,
+        "failed": false
+      }
+    },
+    {
+      "item": "D-2",
+      "criterion": "自愈动作库（四类场景+再分配/参数执行器）",
+      "passed": true,
+      "detail": "专项单测 tests/unit/test_action_engine.py 全绿（82 passed/0 collected）",
+      "evidence": {
+        "exit": 0,
+        "passed": 82,
+        "collected": 0,
+        "failed": false
+      }
+    },
+    {
+      "item": "D-3",
+      "criterion": "阈值自动校准（校准/回滚/人工覆盖）",
+      "passed": true,
+      "detail": "专项单测 tests/unit/test_threshold_calibration.py 全绿（37 passed/0 collected）",
+      "evidence": {
+        "exit": 0,
+        "passed": 37,
+        "collected": 0,
+        "failed": false
+      }
+    },
+    {
+      "item": "D-4",
+      "criterion": "风险预算再分配（再分配/审批/回滚）",
+      "passed": true,
+      "detail": "专项单测 tests/unit/test_risk_reallocation.py 全绿（40 passed/0 collected）",
+      "evidence": {
+        "exit": 0,
+        "passed": 40,
+        "collected": 0,
+        "failed": false
+      }
+    },
+    {
+      "item": "D-5",
+      "criterion": "参数动态调整（提议/确认/生效/回滚）",
+      "passed": true,
+      "detail": "专项单测 tests/unit/test_param_tuner.py 全绿（36 passed/0 collected）",
+      "evidence": {
+        "exit": 0,
+        "passed": 36,
+        "collected": 0,
+        "failed": false
+      }
+    },
+    {
+      "item": "D-6",
+      "criterion": "混沌工程与故障演练",
+      "passed": true,
+      "detail": "P0-8 FI-01~07 演练：7 TP / 0 FP / 0 FN（检出率 100%）",
+      "evidence": {
+        "cases_total": 7,
+        "tp": 7,
+        "fp": 0,
+        "fn": 0
+      }
+    },
+    {
+      "item": "D-7",
+      "criterion": "监控即代码完善（版本化+变更监控+回滚）",
+      "passed": true,
+      "detail": "配置 apply→回滚恢复上一版本内容；版本/变更史可追溯",
+      "evidence": {
+        "applied_version": 2,
+        "rolled_back": true,
+        "restored_content": true,
+        "history_len": 3
+      }
+    },
+    {
+      "item": "D-8",
+      "criterion": "元监控与灾备（年度灾备演练）",
+      "passed": true,
+      "detail": "SQLite 备份恢复 / RabbitMQ 持久化 / 告警通道切换 / FI-07 临界不误判 四项全通过",
+      "evidence": {
+        "items_total": 4,
+        "items_passed": 4
+      }
+    }
+  ],
+  "summary": {
+    "items_total": 8,
+    "items_passed": 8,
+    "all_passed": true
+  }
+}

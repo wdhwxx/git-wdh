@@ -3901,3 +3901,4 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
    c. 测试补强（tests/unit/test_model_governance.py 7→9 项）：新增 test_scheduler_monthly_governance_registered_by_default（默认 attach_engine 注册 monthly_governance 且 get_task 可查、resend_pending 未注册佐证独立性——修复前此测试失败，修复后通过，可防回归）+ test_scheduler_monthly_governance_disable（enable_monthly_governance=False 时不注册）。
    d. 验证结果：py_compile scheduler.py 通过；test_model_governance 9 项全绿；scheduler 相关回归 83 passed（model_governance/escalation/health_alert/alert_escalation/alert_store/weekly_review）；全量 pytest 结果见提交后终验。
    e. 纪律遵守：改动文件均在蓝图目录树已标注（live/scheduler.py 条目追加 #253 + tests/unit/test_model_governance.py 条目追加 #253）；无蓝图外新文件；业务逻辑归 myquant；未改变量/默认值/日志语义，仅修正注册作用域；任务后 git 提交（commit message 引用 #253）。
+   f. 审计处置（D 包验收报告归位）：scripts/docs/监控档案/D包自治验收_20261007.json（D-9 验收机器可读证据，acceptance_id=2c73884d3e2e，D-1~D-8 八项全过）因运行目录在 scripts/ 时相对路径解析偏差落于蓝图外 scripts/docs/——已迁移归位至 docs/监控档案/D包自治验收_20261007.json（与 B/C/M1 验收报告同列归档并入库），scripts/docs/ 空目录已清理；原路径标注废弃。
