@@ -51,4 +51,7 @@ git diff origin/master    # ③ 内容 diff，空 = 一致
 
 cd D:\Projects\Pythonwdhmm; git fetch origin; git status -sb; git diff origin/master
 
+# ========== 门禁的标准运行命令==========
 
+python -m pytest tests/unit/test_architecture.py -v
+python -m pytest tests/unit --cov=myquant --cov-report=term

@@ -58,6 +58,7 @@ from myquant.engine.base import BaseEngine
 from myquant.execution.sim_broker import SimBroker
 from myquant.models.backtest import BacktestConfig, BacktestResult
 from myquant.models.market_data import Bar, MarketEvent
+from myquant.models.trade import OrderType
 from myquant.risk.rules import RiskContext  # KP-P3-07: 回测复用实盘风控上下文
 from myquant.strategies.base import Signal, SignalType, StrategyBase, StrategyContext
 
@@ -484,7 +485,7 @@ class BacktestEngine(BaseEngine):
             if quantity <= 0:
                 logger.debug(f"买入信号跳过: {signal.symbol} 数量为0（资金不足或满仓）")
                 return
-            order = signal.to_order(quantity=quantity, order_type=__import__('myquant.models.trade', fromlist=['OrderType']).OrderType.MARKET)
+            order = signal.to_order(quantity=quantity, order_type=OrderType.MARKET)
         else:
             # 卖出：全部持仓
             position = self.context.get_position(signal.symbol) if self.context else None
@@ -492,7 +493,7 @@ class BacktestEngine(BaseEngine):
                 logger.debug(f"卖出信号跳过: {signal.symbol} 无持仓")
                 return
             quantity = position.quantity
-            order = signal.to_order(quantity=quantity, order_type=__import__('myquant.models.trade', fromlist=['OrderType']).OrderType.MARKET)
+            order = signal.to_order(quantity=quantity, order_type=OrderType.MARKET)
 
         if order and self.broker:
             # KP-P3-07: 回测执行实盘风控（未通过单记录 skip）
