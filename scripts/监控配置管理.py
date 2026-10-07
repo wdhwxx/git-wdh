@@ -16,9 +16,16 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 from typing import List, Optional
 
-from myquant.monitoring.config_as_code import KNOWN_ITEMS, MonitoringConfigRegistry
+# 允许从任意工作目录直接运行（含 scripts/ 目录，对齐 #254 验收_D包自治修复）；
+# 业务逻辑全部在 myquant（薄入口）
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from myquant.monitoring.config_as_code import KNOWN_ITEMS, MonitoringConfigRegistry  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -51,6 +51,18 @@ except Exception:  # noqa: BLE001 —— 常量模块不可用时的降级占位
 # ═══════════════════════════════════════════════
 #  常量
 # ═══════════════════════════════════════════════
+# 项目根探测：业务模块默认路径一律基于项目根（对齐 #254 根治语义），
+# 避免 CWD 差异导致配置目录/版本账本落错位置（scripts/ 下运行同样正确）
+def _resolve_project_root() -> Path:
+    here = Path(__file__).resolve()
+    for parent in (here.parent, *here.parents):
+        if (parent / "pyproject.toml").is_file() or (parent / "myquant").is_dir():
+            return parent
+    return here.parents[1]  # 兜底：monitoring → myquant → 项目根
+
+
+_PROJECT_ROOT: Path = _resolve_project_root()
+# 默认路径语义：相对项目根（拼接在 __init__ 中完成）
 DEFAULT_CONFIG_DIR: str = "config/monitoring"
 DEFAULT_LEDGER_PATH: str = "docs/监控档案/monitoring_config_ledger.json"
 AUDIT_KIND = "config_as_code"
@@ -98,8 +110,13 @@ class MonitoringConfigRegistry:
         alert_manager : AlertManager | None
             变更关联监控告警管理器；None 惰性取 get_alert_manager()。
         """
-        self._config_dir: Path = Path(config_dir or DEFAULT_CONFIG_DIR)
-        self._ledger_path: Path = Path(ledger_path or DEFAULT_LEDGER_PATH)
+        self._config_dir: Path = (
+            Path(config_dir) if config_dir else _PROJECT_ROOT / "config" / "monitoring"
+        )
+        self._ledger_path: Path = (
+            Path(ledger_path) if ledger_path
+            else _PROJECT_ROOT / "docs" / "监控档案" / "monitoring_config_ledger.json"
+        )
         self._clock: Callable[[], float] = clock if clock is not None else time.time
         self._alert_manager: Any = alert_manager
         self._audit_log: Any = None
