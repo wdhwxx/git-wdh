@@ -97,3 +97,23 @@ def test_scheduler_monthly_task_src():
     assert "run_monthly_model_governance" in src
     assert "monthly_governance_cron" in src
     assert "未批准不 active" in src
+
+
+def test_scheduler_monthly_governance_registered_by_default():
+    """DoD（回写#253）：月频治理独立顶层注册——默认 enable_resend_pending=False 时仍注册
+    （修复原缺陷：曾嵌套于 resend_pending 块内导致默认不注册）。"""
+    from myquant.live.scheduler import LiveScheduler, attach_engine
+
+    scheduler = LiveScheduler()
+    tasks = attach_engine(scheduler)
+    assert "monthly_governance" in tasks
+    assert scheduler.get_task(tasks["monthly_governance"]) is not None
+    assert "resend_pending" not in tasks  # 默认关闭，佐证月治理不依赖它
+
+
+def test_scheduler_monthly_governance_disable():
+    from myquant.live.scheduler import LiveScheduler, attach_engine
+
+    scheduler = LiveScheduler()
+    tasks = attach_engine(scheduler, enable_monthly_governance=False)
+    assert "monthly_governance" not in tasks

@@ -2010,21 +2010,25 @@ def attach_engine(
             interval_seconds=resend_pending_interval,
         )
 
-        if enable_monthly_governance:
-            def _monthly_governance_job(**kw) -> None:  # noqa: ARG001
-                """KP-P6-05: 月频模型治理：未批准不 active + 漂移告警（回写 registry 现状）。"""
-                try:
-                    from myquant.ml.model_monitor import ModelMonitor
-                    from myquant.ml.model_registry import ModelRegistry
-                    summary = run_monthly_model_governance(ModelRegistry(), ModelMonitor())
-                    logger.info(f"[attach] 月频模型治理完成: {summary}")
-                except Exception as exc:
-                    logger.error(f"[attach] 月频模型治理异常: {exc}")
-            task_ids["monthly_governance"] = scheduler.add_cron_task(
-                _monthly_governance_job,
-                name="月频模型治理",
-                cron_expr=monthly_governance_cron,
-            )
+    if enable_monthly_governance:
+        # KP-P6-05（回写#253）：月频模型治理独立顶层注册——修复原缺陷：本块曾嵌套于
+        # enable_resend_pending 块内（默认 resend_pending=False 时月治理不注册），
+        # 现与日频漂移同层，enable_monthly_governance 默认 True 即注册（run_monthly_model_governance
+        # 为模块级函数，不依赖 engine/断线补单接线）。
+        def _monthly_governance_job(**kw) -> None:  # noqa: ARG001
+            """KP-P6-05: 月频模型治理：未批准不 active + 漂移告警（回写 registry 现状）。"""
+            try:
+                from myquant.ml.model_monitor import ModelMonitor
+                from myquant.ml.model_registry import ModelRegistry
+                summary = run_monthly_model_governance(ModelRegistry(), ModelMonitor())
+                logger.info(f"[attach] 月频模型治理完成: {summary}")
+            except Exception as exc:
+                logger.error(f"[attach] 月频模型治理异常: {exc}")
+        task_ids["monthly_governance"] = scheduler.add_cron_task(
+            _monthly_governance_job,
+            name="月频模型治理",
+            cron_expr=monthly_governance_cron,
+        )
 
     if enable_daily_model_drift:
         def _daily_model_drift_job(**kw) -> None:  # noqa: ARG001
