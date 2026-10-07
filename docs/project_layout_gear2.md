@@ -436,9 +436,9 @@ Pythonwdhmm/
 
 │   ├── 验收_监控M1保命.py            # ✨【回写#220】A-15 M1 保命验收薄入口：argparse（--mode min/full/both + --out + --db）+ find_project_root + 调 myquant/monitoring/m1_acceptance.py（保命闭环覆盖率 + FI-01~05 故障注入 + MTTx 计时 + TP/FP/FN 分类），输出 JSON 验收报告；业务逻辑零写入脚本
 
-│   ├── 验收_B包保钱包.py            # ✨【回写#230】B-10 B 包保钱包验收薄入口：argparse（--out 默认 docs/监控档案/B包保钱包验收_20261006.json + --db + --mode）+ find_project_root + 调 myquant/monitoring/b_acceptance.py（B-1~B-9 九项验收），控制台逐项摘要 + JSON 报告；业务逻辑零写入脚本
+│   ├── 验收_B包保钱包.py            # ✨【回写#230】B-10 B 包保钱包验收薄入口：argparse（--out 默认 docs/监控档案/B包保钱包验收_20261006.json + --db + --mode）+ find_project_root + 调 myquant/monitoring/b_acceptance.py（B-1~B-9 九项验收），控制台逐项摘要 + JSON 报告；业务逻辑零写入脚本；✨【回写#254】默认 --out 改为项目根绝对路径（DEFAULT_OUT_PATH=_PROJECT_ROOT/docs/监控档案/...），根治从 scripts/ 启动时报告落于 scripts/docs/ 的落档分叉
 
-│   ├── 验收_D包自治.py             # ✨【回写#251】D-9 D 包验收薄入口：argparse（--out）+ 调 myquant/monitoring/d_acceptance.py（D-1~D-8 验收清单逐项断言），控制台逐项 PASS/FAIL + JSON 报告；业务逻辑零写入脚本
+│   ├── 验收_D包自治.py             # ✨【回写#251】D-9 D 包验收薄入口：argparse（--out）+ 调 myquant/monitoring/d_acceptance.py（D-1~D-8 验收清单逐项断言），控制台逐项 PASS/FAIL + JSON 报告；业务逻辑零写入脚本；✨【回写#254】补 _REPO_ROOT 探测 + sys.path 注入（scripts/ 目录启动可直跑，原顶层 import 会 ImportError）+ 默认 --out 改项目根绝对路径，根治 scripts/docs/ 落档分叉
 │   ├── 验收_C包保Alpha.py           # ✨【回写#241】C-12 C 包保 Alpha 验收薄入口：argparse（--out 默认 docs/监控档案/C包保Alpha验收_<日期>.json + --db + --mode）+ find_project_root + 调 myquant/monitoring/c_acceptance.py（C-1~C-11 验收项），控制台逐项摘要 + JSON 报告；业务逻辑零写入脚本
 
 │   ├── 故障演练/季频故障演练.py      # ✨【回写#248】D-6 混沌工程与故障演练薄入口：argparse（--select FI-01…FI-07 + --out + --db + --list）+ find_project_root + 调 myquant/monitoring/chaos_drill.py（复用 P0-8 FI-01~07 用例库，逐用例注入→MTTx 计时→TP/FP/FN 分类→复盘报告 JSON），季度演练落盘；业务逻辑零写入脚本
@@ -3902,3 +3902,11 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
    d. 验证结果：py_compile scheduler.py 通过；test_model_governance 9 项全绿；scheduler 相关回归 83 passed（model_governance/escalation/health_alert/alert_escalation/alert_store/weekly_review）；全量 pytest 结果见提交后终验。
    e. 纪律遵守：改动文件均在蓝图目录树已标注（live/scheduler.py 条目追加 #253 + tests/unit/test_model_governance.py 条目追加 #253）；无蓝图外新文件；业务逻辑归 myquant；未改变量/默认值/日志语义，仅修正注册作用域；任务后 git 提交（commit message 引用 #253）。
    f. 审计处置（D 包验收报告归位）：scripts/docs/监控档案/D包自治验收_20261007.json（D-9 验收机器可读证据，acceptance_id=2c73884d3e2e，D-1~D-8 八项全过）因运行目录在 scripts/ 时相对路径解析偏差落于蓝图外 scripts/docs/——已迁移归位至 docs/监控档案/D包自治验收_20261007.json（与 B/C/M1 验收报告同列归档并入库），scripts/docs/ 空目录已清理；原路径标注废弃。
+## #254 · 2026-10-07 · 验收脚本默认输出路径缺陷根治（scripts/docs 落档分叉根因修复）
+   a. 缺陷确认（#253 f 项审计处置的根因）：scripts/验收_B包保钱包.py 的 --out 默认值与 scripts/验收_D包自治.py 的 DEFAULT_REPORT_PATH 均为相对路径 "docs/监控档案/..."——从 scripts/ 目录（或任何非项目根目录）启动时，报告经 Path("docs/...") 相对当前工作目录解析，落于蓝图外 scripts/docs/监控档案/（与 docs/监控档案/ 正式落档分叉）。#253 f 项仅迁移产物 + 清理空目录，未修根因；2026-10-07 15:37 再次触发（scripts/docs/监控档案/B包保钱包验收_20261006.json 重跑产物，与正式版忽略时间戳后逐字段一致，B-1~B-9 九项全过，为重复产物）。
+   b. 修复：
+      - scripts/验收_B包保钱包.py（条目追加 #254）：新增 DEFAULT_OUT_PATH = _PROJECT_ROOT / "docs" / "监控档案" / "B包保钱包验收_20261006.json"（项目根绝对路径），--out 默认值改用 str(DEFAULT_OUT_PATH)，help 文本同步更新。
+      - scripts/验收_D包自治.py（条目追加 #254）：补 _REPO_ROOT = Path(__file__).resolve().parents[1] 探测 + sys.path 注入（原顶层 `from myquant... import` 从 scripts/ 目录启动直接 ImportError，属同一薄入口健壮性缺陷一并修复）；DEFAULT_REPORT_PATH 改为 str(_REPO_ROOT / "docs" / "监控档案" / "D包自治验收_20261007.json")。
+   c. 归位与清理：删除重复产物 scripts/docs/监控档案/B包保钱包验收_20261006.json（正式版 docs/监控档案/B包保钱包验收_20261006.json 保留，落档时间证据不受影响）；scripts/docs/ 空目录清理（git 不跟踪，删除后工作区无残留）。
+   d. 验证结果：两脚本从 scripts/ 目录启动 `--help` 均正常显示项目根绝对默认路径；从 scripts/ 目录完整运行 验收_B包保钱包.py（--out 指向临时路径）exit=0、B-1~B-9 九项全过、未再生成 scripts/docs/（Test-Path 确认目录不存在）。
+   e. 纪律遵守：改动文件均在蓝图目录树已标注（scripts 段 验收_B包保钱包.py 条目追加 #254 + 验收_D包自治.py 条目追加 #254）；无蓝图外新文件；业务逻辑归 myquant（薄入口零业务逻辑，本次仅修正默认路径与启动引导，未动业务模块）；任务后 git 提交（commit message 引用 #254）。

@@ -47,6 +47,10 @@ _PROJECT_ROOT = _bootstrap_root()
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+# 默认输出为项目根绝对路径（修复：原相对路径从 scripts/ 目录启动时
+# 会把报告写到 scripts/docs/监控档案/，与 docs/监控档案/ 正式落档分叉）
+DEFAULT_OUT_PATH = _PROJECT_ROOT / "docs" / "监控档案" / "B包保钱包验收_20261006.json"
+
 from myquant.monitoring.b_acceptance import BAcceptanceRunner  # noqa: E402  # 业务模块
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
@@ -86,8 +90,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--out", metavar="FILE",
-        default="docs/监控档案/B包保钱包验收_20261006.json",
-        help="验收报告 JSON 输出路径（默认 docs/监控档案/B包保钱包验收_20261006.json）",
+        default=str(DEFAULT_OUT_PATH),
+        help=f"验收报告 JSON 输出路径（默认 {DEFAULT_OUT_PATH}）",
     )
     parser.add_argument(
         "--db", metavar="FILE",
