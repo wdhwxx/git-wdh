@@ -55,7 +55,7 @@ from myquant.monitoring.watchdog import (
 from myquant.utils.time_utils import SessionType
 from myquant.live.portfolio import LivePortfolio
 
-logger = get_logger("monitoring.m1_acceptance")
+logger = get_logger("acceptance.m1_acceptance")
 
 
 # ═══════════════════════════════════════════════

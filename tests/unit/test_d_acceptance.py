@@ -10,7 +10,7 @@ D-9 D 包验收 单测
 """
 import json
 
-from myquant.monitoring.d_acceptance import DAcceptanceRunner
+from myquant.acceptance.d_acceptance import DAcceptanceRunner
 
 
 class TestIntegrationItems:

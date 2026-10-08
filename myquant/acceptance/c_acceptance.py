@@ -299,7 +299,7 @@ class CAcceptanceRunner:
             group_risk_contribution,
             period_bucket_of,
         )
-        from myquant.monitoring.attribution import AttributionAnalyzer  # noqa: WPS433
+        from myquant.backtest.attribution import AttributionAnalyzer  # noqa: WPS433
 
         an = AttributionAnalyzer(period="day", clock=_fixed_clock)
         an.add_record("backtest", BASE_TS, pnl=100.0, strategy="trend_a",

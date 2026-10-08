@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from myquant.monitoring.disaster_drill import DisasterDrillRunner
+from myquant.acceptance.disaster_drill import DisasterDrillRunner
 from myquant.monitoring.meta_monitor import (
     ExternalHeartbeatGuard,
     FileHeartbeatCarrier,

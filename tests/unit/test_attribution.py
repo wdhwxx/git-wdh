@@ -13,7 +13,7 @@ test_attribution.py - C-5 收益归因分析框架测试（回写#234）
   8. backtest/metrics.py 归因侧纯函数直测（group_contribution /
      group_risk_contribution / compare_attribution / period_bucket_of）。
 
-依赖: pytest, myquant.monitoring.attribution, myquant.backtest.metrics。
+依赖: pytest, myquant.backtest.attribution, myquant.backtest.metrics。
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from myquant.backtest.metrics import (
     group_risk_contribution,
     period_bucket_of,
 )
-from myquant.monitoring.attribution import (
+from myquant.backtest.attribution import (
     ALL_DIMENSIONS,
     DIMENSION_FACTOR,
     DIMENSION_PERIOD,

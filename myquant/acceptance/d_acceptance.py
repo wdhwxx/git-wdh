@@ -40,7 +40,7 @@ from typing import Any, Dict, List, Optional
 
 from myquant.core.logger import get_logger
 
-logger = get_logger("monitoring.d_acceptance")
+logger = get_logger("acceptance.d_acceptance")
 
 # ═══════════════════════════════════════════════
 #  常量
@@ -149,7 +149,7 @@ class DAcceptanceRunner:
 
     def _check_d6(self) -> _Item:
         """D-6：P0-8 FI-01~07 逐用例演练，故障全部被捕获（TP）。"""
-        from myquant.monitoring.chaos_drill import ChaosDrillRunner
+        from myquant.acceptance.chaos_drill import ChaosDrillRunner
         runner = ChaosDrillRunner()
         try:
             runner.register_builtin_cases()
@@ -199,7 +199,7 @@ class DAcceptanceRunner:
 
     def _check_d8(self) -> _Item:
         """D-8：年度灾备演练四项全部通过（隔离环境）。"""
-        from myquant.monitoring.disaster_drill import DisasterDrillRunner
+        from myquant.acceptance.disaster_drill import DisasterDrillRunner
         runner = DisasterDrillRunner()
         try:
             report = runner.run()

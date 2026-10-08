@@ -10,7 +10,7 @@ test_m1_acceptance.py - M1 保命验收单元测试（A-15-Min / A-15-Full）
   4. 同一 runner 连跑 min→full 去重隔离（回归修复：跨 run 同去重键告警不误取/不抑制）。
   5. 非法 mode 抛 ValueError。
 
-依赖: pytest, myquant.monitoring.m1_acceptance。
+依赖: pytest, myquant.acceptance.m1_acceptance。
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from typing import Any, Dict
 
 import pytest
 
-from myquant.monitoring.m1_acceptance import M1AcceptanceRunner
+from myquant.acceptance.m1_acceptance import M1AcceptanceRunner
 
 
 @pytest.fixture()

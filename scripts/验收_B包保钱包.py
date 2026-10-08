@@ -13,7 +13,7 @@
   - B-8 驾驶舱四视图
   - B-9 保证金（PENDING_CAL 语义验收）
 
-业务逻辑位于 myquant.monitoring.b_acceptance（BAcceptanceRunner），
+业务逻辑位于 myquant.acceptance.b_acceptance（BAcceptanceRunner），
 本脚本只做：参数解析 → 项目根探测 → 调用 → 输出报告（控制台 + JSON）。
 
 运行方式:
@@ -51,7 +51,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 # 会把报告写到 scripts/docs/监控档案/，与 docs/监控档案/ 正式落档分叉）
 DEFAULT_OUT_PATH = _PROJECT_ROOT / "docs" / "监控档案" / "B包保钱包验收_20261006.json"
 
-from myquant.monitoring.b_acceptance import BAcceptanceRunner  # noqa: E402  # 业务模块
+from myquant.acceptance.b_acceptance import BAcceptanceRunner  # noqa: E402  # 业务模块
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
 logger = logging.getLogger("验收_B包保钱包")

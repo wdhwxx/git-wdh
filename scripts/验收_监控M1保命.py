@@ -9,7 +9,7 @@ M1 保命闭环验收：
   - A-15-Full : FI-01~05 注入按 P0-8 口径计时（MTTD<1min / MTTA<5min /
                 MTTR<30min）+ EVENT 项事件路径验证 + TP/FP/FN 分类统计
 
-业务逻辑位于 myquant.monitoring.m1_acceptance（M1AcceptanceRunner），
+业务逻辑位于 myquant.acceptance.m1_acceptance（M1AcceptanceRunner），
 本脚本只做：参数解析 → 项目根探测 → 调用 → 输出报告（控制台 + JSON）。
 
 运行方式:
@@ -48,7 +48,7 @@ _PROJECT_ROOT = _bootstrap_root()
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from myquant.monitoring.m1_acceptance import M1AcceptanceRunner  # noqa: E402  # 业务模块
+from myquant.acceptance.m1_acceptance import M1AcceptanceRunner  # noqa: E402  # 业务模块
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
 logger = logging.getLogger("验收_监控M1保命")

@@ -15,7 +15,7 @@ import time
 import pytest
 
 from myquant.core.constants import SeverityLevel
-from myquant.monitoring.chaos_drill import (
+from myquant.acceptance.chaos_drill import (
     CLASSIFICATION_FN,
     CLASSIFICATION_UNKNOWN,
     ChaosDrillRunner,

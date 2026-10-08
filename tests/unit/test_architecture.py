@@ -43,7 +43,8 @@ v4.2（K-f~K-h）与 v4.1（K-a~K-e）的修正结论全部沿用，摘要如下
        权威违规由 40 修正为 37；回写#255 P0-1/P0-2 消除后再由 37 修正为 35。
   K-g  新增 R-21：任何 myquant 文件必须可解析，_parse is None 即红 —— 封堵 v4.1 的
        errors="replace" 兜底导致的"畸形编码静默归零"盲区（评审 B-4）。
-  K-h  新增 R-22：同层互引计数（只报告不阻断）—— 使 monitoring 153 处内部互引（#260 降至 111）、
+  K-h  新增 R-22：同层互引计数（只报告不阻断）—— 使 monitoring 153 处内部互引（#260 降至 111、
+       #262 拆出 6 模块至 acceptance/ 后降至 74，acceptance 包内 36，L5 合计 110）、
        core/utils 内部耦合可度量、可递减（评审 B-5；这是 G2 拆包的驱动指标）。
 
 另按评审采纳：S-1 `_is_packaging_cycle` 改为白名单式（显式枚举允许的 re-export
@@ -84,7 +85,7 @@ MODULE_LAYER: dict[str, str] = {
     "myquant.strategies": "L3", "myquant.backtest": "L3",
     "myquant.allocation": "L3", "myquant.risk": "L3", "myquant.ml": "L3",
     "myquant.execution": "L4", "myquant.live": "L4",
-    "myquant.monitoring": "L5",
+    "myquant.monitoring": "L5", "myquant.acceptance": "L5",  # acceptance/：验收+演练域（#262 从 monitoring 拆出）
     "myquant.api": "L6", "myquant.gui": "L6", "myquant.web": "L6",
 }
 LAYER_ORDER = ["L0", "L1", "L2", "L2E", "L3", "L4", "L5", "L6"]

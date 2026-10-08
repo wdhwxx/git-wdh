@@ -55,7 +55,7 @@ from myquant.backtest.metrics import (
 )
 from myquant.core.logger import get_logger
 
-logger = get_logger("monitoring.attribution")
+logger = get_logger("backtest.attribution")
 
 # ─────────────────────────────────────────────
 # 常量提取（非业务阈值；本模块无 SLO 阈值，仅口径常量）
@@ -114,7 +114,7 @@ class AttributionAnalyzer:
     收益归因分析器：四维归因 + 回测/实盘同口径对比 + 日报摘要 + 可视化数据。
 
     用法:
-        from myquant.monitoring.attribution import AttributionAnalyzer
+        from myquant.backtest.attribution import AttributionAnalyzer
 
         an = AttributionAnalyzer(period="day")
         an.add_record("backtest", ts1, pnl=120.0, strategy="trend_a",

@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from myquant.monitoring.c_acceptance import (
+from myquant.acceptance.c_acceptance import (
     CLOCK_NOW,
     REPORT_DATE,
     CAcceptanceRunner,
@@ -194,5 +194,5 @@ class TestSelfTest:
     """模块 __main__ 自测返回 0 失败。"""
 
     def test_self_test_zero_failures(self) -> None:
-        from myquant.monitoring.c_acceptance import _run_self_test
+        from myquant.acceptance.c_acceptance import _run_self_test
         assert _run_self_test() == 0

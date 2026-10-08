@@ -20,7 +20,7 @@ from typing import Any, Dict
 
 import pytest
 
-from myquant.monitoring.b_acceptance import BAcceptanceRunner, _InMemoryMetricsCollector
+from myquant.acceptance.b_acceptance import BAcceptanceRunner, _InMemoryMetricsCollector
 
 
 # ═══════════════════════════════════════════════

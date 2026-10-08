@@ -52,7 +52,7 @@ from myquant.monitoring.measurability import (
     MttxCalculator,
 )
 
-logger = get_logger("monitoring.chaos_drill")
+logger = get_logger("acceptance.chaos_drill")
 
 
 # ═══════════════════════════════════════════════

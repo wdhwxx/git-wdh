@@ -20,7 +20,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from myquant.monitoring.c_acceptance import CAcceptanceRunner  # noqa: E402
+from myquant.acceptance.c_acceptance import CAcceptanceRunner  # noqa: E402
 
 DEFAULT_OUT = _REPO_ROOT / "docs" / "监控档案" / "C包保Alpha验收_20261006.json"
 

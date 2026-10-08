@@ -45,7 +45,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from myquant.core.logger import get_logger
 
-logger = get_logger("monitoring.disaster_drill")
+logger = get_logger("acceptance.disaster_drill")
 
 try:
     from myquant.core.constants import SeverityLevel
