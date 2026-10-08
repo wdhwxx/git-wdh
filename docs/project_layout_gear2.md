@@ -3932,3 +3932,11 @@ esolve_engine_mode 本身只依赖 strategy.engine_modes() 能力接口，不依
    c. **CI 同步（.github/workflows/ci.yml architecture-gate job）**：注释与 job name 更新为基线锁定 v4.3（违规 35 / 真环 3 / 例外 26 / 零覆盖存量 49；新增违规/入口/膨胀/零覆盖即红）。
    d. **验证结果**：py_compile test_architecture.py 通过；门禁 26 passed/1 skipped（R-19 转真跑断言 current_zero ⊆ 基线 49；R-23 入口全登记无新增；R-24 14 项行数全部 ≤ 基线；R-05 白名单 1 项按设计 skip）；全量 pytest 结果见提交后终验。
    e. **纪律遵守**：无蓝图外新文件；改动文件均在蓝图目录树已标注（test_architecture.py 条目追加 #256；ci.yml 为 CI 配置不入目录树）；业务逻辑归 myquant（门禁新增规则全部静态可审计）；严格防未来（R-19 冻结集合为存量快照，未来新增才红）；任务后 git 提交（commit message 引用 #256）。
+
+## #257 · 2026-10-08 · G1 例外收敛 EX-07A：并行模式标志上移 L0（违规 35→34）
+   事实来源：本次落地（G1 例外收敛第 1 项，用户点名优先级 EX-07A/B、08A、11A/B/C、15A），代码级核验：py_compile 通过 + 门禁 26 passed/1 skipped + 两文件 __main__ 自测全过 + 因子缓存单测 35 passed。
+   a. **EX-07A 消除（myquant/utils/parallel.py ↔ myquant/indicators/factor_cache.py，L0→L2 反向依赖归零）**：并行模式全局标志（set_parallel_mode/is_parallel_mode）由 indicators/factor_cache.py 上移至 utils/parallel.py（L0 持有，模块 docstring 同步更新）；factor_cache.py 删除同名实现段，改为自 myquant.utils.parallel 导入（L2→L0 合法方向，无环：utils.pickle_checker 顶层零 myquant 依赖）；parallel_factor_context 删除函数内延迟导入（原 664 行）；__main__ 自测测试 7/8 经真名模块 myquant.utils.parallel 引用（规避 -m/脚本双模块差异）。
+   b. **门禁收缩（tests/unit/test_architecture.py，条目追加 #257）**：例外表删除 EX-07A（26 对→25 对，注释同步）；VIOLATION_BASELINE 35→34（R-02 实测违规 34，无幽灵、无新增）。
+   c. **兼容性**：factor_cache 命名空间经导入继续暴露 is_parallel_mode/set_parallel_mode（外部 from myquant.indicators.factor_cache import ... 不受影响）；并行模式语义（并行下 L1 自动关闭）与日志不变。
+   d. **验证结果**：py_compile 三文件通过；门禁 26 passed/1 skipped（R-02 违规 34 = 基线，无幽灵）；myquant.utils.parallel __main__ 自测 35/35；myquant.indicators.factor_cache __main__ 自测全过；tests/unit/test_factor_cache_v5.py + test_factor_cache_nofp.py 35 passed；全量 pytest 结果见提交后终验。
+   e. **纪律遵守**：无新增文件、无蓝图外文件（两文件均在目录树已标注）；无目录树条目变更（存量修改）；严格防未来（并行模式标志为纯执行模式状态，无时序数据引用）；工作区既有未提交改动（docs/系统性审核/鲲鹏量化交易系统_架构分层治理方案_v5.md）未触碰；任务后 git 提交（commit message 引用 #257）。

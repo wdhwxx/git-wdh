@@ -74,13 +74,11 @@ LAYER_ORDER = ["L0", "L1", "L2", "L2E", "L3", "L4", "L5", "L6"]
 SAME_OK: dict[str, set[str]] = {"L2": {"L2E"}, "L2E": {"L2"}}
 
 
-# ═══════════════════════ 2) 例外表（点对点 + 到期日 + 台账；26 对 + P0 2 对） ═══════════════════════
+# ═══════════════════════ 2) 例外表（点对点 + 到期日 + 台账；25 对 + P0 2 对） ═══════════════════════
 # 字段: id, 源文件(相对项目根), 目标模块, 收敛任务, 到期日, kind, 说明
 _EXC = [
     ("EX-01A", "myquant/database/trade_log.py", "myquant.models.trade",
      "永久", "2099-12-31", "runtime", "ORM 必引领域模型"),
-    ("EX-07A", "myquant/utils/parallel.py", "myquant.indicators.factor_cache",
-     "G1-1", "2026-12-31", "runtime", "并行模式开关"),
     ("EX-07B", "myquant/utils/cache_sync.py", "myquant.indicators.factor_cache",
      "G1-1", "2026-12-31", "runtime", "缓存同步"),
     ("EX-08A", "myquant/data_access/financial_service.py", "myquant.indicators.factor_engine",
@@ -139,7 +137,7 @@ EXCEPTIONS: dict[tuple[str, str], dict] = {
 # 回写#255：P0-1（performance_config→ma_strategy）与 P0-2（backtest.engine→live.engine）已消除，集合清空
 P0_MUST_FIX: set[tuple[str, str]] = set()
 
-VIOLATION_BASELINE = 35          # K-a + K-f：语义矩阵 α，排除 TYPE_CHECKING 与 __main__；回写#255 P0-1/P0-2 消除后 37→35
+VIOLATION_BASELINE = 34          # K-a + K-f：语义矩阵 α，排除 TYPE_CHECKING 与 __main__；回写#255 P0-1/P0-2 消除后 37→35，回写#257 G1 EX-07A 消除后 35→34
 TOP_LEVEL_CYCLE_BASELINE = 0     # K-b：顶层真环（剔除包装惯用环与 __main__ 后）
 LAZY_CYCLE_BASELINE = 3          # K-f：全量真环，只减不增（环1 event_bus↔memory_pool、
                                  #      环2 monitoring 内部4模块、环3 portfolio↔account_reconciler）
@@ -500,7 +498,7 @@ class TestR01bLazyCycle:
 
 
 class TestR02CrossLayer:
-    """R-02：跨层反向 import；例外须登记且未过期且非假豁免。基线 35（回写#255 由 37 收缩）。"""
+    """R-02：跨层反向 import；例外须登记且未过期且非假豁免。基线 34（回写#257 G1 EX-07A 消除后 35→34）。"""
 
     def test_count_not_rising(self):
         found = _violations(top_only=False)

@@ -18,7 +18,8 @@ factor_cache.py - 三级因子缓存
 
 依赖: hashlib, json, os, pathlib, logging, threading, time, typing
 第三方: pandas, numpy
-本地: myquant.core.cache.MemoryCache, myquant.core.constants, myquant.utils.data_fingerprint
+本地: myquant.core.cache.MemoryCache, myquant.core.constants, myquant.utils.data_fingerprint,
+      myquant.utils.parallel (is_parallel_mode/set_parallel_mode，并行模式全局标志)（L2→L0 合法依赖）
 """
 
 from __future__ import annotations
@@ -38,6 +39,7 @@ import pandas as pd
 from myquant.core.cache import MemoryCache
 from myquant.core.constants import CACHE_DEFAULT_TTL, CACHE_MAX_SIZE
 from myquant.utils.data_fingerprint import DataFingerprint
+from myquant.utils.parallel import is_parallel_mode, set_parallel_mode
 
 logger = logging.getLogger(__name__)
 
@@ -72,43 +74,6 @@ NOFP_FINGERPRINT_TTL: int = 3600
 
 # 文件名中指纹截断长度（避免文件名过长）
 FINGERPRINT_TRUNCATE_LEN: int = 16
-
-# ─────────────────────────────────────────────
-# 并行模式全局标志
-# ─────────────────────────────────────────────
-# P2 任务的 parallel_factor_context 上下文管理器会设置此标志。
-# 并行模式下，所有 FactorCache 实例自动关闭 L1（多进程内存不共享）。
-_parallel_mode: bool = False
-_parallel_mode_lock = threading.Lock()
-
-
-def set_parallel_mode(enabled: bool) -> None:
-    """设置全局并行模式。
-
-    并行模式下，新建的 FactorCache 实例自动关闭 L1 内存缓存；
-    已存在的实例在后续 get/get_or_compute 调用中也会跳过 L1。
-
-    Args:
-        enabled: True 开启并行模式（关闭 L1），False 关闭并行模式（恢复 L1）。
-    """
-    global _parallel_mode
-    with _parallel_mode_lock:
-        _parallel_mode = enabled
-    if enabled:
-        logger.info("并行模式已开启：因子缓存 L1 内存缓存将自动关闭")
-    else:
-        logger.info("并行模式已关闭：因子缓存 L1 内存缓存已恢复")
-
-
-def is_parallel_mode() -> bool:
-    """查询当前是否处于并行模式。
-
-    Returns:
-        True 表示并行模式已开启（L1 被自动关闭）。
-    """
-    with _parallel_mode_lock:
-        return _parallel_mode
-
 
 # ─────────────────────────────────────────────
 # 辅助函数

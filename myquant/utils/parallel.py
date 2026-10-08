@@ -55,7 +55,8 @@ V5回测性能优化 P2 新增：为批量回测、参数扫描、因子计算�
 
 依赖: os, threading, time, concurrent.futures, contextlib, logging, typing
 本地: myquant.utils.pickle_checker (pickle 预检),
-      myquant.indicators.factor_cache (set_parallel_mode/is_parallel_mode，延迟导入)
+      并行模式全局标志（set_parallel_mode/is_parallel_mode）由本模块持有，
+      myquant.indicators.factor_cache 自本模块导入（L2→L0 合法方向）
 """
 from __future__ import annotations
 
@@ -107,6 +108,45 @@ THREAD_NAME_PREFIX: str = "quant-io"
 
 # 单批 map 提交的默认分块大小（控制一次往池里塞的任务数量，避免一次性占满内存）
 DEFAULT_MAP_CHUNK_SIZE: int = 1
+
+
+# ============================================================================
+# 并行模式全局标志（归 L0 utils 持有）
+# ============================================================================
+# 并行模式是"并行执行设施"自身的全局状态，由本模块持有；
+# 因子缓存（L2 indicators.factor_cache）自本模块导入，并行模式下自动关闭 L1
+# 内存缓存（多进程间内存不共享，L1 命中率低，走 L2/L3 更合理）。
+# 本标志不涉及时序计算，仅表达当前执行模式（防未来红线不适用）。
+_GLOBAL_PARALLEL_MODE: bool = False
+_PARALLEL_MODE_LOCK = threading.Lock()
+
+
+def set_parallel_mode(enabled: bool) -> None:
+    """设置全局并行模式。
+
+    并行模式下，新建的 FactorCache 实例自动关闭 L1 内存缓存；
+    已存在的实例在后续 get/get_or_compute 调用中也会跳过 L1。
+
+    Args:
+        enabled: True 开启并行模式（关闭 L1），False 关闭并行模式（恢复 L1）。
+    """
+    global _GLOBAL_PARALLEL_MODE
+    with _PARALLEL_MODE_LOCK:
+        _GLOBAL_PARALLEL_MODE = enabled
+    if enabled:
+        logger.info("并行模式已开启：因子缓存 L1 内存缓存将自动关闭")
+    else:
+        logger.info("并行模式已关闭：因子缓存 L1 内存缓存已恢复")
+
+
+def is_parallel_mode() -> bool:
+    """查询当前是否处于并行模式。
+
+    Returns:
+        True 表示并行模式已开启（L1 被自动关闭）。
+    """
+    with _PARALLEL_MODE_LOCK:
+        return _GLOBAL_PARALLEL_MODE
 
 
 # ============================================================================
@@ -660,9 +700,6 @@ def parallel_factor_context(
         >>> with parallel_factor_context(cpu_workers=4) as pm:
         ...     results = pm.map_cpu(compute_factor, items)
     """
-    # factor_cache 延迟导入，避免模块加载期循环依赖
-    from myquant.indicators.factor_cache import is_parallel_mode, set_parallel_mode
-
     was_parallel = is_parallel_mode()
 
     mgr = manager if manager is not None else get_parallel_manager(
@@ -941,8 +978,12 @@ if __name__ == "__main__":
     print(f"    结果: {mixed_results}")
 
     # ── 测试 7: parallel_factor_context 关闭 L1 ──
+    # 注：本模块以 -m/脚本方式运行自测时存在"__main__ 与真名双模块"差异
+    # （上下文管理器经 __main__ 执行，factor_cache 导入的是真名模块），
+    # 故此处经真名模块 myquant.utils.parallel 引用，保证状态一致。
     print("\n[7] parallel_factor_context 关闭 L1 缓存")
-    from myquant.indicators.factor_cache import FactorCache, is_parallel_mode
+    import myquant.utils.parallel as _self_mod
+    from myquant.indicators.factor_cache import FactorCache
     import tempfile
     import shutil
     from pathlib import Path
@@ -952,14 +993,14 @@ if __name__ == "__main__":
         cache = FactorCache(cache_dir=str(tmp_dir / "factor"), enable_l1=True, l2_enabled=False)
         _expect_ok(cache.enable_l1 is True, "进入上下文前 L1 启用")
 
-        with parallel_factor_context(cpu_workers=2, warn_l1=True) as pm_ctx:
-            _expect_ok(is_parallel_mode() is True, "上下文内并行模式开启")
-            _expect_ok(pm_ctx is get_parallel_manager(), "上下文返回全局管理器")
+        with _self_mod.parallel_factor_context(cpu_workers=2, warn_l1=True) as pm_ctx:
+            _expect_ok(_self_mod.is_parallel_mode() is True, "上下文内并行模式开启")
+            _expect_ok(pm_ctx is _self_mod.get_parallel_manager(), "上下文返回全局管理器")
             # 上下文内新建的 FactorCache 自动关闭 L1
             cache_inside = FactorCache(cache_dir=str(tmp_dir / "factor2"), enable_l1=True, l2_enabled=False)
             _expect_ok(cache_inside.enable_l1 is False, "上下文内新实例 L1 被强制关闭")
 
-        _expect_ok(is_parallel_mode() is False, "退出上下文后并行模式恢复")
+        _expect_ok(_self_mod.is_parallel_mode() is False, "退出上下文后并行模式恢复")
         cache_after = FactorCache(cache_dir=str(tmp_dir / "factor3"), enable_l1=True, l2_enabled=False)
         _expect_ok(cache_after.enable_l1 is True, "退出上下文后 L1 恢复启用")
     finally:
@@ -967,13 +1008,12 @@ if __name__ == "__main__":
 
     # ── 测试 8: 嵌套上下文 ──
     print("\n[8] 嵌套上下文")
-    from myquant.indicators.factor_cache import is_parallel_mode as _ipm
-    with parallel_factor_context(cpu_workers=1) as outer:
-        _expect_ok(_ipm() is True, "外层开启并行")
-        with parallel_factor_context(cpu_workers=1) as inner:
-            _expect_ok(_ipm() is True, "内层仍并行（嵌套）")
-        _expect_ok(_ipm() is True, "内层退出后外层仍并行")
-    _expect_ok(_ipm() is False, "外层退出后恢复关闭")
+    with _self_mod.parallel_factor_context(cpu_workers=1) as outer:
+        _expect_ok(_self_mod.is_parallel_mode() is True, "外层开启并行")
+        with _self_mod.parallel_factor_context(cpu_workers=1) as inner:
+            _expect_ok(_self_mod.is_parallel_mode() is True, "内层仍并行（嵌套）")
+        _expect_ok(_self_mod.is_parallel_mode() is True, "内层退出后外层仍并行")
+    _expect_ok(_self_mod.is_parallel_mode() is False, "外层退出后恢复关闭")
 
     # ── 测试 9: 统计信息 ──
     print("\n[9] 统计信息")
