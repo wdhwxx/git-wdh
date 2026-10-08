@@ -20,6 +20,8 @@ import enum
 import logging
 from typing import Any, Dict, List, Optional
 
+from myquant.risk.guardian import get_operation_guard  # G1 EX-12D：L4→L3 合法（准入守卫注册表访问器）
+
 logger = logging.getLogger("live.run_mode")
 
 # 实盘(LIVE)要求券商必须是这些类型之一（paper 本地撮合不能用于真钱实盘）
@@ -159,12 +161,17 @@ def apply_mode_to_config(config: Dict[str, Any], mode: RunMode) -> Dict[str, Any
         return config
     # LIVE（真钱实盘）
     # KP-M04（T-30）：实盘模式切换属高危写操作——准入拒绝则显式抛错（默认仅审计留痕）
-    from myquant.api.middleware.auth import get_operation_guard
-    ok, why = get_operation_guard().check(
-        "mode_switch_live", operator="run_mode",
-        action="apply_mode_to_config -> LIVE")
-    if not ok:
-        raise ValueError(f"实盘模式切换被准入拒绝: {why}")
+    guard = get_operation_guard()
+    if guard is None:
+        logger.warning(
+            "[run_mode] 未装配准入守卫（register_operation_guard），LIVE 切换默认放行（仅审计留痕）"
+        )
+    else:
+        ok, why = guard.check(
+            "mode_switch_live", operator="run_mode",
+            action="apply_mode_to_config -> LIVE")
+        if not ok:
+            raise ValueError(f"实盘模式切换被准入拒绝: {why}")
     live_cfg["trade_mode"] = "live"
     broker_cfg["mode"] = "LIVE"
     return config

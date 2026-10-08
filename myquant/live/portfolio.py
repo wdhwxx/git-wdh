@@ -56,6 +56,7 @@ from typing import Any, Callable, Dict, List, Optional
 from myquant.core.constants import SeverityLevel
 from myquant.core.logger import get_logger
 from myquant.models.trade import OrderSide, Position, Trade
+from myquant.risk.guardian import get_operation_guard  # G1 EX-12C：L4→L3 合法（准入守卫注册表访问器）
 
 logger = get_logger("live.portfolio")
 
@@ -199,6 +200,7 @@ class LivePortfolio:
         self,
         initial_capital: float = 1_000_000.0,
         account_id: str = "default",
+        alert_manager: Optional[Any] = None,
     ):
         """
         初始化实时持仓管理
@@ -209,6 +211,9 @@ class LivePortfolio:
             初始资金（元）
         account_id : str
             账户ID（为多账户预留，v1默认"default"）
+        alert_manager : Any | None
+            告警管理器实例（G1 EX-12B 注入点；None 时对账差异告警跳过，
+            经 set_alert_manager 注入，装配责任在合法层/装配器）。
         """
         # 线程锁：保护资金/持仓/回调注册表的并发访问（RLock 可重入）
         self._lock = threading.RLock()
@@ -244,6 +249,9 @@ class LivePortfolio:
         # 同步核对兜底（既有单测依赖同步语义）；注入后事件回调改为异步投递，
         # 且 PnL 防脏门据其冻结状态拒绝脏 PnL 记录。
         self._account_reconciler: Any = None
+        # G1 EX-12B：告警管理器注入点（对账差异 CRITICAL 告警投递）。None 时
+        # 对账差异告警跳过（warning 留痕），由装配器经 set_alert_manager 注入。
+        self._alert_manager: Optional[Any] = alert_manager
 
         logger.info(
             f"实时持仓管理初始化: account={account_id}, "
@@ -504,20 +512,16 @@ class LivePortfolio:
     # ═══════════════════════════════════════════
 
     def _resolve_reconciler(self) -> Any:
-        """解析对账器状态源：优先注入实例，否则取全局惰性单例（避免循环依赖）。
+        """解析对账器状态源：仅用装配层注入的实例（G1 EX-12A 消除 L4→L5 反向）。
 
         Returns:
-            AccountReconciler | None: 对账器；获取失败返回 None（门视为放行，
+            AccountReconciler | None: 对账器；未注入返回 None（门视为放行，
             不因监控组件缺失阻断正常 PnL 记录）。
         """
         if self._account_reconciler is not None:
             return self._account_reconciler
-        try:
-            from myquant.monitoring.account_reconciler import get_account_reconciler
-            return get_account_reconciler()
-        except Exception as e:  # 对账器不可用不阻断 PnL 主流程
-            logger.warning("[portfolio] 惰性获取对账器失败，PnL 门视为放行: %s", e)
-            return None
+        logger.warning("[portfolio] 未注入账户对账器（set_account_reconciler），PnL 门视为放行")
+        return None
 
     @_locked
     def record_pnl_snapshot(self, reason: str = "periodic") -> Optional[Dict[str, Any]]:
@@ -718,9 +722,12 @@ class LivePortfolio:
             "position_diffs": diff.position_diffs,
         }
         dedup_key = _reconciliation_dedup_key(diff)
+        alert_manager = self._alert_manager
+        if alert_manager is None:
+            logger.warning("[portfolio] 未注入告警管理器（set_alert_manager），对账差异告警跳过")
+            return
         try:
-            from myquant.monitoring.alerting import get_alert_manager
-            get_alert_manager().alert(
+            alert_manager.alert(
                 level=SeverityLevel.CRITICAL,
                 message=(
                     f"账实对账差异超阈（容差={diff.cash_tolerance}）: "
@@ -918,6 +925,23 @@ class LivePortfolio:
             "已注入" if reconciler is not None else "已移除", self._account_id,
         )
 
+    def set_alert_manager(self, alert_manager: Any) -> None:
+        """注入对账差异告警管理器（G1 EX-12B）。
+
+        注入后：账实差异超阈告警经该实例投递（category=reconciliation）。
+        传 None 可恢复"告警跳过（warning 留痕）"降级路径。
+
+        Parameters
+        ----------
+        alert_manager : Any | None
+            告警管理器实例（鸭子类型，须有 ``alert(**kw) -> int``）。
+        """
+        self._alert_manager = alert_manager
+        logger.info(
+            "[portfolio] 对账告警管理器%s: account=%s",
+            "已注入" if alert_manager is not None else "已移除", self._account_id,
+        )
+
     @property
     def account_reconciler(self) -> Any:
         """当前注入的账户对账器（None=A-7 同步兜底路径）。"""
@@ -1086,13 +1110,16 @@ class LivePortfolio:
         bool : True=成功
         """
         # KP-M04（T-30）：高危写操作准入——未审批拒绝（默认仅审计留痕，不阻断）
-        from myquant.api.middleware.auth import get_operation_guard
-        ok, why = get_operation_guard().check(
-            "transfer_cash", operator="portfolio",
-            action=f"transfer_cash {amount} -> {target_account}")
-        if not ok:
-            logger.error(f"[portfolio] 资金调拨被准入拒绝: {why}")
-            return False
+        guard = get_operation_guard()
+        if guard is None:
+            logger.warning("[portfolio] 未装配准入守卫（register_operation_guard），资金调拨默认放行（仅审计留痕）")
+        else:
+            ok, why = guard.check(
+                "transfer_cash", operator="portfolio",
+                action=f"transfer_cash {amount} -> {target_account}")
+            if not ok:
+                logger.error(f"[portfolio] 资金调拨被准入拒绝: {why}")
+                return False
         logger.warning(f"[portfolio] 资金调拨未实现（v1单账户）: {amount} -> {target_account}")
         return False
 
@@ -1148,8 +1175,6 @@ def _run_self_test() -> int:
     Returns:
         int: 失败项数（0=全绿）。
     """
-    import myquant.monitoring.alerting as alerting_mod  # noqa: WPS433
-
     from myquant.core.event_bus import Event, EventBus, EventType  # noqa: WPS433
 
     sent: List[Dict[str, Any]] = []
@@ -1161,8 +1186,7 @@ def _run_self_test() -> int:
             sent.append(kw)
             return 1
 
-    orig = alerting_mod.get_alert_manager
-    alerting_mod.get_alert_manager = lambda: _StubAlertManager()  # type: ignore[assignment]
+    stub_alert_manager = _StubAlertManager()
 
     passed = 0
     failures: List[str] = []
@@ -1174,46 +1198,43 @@ def _run_self_test() -> int:
         else:
             failures.append(f"{name} ({detail})")
 
-    try:
-        # 1. 默认容差取配置真源（LOCKED=0）；一致 → 不告警
-        p = LivePortfolio(initial_capital=100_000.0)
-        p._cash = 100_000.0
-        b_ok = _SelfTestBroker(100_000.0, [])
-        d = p.reconcile_vs_broker(b_ok)
-        check("默认容差取配置=0", d.cash_tolerance == 0.0, f"tol={d.cash_tolerance}")
-        check("一致快照不告警", d.exceeds_threshold is False and len(sent) == 0,
-              f"sent={len(sent)}")
+    # 1. 默认容差取配置真源（LOCKED=0）；一致 → 不告警
+    p = LivePortfolio(initial_capital=100_000.0, alert_manager=stub_alert_manager)
+    p._cash = 100_000.0
+    b_ok = _SelfTestBroker(100_000.0, [])
+    d = p.reconcile_vs_broker(b_ok)
+    check("默认容差取配置=0", d.cash_tolerance == 0.0, f"tol={d.cash_tolerance}")
+    check("一致快照不告警", d.exceeds_threshold is False and len(sent) == 0,
+          f"sent={len(sent)}")
 
-        # 2. 制造差异 → CRITICAL 告警含明细
-        p2 = LivePortfolio(initial_capital=100_000.0)
-        p2._cash = 100_000.0
-        p2._positions = {"600000.SH": Position(symbol="600000.SH", quantity=100.0)}
-        b_diff = _SelfTestBroker(90_000.0, [])  # 现金差 10000 + 本地多仓 100
-        d2 = p2.reconcile_vs_broker(b_diff)
-        check("差异超阈", d2.exceeds_threshold is True, "")
-        check("差异触发一条 CRITICAL 告警",
-              len(sent) == 1 and sent[0]["level"] == SeverityLevel.CRITICAL,
-              f"sent={len(sent)}")
-        check("告警 category=reconciliation",
-              bool(sent) and sent[0].get("category") == "reconciliation", "")
-        check("告警 details 含现金差与持仓差异",
-              bool(sent) and sent[0]["details"]["cash_diff"] == 10_000.0
-              and "600000.SH" in sent[0]["details"]["position_diffs"], "")
-        check("告警带 reconciliation: dedup_key",
-              bool(sent) and sent[0].get("deduplication_key", "").startswith("reconciliation:"),
-              "")
+    # 2. 制造差异 → CRITICAL 告警含明细
+    p2 = LivePortfolio(initial_capital=100_000.0, alert_manager=stub_alert_manager)
+    p2._cash = 100_000.0
+    p2._positions = {"600000.SH": Position(symbol="600000.SH", quantity=100.0)}
+    b_diff = _SelfTestBroker(90_000.0, [])  # 现金差 10000 + 本地多仓 100
+    d2 = p2.reconcile_vs_broker(b_diff)
+    check("差异超阈", d2.exceeds_threshold is True, "")
+    check("差异触发一条 CRITICAL 告警",
+          len(sent) == 1 and sent[0]["level"] == SeverityLevel.CRITICAL,
+          f"sent={len(sent)}")
+    check("告警 category=reconciliation",
+          bool(sent) and sent[0].get("category") == "reconciliation", "")
+    check("告警 details 含现金差与持仓差异",
+          bool(sent) and sent[0]["details"]["cash_diff"] == 10_000.0
+          and "600000.SH" in sent[0]["details"]["position_diffs"], "")
+    check("告警带 reconciliation: dedup_key",
+          bool(sent) and sent[0].get("deduplication_key", "").startswith("reconciliation:"),
+          "")
 
-        # 3. 事件触发路径：发布 FILLED → 触发核对 → 告警
-        bus = EventBus()
-        p3 = LivePortfolio(initial_capital=100_000.0)
-        p3._cash = 100_000.0
-        p3.attach_reconciliation_event_trigger(bus, b_diff)
-        n_before = len(sent)
-        bus.publish(Event(EventType.ORDER_FILLED, data={"symbol": "600000.SH"}))
-        check("发布 FILLED 事件触发对账并告警", len(sent) == n_before + 1,
-              f"sent={len(sent)}")
-    finally:
-        alerting_mod.get_alert_manager = orig  # type: ignore[assignment]
+    # 3. 事件触发路径：发布 FILLED → 触发核对 → 告警
+    bus = EventBus()
+    p3 = LivePortfolio(initial_capital=100_000.0, alert_manager=stub_alert_manager)
+    p3._cash = 100_000.0
+    p3.attach_reconciliation_event_trigger(bus, b_diff)
+    n_before = len(sent)
+    bus.publish(Event(EventType.ORDER_FILLED, data={"symbol": "600000.SH"}))
+    check("发布 FILLED 事件触发对账并告警", len(sent) == n_before + 1,
+          f"sent={len(sent)}")
 
     total = passed + len(failures)
     print("=" * 60)

@@ -410,7 +410,8 @@ class M1AcceptanceRunner:
     def _fi_reconcile(self) -> Dict[str, Any]:
         """FI-05 人为制造持仓差异（EVENT 路径）：账实差异超阈 → CRITICAL。"""
         # 本地账本现金 100000，券商现金 99900 → 现金差 100 > 容差 0 → 超阈
-        local = LivePortfolio(initial_capital=100_000.0)
+        # G1 EX-12B：对账差异告警改注入投递，须装配本执行器告警管理器
+        local = LivePortfolio(initial_capital=100_000.0, alert_manager=self._manager)
         local._cash = 100_000.0  # type: ignore[attr-defined]  # 验收桩注入
         broker = _ReconcileBroker(cash=99_900.0, positions=[])
         fault_ts: float = time.time()

@@ -36,7 +36,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # 项目根引导，与其它入口脚本一致
 
-from myquant.backtest.engine import BacktestEngine
+from myquant.backtest.engine import BacktestEngine, register_broker_factory
 from myquant.backtest.fee_common import FeeCalculator
 from myquant.backtest.mixed_engine import MixedBacktestEngine
 from myquant.backtest.vectorized_engine import VectorizedBacktestEngine
@@ -52,6 +52,19 @@ from myquant.strategies.base import (
 )
 from myquant.strategies.ma_strategy import MACrossStrategy
 from myquant.utils.memory_pool import EventObjectPool, ObjectPool, reset_event_pool
+
+# G1 EX-09A：装配撮合执行器工厂（scripts 为合法装配层，SimBroker 引用合规）
+from myquant.execution.sim_broker import SimBroker
+register_broker_factory(
+    lambda cfg: SimBroker(
+        initial_capital=cfg.initial_capital,
+        commission_model=cfg.commission,
+        slippage_model=cfg.slippage,
+        price_limit_pct=float(cfg.to_dict().get("price_limit_pct", 0.10)),
+        enforce_limit=bool(cfg.to_dict().get("enforce_limit", False)),
+        is_suspended=None,
+    )
+)
 
 # ── 验收阈值（秒）──
 PERF_TARGET_SECONDS: float = 120.0          # 20min → 2min 目标（120s）

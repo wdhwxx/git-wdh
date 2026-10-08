@@ -27,6 +27,7 @@
 from __future__ import annotations
 
 import itertools
+from functools import partial
 import logging
 import time
 from dataclasses import dataclass
@@ -36,7 +37,7 @@ import numpy as np
 import pandas as pd
 
 from myquant.backtest.data_loader import require_ohlcv
-from myquant.backtest.engine import BacktestEngine
+from myquant.backtest.engine import BacktestEngine, register_broker_factory
 from myquant.models.backtest import BacktestConfig
 from myquant.strategies.base import StrategyBase
 from myquant.strategies.ma_strategy import MACrossStrategy
@@ -194,7 +195,10 @@ def create_strategy(name: str, params: Dict[str, Any]) -> StrategyBase:
     return cls(**params)
 
 
-def evaluate_params(trial: ParamTrial) -> Dict[str, Any]:
+def evaluate_params(
+    trial: ParamTrial,
+    broker_factory: Optional[Callable[[Any], Any]] = None,
+) -> Dict[str, Any]:
     """模块级任务函数：在子进程中评估一组参数，返回指标字典（永不抛出）。
 
     任何异常都被捕获并记入 status="error"（含错误类型与消息），
@@ -233,7 +237,10 @@ def evaluate_params(trial: ParamTrial) -> Dict[str, Any]:
             initial_capital=trial.initial_capital,
             params=trial.params,
         )
-        engine = BacktestEngine(config=config, strategy=strategy, data=trial.data)
+        engine = BacktestEngine(
+            config=config, strategy=strategy, data=trial.data,
+            broker_factory=broker_factory,
+        )
         result = engine.run()
         metrics = result.metrics
         base.update(
@@ -690,8 +697,14 @@ class ParamOptimizer:
         in_sample_end: str = "",
         initial_capital: float = DEFAULT_INITIAL_CAPITAL,
         frequency: str = DEFAULT_FREQUENCY,
+        broker_factory: Optional[Callable[[Any], Any]] = None,
     ) -> None:
-        """初始化优化器并做防御式参数校验。"""
+        """初始化优化器并做防御式参数校验。
+
+        Args:
+            broker_factory: 撮合执行器工厂（G1 EX-09A 注入点，签名
+                factory(config) -> broker；None 时引擎回退全局
+                register_broker_factory，未装配则显式报错）。"""
         if not isinstance(strategy_name, str) or not strategy_name.strip():
             raise ValueError("strategy_name 必须为非空字符串")
         if strategy_name not in STRATEGY_REGISTRY:
@@ -744,6 +757,7 @@ class ParamOptimizer:
         self.in_sample_end = in_sample_end
         self.initial_capital = initial_capital
         self.frequency = frequency
+        self._broker_factory: Optional[Callable[[Any], Any]] = broker_factory
 
     def _build_trials(self) -> List[ParamTrial]:
         """展开全部任务：参数组合 x 标的，每任务只携带本标的行情。
@@ -822,8 +836,16 @@ class ParamOptimizer:
         # 并行上下文：自动管理缓存开关（L1 关闭 + 告警），退出自动恢复
         eval_t0 = time.perf_counter()
         with parallel_factor_context(cpu_workers=self.cpu_workers) as pm:
+            # G1 EX-09A：主进程注册 + 任务函数经 partial 显式传工厂（
+            # Windows spawn 下子进程 pickle partial 参数，不依赖全局注册表
+            # 与 initializer——共享进程池单例场景下后者不可靠）
+            if self._broker_factory is not None:
+                register_broker_factory(self._broker_factory)
+            task_fn: Any = evaluate_params
+            if self._broker_factory is not None:
+                task_fn = partial(evaluate_params, broker_factory=self._broker_factory)
             outcomes = pm.map_cpu(
-                evaluate_params,
+                task_fn,
                 trials,
                 return_exceptions=True,
                 check_pickle=True,
@@ -925,6 +947,7 @@ class ParamOptimizer:
                 in_sample_end=train_end,
                 initial_capital=self.initial_capital,
                 frequency=self.frequency,
+                broker_factory=self._broker_factory,
             )
             result = sub_opt.optimize()
             best = result.best()

@@ -31,6 +31,7 @@ run_批量回测.py 主入口的支撑核心：
 from __future__ import annotations
 
 import hashlib
+from functools import partial
 import json
 import logging
 import os
@@ -44,7 +45,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 import pandas as pd
 
 from myquant.backtest.data_loader import require_ohlcv
-from myquant.backtest.engine import run_backtest
+from myquant.backtest.engine import register_broker_factory, run_backtest
 from myquant.models.backtest import (
     BacktestConfig,
     CommissionModel,
@@ -66,6 +67,7 @@ from myquant.utils.parallel import parallel_factor_context
 from myquant.utils.timer import format_duration
 
 logger = logging.getLogger("myquant.backtest.batch_backtest")
+
 
 # ── 常量（禁魔法数字） ──────────────────────────────────────────────
 DEFAULT_INITIAL_CAPITAL: float = 1_000_000.0
@@ -133,7 +135,10 @@ class BatchTrial:
     include_detail: bool = False
 
 
-def evaluate_batch_symbol(trial: BatchTrial) -> Dict[str, Any]:
+def evaluate_batch_symbol(
+    trial: BatchTrial,
+    broker_factory: Optional[Callable[[Any], Any]] = None,
+) -> Dict[str, Any]:
     """模块级任务函数：经三模式调度回测单标的并返回指标（永不抛出）。
 
     异常被捕获并记入 status="error"，保证进程池不因单标的失败中断整批。
@@ -174,7 +179,8 @@ def evaluate_batch_symbol(trial: BatchTrial) -> Dict[str, Any]:
             risk_free_rate=trial.risk_free_rate,
         )
         result = run_backtest(
-            config, strategy, data=trial.data, mode=trial.mode
+            config, strategy, data=trial.data, mode=trial.mode,
+            broker_factory=broker_factory,
         )
         metrics = result.metrics
         base.update(
@@ -358,8 +364,14 @@ class BatchBacktester:
         batch_size: Optional[int] = None,
         memory_watcher: Optional[MemoryWatcher] = None,
         on_batch_done: Optional[Callable[[int, int], None]] = None,
+        broker_factory: Optional[Callable[[Any], Any]] = None,
     ) -> None:
-        """初始化并做防御式参数校验。"""
+        """初始化并做防御式参数校验。
+
+        Args:
+            broker_factory: 撮合执行器工厂（G1 EX-09A 注入点，签名
+                factory(config) -> broker，如 SimBroker；None 时不注册，
+                BacktestEngine 回退全局 register_broker_factory）。"""
         if not isinstance(strategy_name, str) or not strategy_name.strip():
             raise ValueError("strategy_name 必须为非空字符串")
         if strategy_name not in STRATEGY_REGISTRY:
@@ -425,6 +437,7 @@ class BatchBacktester:
         self.include_detail = include_detail
         self.batch_size = batch_size
         self._on_batch_done = on_batch_done
+        self._broker_factory: Optional[Callable[[Any], Any]] = broker_factory
 
         self._fingerprint_path = Path(fingerprint_path)
         self._results_path = Path(results_path)
@@ -653,8 +666,19 @@ class BatchBacktester:
 
             if trials:
                 with parallel_factor_context(cpu_workers=cpu) as pm:
+                    # G1 EX-09A：主进程注册 + 任务函数经 partial 显式传工厂
+                    # （Windows spawn 下子进程 pickle partial 参数，不依赖
+                    # 全局注册表与 initializer——共享进程池单例场景下后者不可靠）
+                    if self._broker_factory is not None:
+                        register_broker_factory(self._broker_factory)
+                    task_fn: Any = evaluate_batch_symbol
+                    if self._broker_factory is not None:
+                        task_fn = partial(
+                            evaluate_batch_symbol,
+                            broker_factory=self._broker_factory,
+                        )
                     outcomes = pm.map_cpu(
-                        evaluate_batch_symbol, trials,
+                        task_fn, trials,
                         return_exceptions=True, check_pickle=True,
                     )
                 for trial, outcome in zip(trials, outcomes):

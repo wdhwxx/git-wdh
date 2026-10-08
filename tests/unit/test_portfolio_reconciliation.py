@@ -37,11 +37,16 @@ SYMBOL = "000001.SZ"
 SYMBOL2 = "600000.SH"
 
 
+# 模块级告警桩实例（G1 EX-12B：portfolio 改注入后不再走全局 get_alert_manager，
+# alert_calls fixture 把桩写入此处，_make_portfolio 构造时注入）。
+_FAKE_ALERT_MGR: Any = None
+
+
 @pytest.fixture(autouse=True)
 def alert_calls(monkeypatch):
-    """隔离告警管理器（A-7）：把 get_alert_manager() 换成内存记录桩。
+    """隔离告警管理器（A-7）：构造 portfolio 时注入内存记录桩。
 
-    reconcile_vs_broker 超阈时会经 get_alert_manager().alert 发 CRITICAL；
+    reconcile_vs_broker 超阈时会经注入的 alert_manager.alert 发 CRITICAL；
     本文件所有用例统一走内存桩，绝不触碰 quant.db。需要断言告警的用例直接
     声明 ``alert_calls`` 参数即可读取调用记录。
     """
@@ -52,7 +57,8 @@ def alert_calls(monkeypatch):
         return 1
 
     fake_mgr = SimpleNamespace(alert=_fake_alert)
-    monkeypatch.setattr("myquant.monitoring.alerting.get_alert_manager", lambda: fake_mgr)
+    global _FAKE_ALERT_MGR
+    _FAKE_ALERT_MGR = fake_mgr
     return calls
 
 
@@ -76,7 +82,7 @@ def _pos(symbol: str, qty: float) -> Position:
 
 
 def _make_portfolio(cash: float, positions: Dict[str, Position]) -> LivePortfolio:
-    p = LivePortfolio(initial_capital=cash)
+    p = LivePortfolio(initial_capital=cash, alert_manager=_FAKE_ALERT_MGR)
     p._cash = float(cash)
     p._positions = dict(positions)
     return p

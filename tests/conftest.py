@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 from typing import Any, Optional, Sequence, Union
 
+import pytest
+
 import numpy as np
 import pandas as pd
 
@@ -26,6 +28,37 @@ pytest_plugins = [
     "tests.fixtures.live_env",
     "tests.fixtures.database",
 ]
+
+
+def backtest_broker_factory(config: Any) -> Any:
+    """G1 EX-09A：撮合执行器工厂（模块级，Windows spawn 下可 pickle）。
+
+    测试会话与进程池子进程（ParamOptimizer/BatchBacktester 并行评估）共用；
+    tests 层引用 SimBroker 属合法装配（不在 myquant 分层违规扫描内）。
+    """
+    from myquant.execution.sim_broker import SimBroker
+
+    _bcfg = config.to_dict()
+    return SimBroker(
+        initial_capital=config.initial_capital,
+        commission_model=config.commission,
+        slippage_model=config.slippage,
+        price_limit_pct=float(_bcfg.get("price_limit_pct", 0.10)),
+        enforce_limit=bool(_bcfg.get("enforce_limit", False)),
+        is_suspended=None,
+    )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _backtest_broker_factory_registered() -> None:
+    """G1 EX-09A：测试会话装配回测撮合执行器工厂。
+
+    BacktestEngine 不再顶层 import execution 层（L3→L4 反向）；tests 直接构造
+    BacktestEngine 的文件（test_backtest.py 等）依赖本注册保持可用。
+    """
+    from myquant.backtest.engine import register_broker_factory
+
+    register_broker_factory(backtest_broker_factory)
 
 
 # ═══════════════════════════════════════════════════════════════

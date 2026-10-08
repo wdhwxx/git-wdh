@@ -39,7 +39,26 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import List
+from typing import Any, List
+
+
+def _backtest_broker_factory(config: Any) -> Any:
+    """G1 EX-09A：撮合执行器工厂（模块级，Windows spawn 下可 pickle）。
+
+    入口脚本为合法装配层；主进程经 BatchBacktester.broker_factory 装配，
+    进程池子进程经 initializer 重装配（嵌套函数不可 pickle，故定义在模块级）。
+    """
+    from myquant.execution.sim_broker import SimBroker
+
+    _bcfg = config.to_dict()
+    return SimBroker(
+        initial_capital=config.initial_capital,
+        commission_model=config.commission,
+        slippage_model=config.slippage,
+        price_limit_pct=float(_bcfg.get("price_limit_pct", 0.10)),
+        enforce_limit=bool(_bcfg.get("enforce_limit", False)),
+        is_suspended=None,
+    )
 
 
 def find_project_root() -> Path:
@@ -166,6 +185,8 @@ def main() -> int:
             end_date=args.end,
             batch_size=args.batch_size,
             memory_watcher=watcher,
+            # G1 EX-09A：装配撮合执行器工厂（入口脚本为合法装配层）
+            broker_factory=_backtest_broker_factory,
         )
         result = backtester.run(force_full=args.force_full)
 

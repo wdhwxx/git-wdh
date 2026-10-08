@@ -1727,6 +1727,21 @@ def attach_engine(
     """
     task_ids: Dict[str, str] = {}
 
+    # G1 EX-12A/B：portfolio 监控组件装配（L4→L5 合法，装配器职责）。
+    # 注入对账器与告警管理器，保证实盘 PnL 防脏门与对账差异告警真实生效；
+    # 注入失败记 warning 不阻断装配（组件缺失时 portfolio 内部降级放行）。
+    if portfolio is not None:
+        try:
+            from myquant.monitoring.account_reconciler import get_account_reconciler
+            portfolio.set_account_reconciler(get_account_reconciler())
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[attach] 对账器注入失败（PnL 门放行）: {e}")
+        try:
+            from myquant.monitoring.alerting import get_alert_manager
+            portfolio.set_alert_manager(get_alert_manager())
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[attach] 告警管理器注入失败（对账差异告警跳过）: {e}")
+
     if enable_patrol:
         patrol = HealthPatrol()
         # BASE-2：默认绑定指标时序存储（周期落库 60s；初始化失败降级为

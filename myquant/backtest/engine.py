@@ -6,7 +6,8 @@ backtest/engine.py - 回测引擎
 
 设计原则（规则2：为实盘无缝对接准备）:
   - 继承 BaseEngine，与实盘引擎(live/engine.py)共用同一生命周期接口
-  - 使用 SimBroker 撮合订单，实盘切换为 BrokerExecutor 零修改
+  - 撮合执行器（SimBroker 等）由装配方经 register_broker_factory() 或构造
+    broker_factory 注入（G1 EX-09A 消除 L3→L4 反向），实盘切换为 BrokerExecutor 零修改
   - 使用 StrategyContext 调用策略，策略不依赖具体引擎
   - 使用 TradeRecorder 记录交易和净值，实盘可复用
   - 使用 MetricsCalculator 计算绩效，回测/实盘共用
@@ -39,7 +40,7 @@ __version__ = "0.2.0"
 __author__ = "Pythonwdhmm"
 
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -55,7 +56,6 @@ from myquant.core.lookahead_guard import (
     get_lookahead_guard,  # #H2修复：scheduler 统一注入单例
 )
 from myquant.engine.base import BaseEngine
-from myquant.execution.sim_broker import SimBroker
 from myquant.models.backtest import BacktestConfig, BacktestResult
 from myquant.models.market_data import Bar, MarketEvent
 from myquant.models.trade import OrderType
@@ -63,6 +63,35 @@ from myquant.risk.rules import RiskContext  # KP-P3-07: 回测复用实盘风控
 from myquant.strategies.base import Signal, SignalType, StrategyBase, StrategyContext
 
 logger = get_logger(__name__)
+
+# ── 撮合执行器工厂注册表（G1 EX-09A）──────────────────────────
+# BacktestEngine 不再顶层 import execution 层（L3→L4 反向），撮合执行器
+# （SimBroker 等）由合法层（scripts/tests/入口/批量回测装配方）经
+# register_broker_factory 装配，或构造时传 broker_factory 参数。
+# 未装配时 on_init 显式报错（不静默降级）。防未来：工厂只消费已传入 config，
+# 不引用任何未来数据。
+_broker_factory: Optional[Callable[[BacktestConfig], Any]] = None
+
+
+def register_broker_factory(
+    factory: Optional[Callable[[BacktestConfig], Any]],
+) -> None:
+    """注册全局撮合执行器工厂（装配层注入，进程内生效）。
+
+    Args:
+        factory: 工厂函数，签名 factory(config: BacktestConfig) -> broker
+            （如 SimBroker 实例）；传 None 清除注册（回退为仅实例级注入）。
+
+    Raises:
+        TypeError: factory 不可调用时抛出。
+    """
+    global _broker_factory
+    if factory is not None and not callable(factory):
+        raise TypeError(f"broker_factory 必须可调用，收到: {type(factory).__name__}")
+    _broker_factory = factory
+    logger.info(
+        "[backtest] 撮合执行器工厂%s", "已装配" if factory is not None else "已清除"
+    )
 
 
 class BacktestEngine(BaseEngine):
@@ -107,6 +136,7 @@ class BacktestEngine(BaseEngine):
         name: str = "backtest",
         lookahead_guard: Optional[LookaheadGuard] = None,
         enable_lookahead_guard: bool = True,
+        broker_factory: Optional[Callable[[BacktestConfig], Any]] = None,
     ):
         """
         初始化回测引擎
@@ -120,6 +150,9 @@ class BacktestEngine(BaseEngine):
             name: 引擎名称
             lookahead_guard: 防未来函数校验器实例（None则自动创建，#S3修复）
             enable_lookahead_guard: 是否启用防未来函数显式校验（默认True，规则4要求强制开启）
+            broker_factory: 撮合执行器工厂（G1 EX-09A 注入点，签名
+                factory(config) -> broker；None 时用 register_broker_factory 注册的
+                全局工厂，仍未装配则 on_init 显式报错）
 
         数据优先级:
             如果同时传入 data 和 data_provider，优先使用 data（向后兼容），
@@ -132,7 +165,9 @@ class BacktestEngine(BaseEngine):
         self.data_provider = data_provider
 
         # 核心组件
-        self.broker: Optional[SimBroker] = None
+        self.broker: Optional[Any] = None
+        # G1 EX-09A：实例级撮合执行器工厂（优先于全局注册表）
+        self._broker_factory: Optional[Callable[[BacktestConfig], Any]] = broker_factory
         self.recorder: Optional[TradeRecorder] = None
         self.metrics_calc: Optional[MetricsCalculator] = None
         self.context: Optional[StrategyContext] = None
@@ -209,6 +244,29 @@ class BacktestEngine(BaseEngine):
     # 生命周期：初始化
     # ------------------------------------------------------------------
 
+    def _resolve_broker(self, config: BacktestConfig) -> Any:
+        """解析撮合执行器：实例级工厂 > 全局注册表；未装配显式报错。
+
+        Args:
+            config: 回测配置（传给工厂构造撮合执行器）。
+
+        Returns:
+            撮合执行器实例（已 connect 前状态）。
+
+        Raises:
+            ValueError: 实例级与全局均未装配工厂，或工厂返回 None 时抛出。
+        """
+        factory = self._broker_factory or _broker_factory
+        if factory is None:
+            raise ValueError(
+                "BacktestEngine 需要撮合执行器工厂：请经 register_broker_factory() "
+                "装配（如 SimBroker），或构造时传 broker_factory 参数（G1 EX-09A）"
+            )
+        broker = factory(config)
+        if broker is None:
+            raise ValueError("broker_factory 返回了 None（撮合执行器不可为空）")
+        return broker
+
     def on_init(self, config: Optional[Dict[str, Any]] = None) -> None:
         """
         初始化回测引擎
@@ -230,16 +288,8 @@ class BacktestEngine(BaseEngine):
         if not self.data and self.data_provider is not None:
             self._load_data_from_provider()
 
-        # 1. 创建模拟券商
-        _bcfg = self.config.to_dict()
-        self.broker = SimBroker(
-            initial_capital=self.config.initial_capital,
-            commission_model=self.config.commission,
-            slippage_model=self.config.slippage,
-            price_limit_pct=float(_bcfg.get("price_limit_pct", 0.10)),
-            enforce_limit=bool(_bcfg.get("enforce_limit", False)),
-            is_suspended=None,
-        )
+        # 1. 创建撮合执行器（G1 EX-09A：工厂注入，装配责任在合法层）
+        self.broker = self._resolve_broker(self.config)
         self.broker.connect()
 
         # 1b. KP-P3-07: 装配与实盘同源的 RiskManager（回测执行实盘风控）
@@ -1218,4 +1268,19 @@ def _run_self_test() -> int:
 
 if __name__ == "__main__":
     # 自测 Demo：运行全部校验项
+    # G1 EX-09A：main 语境装配撮合执行器工厂（分层违规豁免边界内）
+    from myquant.execution.sim_broker import SimBroker
+
+    def _selftest_broker_factory(config: BacktestConfig) -> Any:
+        _bcfg = config.to_dict()
+        return SimBroker(
+            initial_capital=config.initial_capital,
+            commission_model=config.commission,
+            slippage_model=config.slippage,
+            price_limit_pct=float(_bcfg.get("price_limit_pct", 0.10)),
+            enforce_limit=bool(_bcfg.get("enforce_limit", False)),
+            is_suspended=None,
+        )
+
+    register_broker_factory(_selftest_broker_factory)
     raise SystemExit(_run_self_test())

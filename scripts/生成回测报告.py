@@ -211,9 +211,20 @@ def main() -> int:
     guard = get_lookahead_guard()
     guard.reset()
 
-    # ── 7. 创建回测引擎并运行 ──
+    # ── 7. 创建回测引擎并运行（G1 EX-09A：装配撮合执行器工厂）──
     try:
-        from myquant.backtest.engine import BacktestEngine
+        from myquant.backtest.engine import BacktestEngine, register_broker_factory
+        from myquant.execution.sim_broker import SimBroker
+        register_broker_factory(
+            lambda cfg: SimBroker(
+                initial_capital=cfg.initial_capital,
+                commission_model=cfg.commission,
+                slippage_model=cfg.slippage,
+                price_limit_pct=float(cfg.to_dict().get("price_limit_pct", 0.10)),
+                enforce_limit=bool(cfg.to_dict().get("enforce_limit", False)),
+                is_suspended=None,
+            )
+        )
         engine = BacktestEngine.from_data_provider(
             data_provider=data_provider, config=bt_config, strategy=strategy,
         )

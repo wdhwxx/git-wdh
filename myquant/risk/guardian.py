@@ -194,6 +194,16 @@ def register_operation_guard(guard: Any) -> None:
     logger.info("[guardian] 高危写操作准入守卫已装配: %s", type(guard).__name__)
 
 
+def get_operation_guard() -> Any:
+    """取当前已装配的准入守卫实例（G1 EX-11C/12C/12D 共用访问器）。
+
+    Returns:
+        Any | None: 守卫实例；未装配（register_operation_guard 未调用）返回 None，
+        调用方须按"默认放行（仅审计留痕）"语义处理。
+    """
+    return _OPERATION_GUARD
+
+
 # ═══════════════════════════════════════════════
 #  风控守护
 # ═══════════════════════════════════════════════

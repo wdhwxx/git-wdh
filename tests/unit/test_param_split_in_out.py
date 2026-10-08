@@ -23,6 +23,10 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from typing import Any  # noqa: E402
+
+from myquant.execution.sim_broker import SimBroker  # noqa: E402
+
 from myquant.backtest.param_optimizer import (  # noqa: E402
     ParamGrid,
     ParamOptimizationResult,
@@ -31,6 +35,20 @@ from myquant.backtest.param_optimizer import (  # noqa: E402
     ParamTrial,
     evaluate_params,
 )
+
+
+def _backtest_broker_factory(config: Any) -> Any:
+    """G1 EX-09A：撮合执行器工厂（tests 合法装配层，与 tests/conftest.py
+    会话装配同源；模块级函数保证 Windows spawn 下可 pickle）。"""
+    _bcfg = config.to_dict()
+    return SimBroker(
+        initial_capital=config.initial_capital,
+        commission_model=config.commission,
+        slippage_model=config.slippage,
+        price_limit_pct=float(_bcfg.get("price_limit_pct", 0.10)),
+        enforce_limit=bool(_bcfg.get("enforce_limit", False)),
+        is_suspended=None,
+    )
 
 
 def _make_data(
@@ -81,6 +99,7 @@ def _run_split(in_sample_end: str) -> ParamOptimizationResult:
         end_date="2024-01-31",
         in_sample_end=in_sample_end,
         cpu_workers=1,
+        broker_factory=_backtest_broker_factory,
     )
     return opt.optimize()
 
@@ -94,6 +113,7 @@ def _run_nosplit() -> ParamOptimizationResult:
         start_date="2023-01-02",
         end_date="2024-01-31",
         cpu_workers=1,
+        broker_factory=_backtest_broker_factory,
     )
     return opt.optimize()
 
@@ -205,6 +225,7 @@ class TestWalkForward:
             start_date="2023-01-02",
             end_date="2024-01-31",
             cpu_workers=1,
+            broker_factory=_backtest_broker_factory,
         )
         wf = opt.walk_forward(folds=2)
         assert wf.fold_count == 2
@@ -223,6 +244,7 @@ class TestWalkForward:
             start_date="2023-01-02",
             end_date="2024-01-31",
             cpu_workers=1,
+            broker_factory=_backtest_broker_factory,
         )
         with pytest.raises(ValueError, match="folds 必须为"):
             opt.walk_forward(folds=1)

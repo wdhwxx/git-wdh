@@ -312,6 +312,16 @@ def create_app(
         openapi_url="/openapi.json" if enable_docs else None,
     )
 
+    # G1 EX-11C/12C/12D 装配闭环：准入守卫注册表装配（L6→L3 合法）。
+    # 未配置守卫时 get_operation_guard() 返回未启用实例（仅审计留痕），
+    # portfolio.transfer_cash 与 run_mode LIVE 切换经 guardian 访问器取用同一实例。
+    try:
+        from myquant.api.middleware.auth import get_operation_guard as _api_operation_guard
+        from myquant.risk.guardian import register_operation_guard
+        register_operation_guard(_api_operation_guard())
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[api] 准入守卫装配失败（默认放行，仅审计留痕）: {e}")
+
     # ── M4修复：服务获取统一走依赖注入层（api/dependencies/get_services.py）──
     # 外部注入的服务先注册到 ServiceContainer（保持注入优先能力），
     # 未注入时由依赖注入函数懒加载全局单例并回填容器。

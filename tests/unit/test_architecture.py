@@ -1,5 +1,5 @@
 # tests/unit/test_architecture.py
-"""架构分层门禁 v4.4（G1 例外收敛首批：EX-07B/08A/11A/11B/11C/15A 消除，回写#258）。
+"""架构分层门禁 v4.6（G1 例外收敛三批：EX-09A/B 消除，回写#259）。
 
 本版在 v4.2 基础上的修正（新增 L-a~L-c）：
   L-a  新增 R-23 入口白名单冻结：scripts/（41 个，含 故障演练/灾备演练 子目录）与
@@ -13,7 +13,19 @@
        （financial_service 因子引擎工厂注入）、EX-11A/B（rules 告警/指标显式注入）、
        EX-11C（guardian 准入守卫注册表）、EX-15A（MonitorCenterDataProvider 下沉 monitoring）
        六项消除；例外表 25→19 对；VIOLATION_BASELINE 34→27。
-       —— 权威基线冻结：违规 27 / 全量真环 3 / 顶层 0 / 例外 19 / 零覆盖存量 49。
+  L-e  G1 例外收敛次批（回写#259）：EX-12A/B（portfolio 对账器/告警管理器构造注入 +
+       scheduler 装配器装配）、EX-12C/D（portfolio/run_mode 改经 guardian 注册表访问器
+       取准入守卫，消除 live→api.auth 反向）；新增 EX-13K 登记 scheduler→
+       monitoring.account_reconciler（装配器，同 EX-13 族）；例外表 19→16 对；
+       VIOLATION_BASELINE 27→24（EX-12 四项消除 -4，EX-13K 装配引用新增 +1）；
+       LAZY_CYCLE_BASELINE 3→2（环3 portfolio↔account_reconciler 随 EX-12A 消除）。
+  L-f  G1 例外收敛三批（回写#259）：EX-09A（backtest.engine 撮合执行器工厂
+       register_broker_factory/broker_factory 注入，装配责任上移 scripts/tests/
+       批量回测入口，进程池子进程经 parallel.set_worker_initializer 重装配）、
+       EX-09B（order_matcher SimBroker 真值对照段移入 __main__ 语境）；例外表
+       16→14 对；VIOLATION_BASELINE 24→22。G1 限期例外全部清零（仅剩 EX-01A/
+       10A/B/13A~K 永久型 14 对）。
+       —— 权威基线冻结：违规 22 / 全量真环 2 / 顶层 0 / 例外 14 / 零覆盖存量 49。
        （R-19 为"被 tests import 即视为覆盖"的引用级近似；真实覆盖由 pytest-cov 判定，
         cov 实测 58% / 零覆盖业务 12 个仅作 G0-9 补测清单，二者口径不同不混用。）
 
@@ -25,7 +37,7 @@ v4.2（K-f~K-h）与 v4.1（K-a~K-e）的修正结论全部沿用，摘要如下
        momentum:581/586、kunpeng:956/959、mean_reversion:497/502），v4.1 把它们当 top，
        制造了伪环。修正后全量真环 = 3（环1 core.event_bus↔utils.memory_pool、
        环2 monitoring 内部 4 模块、环3 live.portfolio↔monitoring.account_reconciler），
-       LAZY_CYCLE_BASELINE 由 4 改 3。
+       LAZY_CYCLE_BASELINE 由 4 改 3。回写#259：EX-12A 消除后环3 消失，3→2。
        同一盲区还误计了违规：utils/parallel.py:945/970/988 -> factor_cache 三条
        也在 __main__ 自测块，v4/v4.1 把它们当违规计入（L0->L2=6），排除后 L0->L2=3，
        权威违规由 40 修正为 37；回写#255 P0-1/P0-2 消除后再由 37 修正为 35。
@@ -39,9 +51,11 @@ v4.2（K-f~K-h）与 v4.1（K-a~K-e）的修正结论全部沿用，摘要如下
 S-3 R-19 更名 TestR19ZeroReference（诚实命名：引用级判定，非执行覆盖）。
 
 权威台账：docs/系统性审核/整改台账_2026Q4.md
-基线口径：违规=27（语义矩阵 α，排除 TYPE_CHECKING 与 __main__ 自测块；
-          P0-1/P0-2 后 37→35（#255），EX-07A 后 35→34（#257），G1 六项后 34→27（#258））；
-          全量真环=3（另 1 组 strategies 包 re-export 惯用环为包装环，白名单剔除）；
+基线口径：违规=22（语义矩阵 α，排除 TYPE_CHECKING 与 __main__ 自测块；
+          P0-1/P0-2 后 37→35（#255），EX-07A 后 35→34（#257），G1 六项后 34→27（#258），
+          EX-12 四项消除且 EX-13K 装配引用新增后 27→24（#259），EX-09 两项后 24→22）；
+          全量真环=2（另 1 组 strategies 包 re-export 惯用环为包装环，白名单剔除；
+          环3 随 EX-12A 消除，回写#259）；
           顶层真环=0；>1500 行白名单 14 项（相对路径，行数基线见 OVERSIZE_LINE_BASELINE）；
           零覆盖存量 49 个引用级业务模块（2026-10-08 冻结，新增零覆盖即红，回写#256）。
 运行状态：已在 conda_wdh 环境真实运行（门禁 24 passed/1 skipped：R-19 冻结后转真跑，
@@ -83,22 +97,10 @@ SAME_OK: dict[str, set[str]] = {"L2": {"L2E"}, "L2E": {"L2"}}
 _EXC = [
     ("EX-01A", "myquant/database/trade_log.py", "myquant.models.trade",
      "永久", "2099-12-31", "runtime", "ORM 必引领域模型"),
-    ("EX-09A", "myquant/backtest/engine.py", "myquant.execution.sim_broker",
-     "G2-2", "2027-03-31", "runtime", "回测撮合"),
-    ("EX-09B", "myquant/backtest/order_matcher.py", "myquant.execution.sim_broker",
-     "G2-2", "2027-03-31", "runtime", "统一撮合"),
     ("EX-10A", "myquant/allocation/risk_parity.py", "myquant.monitoring.audit_log",
      "永久", "2099-12-31", "runtime", "审计横切（可注入）"),
     ("EX-10B", "myquant/strategies/param_tuner.py", "myquant.monitoring.audit_log",
      "永久", "2099-12-31", "runtime", "审计横切（可注入）"),
-    ("EX-12A", "myquant/live/portfolio.py", "myquant.monitoring.account_reconciler",
-     "G2-3", "2027-03-31", "runtime", "对账集成"),
-    ("EX-12B", "myquant/live/portfolio.py", "myquant.monitoring.alerting",
-     "G2-3", "2027-03-31", "runtime", "PnL 告警"),
-    ("EX-12C", "myquant/live/portfolio.py", "myquant.api.middleware.auth",
-     "G2-3", "2027-03-31", "runtime", "准入守卫"),
-    ("EX-12D", "myquant/live/run_mode.py", "myquant.api.middleware.auth",
-     "G2-3", "2027-03-31", "runtime", "准入守卫"),
     ("EX-13A", "myquant/live/scheduler.py", "myquant.monitoring.metrics_history",
      "永久", "2099-12-31", "runtime", "装配器"),
     ("EX-13B", "myquant/live/scheduler.py", "myquant.monitoring.meta_monitor",
@@ -119,6 +121,8 @@ _EXC = [
      "永久", "2099-12-31", "runtime", "装配器"),
     ("EX-13J", "myquant/live/scheduler.py", "myquant.monitoring.audit_log",
      "永久", "2099-12-31", "runtime", "装配器"),
+    ("EX-13K", "myquant/live/scheduler.py", "myquant.monitoring.account_reconciler",
+     "永久", "2099-12-31", "runtime", "装配器（EX-12A 装配责任上移，回写#259）"),
 ]
 EXCEPTIONS: dict[tuple[str, str], dict] = {
     (f, t): {"id": i, "task": tk, "expires": date.fromisoformat(e), "kind": k, "why": w}
@@ -129,10 +133,10 @@ EXCEPTIONS: dict[tuple[str, str], dict] = {
 # 回写#255：P0-1（performance_config→ma_strategy）与 P0-2（backtest.engine→live.engine）已消除，集合清空
 P0_MUST_FIX: set[tuple[str, str]] = set()
 
-VIOLATION_BASELINE = 27          # K-a + K-f：语义矩阵 α，排除 TYPE_CHECKING 与 __main__；回写#255 37→35，#257 EX-07A 35→34，#258 G1 六项 34→27
+VIOLATION_BASELINE = 22          # K-a + K-f：语义矩阵 α，排除 TYPE_CHECKING 与 __main__；#255 37→35，#257 35→34，#258 34→27，#259 前段 27→24（EX-12-4 + EX-13K+1），EX-09A/B 后 24→22
 TOP_LEVEL_CYCLE_BASELINE = 0     # K-b：顶层真环（剔除包装惯用环与 __main__ 后）
-LAZY_CYCLE_BASELINE = 3          # K-f：全量真环，只减不增（环1 event_bus↔memory_pool、
-                                 #      环2 monitoring 内部4模块、环3 portfolio↔account_reconciler）
+LAZY_CYCLE_BASELINE = 2          # K-f：全量真环，只减不增（环1 event_bus↔memory_pool、
+                                 #      环2 monitoring 内部4模块；环3 随 EX-12A 消除，#259）
 
 OVERSIZE_LIMIT = 1500
 OVERSIZE_WHITELIST = {           # 相对 myquant 的路径（禁 basename）
@@ -200,7 +204,7 @@ ENTRY_ALLOWLIST: set[str] = {
 # OVERSIZE 白名单 14 项行数基线（2026-10-08 实测冻结）：白名单内文件行数只减不增。
 OVERSIZE_LINE_BASELINE: dict[str, int] = {
     "monitoring/alerting.py": 3677, "live/engine.py": 2858, "core/event_bus.py": 2383,  # engine 2851→2858：用户提交 1499c09 引入 +7 行（回写#258）
-    "live/scheduler.py": 2348, "monitoring/metrics_collector.py": 2284,
+    "live/scheduler.py": 2363, "monitoring/metrics_collector.py": 2284,
     "monitoring/action_engine.py": 2259, "data_access/manager.py": 2170,
     "live/brokers/qmt_broker.py": 2170, "live/data_feed.py": 2147,
     "gui/backtest_config_dialog.py": 1861, "risk/risk_manager.py": 1901,
@@ -479,7 +483,7 @@ class TestR01aTopLevelCycle:
 
 
 class TestR01bLazyCycle:
-    """R-01b：全量导入图真环数只减不增（基线 3）。"""
+    """R-01b：全量导入图真环数只减不增（基线 2，回写#259 环3 消除）。"""
 
     def test_lazy_cycle_not_rising(self):
         cycles = _real_cycles(top_only=False)

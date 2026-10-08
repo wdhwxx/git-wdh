@@ -936,44 +936,6 @@ def _run_self_test() -> int:
     except ValueError as exc:
         check("向量化 vs 标量撮合一致（2000 笔混合）", False, str(exc))
 
-    # 9. 与原有 SimBroker 的 MARKET/LIMIT 成交价一致（真值基准对照）
-    from myquant.execution.sim_broker import SimBroker
-    from myquant.models.backtest import SlippageModel
-
-    broker = SimBroker(
-        initial_capital=1_000_000.0,
-        slippage_model=SlippageModel(type="none"),  # 关闭滑点便于对比基础成交价
-    )
-    broker.connect()
-    legacy_ok = True
-    for otype, side, px, o, h, l, expect in [
-        ("MARKET", "BUY", None, 10.0, 11.0, 9.5, 10.0),
-        ("LIMIT", "BUY", 10.5, 10.0, 11.0, 9.5, 10.0),
-        ("LIMIT", "SELL", 10.2, 10.0, 10.8, 9.8, 10.2),
-        ("LIMIT", "SELL", 10.2, 10.0, 10.1, 9.8, None),
-    ]:
-        order = make_order(otype, side, price=px)
-        bar = make_bar(o, h, l)
-        new_fill = matcher.match(order=order, bar=bar)
-        # SimBroker 重新构造订单提交撮合
-        b_order = Order(
-            symbol="600519.SH", side=OrderSide(side),
-            order_type=OrderType(otype), quantity=100.0, price=px,
-        )
-        broker.submit_order(b_order)
-        trades = broker.on_bar(bar)
-        legacy_price = trades[0].price if trades else None
-        new_price = new_fill.price if new_fill else None
-        if (legacy_price is None) != (new_price is None) or (
-            legacy_price is not None and abs(legacy_price - new_price) > 1e-9
-        ):
-            legacy_ok = False
-            failures.append(
-                f"与 SimBroker 不一致: {otype}/{side} legacy={legacy_price} new={new_price}"
-            )
-        broker.reset()
-    check("与原有 SimBroker MARKET/LIMIT 成交价一致", legacy_ok, "存在不一致")
-
     # 9b. 停牌校验（volume=0 → 买卖均不成交）
     f_halt_buy = matcher.match(
         make_order("MARKET", "BUY"),
@@ -1127,4 +1089,67 @@ def _run_self_test() -> int:
 
 if __name__ == "__main__":
     # 自测 Demo：运行全部校验项
-    raise SystemExit(_run_self_test())
+    exit_code = _run_self_test()
+
+    # G1 EX-09B：与原有 SimBroker 的 MARKET/LIMIT 成交价一致（真值基准对照）。
+    # 对照段原在 _run_self_test 内（模块级函数），import execution 层属 func 语境
+    # 分层违规；移入 main 语境（分层违规豁免边界内）后保持同一真值对照覆盖。
+    if exit_code == 0:
+        from myquant.execution.sim_broker import SimBroker
+        from myquant.models.backtest import SlippageModel
+        from myquant.models.trade import Order, OrderSide, OrderType
+
+        def _mk_order(otype: str, side: str, price: Optional[float] = None) -> Order:
+            order = Order(
+                symbol="600519.SH",
+                side=OrderSide(side),
+                order_type=OrderType(otype),
+                quantity=100.0,
+                price=price,
+            )
+            order.submit()
+            return order
+
+        def _mk_bar(open_px: float, high_px: float, low_px: float) -> Bar:
+            return Bar(
+                symbol="600519.SH",
+                open=open_px, high=high_px, low=low_px, close=open_px,
+                pre_close=10.0, volume=1_000_000.0, timestamp=1_700_000_000.0,
+            )
+
+        matcher = OrderMatcher()
+        broker = SimBroker(
+            initial_capital=1_000_000.0,
+            slippage_model=SlippageModel(type="none"),  # 关闭滑点便于对比基础成交价
+        )
+        broker.connect()
+        legacy_ok = True
+        for otype, side, px, o, h, l in [
+            ("MARKET", "BUY", None, 10.0, 11.0, 9.5),
+            ("LIMIT", "BUY", 10.5, 10.0, 11.0, 9.5),
+            ("LIMIT", "SELL", 10.2, 10.0, 10.8, 9.8),
+            ("LIMIT", "SELL", 10.2, 10.0, 10.1, 9.8),
+        ]:
+            order = _mk_order(otype, side, price=px)
+            bar = _mk_bar(o, h, l)
+            new_fill = matcher.match(order=order, bar=bar)
+            # SimBroker 重新构造订单提交撮合
+            b_order = Order(
+                symbol="600519.SH", side=OrderSide(side),
+                order_type=OrderType(otype), quantity=100.0, price=px,
+            )
+            broker.submit_order(b_order)
+            trades = broker.on_bar(bar)
+            legacy_price = trades[0].price if trades else None
+            new_price = new_fill.price if new_fill else None
+            if (legacy_price is None) != (new_price is None) or (
+                legacy_price is not None and abs(legacy_price - new_price) > 1e-9
+            ):
+                legacy_ok = False
+                print(f"  与 SimBroker 不一致: {otype}/{side} legacy={legacy_price} new={new_price}")
+            broker.reset()
+        if legacy_ok:
+            print("与原有 SimBroker MARKET/LIMIT 成交价一致（真值基准对照通过）")
+        else:
+            exit_code = 1
+    raise SystemExit(exit_code)
