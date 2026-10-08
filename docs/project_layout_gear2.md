@@ -423,6 +423,8 @@ Pythonwdhmm/
 │   ├── 实盘模拟回测.py                # ✨【新增】实盘模拟回测入口（单券商端到端链路验证，akshare真实历史数据）
 
 │   ├── 双券商模拟实盘.py              # ✨【新增·任务27】双券商并行模拟实盘入口（QMT主+Ptrade备+主备failover演示，akshare优先+模拟兜底）
+│   ├── 同步交易日历.py                # ✨【回写#256】交易日历同步薄入口（P2-① #83 既有实现，G0 入口冻结盘点补登）：调 myquant/utils/trade_calendar.py sync_trade_calendar/load_trade_calendar → data/trade_calendar.csv；顶部 sys.path 注入；业务逻辑归 myquant
+│   ├── 同步股本变动.py                # ✨【回写#256】股本变动同步薄入口（P1-② #83 既有实现，G0 入口冻结盘点补登）：调 data_access/share_change_sync_service.py ShareChangeSyncService + DataFetcher（优先通达信本地、备用 akshare，同 数据下载.py 口径）→ share_change 表；顶部 sys.path 注入；业务逻辑归 myquant
 
 │   ├── 实时行情驱动.py                # ✨【任务28】实时行情驱动入口：腾讯/akshare/mock多源，流式清洗+事件总线，--broker paper/qmt/ptrade/dual
 
@@ -741,7 +743,7 @@ Pythonwdhmm/
 │   │   ├── test_live_bar_dedup.py    # ✨【回写#139】日线bar去重测试（KP-P3-02：bar_date_to_epoch往返/解析失败0.0/make_bar时间戳确定性且还原日期/引擎同根bar二次推送丢弃且不达撮合/不同日期正常/不同标的同日不误删，7项）✅已完成
     │   ├── test_sim_partial_fill_cap.py # ✨【回写#179】sim_broker 参与率限成交测试（KP-P2-03：默认全量不变/参与率限到 volume*rate/不超限/零成交保留订单/vectorized 负现金计数源码断言，5项）✅已完成
     │   ├── test_adjust_strict.py      # ✨【回写#180】复权因子缺失不再静默降级测试（KP-P2-09：strict raise/降级 attrs raw/生效 attrs hfq/扫描器读 yaml adjust/结果 meta 落盘源码断言，5项）✅已完成
-    │   ├── test_architecture.py       # ✨【回写#255】架构分层门禁（v4.2：R-01 环基线0/3、R-02 跨层违规基线35、R-05/R-09/R-11/R-13/R-14/R-16/R-19/R-20/R-21/R-22；P0_MUST_FIX 已清空）✅已完成
+    │   ├── test_architecture.py       # ✨【回写#255/#256】架构分层门禁（v4.3 基线锁定：R-01 环基线0/3、R-02 跨层违规基线35、R-05/R-09/R-11/R-13/R-14/R-16/R-19(零覆盖冻结49)/R-20/R-21/R-22/R-23(入口冻结)/R-24(薄化冻结)；P0_MUST_FIX 已清空）✅已完成
 
 │   │   ├── test_signal_idempotency.py # ✨【回写#43】幂等去重测试（Signal确定性ID/to_order映射/引擎去重/分钟线粒度/start重置/QMT端按订单ID去重/统计双计修复验证，19项）✅已完成
 │   │   ├── test_guard_mounting.py    # ✨【回写#140】防未来铁律1/2/4挂载测试（KP-P2-08：indicators_recorded>0/钩子因果口径/T+1指标桩抛错/T+1信号桩引擎标记失败/止损UPDATE早于CHECK抛错/数据访问未来抛错/无guard注入退化为无操作，10项）✅已完成
@@ -3916,8 +3918,17 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
    h. 补充项（全量脚本默认路径专项审计 + 监控配置管理双缺陷修复）：按用户要求对 2026-10-01 至当下 git 产出的全部 scripts/*.py（21 个，含子目录）做 #254 同类缺陷专项审计——19 个安全（已根治 6：验收_B/D/C、两演练；find_project_root/_REPO_ROOT/get_project_path 锚定 10：周复盘/可测量性统计/推理延迟基准/标的预筛选/数据下载/一键平仓/数据导出/结果备份/数据清洗/交易日历/股本变动/复权因子/行情驱动/运行API 等；默认不落盘 1：监控可测量性统计 --out 可选）；**发现 1 个同类缺陷（监控配置管理 D-7 链路，双缺陷）**：①scripts/监控配置管理.py 无 sys.path 注入，从 scripts/ 目录运行顶层 import myquant 直接 ModuleNotFoundError（复现确认）；②业务模块 myquant/monitoring/config_as_code.py 默认路径常量 DEFAULT_CONFIG_DIR="config/monitoring"、DEFAULT_LEDGER_PATH="docs/监控档案/monitoring_config_ledger.json" 为裸相对路径且无项目根探测，从非项目根 CWD 实例化 Registry 会操作 scripts/config/monitoring、落账 scripts/docs/监控档案/（与 #254 落档分叉同根因，且比薄入口默认路径更隐蔽）。修复：config_as_code.py 补 _PROJECT_ROOT 探测（向上找 pyproject.toml/myquant 目录）+ __init__ 默认路径改 _PROJECT_ROOT 拼接（参数注入 config_dir/ledger_path 语义不变，tests 临时目录注入不受影响，常量无外部引用）；监控配置管理.py 补 _REPO_ROOT 探测 + sys.path 注入。验证：py_compile 通过；从 scripts/ 目录运行 --list 正常（4 项配置指纹读取、账本未初始化 version=None 属正常态），scripts/config、scripts/docs 均未生成（本提交 commit message 引用 #254 补充项）。
 ## #255 · 2026-10-08 · 架构治理 P0-1/P0-2 消除（performance_config 去 strategies 依赖 + 风控装配工厂下沉 risk）
    事实来源：本次落地（架构分层治理方案 v5.3 §4.4 G0 启动顺序「P0 必修 2 项」），代码级核验：py_compile 6 文件通过 + performance_config 自测通过 + 架构门禁 23 passed/2 skipped（R-02 基线 37→35 全绿）+ 相关单测 22 passed + 定向回归 279 passed/1 skipped；全量 pytest 结果见提交后终验。
-   a. **P0-1 消除（myquant/utils/performance_config.py）**：_main() 自测第 392 行 rom myquant.strategies.ma_strategy import MACrossStrategy（L0→L3 反向依赖）删除，改为本地能力桩 _EngineCapableStub（仅实现 engine_modes() 接口，duck-type 模拟策略引擎能力）——esolve_engine_mode 本身只依赖 strategy.engine_modes() 能力接口，不依赖具体策略类；模块公开 API（PerformanceConfig/resolve_engine_mode/apply_performance）零变化。
+   a. **P0-1 消除（myquant/utils/performance_config.py）**：_main() 自测第 392 行 rom myquant.strategies.ma_strategy import MACrossStrategy（L0→L3 反向依赖）删除，改为本地能力桩 _EngineCapableStub（仅实现 engine_modes() 接口，duck-type 模拟策略引擎能力）——
+esolve_engine_mode 本身只依赖 strategy.engine_modes() 能力接口，不依赖具体策略类；模块公开 API（PerformanceConfig/resolve_engine_mode/apply_performance）零变化。
    b. **P0-2 消除（风控装配工厂下沉）**：uild_risk_manager_from_config 由 myquant/live/engine.py:2685 整体下沉至 myquant/risk/risk_manager.py 末尾（依赖面仅 RiskManager + DataQualityRiskConfig，同模块，不引入新跨层依赖）；live/engine.py 顶部 rom myquant.risk.risk_manager import build_risk_manager_from_config（L4→L3 合法方向），create_live_engine 调用点不变；backtest/engine.py:245 懒导入改 rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向依赖；tests/unit/test_daily_loss_limit.py:27 import 同步调整。
    c. **门禁同步（tests/unit/test_architecture.py）**：P0_MUST_FIX 两对条目清空（集合置空并注释回写#255）；VIOLATION_BASELINE 37→35（实测违规 35 条，P0 两行消除后）；TestR02CrossLayer docstring 基线 40→35（顺带修正过时注释）。
    d. **验证结果**：py_compile 6 文件通过；python -m myquant.utils.performance_config 自测全绿（[4] auto 解析=vectorized，能力桩生效）；架构门禁 23 passed/2 skipped（R-02=35 未超基线、违规全部登记、无幽灵、无过期；真环 3 不变；R-21/R-22 通过）；test_daily_loss_limit+test_backtest_risk 22 passed；回测/实盘/风控定向组 279 passed/1 skipped；全量 pytest tests/unit 结果以提交后终验为准。
    e. **纪律遵守**：业务逻辑归 myquant（performance_config/risk_manager/live/engine/backtest/engine 均在蓝图目录树已标注，本回写同步追加 #255 条目）；无蓝图外新文件；未新增测试文件（性能配置自测保留于模块 __main__ demo，符合 py文件代码规则第 5 条）；严格防未来（resolve_engine_mode 仅消费已配置能力声明；风控装配仅消费配置值，无时序数据引用）；工作区既有未提交改动（docs/系统性审核/鲲鹏量化交易系统_架构分层治理方案_v5.md）未触碰；任务后 git 提交（commit message 引用 #255）。
+
+## #256 · 2026-10-08 · G0 收尾：入口/薄化冻结 + 基线锁定（门禁 v4.3，R-23/R-24/R-19 冻结）
+   事实来源：本次落地（架构分层治理方案 v5.4 §4.4 G0 启动顺序「入口/薄化冻结 → 基线锁定」），代码级核验：py_compile 通过 + 门禁 26 passed/1 skipped（R-19 冻结转真跑、R-23/R-24 新增生效）+ CI architecture-gate 注释同步；全量 pytest 结果见提交后终验。
+   a. **门禁 v4.3（tests/unit/test_architecture.py，条目追加 #256）**：新增 R-23 入口白名单冻结（ENTRY_ALLOWLIST = scripts/ 41 个含 故障演练/灾备演练 子目录 + 根目录 12 个 .py + 一键部署.bat，相对项目根全量登记，新增入口未登记即红；先更新蓝图目录树再建文件）+ R-24 薄化冻结（OVERSIZE_LINE_BASELINE 实测 14 项行数，白名单内文件只减不增）；ZERO_COVERAGE_BASELINE 冻结为实测引用级零覆盖业务模块 49 个（相对项目根口径，R-19 由 skip 转 CI 阻断，新增零覆盖即红）；docstring 基线锁定声明（违规 35 / 真环 3 / 顶层 0 / 例外 26 / 零覆盖 49）。
+   b. **目录树补登（scripts/ 段，G0 入口冻结盘点发现）**：同步交易日历.py（调 myquant/utils/trade_calendar.py sync_trade_calendar/load_trade_calendar，P2-① #83 既有实现）+ 同步股本变动.py（调 data_access/share_change_sync_service.py ShareChangeSyncService + DataFetcher，P1-② #83 既有实现）——两脚本磁盘在、蓝图目录树漏登记（历史遗漏），本次按治理规则 §3.2 目录树同步义务补登。
+   c. **CI 同步（.github/workflows/ci.yml architecture-gate job）**：注释与 job name 更新为基线锁定 v4.3（违规 35 / 真环 3 / 例外 26 / 零覆盖存量 49；新增违规/入口/膨胀/零覆盖即红）。
+   d. **验证结果**：py_compile test_architecture.py 通过；门禁 26 passed/1 skipped（R-19 转真跑断言 current_zero ⊆ 基线 49；R-23 入口全登记无新增；R-24 14 项行数全部 ≤ 基线；R-05 白名单 1 项按设计 skip）；全量 pytest 结果见提交后终验。
+   e. **纪律遵守**：无蓝图外新文件；改动文件均在蓝图目录树已标注（test_architecture.py 条目追加 #256；ci.yml 为 CI 配置不入目录树）；业务逻辑归 myquant（门禁新增规则全部静态可审计）；严格防未来（R-19 冻结集合为存量快照，未来新增才红）；任务后 git 提交（commit message 引用 #256）。

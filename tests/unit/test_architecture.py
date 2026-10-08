@@ -1,7 +1,19 @@
 # tests/unit/test_architecture.py
-"""架构分层门禁 v4.2（全盘复查 + 评审修正版）。
+"""架构分层门禁 v4.3（G0 收尾：入口/薄化冻结 + 基线锁定，回写#256）。
 
-本版在 v4.1 门禁基础上的修正（在 v4 §7 的 G-a~G-h 与 v4.1 的 K-a~K-e 之外，新增 K-f~K-h）：
+本版在 v4.2 基础上的修正（新增 L-a~L-c）：
+  L-a  新增 R-23 入口白名单冻结：scripts/（41 个，含 故障演练/灾备演练 子目录）与
+       根目录（12 个 .py + 一键部署.bat）入口全量登记；新增入口未登记即红。
+       新增入口必须先更新蓝图目录树 + 本白名单（代码变更治理规则 §1.3 脚本薄入口纪律）。
+  L-b  新增 R-24 薄化冻结：OVERSIZE 白名单 14 项行数基线实测锁定（2026-10-08），
+       白名单内文件行数只减不增（存量继续膨胀即红）；新增 >1500 仍由 R-14 拦截。
+  L-c  基线锁定（G0 完成）：ZERO_COVERAGE_BASELINE 填入实测引用级零覆盖业务模块 49 个，
+       R-19 由"仅报告/skip"转 CI 阻断（新增零覆盖即红）。
+       —— 权威基线冻结：违规 35 / 全量真环 3 / 顶层 0 / 例外 26 / 零覆盖存量 49。
+       （R-19 为"被 tests import 即视为覆盖"的引用级近似；真实覆盖由 pytest-cov 判定，
+        cov 实测 58% / 零覆盖业务 12 个仅作 G0-9 补测清单，二者口径不同不混用。）
+
+v4.2（K-f~K-h）与 v4.1（K-a~K-e）的修正结论全部沿用，摘要如下：
   K-f  修复 `_imports()` 的 __main__ 盲区：`if __name__ == "__main__":` 自测块内的
        import 归入新语境 "main"（selfcheck），环图与违规计数均排除。
        —— 这是上一轮深度评审 B-2 抓到的真缺陷：strategies/* -> backtest.engine 的
@@ -12,7 +24,7 @@
        LAZY_CYCLE_BASELINE 由 4 改 3。
        同一盲区还误计了违规：utils/parallel.py:945/970/988 -> factor_cache 三条
        也在 __main__ 自测块，v4/v4.1 把它们当违规计入（L0->L2=6），排除后 L0->L2=3，
-       权威违规由 40 修正为 37（VIOLATION_BASELINE 同步改 37）。
+       权威违规由 40 修正为 37；回写#255 P0-1/P0-2 消除后再由 37 修正为 35。
   K-g  新增 R-21：任何 myquant 文件必须可解析，_parse is None 即红 —— 封堵 v4.1 的
        errors="replace" 兜底导致的"畸形编码静默归零"盲区（评审 B-4）。
   K-h  新增 R-22：同层互引计数（只报告不阻断）—— 使 monitoring 153 处内部互引、
@@ -23,13 +35,13 @@
 S-3 R-19 更名 TestR19ZeroReference（诚实命名：引用级判定，非执行覆盖）。
 
 权威台账：docs/系统性审核/整改台账_2026Q4.md
-基线口径：违规=37（语义矩阵 α，排除 TYPE_CHECKING 与 __main__ 自测块；
-          parallel.py:945/970/988 为 __main__ 自测边，L0->L2=3 非 6）；
+基线口径：违规=35（语义矩阵 α，排除 TYPE_CHECKING 与 __main__ 自测块；
+          P0-1/P0-2 消除后 37→35，回写#255）；
           全量真环=3（另 1 组 strategies 包 re-export 惯用环为包装环，白名单剔除）；
-          顶层真环=0；>1500 行白名单 14 项（相对路径）；
-          零覆盖基线未冻结（待 pytest-cov 校准，见 G0-9）。
-[待验]：本文件为静态审查 + 只读驱动核验通过，未在项目内真实运行 pytest；
-        首跑若红，预期调整点仅 EXCEPTIONS 到期日/任务字段。
+          顶层真环=0；>1500 行白名单 14 项（相对路径，行数基线见 OVERSIZE_LINE_BASELINE）；
+          零覆盖存量 49 个引用级业务模块（2026-10-08 冻结，新增零覆盖即红，回写#256）。
+运行状态：已在 conda_wdh 环境真实运行（门禁 24 passed/1 skipped：R-19 冻结后转真跑，
+          R-05 白名单 1 项按设计 skip；回写#255 前为 23 passed/2 skipped）。
 """
 from __future__ import annotations
 
@@ -168,10 +180,75 @@ RAW_ACCESS_PATTERNS = [
 RAW_SCAN_LAYERS = {"L1", "L3", "L5"}
 RAW_ALLOWLIST = {"myquant/data_access/financial_sync_service.py"}
 
-# R-19 零覆盖基线：未冻结（空）。冻结流程：G0-9 跑 pytest-cov 得真实覆盖后，
-# 把当前全部零覆盖业务模块写入此集合；此后"新增零覆盖即红"。
-# 注意：本判定为"引用级"（被 tests import 即视为覆盖），非执行级覆盖；真覆盖由 cov 判定。
-ZERO_COVERAGE_BASELINE: set[str] = set()
+# ═══════════════════════════ 2b) 入口白名单冻结（R-23，G0 收尾回写#256） ═══════════════════════════
+# 相对项目根；scripts/ 41 个（含 故障演练/灾备演练 子目录）+ 根目录 12 个 .py + 一键部署.bat。
+# 新增入口必须：先更新蓝图目录树（docs/project_layout_gear2.md）+ 本白名单，否则门禁红。
+ENTRY_ALLOWLIST: set[str] = {
+    # scripts/（相对项目根，含子目录）
+    "scripts/kunpeng_param_scan.py", "scripts/一致性校验.py", "scripts/一键平仓.py",
+    "scripts/仿真准入评估.py", "scripts/候选池交叉验证.py", "scripts/初始化项目目录.py",
+    "scripts/参数优化.py", "scripts/双券商模拟实盘.py", "scripts/同步交易日历.py",
+    "scripts/同步股本变动.py", "scripts/垃圾数据清理.py", "scripts/增量回测.py",
+    "scripts/复权因子同步.py", "scripts/实时行情驱动.py", "scripts/实盘模拟回测.py",
+    "scripts/性能基准测试.py", "scripts/推理延迟基准.py", "scripts/故障演练/季频故障演练.py",
+    "scripts/数据下载.py", "scripts/数据全量清洗.py", "scripts/数据导出_DB到processed.py",
+    "scripts/数据库初始化.py", "scripts/数据库迁移.py", "scripts/数据清洗.py",
+    "scripts/标的预筛选.py", "scripts/清理历史回测输出.py", "scripts/灾备演练/年度灾备演练.py",
+    "scripts/生成回测报告.py", "scripts/监控可测量性统计.py", "scripts/监控周复盘.py",
+    "scripts/监控配置管理.py", "scripts/结果备份.py", "scripts/缓存管理.py",
+    "scripts/财务CSV更新.py", "scripts/财务数据入库.py", "scripts/运行API.py",
+    "scripts/验收_B包保钱包.py", "scripts/验收_C包保Alpha.py", "scripts/验收_D包自治.py",
+    "scripts/验收_回测引擎V5.py", "scripts/验收_监控M1保命.py",
+    # 根目录入口（.py + .bat）
+    "run_GUI入口.py", "run_全量清洗GUI.py", "run_回测入口.py", "run_回测配置GUI.py",
+    "run_实盘入口.py", "run_批量回测.py", "run_数据下载GUI.py", "run_清理GUI.py",
+    "run_鲲鹏一键应用推荐参数.py", "run_鲲鹏参数优化.py", "run_鲲鹏批量回测.py",
+    "鲲鹏仿真运测.py", "一键部署.bat",
+}
+
+# ═══════════════════════════ 2c) 薄化冻结（R-24，G0 收尾回写#256） ═══════════════════════════
+# OVERSIZE 白名单 14 项行数基线（2026-10-08 实测冻结）：白名单内文件行数只减不增。
+OVERSIZE_LINE_BASELINE: dict[str, int] = {
+    "monitoring/alerting.py": 3677, "live/engine.py": 2851, "core/event_bus.py": 2383,
+    "live/scheduler.py": 2348, "monitoring/metrics_collector.py": 2284,
+    "monitoring/action_engine.py": 2259, "data_access/manager.py": 2170,
+    "live/brokers/qmt_broker.py": 2170, "live/data_feed.py": 2147,
+    "gui/backtest_config_dialog.py": 1861, "risk/risk_manager.py": 1901,
+    "web/dashboard.py": 1760, "ml/training_pipeline.py": 1651,
+    "monitoring/dynamic_baseline.py": 1552,
+}
+
+# R-19 零覆盖基线：✅ 已冻结（回写#256）。冻结集合 = 2026-10-08 实测引用级零覆盖业务模块 49 个
+# （被 tests import 即视为覆盖；含 gui/strategies/allocation 等业务模块，剔除 __init__.py）。
+# 冻结后"新增零覆盖即红"；存量零覆盖只减不增（收敛由 G1/G2 或 G0-9 补测清单推进）。
+# 注意：本判定为"引用级"近似，非执行级覆盖；真实覆盖由 pytest-cov 判定
+# （cov 实测 58% / 零覆盖业务 12 个仅作 G0-9 补测清单，不混用）。
+ZERO_COVERAGE_BASELINE: set[str] = {
+    "myquant/allocation/base.py", "myquant/allocation/equal_weight.py", "myquant/allocation/target_volatility.py",
+    "myquant/backtest/async_monte_carlo.py", "myquant/backtest/candidate_pool.py",
+    "myquant/backtest/candidate_report.py", "myquant/backtest/config_builder.py", "myquant/backtest/monte_carlo.py",
+    "myquant/backtest/pdf_report.py", "myquant/backtest/report.py", "myquant/core/async_runtime.py",
+    "myquant/core/config_loader.py", "myquant/core/transports/redis_bus.py",
+    "myquant/data_access/cleaner/error_codes.py", "myquant/data_access/factory.py", "myquant/data_access/fetcher.py",
+    "myquant/data_access/loader.py", "myquant/data_access/sources/broker_source.py",
+    "myquant/data_access/sources/composite_source.py", "myquant/database/migrations/env.py",
+    "myquant/database/migrations/versions/0001_initial_schema.py",
+    "myquant/database/migrations/versions/0002_add_market_data_composite_index.py",
+    "myquant/database/migrations/versions/0003_align_schema_divergence.py",
+    "myquant/database/migrations/versions/0004_add_trade_ledger.py",
+    "myquant/database/migrations/versions/0005_add_alerts.py",
+    "myquant/database/migrations/versions/0006_add_metrics_history.py",
+    "myquant/database/migrations/versions/0007_add_audit_log.py",
+    "myquant/database/migrations/versions/0008_add_value_encrypted.py",
+    "myquant/execution/base.py", "myquant/execution/state_machine.py", "myquant/gui/backtest_config_dialog.py",
+    "myquant/gui/batch_backtest_tab.py", "myquant/gui/cleanup_dialog.py", "myquant/gui/data_clean_dialog.py",
+    "myquant/gui/main_window.py", "myquant/gui/widgets/kline_item.py", "myquant/gui/widgets/plot_helper.py",
+    "myquant/gui/widgets/side_panel.py", "myquant/live/brokers/ptrade_broker.py",
+    "myquant/strategies/kunpeng_strategy.py", "myquant/strategies/mean_reversion_strategy.py",
+    "myquant/strategies/momentum_strategy.py", "myquant/utils/cache_sync.py", "myquant/utils/csv_utils.py",
+    "myquant/utils/math_utils.py", "myquant/utils/memory_pool.py", "myquant/utils/parallel.py",
+    "myquant/utils/performance_config.py", "myquant/utils/timer.py",
+}
 
 
 # ═══════════════════════════ 3) 工具 ═══════════════════════════
@@ -546,15 +623,14 @@ class TestR16AssemblerScope:
 
 
 class TestR19ZeroReference:
-    """R-19：零覆盖模块只减不增（待校准；引用级判定，非执行覆盖）。
+    """R-19：零覆盖模块只减不增（✅ 已冻结回写#256；引用级判定，非执行覆盖）。
 
     关键事实（全盘复查）：文档的「15 个零覆盖模块清单」是抽查，不是全量——
     实测字符串级零引用 74 个、精确 import 级 68 个（含 __init__ 后）。真实覆盖率
     必须由 pytest-cov 插桩（G0-9）判定；本判定为"被 tests import 即视为覆盖"的
     引用级近似（S-3 诚实命名：TestR19ZeroReference，真覆盖由 cov 判定）。
-    因此在覆盖率基线未冻结前，本规则只收集报告、不设 CI 阻断；冻结方式：
-    先跑 pytest-cov 得到真实覆盖，把当前全部零覆盖业务模块写入
-    ZERO_COVERAGE_BASELINE，此后"新增零覆盖即红"。
+    冻结（回写#256）：2026-10-08 实测当前全部引用级零覆盖业务模块 49 个写入
+    ZERO_COVERAGE_BASELINE，此后"新增零覆盖即红"；存量零覆盖只减不增。
     """
 
     @staticmethod
@@ -644,3 +720,45 @@ class TestR22SelfLayerReport:
         print("\nR-22 同层互引计数（仅报告，不阻断）")
         print("  按层:", dict(sorted(per_layer.items())))
         print("  按顶层包:", dict(sorted(per_pkg.items())))
+
+
+class TestR23EntryFreeze:
+    """R-23：入口白名单冻结（G0 收尾，回写#256）。
+
+    scripts/（41 个，含 故障演练/灾备演练 子目录）与根目录入口（12 个 .py + 一键部署.bat）
+    全量登记于 ENTRY_ALLOWLIST；新增入口未登记即红。新增入口必须：先更新蓝图目录树
+    （docs/project_layout_gear2.md）→ 再更新本白名单 → 再创建文件（蓝图优先纪律）。
+    扫描范围：scripts/ 递归 *.py + 项目根 *.py / *.bat（__pycache__ 除外）。
+    """
+
+    def test_no_new_entry(self):
+        scripts: list[Path] = [p for p in (PROJECT_ROOT / "scripts").rglob("*.py")
+                               if "__pycache__" not in p.parts]
+        roots: list[Path] = [p for p in PROJECT_ROOT.iterdir()
+                             if p.is_file() and p.suffix in (".py", ".bat")]
+        found = [p.relative_to(PROJECT_ROOT).as_posix() for p in scripts + roots]
+        unlisted = sorted(set(found) - ENTRY_ALLOWLIST)
+        assert not unlisted, (
+            "新增入口未登记白名单（须先更新蓝图目录树 + ENTRY_ALLOWLIST）：\n"
+            + "\n".join(unlisted)
+        )
+
+
+class TestR24OversizeFreeze:
+    """R-24：薄化冻结——OVERSIZE 白名单内文件行数只减不增（G0 收尾，回写#256）。
+
+    基线 = 2026-10-08 实测（OVERSIZE_LINE_BASELINE，14 项）；白名单内文件行数
+    超过基线即红（存量继续膨胀禁止）；新增 >1500 行文件仍由 R-14 拦截（白名单外）。
+    文件被删除/迁移时不误报（由蓝图一致性检查另行处理）。
+    """
+
+    def test_oversize_not_rising(self):
+        over = []
+        for rel, baseline in sorted(OVERSIZE_LINE_BASELINE.items()):
+            p = MYQUANT / rel
+            if not p.exists():
+                continue
+            lines = len(_read_text(str(p)).splitlines())
+            if lines > baseline:
+                over.append(f"{rel}: {lines} > 基线 {baseline}")
+        assert not over, "白名单内超大文件行数上涨（薄化冻结，只减不增）：\n" + "\n".join(over)
