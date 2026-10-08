@@ -306,6 +306,16 @@ class TdxDataSource(DataSourceBase):
     # 核心接口实现
     # ═══════════════════════════════════════════
 
+    @staticmethod
+    def _normalize_date(value: Optional[str]) -> Optional[str]:
+        """YYYYMMDD → YYYY-MM-DD（tdx 记录 date 为 ISO 格式，统一字符串比较基准）。"""
+        if not value:
+            return value
+        s = str(value).strip()
+        if len(s) == 8 and s.isdigit():
+            return f"{s[:4]}-{s[4:6]}-{s[6:]}"
+        return s
+
     def get_market_data(
         self,
         symbol: str,
@@ -348,10 +358,12 @@ class TdxDataSource(DataSourceBase):
 
         try:
             all_data = self._parse_day_file(file_path)
-            # 【防未来函数】按日期范围过滤
-            filtered = self._filter_by_date(all_data, start_date, end_date)
+            # 【防未来函数】按日期范围过滤（统一 YYYY-MM-DD 基准，避免 YYYYMMDD 字符串比较失效）
+            start_norm = self._normalize_date(start_date)
+            end_norm = self._normalize_date(end_date)
+            filtered = self._filter_by_date(all_data, start_norm, end_norm)
             # P1-③(#83)：真实日历对齐补停牌占位行（volume=0 → is_suspended=1）
-            filtered = self._fill_suspended_placeholders(filtered, start_date, end_date)
+            filtered = self._fill_suspended_placeholders(filtered, start_norm, end_norm)
             self._record_success()
             return MarketDataResult(
                 symbol=symbol,

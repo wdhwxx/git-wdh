@@ -1266,6 +1266,13 @@ class LiveEngine(BaseEngine):
                 for b in bar_objs[:-1]:
                     strategy.on_bar(b, self._context)
                 latest = bar_objs[-1]
+                # KP-P3-04 补充：warmup 路径不经过 bar 处理段（feed 无新 bar），
+                # 手动注入昨收（上一根 bar 收盘价；跨休市语义：10-08 昨收=09-30 收盘）
+                if len(bar_objs) >= 2 and hasattr(bar_objs[-2], "close"):
+                    try:
+                        self._prev_close_map[symbol] = float(bar_objs[-2].close)
+                    except Exception:
+                        pass
                 for sig in (strategy.on_bar(latest, self._context) or []):
                     self._process_signal(sig, latest)
             except Exception as e:
