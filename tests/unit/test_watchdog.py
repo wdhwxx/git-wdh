@@ -381,8 +381,11 @@ class TestSchedulerBrokerPatrolA6:
         broker = FakeBroker()
         calls: list = []
         monkeypatch.setattr(
-            "myquant.monitoring.alerting.get_alert_manager",
-            lambda: type("AM", (), {"alert": lambda self, **kw: calls.append(kw) or 1})(),
+            "myquant.core.registry.get_component",
+            lambda name: (
+                (lambda: type("AM", (), {"alert": lambda self, **kw: calls.append(kw) or 1})())
+                if name == "alert_manager" else None
+            ),
         )
         # health_checker 健康，不干扰 broker 闭环
         hc = type("HC", (), {

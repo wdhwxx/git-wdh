@@ -34,8 +34,11 @@ class TestSchedulerEscalation:
         """DoD：周期任务触发 check_escalations()。"""
         calls: list = []
         monkeypatch.setattr(
-            "myquant.monitoring.alerting.get_alert_manager",
-            lambda: SimpleNamespace(check_escalations=lambda: calls.append(1) or 1),
+            "myquant.core.registry.get_component",
+            lambda name: (
+                (lambda: SimpleNamespace(check_escalations=lambda: calls.append(1) or 1))
+                if name == "alert_manager" else None
+            ),
         )
         tasks = attach_engine(scheduler)
         esc_task = scheduler.get_task(tasks["escalation"])

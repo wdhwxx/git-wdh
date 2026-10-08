@@ -1732,13 +1732,21 @@ def attach_engine(
     # 注入失败记 warning 不阻断装配（组件缺失时 portfolio 内部降级放行）。
     if portfolio is not None:
         try:
-            from myquant.monitoring.account_reconciler import get_account_reconciler
-            portfolio.set_account_reconciler(get_account_reconciler())
+            from myquant.core.registry import get_component as _get_comp
+            _ar_factory = _get_comp("account_reconciler")
+            if _ar_factory is None:
+                logger.warning("[attach] 对账器组件未注册（PnL 门放行）")
+            else:
+                portfolio.set_account_reconciler(_ar_factory())
         except Exception as e:  # noqa: BLE001
             logger.warning(f"[attach] 对账器注入失败（PnL 门放行）: {e}")
         try:
-            from myquant.monitoring.alerting import get_alert_manager
-            portfolio.set_alert_manager(get_alert_manager())
+            from myquant.core.registry import get_component as _get_comp
+            _am_factory = _get_comp("alert_manager")
+            if _am_factory is None:
+                logger.warning("[attach] 告警管理器组件未注册（对账差异告警跳过）")
+            else:
+                portfolio.set_alert_manager(_am_factory())
         except Exception as e:  # noqa: BLE001
             logger.warning(f"[attach] 告警管理器注入失败（对账差异告警跳过）: {e}")
 
@@ -1755,10 +1763,12 @@ def attach_engine(
         # BASE-5：元监控随巡检装配（监控自身可观测性；失败降级为不采集，不阻断）
         try:
             from myquant.core.event_bus import get_event_bus
+            from myquant.core.registry import get_component as _get_comp
             from myquant.monitoring.meta_monitor import MetaMonitor
-            from myquant.monitoring.metrics_collector import get_metrics_collector
+            _mc_factory = _get_comp("metrics_collector")
+            _mc = _mc_factory() if _mc_factory is not None else None
             meta = MetaMonitor(
-                collector=get_metrics_collector(),
+                collector=_mc,
                 metrics_history=patrol._metrics_history,  # 复用巡检时序库（同一趋势回放源）
                 event_bus=get_event_bus(),
             )
@@ -1843,14 +1853,15 @@ def attach_engine(
             # + details.runbook_id）。与事件路径共用去重键，窗口内不重复刷屏。
             try:
                 from myquant.core.constants import SeverityLevel as _SL
-                from myquant.monitoring.alerting import get_alert_manager as _gam
+                from myquant.core.registry import get_component as _get_comp
                 from myquant.monitoring.watchdog import RUNBOOK_BROKER_DISCONNECT
+                _gam_factory = _get_comp("alert_manager")
                 broker_item = report.get("checks", {}).get("broker", {})
                 broker_status = broker_item.get("status", PATROL_HEALTHY)
                 broker_healthy = broker_status == PATROL_HEALTHY
                 if (not broker_healthy) and _broker_prev_healthy[0]:
-                    # 健康→不健康转换点：交易中断 P0
-                    _gam().alert(
+                    # 健康→不健康转换点：交易中断 P0（组件未注册时 TypeError 走外层降级）
+                    _gam_factory().alert(
                         level=_SL.CRITICAL,
                         message=f"[patrol] 券商连接异常（交易中断 P0）: {broker_item.get('detail', {})}",
                         source="live.scheduler",
@@ -1870,8 +1881,11 @@ def attach_engine(
             # KP-P5-03: 监控告警闭环——HealthChecker 巡检非 healthy 经告警管理器 alert
             try:
                 from myquant.core.constants import SeverityLevel
-                from myquant.monitoring.alerting import get_alert_manager
+                from myquant.core.registry import get_component as _get_comp
                 from myquant.core.health_check import get_health_checker
+                _am_factory = _get_comp("alert_manager")
+                if _am_factory is None:
+                    logger.warning("[attach] 告警管理器组件未注册（巡检健康告警跳过）")
                 hc = get_health_checker()
                 hc.run_all()
                 summary = hc.get_summary()
@@ -1881,7 +1895,7 @@ def attach_engine(
                         if summary.get("is_critical")
                         else SeverityLevel.WARNING
                     )
-                    get_alert_manager().alert(
+                    _am_factory().alert(
                         level=level,
                         message=(
                             "健康检查非健康: "
@@ -1996,10 +2010,14 @@ def attach_engine(
         # KP-P5-04: 告警升级检查接入周期任务（check_escalations 原无调用方）
         def _escalation_job(**kw) -> None:  # noqa: ARG001
             try:
-                from myquant.monitoring.alerting import get_alert_manager
-                n = get_alert_manager().check_escalations()
-                if n:
-                    logger.info(f"[attach] 告警升级检查: 升级 {n} 条")
+                from myquant.core.registry import get_component as _get_comp
+                _am_factory = _get_comp("alert_manager")
+                if _am_factory is None:
+                    logger.warning("[attach] 告警管理器组件未注册（升级检查跳过）")
+                else:
+                    n = _am_factory().check_escalations()
+                    if n:
+                        logger.info(f"[attach] 告警升级检查: 升级 {n} 条")
             except Exception as e:
                 logger.warning(f"[attach] 告警升级检查异常: {e}")
 
@@ -2293,8 +2311,9 @@ def run_daily_model_drift_check(
                       "ks": float|None, "alerted": bool}}。
     """
     from myquant.core.constants import SeverityLevel
-    from myquant.monitoring.alerting import get_alert_manager as _default_am
+    from myquant.core.registry import get_component as _get_comp
     from myquant.ml.model_monitor import DRIFT_STATUS_DRIFT
+    _default_am_factory = _get_comp("alert_manager")
 
     drift_checks = drift_checks or {}
     versions = versions or {}
@@ -2304,7 +2323,7 @@ def run_daily_model_drift_check(
             psi_threshold = cfg_thr["psi_threshold"]
         if ks_threshold is None:
             ks_threshold = cfg_thr["ks_threshold"]
-    am = alert_manager if alert_manager is not None else _default_am()
+    am = alert_manager if alert_manager is not None else (_default_am_factory() if _default_am_factory is not None else None)
 
     summary: Dict[str, Any] = {}
     for name, pair in drift_checks.items():

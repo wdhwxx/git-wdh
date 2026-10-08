@@ -18,6 +18,27 @@ from typing import Any, Optional
 #: 全局指标采集器（由 metrics_collector 懒创建时自注册；装配方保证先于使用方调用）
 _collector: Optional[Any] = None
 
+#: 通用组件工厂注册表（name -> 可调用工厂；monitoring 等模块导入时自注册，装配方经 get_component 取用）
+_component_factories: dict[str, Any] = {}
+
+
+def register_component(name: str, factory: Any) -> None:
+    """注册通用组件工厂。
+
+    Parameters
+    ----------
+    name : str
+        组件注册名（如 "alert_manager"、"account_reconciler"、"metrics_collector"）。
+    factory : Any
+        可调用工厂，调用后返回组件实例（monitoring 模块导入时注册 get_xxx 单例函数）。
+    """
+    _component_factories[name] = factory
+
+
+def get_component(name: str) -> Optional[Any]:
+    """获取组件工厂；未注册返回 None（使用方降级为跳过装配，不阻断业务）。"""
+    return _component_factories.get(name)
+
 
 def register_collector(collector: Any) -> None:
     """注册全局指标采集器实例。

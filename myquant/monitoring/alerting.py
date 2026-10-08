@@ -78,6 +78,7 @@ from urllib.error import URLError
 
 from myquant.core.constants import DEFAULT_DEPENDENCY_MAP, MetricType, SeverityLevel, TRADE_EXCEPTION_ALERT_LEVEL_MAP
 from myquant.core.logger import get_logger
+from myquant.core.registry import register_component  # G2-5：get_alert_manager 工厂注册（供 live/scheduler 经 L0 取用）
 
 logger = get_logger("monitoring.alerting")
 
@@ -3057,6 +3058,11 @@ def get_alert_manager() -> AlertManager:
             # KP-P5-05: 按 notification.channels 装配 Email/Webhook 通道
             configure_notification_channels(_global_alert_manager)
         return _global_alert_manager
+
+
+# G2-5：告警管理器工厂注册（模块导入即注册；live/scheduler 经 core.registry.get_component("alert_manager") 取用，
+# L4→L0 合法，消除 EX-13E 装配违规；reset 后工厂懒建重建，无 stale）
+register_component("alert_manager", get_alert_manager)
 
 
 def configure_notification_channels(manager: AlertManager) -> int:

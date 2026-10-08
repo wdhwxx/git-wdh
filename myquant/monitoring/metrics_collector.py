@@ -81,7 +81,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from myquant.core.constants import MetricType  # G2-1 下沉 core，re-export 兼容旧引用
 from myquant.core.logger import get_logger
-from myquant.core.registry import register_collector
+from myquant.core.registry import register_collector, register_component  # G2-5：+工厂注册（供 live/scheduler 经 L0 取用）
 
 logger = get_logger("monitoring.metrics")
 
@@ -1971,6 +1971,11 @@ def reset_metrics_collector() -> None:
     """重置全局指标采集器（测试用）"""
     global _global_collector
     _global_collector = None
+
+
+# G2-5：指标采集器工厂注册（模块导入即注册；live/scheduler 经 core.registry.get_component("metrics_collector") 取用，
+# L4→L0 合法，消除 EX-13C 装配违规；reset 后工厂懒建重建，无 stale）
+register_component("metrics_collector", get_metrics_collector)
 
 
 # ═══════════════════════════════════════════════

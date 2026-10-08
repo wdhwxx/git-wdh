@@ -48,6 +48,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
 from myquant.core.constants import SeverityLevel
+from myquant.core.registry import register_component  # G2-5：get_account_reconciler 工厂注册（供 live/scheduler 经 L0 取用）
 
 logger = logging.getLogger("myquant.monitoring.account_reconciler")
 
@@ -540,6 +541,11 @@ def get_account_reconciler() -> AccountReconciler:
             if _global_reconciler is None:
                 _global_reconciler = AccountReconciler(account_id="default")
     return _global_reconciler
+
+
+# G2-5：对账器工厂注册（模块导入即注册；live/scheduler 经 core.registry.get_component("account_reconciler") 取用，
+# L4→L0 合法，消除 EX-13K 装配违规；reset 后工厂懒建重建，无 stale）
+register_component("account_reconciler", get_account_reconciler)
 
 
 def reset_account_reconciler() -> None:
