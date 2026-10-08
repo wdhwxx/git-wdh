@@ -33,7 +33,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from myquant.monitoring.alert_store import AlertStore
+from myquant.core.alert_store import AlertStore
 from myquant.monitoring.alerting import weekly_alert_stats
 
 logger = logging.getLogger("monitoring.weekly_review")

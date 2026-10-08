@@ -33,7 +33,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from myquant.core.constants import SeverityLevel  # noqa: E402
 from myquant.core.event_bus import Event, EventBus, EventType  # noqa: E402
 from myquant.database.connection import DatabaseConnection  # noqa: E402
-from myquant.monitoring.audit_log import AuditLogStore  # noqa: E402
+from myquant.core.audit_log import AuditLogStore  # noqa: E402
 from myquant.monitoring.circuit_breaker import (  # noqa: E402
     CircuitBreaker,
     CircuitBreakerConfig,

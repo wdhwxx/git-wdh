@@ -847,6 +847,12 @@ Pythonwdhmm/
     │   ├── lookahead_guard.py        # ✨【#1】防未来函数校验器（规则4核心）：记录指标/信号/成交/止损/数据访问5类操作，四条铁律自动校验（指标不含当日/T+1成交/先检查后更新/因子仅用历史），回测结束assert_pass()强制校验；环境变量LOOKAHEAD_GUARD_ENABLED/STRICT控制开关与严格模式；回测实盘共用同一校验逻辑（实盘无缝对接）；依赖exceptions.LookaheadError；P2-D7-003 整改声明：铁律1（指标不含当日）由结构（RSRS闭式OLS+shift(1)/derived_metrics严格因果）+测试锚点保障、铁律2（先检查后更新）由止损逻辑顺序保障，guard 运行期记录覆盖铁律3/4（record_indicator/record_stop_loss 无生产调用，蓝图如实声明）
 
     │   ├── registry.py             # ✨【回写#260】G2-1 组件注册表（L0 纯状态，无 myquant 依赖）：register_collector/get_collector 全局指标采集器注册与读取；metrics_collector 懒创建单例后自注册，alerting 等经注册表取用（monitoring 内部环2 打断的关键低层通道）
+    │   ├── alert_store.py          # ✨【回写#196 原monitoring/ 段，#263 下沉】BASE-1 告警持久化存储（alerts 表落库/状态流转/classification 打标/升级标记/runbook 绑定/查询）；✨【回写#202】BASE-7 审计接入；__main__ 自测 14 项
+    │   ├── audit_log.py            # ✨【回写#202 原monitoring/ 段，#263 下沉】BASE-7 审计只追加存储（降级哈希链/篡改检测/归档校验）；orders/fills/alerts 全落库留痕；✨【回写#204】BASE-9 log_access；__main__ 自测 19 项
+    │   ├── field_crypto.py          # ✨【回写#204 原monitoring/ 段，#263 下沉】BASE-9 关键字段加密（Fernet，密钥探测=环境变量→密钥文件；SENSITIVE_NAME_PATTERNS 脱敏）；__main__ 自测 10 项
+    │   ├── health_check.py          # ✨【原monitoring/ 段，#263 下沉】系统健康检查（磁盘/进程/事件总线/数据源连通性；HealthStatus/HealthCheckResult/HealthChecker + get_health_checker 惰性单例 + 探针注册）；monitoring/__init__.py re-export 兼容
+    │   ├── measurability.py         # ✨【原monitoring/ 段，#263 下沉】P0-8 度量口径库（FI_CASES 故障注入用例库 + ClassificationStats TP/FP/FN 分类 + MTTx 计时），唯一权威依据，供 acceptance/ 演练与 monitoring/alerting 引用
+    │   ├── metrics_history.py       # ✨【回写#197 原monitoring/ 段，#263 下沉】BASE-2 指标时序存储（唯一幂等/降采样聚合/保留清理）；✨【回写#201】BASE-6 异步批量+物化；✨【回写#204】BASE-9 敏感加密绑定；__main__ 自测 38 项
     │   ├── light_lookahead_guard.py  # ✨【V5·P2】轻量防未来函数校验器（回测专用）：向量化/混合模式下的轻量代理——对预计算信号序列做向量偏移校验+当日bar数据索引合法性检查，不依赖全量操作记录，性能开销可忽略；与lookahead_guard互补（重校验用于event模式/验收）；P2-D7-002 整改声明：当前为独立可选模块，尚未接入引擎（性能配置 light_lookahead_guard 开关仅同步环境变量，无引擎消费方；接入需在事件/混合引擎逐 bar 检查点挂载 on_bar_close/check_*）
 
     │   └── transports/               # 外部消息中间件适配
@@ -1221,7 +1227,7 @@ Pythonwdhmm/
 
     │   ├── __init__.py
 
-    │   ├── health_check.py           # 健康检查：数据源连通性、磁盘、进程；✨【回写#205】A-1 L0 基础设施监控补全——新增 7 项检查（network_latency TCP 延迟/clock_skew NTP 校时（标准库 UDP 123，不可达降级不误判时钟损坏）/cpu_usage+memory_usage（psutil 采样）/tls_certificate（peer cert 剩余天数，语义 warning>critical）/dns_resolution（getaddrinfo）/network_partition（多端点可达性））+ register_l0_checks 批量注册（critical 标记：时钟/DNS/分区 True，延迟/CPU/内存/证书 False）；全部只读当前状态防未来、阈值/端点防御式校验、默认端点可配置外置；__main__ 自测 26 项
+    │   ├── health_check.py             # ⚠️ 已迁移至 myquant/core/health_check.py（回写#263 G2-4 下沉：监控存储/基础设施子层归位 L0，原监控段历史上下文见回写记录），本目录不再保留该文件
 
     │   ├── alerting.py               # 告警通道，支持分级去重；✨【回写#162】按 notification.channels 装配 Email/Webhook + 未投递回退 logs/alerts_undelivered.log（KP-P5-05）；✨【回写#212/#213/#214】A-8 交易异常 4 类事件（REJECTED/FAILED/FILL_REPORT_ERROR/EMERGENCY_LIQUIDATION）自动告警 + A-9 通道冗余投递（逐通道留痕/P0 两通道可达/未投递落盘完整内容/stats 元监控计数）+ A-10 P0-P3 统一映射与 runbook_id 显式字段贯通落库/升级补缺
 
@@ -1233,15 +1239,15 @@ Pythonwdhmm/
 
     │   ├── meta_monitor.py          # ✨【回写#200】BASE-5 元监控（监控自身可观测性）：五类探针（采集器健康/事件总线积压/存储写入延迟/告警发送成功率/看板可用性）→ MetricsCollector（meta_* 进 /api/metrics）+ MetricsHistoryStore（R-02 仅回放）+ 独立告警通道（R-08 独立冷却窗口，dedup_key=meta:* 与业务告警隔离）；探针可注入覆盖；probe_status 供 HealthPatrol 集成；__main__ 自测 12 项全绿；✨【回写#203】BASE-8 外部兜底心跳——HeartbeatCarrier ABC + FileHeartbeatCarrier（外部目录原子写 heartbeat.json）/WebhookHeartbeatCarrier（手机推送/云函数预留）+ get_heartbeat_carrier 注册表 + HeartbeatWriter（守护线程周期写）+ ExternalHeartbeatGuard（R-08 连续多次超时>=2 才判死，单次超时 degraded 不误判临界网络抖动，心跳恢复计数清零）+ MetaMonitor.attach_heartbeat 随巡检发心跳（单机故障=run 停=心跳停，外部看门狗判死）；__main__ 自测 25 项
 
-    │   ├── measurability.py         # ✨【回写#189】P0-8 可测量性统计模块：MTTx（MTTD/MTTA/MTTR）系统时间戳口径计算 + TP/FP/FN ground-truth 分类与准确率/误报率/检出率自动统计 + FI-01~07 标准故障注入用例库（与 D-6 混沌工程共用）；只消费已发生时间戳与告警记录，严格防未来
+    │   ├── measurability.py             # ⚠️ 已迁移至 myquant/core/measurability.py（回写#263 G2-4 下沉：监控存储/基础设施子层归位 L0，原监控段历史上下文见回写记录），本目录不再保留该文件
 
-    │   ├── alert_store.py           # ✨【回写#196】BASE-1 告警持久化存储：alerts 表落库（save_alert 幂等 upsert/status 推导）、状态流转（update_status acked/resolved 时间戳语义/COALESCE 补 acked_at/reopen 清时间戳）、classification 打标（P0-8 统计读取源 R-01）、升级标记/runbook 绑定、查询（load_history 过滤/load_unacknowledged/load_escalated/get_open_by_dedup_key 恢复匹配）、防御式校验（非法 status/limit<=0/缺 alert_id/level/message 抛 ValueError）；__main__ 自测 14 项；✨【回写#202】BASE-7 审计接入——audit_log 参数/attach_audit_log/_audit_trail（save/status_change 落库留痕，失败记 error 不阻断告警主流程）
+    │   ├── alert_store.py             # ⚠️ 已迁移至 myquant/core/alert_store.py（回写#263 G2-4 下沉：监控存储/基础设施子层归位 L0，原监控段历史上下文见回写记录），本目录不再保留该文件
 
-    │   ├── metrics_history.py       # ✨【回写#197】BASE-2 指标时序存储：metrics_history 表落库（save_metric 唯一幂等/save_batch 批量事务）、查询（name/labels/时间范围/limit）、降采样聚合（epoch 桶 avg/max/min/sum/count 支撑 1 年回放）、保留清理（原始 30 天 purge，R-02 仅回放不检测）；__main__ 自测 14 项；✨【回写#201】BASE-6 存储优化——异步批量写入（enqueue 内存队列 + flush 事务落库 + 后台守护线程周期 flush 避免热路径直写）、降采样物化（materialize_downsampled 旧数据按桶聚合物化落库，标签带 source/bucket/agg，幂等可回放 1 年）+ DownsamplingTask 独立调度（守护线程 interval 可配默认每日，stop 收尾补跑）、迁移接口预留（MetricExporter ABC + get_exporter 注册表 null/vm/clickhouse 占位，导出副本失败不阻断落库）；__main__ 自测 29 项；✨【回写#204】BASE-9 敏感字段加密与访问审计——attach_field_crypto 绑定 FieldCrypto（敏感名 patterns 可覆盖）、save_metric/save_batch 敏感分支（value 列存占位 0.0 + value_encrypted 存 Fernet 密文，未绑定加密器时拒绝明文落盘抛 ValueError）、_row_to_dict_decrypted 查询解密回读真实值（解密失败 mask_value "****" 不泄露）、query 新增 record_access 参数（True 走 _audit_access kind=access 留痕）、query_downsampled 对敏感指标拒绝聚合（密文不可聚合，提示用 query 回读）、export_csv 导出强制访问审计；__main__ 自测 38 项
+    │   ├── metrics_history.py             # ⚠️ 已迁移至 myquant/core/metrics_history.py（回写#263 G2-4 下沉：监控存储/基础设施子层归位 L0，原监控段历史上下文见回写记录），本目录不再保留该文件
 
-    │   ├── field_crypto.py          # ✨【回写#204】BASE-9 关键字段加密（新增·R-06）：FieldCrypto Fernet 对称加密（cryptography 49.0.0），密钥探测 = 环境变量 QUANT_MONITOR_KEY（base64 32B）→ 密钥文件 config/monitoring/.monitor_field_key（首次自动生成 + chmod 600）；SENSITIVE_NAME_PATTERNS 敏感关键字（equity/balance/position/capital/asset/pnl，可配置覆盖）+ is_sensitive_name 判定 + mask_value 脱敏（"****"）；encrypt 失败抛 ValueError 宁可拒绝不落明文、decrypt InvalidToken 明确报错、try_decrypt 安全解密失败返回 None 记 error；__main__ 自测 10 项
+    │   ├── field_crypto.py             # ⚠️ 已迁移至 myquant/core/field_crypto.py（回写#263 G2-4 下沉：监控存储/基础设施子层归位 L0，原监控段历史上下文见回写记录），本目录不再保留该文件
 
-    │   ├── audit_log.py            # ✨【回写#202】BASE-7 审计只追加存储：降级哈希链（seq 递增 + row_hash=SHA-256(kind|action|actor|detail_json|created_ts|seq) + prev_hash 链尾衔接，首条 GENESIS 64 个 '0'）；append 只追加（业务层无 UPDATE/DELETE API）、只读查询（kind/actor/时间/limit/order，detail 反序列化）、verify_chain 篡改检测（行内容/链衔接/删行均断链可检出）、archive 归档（旧行按原 seq/prev_hash/row_hash COPY 到 audit_archive 哈希不改写 + manifest checksum=归档行 row_hash 按序聚合 SHA-256）+ verify_archive 归档校验；orders/fills/alerts 全落库留痕语义（AlertStore 真实接入；交易域落库调 append(kind=...)）；防御式校验（空 kind/action/actor、detail 非 dict/超限、limit/before_ts 非法抛 ValueError）；__main__ 自测 19 项；✨【回写#204】BASE-9 log_access 便捷方法（kind=access，resource+action+actor+detail 结构，读取/导出留痕入口）
+    │   ├── audit_log.py             # ⚠️ 已迁移至 myquant/core/audit_log.py（回写#263 G2-4 下沉：监控存储/基础设施子层归位 L0，原监控段历史上下文见回写记录），本目录不再保留该文件
 
     │   ├── watchdog.py                  # ✨【回写#208/#209/#210】交易看门狗：A-4 行情活性 StalenessDetector（EVENT bar 刷新+秒级兜底，超 bar_timeout_seconds 断流 ERROR、非交易时段豁免、开盘 grace 未就绪告警、到达间隔 P99 统计，阈值读 monitoring.watchdog）；A-5 引擎心跳 EngineHeartbeatWatcher（连续 consecutive_misses 判僵死 P0，5×10s=50s<60s 保 MTTD，阈值读 slo.engine_heartbeat）；A-6 券商连接 BrokerConnectionWatcher（快速轮询+健康→不健康转换点 P0/CRITICAL，details.runbook_id=RB-BROKER-DISCONNECT-001）；__main__ 自测 14 项
 
@@ -4024,3 +4030,12 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    e. **兼容性**：monitoring/__init__.py 无 re-export 涉迁模块（只 re-export health_check/alerting/metrics_collector），零改动；被迁模块在 monitoring 内无内部引用方（探针实测，仅 d_acceptance→chaos/disaster 为迁出包内部互引）；外部调用方仅 scripts 薄入口 + tests（已全量改写）；EX-13A~K 例外引用 monitoring 模块均未涉迁。
    f. **验证结果**：py_compile 21 文件通过；门禁 26 passed/1 skipped（真环 0/违规 22/零覆盖 49 冻结无新增）；迁移相关单测 118 passed；全量 pytest 3525 passed/3 skipped（与 #261 持平，无回归）。
    g. **纪律遵守**：先更新蓝图目录树（monitoring 段按 3.3 标注 7 迁出保留历史、backtest 段登记 attribution、新增 acceptance/ 段）再落代码；零蓝图外新增文件；scripts 保持薄入口（仅 import 路径变化）；严格防未来（本批纯结构迁移，无时序逻辑变更）；工作区既有未提交改动未触碰；任务后 git 提交（commit message 引用 #262）。
+## #263 · 2026-10-08 · G2-4 下沉：监控存储/基础设施子层迁 core/（L0），消除 EX-10A/10B/13A/F/G/J 六条例外（违规 22→16）
+   事实来源：本次落地（用户指令"直接明确任务"后续主线推进），代码级核验：py_compile 通过 + 门禁 26 passed/1 skipped（VIOLATION_BASELINE 22→16 收紧）+ 下沉相关单测全绿 + 全量 pytest 3525 passed/3 skipped。
+   a. **下沉 6 模块（monitoring → core/，L5→L0 归位）**：alert_store（BASE-1 告警存储）、audit_log（BASE-7 审计存储）、field_crypto（BASE-9 字段加密）、health_check（系统健康检查）、measurability（P0-8 度量口径库 FI_CASES/ClassificationStats）、metrics_history（BASE-2 指标时序存储）——六模块 monitoring 内零依赖或仅依赖子层内部（探针实测），属监控存储/基础设施子层，归位 L0；monitoring/__init__.py 对 health_check 保留 re-export（改自 core 导入）兼容既有 `from myquant.monitoring import HealthChecker` 调用方。
+   b. **全项目引用改写（58 文件）**：myquant.monitoring.{6 模块} → myquant.core.{6 模块}（含 import/from import/monkeypatch.setattr 字符串路径/logging.getLogger 名/python -m 自测注释/纯文本 docstring 描述）；覆盖 myquant 全部包（monitoring 内部 alerting→core.alert_store/measurability、metrics_collector→core.health_check/metrics_history/field_crypto、weekly_review→core.alert_store、incident_context→core.alert_store、circuit_breaker→core.audit_log、dynamic_baseline→core.audit_log、meta_monitor→core.metrics_history、action_engine→core.audit_log、config_as_code→core.audit_log、account_reconciler→core.audit_log 等）+ acceptance 6 模块 + api/web/live/allocation/risk_parity + scripts + tests 30 余文件；grep 复验残留 0。
+   c. **例外消除 6 条（门禁 EXCEPTIONS 表）**：EX-10A（allocation/risk_parity→audit_log）、EX-10B（strategies/param_tuner→audit_log）、EX-13A（live/scheduler→metrics_history）、EX-13F（→health_check）、EX-13G（→alert_store）、EX-13J（→audit_log）——下沉后 L3/L4→L0 合法，假豁免检测（test_no_ghost_exception）自动揪出并删除；例外表 19+2 对 → 13+1 对；VIOLATION_BASELINE 22→16。
+   d. **门禁（tests/unit/test_architecture.py，条目追加 #263）**：VIOLATION_BASELINE 22→16（违规实测 16，只增即红收紧）；R-22 docstring 更新：monitoring 内部互引 74→56（6 模块迁出净减 18 条），core 包内 38，L5 合计 82；MODULE_LAYER 不变（core 已 L0）；OVERSIZE 无涉及（6 文件均 <1500 行：alert_store/audit_log/field_crypto/health_check 1266/measurability/metrics_history 1383）。
+   e. **兼容性**：monitoring/__init__.py 仅 health_check re-export 路径改 core（符号名不变，`from myquant.monitoring import HealthChecker` 等调用方零改动）；AlertStore/AuditLogStore/FieldCrypto/MetricsHistoryStore 等类名与既有调用签名不变；EX-13B/C/D/E/H/I/K 例外保留（scheduler→monitoring 的 meta_monitor/metrics_collector/watchdog/alerting/weekly_review/action_engine/account_reconciler 未下沉，仍 L4→L5 豁免）。
+   f. **验证结果**：py_compile 6 下沉文件 + monitoring/__init__ 通过；门禁 26 passed/1 skipped（真环 0/违规 16/例外 14 条剩 13+1）；下沉相关单测（alert_store/audit_log/field_crypto/health_check/measurability/metrics_history + 引用方 20+ 测试套件）全绿；全量 pytest 3525 passed/3 skipped（与 #262 持平，无回归）。
+   g. **纪律遵守**：先更新蓝图目录树（core 段登记 6 文件 + monitoring 段按 3.3 标注 6 迁出）再落代码；零蓝图外新增文件；严格防未来（本批纯结构迁移，无时序逻辑变更）；工作区既有未提交改动未触碰；任务后 git 提交（commit message 引用 #263）。

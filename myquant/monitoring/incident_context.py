@@ -684,7 +684,7 @@ def _run_self_test() -> int:
     import tempfile
     from pathlib import Path
 
-    from myquant.monitoring.alert_store import AlertStore
+    from myquant.core.alert_store import AlertStore
     from myquant.monitoring.alerting import AlertManager, ConsoleAlertChannel
 
     passed = 0

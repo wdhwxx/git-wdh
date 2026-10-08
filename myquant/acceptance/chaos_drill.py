@@ -3,7 +3,7 @@
 chaos_drill.py - 混沌工程与故障演练（D-6）
 ==========================================
 季度故障注入：**直接复用 P0-8 标准故障注入用例集 FI-01~07**（与验收测量同一
-用例库，不再另立用例，R-01，字段全部取自 myquant.monitoring.measurability
+用例库，不再另立用例，R-01，字段全部取自 myquant.core.measurability
 .FI_CASES，未自行定义）。先做最小可行版本（FI-01 断流 / 备份恢复），逐步扩展。
 
 本模块提供：
@@ -40,9 +40,9 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from myquant.core.logger import get_logger
-from myquant.monitoring.alert_store import AlertStore, STATUS_ACKED, STATUS_RESOLVED
+from myquant.core.alert_store import AlertStore, STATUS_ACKED, STATUS_RESOLVED
 from myquant.monitoring.alerting import AlertManager
-from myquant.monitoring.measurability import (
+from myquant.core.measurability import (
     CLASSIFICATION_FP,
     CLASSIFICATION_FN,
     CLASSIFICATION_TP,
@@ -450,7 +450,7 @@ class ChaosDrillRunner:
             "drill_id": self._drill_id,
             "title": DEFAULT_DRILL_HEADER,
             "run_at": self._run_at,
-            "fi_library_source": "P0-8（myquant.monitoring.measurability.FI_CASES，R-01 同库）",
+            "fi_library_source": "P0-8（myquant.core.measurability.FI_CASES，R-01 同库）",
             "results": [r.to_dict() for r in self._results],
             "summary": {
                 "cases_total": total,
@@ -514,7 +514,7 @@ class ChaosDrillRunner:
         if self._audit_log is None:
             if not self._audit_tried:
                 try:
-                    from myquant.monitoring.audit_log import AuditLogStore
+                    from myquant.core.audit_log import AuditLogStore
                     self._audit_log = AuditLogStore()
                 except Exception as e:  # noqa: BLE001
                     logger.warning("[chaos_drill] 审计存储不可用（降级内存留痕）: %s", e)

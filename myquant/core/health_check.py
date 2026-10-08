@@ -1263,7 +1263,7 @@ def reset_health_checker() -> None:
 
 
 # ═══════════════════════════════════════════════
-#  自测（python -m myquant.monitoring.health_check）
+#  自测（python -m myquant.core.health_check）
 # ═══════════════════════════════════════════════
 
 def _run_self_test() -> int:

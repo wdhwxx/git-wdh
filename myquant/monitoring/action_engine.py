@@ -2073,7 +2073,7 @@ class ActionEngine:
         if self._audit_log is None:
             if not self._audit_tried:
                 try:
-                    from myquant.monitoring.audit_log import AuditLogStore
+                    from myquant.core.audit_log import AuditLogStore
                     self._audit_log = AuditLogStore()
                 except Exception as e:  # noqa: BLE001 —— 审计不可用降级内存留痕
                     logger.warning("[action] 审计存储不可用（降级内存留痕）: %s", e)

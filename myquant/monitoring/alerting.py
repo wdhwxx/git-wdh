@@ -3047,7 +3047,7 @@ def get_alert_manager() -> AlertManager:
             # BASE-1：默认绑定告警持久化存储（发送落库/状态同步/双读）；
             # store 初始化失败降级为纯内存，不阻断告警功能
             try:
-                from myquant.monitoring.alert_store import AlertStore
+                from myquant.core.alert_store import AlertStore
                 _global_alert_manager.attach_store(AlertStore())
             except Exception as e:
                 logger.warning(f"告警持久化存储初始化失败（降级为纯内存）: {e}")
@@ -3317,7 +3317,7 @@ def weekly_alert_stats(
     fn = 0
     if fi_records is not None:
         try:
-            from myquant.monitoring.measurability import ClassificationStats
+            from myquant.core.measurability import ClassificationStats
             fn = ClassificationStats.count_fn(fi_records)
         except Exception as e:  # noqa: BLE001
             logger.warning("统计 FN 失败（按 0 计）: %s", e)
@@ -3404,7 +3404,7 @@ def _run_a10_self_test() -> int:
     from pathlib import Path
 
     from myquant.database.connection import DatabaseConnection
-    from myquant.monitoring.alert_store import AlertStore
+    from myquant.core.alert_store import AlertStore
 
     passed = 0
     failures: List[str] = []
@@ -3666,7 +3666,7 @@ def _run_c9_governance_self_test(dynamic_baseline_cls: Any = None,
 
 
 if __name__ == "__main__":
-    from myquant.monitoring.alert_store import AlertStore
+    from myquant.core.alert_store import AlertStore
     from myquant.monitoring.dynamic_baseline import DynamicBaseline
 
     _a10 = _run_a10_self_test()

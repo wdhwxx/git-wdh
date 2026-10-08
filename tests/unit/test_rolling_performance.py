@@ -14,7 +14,7 @@ test_rolling_performance.py - C-2 滚动绩效指标监控测试（回写#232）
   8. record 幂等去重。
 
 依赖: pytest, myquant.monitoring.rolling_performance,
-      myquant.monitoring.metrics_history, myquant.database.connection。
+      myquant.core.metrics_history, myquant.database.connection。
 """
 
 from __future__ import annotations
@@ -25,8 +25,8 @@ import pytest
 
 from myquant.core.constants import SeverityLevel
 from myquant.database.connection import DatabaseConnection
-from myquant.monitoring.field_crypto import FieldCrypto
-from myquant.monitoring.metrics_history import MetricsHistoryStore
+from myquant.core.field_crypto import FieldCrypto
+from myquant.core.metrics_history import MetricsHistoryStore
 from myquant.monitoring.rolling_performance import (
     DEFAULT_STRATEGY,
     METRIC_INTRADAY_DRAWDOWN,

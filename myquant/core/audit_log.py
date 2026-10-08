@@ -43,7 +43,7 @@ from myquant.database.schema import (
     CREATE_AUDIT_LOG_SQL,
 )
 
-logger = logging.getLogger("myquant.monitoring.audit_log")
+logger = logging.getLogger("myquant.core.audit_log")
 
 
 # ═══════════════════════════════════════════════
@@ -499,7 +499,7 @@ class AuditLogStore:
 
 
 # ═══════════════════════════════════════════════
-#  自测（python -m myquant.monitoring.audit_log）
+#  自测（python -m myquant.core.audit_log）
 # ═══════════════════════════════════════════════
 
 def _run_self_test() -> int:

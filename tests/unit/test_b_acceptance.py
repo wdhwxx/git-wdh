@@ -53,10 +53,10 @@ class TestIsolatedEnvironment:
 
     def test_injected_deps_used(self) -> None:
         """注入的依赖被使用（不自动构建）。"""
-        from myquant.monitoring.alert_store import AlertStore
+        from myquant.core.alert_store import AlertStore
         from myquant.monitoring.alerting import AlertManager
         from myquant.core.event_bus import EventBus
-        from myquant.monitoring.metrics_history import MetricsHistoryStore
+        from myquant.core.metrics_history import MetricsHistoryStore
 
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             store = AlertStore(db_path=str(Path(td) / "test.db"))

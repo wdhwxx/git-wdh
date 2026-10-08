@@ -30,9 +30,9 @@ from typing import Any, Dict
 import pytest
 
 from myquant.database.connection import DatabaseConnection
-from myquant.monitoring.audit_log import AuditLogStore
-from myquant.monitoring.field_crypto import FieldCrypto, is_sensitive_name, mask_value
-from myquant.monitoring.metrics_history import MetricsHistoryStore
+from myquant.core.audit_log import AuditLogStore
+from myquant.core.field_crypto import FieldCrypto, is_sensitive_name, mask_value
+from myquant.core.metrics_history import MetricsHistoryStore
 
 
 @pytest.fixture()

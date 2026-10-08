@@ -44,7 +44,8 @@ v4.2（K-f~K-h）与 v4.1（K-a~K-e）的修正结论全部沿用，摘要如下
   K-g  新增 R-21：任何 myquant 文件必须可解析，_parse is None 即红 —— 封堵 v4.1 的
        errors="replace" 兜底导致的"畸形编码静默归零"盲区（评审 B-4）。
   K-h  新增 R-22：同层互引计数（只报告不阻断）—— 使 monitoring 153 处内部互引（#260 降至 111、
-       #262 拆出 6 模块至 acceptance/ 后降至 74，acceptance 包内 36，L5 合计 110）、
+       #262 拆出 6 模块至 acceptance/ 后降至 74，acceptance 包内 36，L5 合计 110；
+       #263 存储/基础设施子层下沉 core/ 后 monitoring 降至 56、core 38、L5 合计 82）、
        core/utils 内部耦合可度量、可递减（评审 B-5；这是 G2 拆包的驱动指标）。
 
 另按评审采纳：S-1 `_is_packaging_cycle` 改为白名单式（显式枚举允许的 re-export
@@ -93,17 +94,12 @@ LAYER_ORDER = ["L0", "L1", "L2", "L2E", "L3", "L4", "L5", "L6"]
 SAME_OK: dict[str, set[str]] = {"L2": {"L2E"}, "L2E": {"L2"}}
 
 
-# ═══════════════════════ 2) 例外表（点对点 + 到期日 + 台账；19 对 + P0 2 对） ═══════════════════════
+# ═══════════════════════ 2) 例外表（点对点 + 到期日 + 台账；13 对 + P0 1 对，回写#263 消 6 条） ═══════════════════════
 # 字段: id, 源文件(相对项目根), 目标模块, 收敛任务, 到期日, kind, 说明
 _EXC = [
     ("EX-01A", "myquant/database/trade_log.py", "myquant.models.trade",
      "永久", "2099-12-31", "runtime", "ORM 必引领域模型"),
-    ("EX-10A", "myquant/allocation/risk_parity.py", "myquant.monitoring.audit_log",
-     "永久", "2099-12-31", "runtime", "审计横切（可注入）"),
-    ("EX-10B", "myquant/strategies/param_tuner.py", "myquant.monitoring.audit_log",
-     "永久", "2099-12-31", "runtime", "审计横切（可注入）"),
-    ("EX-13A", "myquant/live/scheduler.py", "myquant.monitoring.metrics_history",
-     "永久", "2099-12-31", "runtime", "装配器"),
+    # EX-10A/10B/13A/F/G/J 已随 #263 下沉消除（audit_log/metrics_history/health_check/alert_store 迁 core/，L3/L4→L0 合法）
     ("EX-13B", "myquant/live/scheduler.py", "myquant.monitoring.meta_monitor",
      "永久", "2099-12-31", "runtime", "装配器"),
     ("EX-13C", "myquant/live/scheduler.py", "myquant.monitoring.metrics_collector",
@@ -112,15 +108,9 @@ _EXC = [
      "永久", "2099-12-31", "runtime", "装配器"),
     ("EX-13E", "myquant/live/scheduler.py", "myquant.monitoring.alerting",
      "永久", "2099-12-31", "runtime", "装配器"),
-    ("EX-13F", "myquant/live/scheduler.py", "myquant.monitoring.health_check",
-     "永久", "2099-12-31", "runtime", "装配器"),
-    ("EX-13G", "myquant/live/scheduler.py", "myquant.monitoring.alert_store",
-     "永久", "2099-12-31", "runtime", "装配器"),
     ("EX-13H", "myquant/live/scheduler.py", "myquant.monitoring.weekly_review",
      "永久", "2099-12-31", "runtime", "装配器"),
     ("EX-13I", "myquant/live/scheduler.py", "myquant.monitoring.action_engine",
-     "永久", "2099-12-31", "runtime", "装配器"),
-    ("EX-13J", "myquant/live/scheduler.py", "myquant.monitoring.audit_log",
      "永久", "2099-12-31", "runtime", "装配器"),
     ("EX-13K", "myquant/live/scheduler.py", "myquant.monitoring.account_reconciler",
      "永久", "2099-12-31", "runtime", "装配器（EX-12A 装配责任上移，回写#259）"),
@@ -134,7 +124,7 @@ EXCEPTIONS: dict[tuple[str, str], dict] = {
 # 回写#255：P0-1（performance_config→ma_strategy）与 P0-2（backtest.engine→live.engine）已消除，集合清空
 P0_MUST_FIX: set[tuple[str, str]] = set()
 
-VIOLATION_BASELINE = 22          # K-a + K-f：语义矩阵 α，排除 TYPE_CHECKING 与 __main__；#255 37→35，#257 35→34，#258 34→27，#259 前段 27→24（EX-12-4 + EX-13K+1），EX-09A/B 后 24→22
+VIOLATION_BASELINE = 16          # K-a + K-f：语义矩阵 α，排除 TYPE_CHECKING 与 __main__；#255 37→35，#257 35→34，#258 34→27，#259 前段 27→24（EX-12-4 + EX-13K+1），EX-09A/B 后 24→22；#263 下沉消除 EX-10A/10B/13A/F/G/J 后 22→16
 TOP_LEVEL_CYCLE_BASELINE = 0     # K-b：顶层真环（剔除包装惯用环与 __main__ 后）
 LAZY_CYCLE_BASELINE = 0          # K-f：全量真环，只减不增（#261 环1 event_bus↔memory_pool 随事件池注入化
                                  #      打断——全系统真环清零；环2 随 G2-1，#260；环3 随 EX-12A，#259）

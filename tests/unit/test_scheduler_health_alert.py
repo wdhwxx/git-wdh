@@ -38,7 +38,7 @@ def _install_health_hooks(monkeypatch, *, is_healthy, calls):
         }
 
     hc = SimpleNamespace(run_all=_fake_run_all, get_summary=_fake_get_summary)
-    monkeypatch.setattr("myquant.monitoring.health_check.get_health_checker", lambda: hc)
+    monkeypatch.setattr("myquant.core.health_check.get_health_checker", lambda: hc)
     monkeypatch.setattr(
         "myquant.monitoring.alerting.get_alert_manager",
         lambda: SimpleNamespace(alert=lambda **kw: calls.append(kw)),

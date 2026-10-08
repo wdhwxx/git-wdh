@@ -32,7 +32,7 @@ from typing import Any, Dict, List, Optional, Union
 from myquant.database.connection import DatabaseConnection, get_connection
 from myquant.database.schema import CREATE_ALERTS_INDEX_SQL, CREATE_ALERTS_SQL
 
-logger = logging.getLogger("myquant.monitoring.alert_store")
+logger = logging.getLogger("myquant.core.alert_store")
 
 
 # ═══════════════════════════════════════════════

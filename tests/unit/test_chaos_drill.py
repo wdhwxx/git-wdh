@@ -26,7 +26,7 @@ from myquant.acceptance.chaos_drill import (
     build_builtin_cases,
     _budget_for,
 )
-from myquant.monitoring.measurability import (
+from myquant.core.measurability import (
     CLASSIFICATION_TP,
     FI_CASES,
     list_fi_cases,

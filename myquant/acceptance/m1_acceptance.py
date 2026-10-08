@@ -11,7 +11,7 @@ m1_acceptance.py - M1 保命验收业务逻辑（A-15-Min / A-15-Full）
                 所有标注 EVENT 的项必须经事件触发路径验证（确认走事件而非等满 60s 周期）；
                 准确率/误报率按 P0-8 ground-truth 口径自动统计（TP/FP/FN）。
 
-测量口径（唯一权威依据 P0-8，见 myquant.monitoring.measurability）：
+测量口径（唯一权威依据 P0-8，见 myquant.core.measurability）：
   - MTTD = 故障注入时间戳（事件时间） → 告警 BASE-1 落库 created_at
   - MTTA = 告警 created_at → 系统确认 acked_at
   - MTTR = 故障注入时间戳 → 告警→恢复成对记录 resolved_at
@@ -40,9 +40,9 @@ from myquant.core.event_bus import Event, EventBus, EventType, OrderEvent
 from myquant.core.logger import get_logger
 from myquant.core.settings import get_monitoring_config
 from myquant.models.trade import Position
-from myquant.monitoring.alert_store import AlertStore
+from myquant.core.alert_store import AlertStore
 from myquant.monitoring.alerting import AlertManager
-from myquant.monitoring.measurability import (
+from myquant.core.measurability import (
     CLASSIFICATION_TP,
     ClassificationStats,
     MttxCalculator,

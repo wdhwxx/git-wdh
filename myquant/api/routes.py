@@ -371,7 +371,7 @@ def create_app(
         """获取指标时序库（服务容器 "metrics_history_store" 注入优先，否则默认库）。"""
         store = _container.get("metrics_history_store")
         if store is None:
-            from myquant.monitoring.metrics_history import MetricsHistoryStore
+            from myquant.core.metrics_history import MetricsHistoryStore
             store = MetricsHistoryStore()
             _container.register("metrics_history_store", store)
         return store

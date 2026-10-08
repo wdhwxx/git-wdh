@@ -31,7 +31,7 @@ from myquant.monitoring.meta_monitor import (
     META_DOWN,
 )
 from myquant.monitoring.metrics_collector import MetricsCollector
-from myquant.monitoring.metrics_history import MetricsHistoryStore
+from myquant.core.metrics_history import MetricsHistoryStore
 
 
 @pytest.fixture()

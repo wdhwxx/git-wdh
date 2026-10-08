@@ -37,7 +37,7 @@ from myquant.core.constants import SeverityLevel
 from myquant.core.event_bus import Event, EventBus, EventType, OrderEvent
 from myquant.core.logger import get_logger
 from myquant.core.settings import get_monitoring_config
-from myquant.monitoring.alert_store import AlertStore
+from myquant.core.alert_store import AlertStore
 from myquant.monitoring.alerting import AlertManager
 from myquant.monitoring.account_reconciler import AccountReconciler
 from myquant.monitoring.circuit_breaker import (
@@ -47,7 +47,7 @@ from myquant.monitoring.circuit_breaker import (
 from myquant.monitoring.data_quality_explorer import DataFreshnessSli
 from myquant.monitoring.execution_stats import ExecutionStatsMonitor
 from myquant.monitoring.margin_monitor import MarginMonitor
-from myquant.monitoring.metrics_history import MetricsHistoryStore
+from myquant.core.metrics_history import MetricsHistoryStore
 from myquant.risk.rules import LimitUsageMonitor
 from myquant.monitoring.center_provider import MonitorCenterDataProvider  # G1 EX-15A：provider 下沉 monitoring（L5→L5 合法）
 
@@ -247,7 +247,7 @@ class BAcceptanceRunner:
             self._owns_history = True
             # 绑定 FieldCrypto（验收临时密钥，落盘即随临时目录清理）
             try:
-                from myquant.monitoring.field_crypto import FieldCrypto
+                from myquant.core.field_crypto import FieldCrypto
                 key_path = str(self._tmpdir / ".acceptance_crypto_key") if self._tmpdir else ":memory:"
                 crypto = FieldCrypto(key_file=key_path)
                 self._history.attach_field_crypto(crypto)

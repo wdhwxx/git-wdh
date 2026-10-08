@@ -1184,12 +1184,12 @@ def _run_self_test() -> int:
         from pathlib import Path
 
         from myquant.database.connection import DatabaseConnection
-        from myquant.monitoring.field_crypto import FieldCrypto
+        from myquant.core.field_crypto import FieldCrypto
         from myquant.monitoring.metrics_collector import (
             BuiltinMetrics as _B2,
             _today_start_ts,
         )
-        from myquant.monitoring.metrics_history import MetricsHistoryStore
+        from myquant.core.metrics_history import MetricsHistoryStore
 
         conn = DatabaseConnection(str(Path(tmpdir) / "b2.db"))
         store = MetricsHistoryStore(connection=conn)

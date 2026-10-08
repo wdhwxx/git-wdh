@@ -43,13 +43,13 @@ from myquant.database.schema import (
     CREATE_METRICS_HISTORY_INDEX_SQL,
     CREATE_METRICS_HISTORY_SQL,
 )
-from myquant.monitoring.field_crypto import (
+from myquant.core.field_crypto import (
     _SENSITIVE_NAME_PATTERNS as _SENSITIVE_NAME_PATTERNS_DEFAULT,
     is_sensitive_name,
     mask_value,
 )
 
-logger = logging.getLogger("myquant.monitoring.metrics_history")
+logger = logging.getLogger("myquant.core.metrics_history")
 
 
 # ═══════════════════════════════════════════════
@@ -1176,7 +1176,7 @@ class DownsamplingTask:
 
 
 # ═══════════════════════════════════════════════
-#  自测（python -m myquant.monitoring.metrics_history）
+#  自测（python -m myquant.core.metrics_history）
 # ═══════════════════════════════════════════════
 
 def _run_self_test() -> int:
@@ -1332,7 +1332,7 @@ def _run_self_test() -> int:
             #  BASE-9 自测（敏感字段加密 + 访问审计）
             # ══════════════════════════════════
 
-            from myquant.monitoring.field_crypto import FieldCrypto
+            from myquant.core.field_crypto import FieldCrypto
 
             crypto = FieldCrypto(key_file=str(Path(tmp) / ".test_key"))
             store.attach_field_crypto(crypto)
@@ -1380,7 +1380,7 @@ def _run_self_test() -> int:
                 check("敏感指标降采样拒绝", True)
 
             # 访问审计：读取留痕 + 导出留痕
-            from myquant.monitoring.audit_log import AuditLogStore
+            from myquant.core.audit_log import AuditLogStore
 
             audit = AuditLogStore(connection=conn)
             store.attach_access_audit(audit)

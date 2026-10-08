@@ -16,7 +16,7 @@ test_incident_context.py - C-7 根因分析（单机版）测试（回写#236）
   8. 指标注册：incident_total/incident_suppressed_total 经 collector 注册+递增。
 
 依赖: pytest, myquant.monitoring.incident_context, myquant.core.event_bus,
-      myquant.monitoring.alert_store/alerting。
+      myquant.core.alert_store/alerting。
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ import pytest
 
 from myquant.core.constants import SeverityLevel
 from myquant.core.event_bus import Event, EventBus, EventType
-from myquant.monitoring.alert_store import AlertStore
+from myquant.core.alert_store import AlertStore
 from myquant.monitoring.alerting import AlertManager
 from myquant.monitoring.incident_context import (
     CATEGORY_INCIDENT,

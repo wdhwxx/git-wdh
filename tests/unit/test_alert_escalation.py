@@ -32,7 +32,7 @@ import pytest
 from myquant.core.constants import SeverityLevel
 from myquant.database.connection import DatabaseConnection
 from myquant.live.scheduler import LiveScheduler, attach_engine
-from myquant.monitoring.alert_store import AlertStore
+from myquant.core.alert_store import AlertStore
 from myquant.monitoring.alerting import (
     ALERT_LEVEL_CODE_MAP,
     DEFAULT_RUNBOOK_BY_CATEGORY,

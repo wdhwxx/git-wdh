@@ -383,7 +383,7 @@ class MonitoringConfigRegistry:
         """审计留痕（kind=config_as_code；失败降级不阻断）。"""
         if self._audit_log is None:
             try:
-                from myquant.monitoring.audit_log import AuditLogStore
+                from myquant.core.audit_log import AuditLogStore
                 self._audit_log = AuditLogStore()
             except Exception as e:  # noqa: BLE001
                 logger.warning("[config_as_code] 审计存储不可用（降级内存留痕）: %s", e)

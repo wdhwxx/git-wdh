@@ -28,7 +28,7 @@ from typing import Any, Dict, List
 import pytest
 
 from myquant.database.connection import DatabaseConnection
-from myquant.monitoring.alert_store import AlertStore
+from myquant.core.alert_store import AlertStore
 from myquant.monitoring.alerting import (
     GOVERNANCE_SUPPRESSED_BASELINE,
     GOVERNANCE_SUPPRESSED_DEPENDENCY,

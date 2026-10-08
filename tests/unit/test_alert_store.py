@@ -41,7 +41,7 @@ from myquant.database.schema import (
     TABLE_NAMES,
     table_exists,
 )
-from myquant.monitoring.alert_store import (
+from myquant.core.alert_store import (
     STATUS_ACKED,
     STATUS_OPEN,
     STATUS_RESOLVED,

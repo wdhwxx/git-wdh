@@ -27,7 +27,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
-logger = logging.getLogger("myquant.monitoring.measurability")
+logger = logging.getLogger("myquant.core.measurability")
 
 
 # ═══════════════════════════════════════════════

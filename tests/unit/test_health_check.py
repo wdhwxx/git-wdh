@@ -23,7 +23,7 @@ from typing import Any, List, Tuple
 
 import pytest
 
-from myquant.monitoring.health_check import (
+from myquant.core.health_check import (
     DEFAULT_DNS_HOSTS,
     DEFAULT_LATENCY_TARGETS,
     DEFAULT_PARTITION_ENDPOINTS,

@@ -389,13 +389,13 @@ class TestSchedulerBrokerPatrolA6:
             "run_all": lambda self: [],
             "get_summary": lambda self: {"is_healthy": True, "is_critical": False},
         })()
-        monkeypatch.setattr("myquant.monitoring.health_check.get_health_checker", lambda: hc)
+        monkeypatch.setattr("myquant.core.health_check.get_health_checker", lambda: hc)
 
         sched = LiveScheduler()
         # 隔离落库/元监控副作用（不碰 quant.db）
         monkeypatch.setattr("myquant.live.scheduler.HealthPatrol._record_report_metrics", lambda self, r: None)
         monkeypatch.setattr("myquant.live.scheduler.HealthPatrol._run_meta_monitor", lambda self, r: None)
-        monkeypatch.setattr("myquant.monitoring.metrics_history.MetricsHistoryStore", lambda: object())
+        monkeypatch.setattr("myquant.core.metrics_history.MetricsHistoryStore", lambda: object())
         tasks = attach_engine(sched, broker=broker)
         patrol = sched.get_task(tasks["patrol"])
         patrol.func()  # 第一次：broker 健康 → 不应有 broker 告警

@@ -36,7 +36,7 @@ from myquant.database.schema import (
     TABLE_NAMES,
     table_exists,
 )
-from myquant.monitoring.metrics_history import (
+from myquant.core.metrics_history import (
     MAX_BATCH_SIZE,
     MetricsHistoryStore,
 )

@@ -50,7 +50,7 @@ from myquant.api.middleware.auth import (  # noqa: E402
 from myquant.api.dependencies.get_services import get_service_container  # noqa: E402
 from myquant.api.routes import create_app  # noqa: E402
 from myquant.database.connection import DatabaseConnection  # noqa: E402
-from myquant.monitoring.audit_log import AuditLogStore  # noqa: E402
+from myquant.core.audit_log import AuditLogStore  # noqa: E402
 
 
 # ═══════════════════════════════════════════════

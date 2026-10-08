@@ -59,7 +59,7 @@ def main() -> int:
     root = find_project_root()
     sys.path.insert(0, str(root))
 
-    from myquant.monitoring.alert_store import AlertStore
+    from myquant.core.alert_store import AlertStore
     from myquant.monitoring.weekly_review import WeeklyReviewReport
 
     db_path = Path(args.db) if args.db else root / "database" / "quant.db"
@@ -72,7 +72,7 @@ def main() -> int:
     metrics_store = None
     if not args.no_capacity:
         try:
-            from myquant.monitoring.metrics_history import MetricsHistoryStore
+            from myquant.core.metrics_history import MetricsHistoryStore
 
             metrics_store = MetricsHistoryStore(db_path=str(db_path))
         except Exception as exc:  # noqa: BLE001

@@ -28,7 +28,7 @@ import pytest
 from myquant.core.event_bus import Event, EventBus
 from myquant.monitoring.alerting import AlertManager, LogAlertChannel
 from myquant.monitoring.metrics_collector import MetricsCollector
-from myquant.monitoring.metrics_history import MetricsHistoryStore
+from myquant.core.metrics_history import MetricsHistoryStore
 from myquant.monitoring.meta_monitor import (
     DEFAULT_HEARTBEAT_CONSECUTIVE_TIMEOUT,
     ExternalHeartbeatGuard,

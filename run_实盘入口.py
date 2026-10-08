@@ -863,7 +863,7 @@ def run_live_trading(args: argparse.Namespace) -> int:
 
     # ── 6.5 健康探针注册（KP-P5-02：注册真实引擎探针，替代空注册表恒 healthy）──
     try:
-        from myquant.monitoring.health_check import (
+        from myquant.core.health_check import (
             HealthCheckResult,
             HealthStatus,
             get_health_checker,

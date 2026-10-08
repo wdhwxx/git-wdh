@@ -46,7 +46,7 @@ from myquant.monitoring.alerting import (
     SeverityLevel,
     WebhookAlertChannel,
 )
-from myquant.monitoring.health_check import (
+from myquant.core.health_check import (
     HealthChecker,
     HealthCheckResult,
     HealthStatus,

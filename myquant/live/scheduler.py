@@ -1747,7 +1747,7 @@ def attach_engine(
         # BASE-2：默认绑定指标时序存储（周期落库 60s；初始化失败降级为
         # 仅内存巡检不落库，不阻断巡检主流程）
         try:
-            from myquant.monitoring.metrics_history import MetricsHistoryStore
+            from myquant.core.metrics_history import MetricsHistoryStore
             patrol.attach_metrics_history(MetricsHistoryStore())
         except Exception as e:  # noqa: BLE001
             logger.warning(f"指标时序存储初始化失败（巡检不落库，仅内存回放）: {e}")
@@ -1871,7 +1871,7 @@ def attach_engine(
             try:
                 from myquant.core.constants import SeverityLevel
                 from myquant.monitoring.alerting import get_alert_manager
-                from myquant.monitoring.health_check import get_health_checker
+                from myquant.core.health_check import get_health_checker
                 hc = get_health_checker()
                 hc.run_all()
                 summary = hc.get_summary()
@@ -2073,13 +2073,13 @@ def attach_engine(
         # 不阻断调度器（复盘尽力而为）。
         def _weekly_review_job(**kw) -> None:  # noqa: ARG001
             try:
-                from myquant.monitoring.alert_store import AlertStore
+                from myquant.core.alert_store import AlertStore
                 from myquant.monitoring.weekly_review import WeeklyReviewReport
 
                 alert_store = AlertStore()
                 metrics_store: Any = None
                 try:
-                    from myquant.monitoring.metrics_history import MetricsHistoryStore
+                    from myquant.core.metrics_history import MetricsHistoryStore
 
                     metrics_store = MetricsHistoryStore()
                 except Exception as mexc:  # noqa: BLE001
@@ -2117,7 +2117,7 @@ def attach_engine(
             if ae_cfg.get("enabled", True):
                 audit_store = None
                 try:
-                    from myquant.monitoring.audit_log import AuditLogStore
+                    from myquant.core.audit_log import AuditLogStore
                     audit_store = AuditLogStore()
                 except Exception as aexc:  # noqa: BLE001
                     logger.warning(f"[attach] D-1 审计存储不可用（内存留痕）: {aexc}")

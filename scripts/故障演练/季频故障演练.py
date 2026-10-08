@@ -57,7 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def list_cases() -> None:
-    from myquant.monitoring.measurability import list_fi_cases
+    from myquant.core.measurability import list_fi_cases
     print("P0-8 故障注入用例库（演练/验收同源，R-01）：")
     for row in list_fi_cases():
         print(f"  {row['case_id']}: {row['fault_desc']} | {row['kpi']}")

@@ -26,7 +26,7 @@ from typing import Any, Dict, List
 import pytest
 
 from myquant.database.connection import DatabaseConnection, DEFAULT_PRAGMAS
-from myquant.monitoring.metrics_history import (
+from myquant.core.metrics_history import (
     DEFAULT_DOWNSAMPLE_INTERVAL_SECONDS,
     DEFAULT_QUEUE_LIMIT,
     DownsamplingTask,

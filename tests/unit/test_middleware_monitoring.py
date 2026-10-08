@@ -28,7 +28,7 @@ import pytest
 
 from myquant.core.transports.base import TransportConfig, TransportState
 from myquant.core.transports.rabbitmq_bus import RabbitMQTransport
-from myquant.monitoring.health_check import HealthStatus
+from myquant.core.health_check import HealthStatus
 from myquant.monitoring.metrics_collector import BuiltinMetrics, MetricsCollector
 
 

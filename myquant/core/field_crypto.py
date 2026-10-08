@@ -39,7 +39,7 @@ from typing import Any, Optional
 
 from cryptography.fernet import Fernet, InvalidToken
 
-logger = logging.getLogger("myquant.monitoring.field_crypto")
+logger = logging.getLogger("myquant.core.field_crypto")
 
 
 # ═══════════════════════════════════════════════
@@ -211,7 +211,7 @@ class FieldCrypto:
 
 
 # ═══════════════════════════════════════════════
-#  自测（python -m myquant.monitoring.field_crypto）
+#  自测（python -m myquant.core.field_crypto）
 # ═══════════════════════════════════════════════
 
 def _run_self_test() -> int:

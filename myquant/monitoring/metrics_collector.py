@@ -1129,7 +1129,7 @@ class MetricsCollector:
         -------
         HealthCheckResult : 判定结果（message 汇总超限项，details 含明细）
         """
-        from myquant.monitoring.health_check import HealthCheckResult, HealthStatus
+        from myquant.core.health_check import HealthCheckResult, HealthStatus
 
         problems: List[str] = []
         unhealthy = False
@@ -2005,7 +2005,7 @@ def _today_start_ts(now_ts: Optional[float] = None) -> float:
 
 def _default_history_store() -> Any:
     """惰性构建时序库实例（默认项目库；测试注入临时库）。"""
-    from myquant.monitoring.metrics_history import MetricsHistoryStore
+    from myquant.core.metrics_history import MetricsHistoryStore
     return MetricsHistoryStore()
 
 
@@ -2026,7 +2026,7 @@ def _save_pnl_rows(store: Any, rows: List[Dict[str, Any]]) -> int:
         return store.save_batch(rows)
     except ValueError as e:
         if "拒绝明文落盘" in str(e) and getattr(store, "_field_crypto", None) is None:
-            from myquant.monitoring.field_crypto import FieldCrypto
+            from myquant.core.field_crypto import FieldCrypto
             store.attach_field_crypto(FieldCrypto())
             logger.warning(
                 "[metrics] PnL 敏感指标落库：自动绑定 FieldCrypto（BASE-9，首次自动生成密钥）"

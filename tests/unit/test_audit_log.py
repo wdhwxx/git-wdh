@@ -37,8 +37,8 @@ from myquant.database.schema import (
     table_exists,
 )
 from myquant.monitoring.alerting import Alert, SeverityLevel
-from myquant.monitoring.alert_store import AlertStore, STATUS_ACKED, STATUS_RESOLVED
-from myquant.monitoring.audit_log import AuditLogStore, _GENESIS_HASH
+from myquant.core.alert_store import AlertStore, STATUS_ACKED, STATUS_RESOLVED
+from myquant.core.audit_log import AuditLogStore, _GENESIS_HASH
 
 
 @pytest.fixture()

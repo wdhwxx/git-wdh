@@ -26,7 +26,7 @@ monitoring - 监控告警模块
   - 任务22: live/scheduler.py 定期巡检调用 HealthChecker + check_escalations()
 """
 
-from myquant.monitoring.health_check import (
+from myquant.core.health_check import (  # G2-4 下沉：health_check 迁 core/（L0），monitoring 仅 re-export 兼容
     HealthStatus,
     HealthCheckResult,
     HealthChecker,

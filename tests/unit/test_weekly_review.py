@@ -21,9 +21,9 @@ import pytest
 
 from myquant.core.constants import SeverityLevel
 from myquant.database.connection import DatabaseConnection
-from myquant.monitoring.alert_store import AlertStore
+from myquant.core.alert_store import AlertStore
 from myquant.monitoring.alerting import Alert
-from myquant.monitoring.metrics_history import MetricsHistoryStore
+from myquant.core.metrics_history import MetricsHistoryStore
 from myquant.monitoring.weekly_review import (
     WEEK_SECONDS,
     WeeklyReviewReport,

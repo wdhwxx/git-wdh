@@ -7,7 +7,7 @@ P0-8 可测量性与故障注入统计 CLI：
   - 按 P0-8 口径自动统计 TP/FP/FN 与准确率/误报率/检出率
   - 按 P0-8 口径汇总 MTTD/MTTA/MTTR（系统时间戳，禁止人工估算）
 
-业务逻辑位于 myquant.monitoring.measurability
+业务逻辑位于 myquant.core.measurability
 （MttxCalculator / ClassificationStats / FI_CASES），
 本脚本只做：参数解析 → 项目根探测 → 读取 JSON → 调用 → 输出报告。
 
@@ -53,7 +53,7 @@ _PROJECT_ROOT = _bootstrap_root()
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from myquant.monitoring.measurability import (  # noqa: E402  # 业务模块
+from myquant.core.measurability import (  # noqa: E402  # 业务模块
     ClassificationStats,
     MttxCalculator,
     list_fi_cases,

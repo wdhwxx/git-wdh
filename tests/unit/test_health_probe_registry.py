@@ -7,7 +7,7 @@ test_health_probe_registry.py - 健康探针注册表为空测试（KP-P5-02 / T
   2. run_实盘入口.py 装配引擎后注册真实 live 探针（add_check("live", ...)）。
   3. engine.health_check 返回含 status 的真实探针数据源存在（供探针消费）。
 
-依赖: pytest, myquant.api.routes.create_app, myquant.monitoring.health_check
+依赖: pytest, myquant.api.routes.create_app, myquant.core.health_check
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from myquant.api.routes import create_app
-from myquant.monitoring.health_check import HealthStatus, get_health_checker
+from myquant.core.health_check import HealthStatus, get_health_checker
 
 _PROJ = Path(__file__).resolve().parent.parent.parent
 
@@ -51,7 +51,7 @@ class TestLiveProbeRegistered:
     def test_healthchecker_注册探针运行(self) -> None:
         """DoD：HealthChecker 注册 live 探针后 run_all 返回结果（探针链路可用）。"""
         checker = get_health_checker()
-        from myquant.monitoring.health_check import HealthCheckResult
+        from myquant.core.health_check import HealthCheckResult
 
         def _healthy() -> HealthCheckResult:
             return HealthCheckResult(

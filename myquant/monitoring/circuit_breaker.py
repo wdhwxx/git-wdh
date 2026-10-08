@@ -709,7 +709,7 @@ def _run_self_test() -> int:
 
     from myquant.core.event_bus import EventBus
     from myquant.database.connection import DatabaseConnection
-    from myquant.monitoring.audit_log import AuditLogStore
+    from myquant.core.audit_log import AuditLogStore
     from myquant.risk.risk_manager import RiskManager
 
     passed = 0

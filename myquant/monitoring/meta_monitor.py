@@ -996,7 +996,7 @@ def _run_self_test() -> int:
     from myquant.core.event_bus import Event, EventBus
     from myquant.monitoring.alerting import AlertManager, LogAlertChannel
     from myquant.monitoring.metrics_collector import MetricsCollector
-    from myquant.monitoring.metrics_history import MetricsHistoryStore
+    from myquant.core.metrics_history import MetricsHistoryStore
 
     import tempfile
     from pathlib import Path
