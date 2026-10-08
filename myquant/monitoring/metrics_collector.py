@@ -77,35 +77,18 @@ import math
 import time
 import uuid
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+from myquant.core.constants import MetricType  # G2-1 下沉 core，re-export 兼容旧引用
 from myquant.core.logger import get_logger
+from myquant.core.registry import register_collector
 
 logger = get_logger("monitoring.metrics")
 
 
 # ═══════════════════════════════════════════════
-#  指标类型枚举
+#  指标类型枚举（G2-1 下沉 myquant/core/constants；re-export 见顶部导入）
 # ═══════════════════════════════════════════════
-
-class MetricType(Enum):
-    """
-    指标类型（与 Prometheus 兼容）
-
-    - COUNTER: 只增不减的计数器（如事件总数、错误次数）
-    - GAUGE: 可增可减的仪表盘（如当前脏数据占比、磁盘使用率）
-    - HISTOGRAM: 直方图（如请求耗时分布，当前版本简化为计数+总和）
-    """
-    COUNTER = "counter"
-    GAUGE = "gauge"
-    HISTOGRAM = "histogram"
-
-    @property
-    def is_monotonic(self) -> bool:
-        """是否为单调递增类型"""
-        return self == MetricType.COUNTER
-
 
 # ═══════════════════════════════════════════════
 #  指标数据类
@@ -1779,7 +1762,7 @@ class MetricsCollector:
         """
         try:
             from myquant.core.event_bus import EventType
-            from myquant.monitoring.alerting import TRADE_EXCEPTION_ALERT_LEVEL_MAP
+            from myquant.core.constants import TRADE_EXCEPTION_ALERT_LEVEL_MAP
 
             et = getattr(event, "event_type", None)
             et_name: str = et.value if isinstance(et, EventType) else str(et)
@@ -1980,6 +1963,7 @@ def get_metrics_collector() -> MetricsCollector:
         if _global_collector is None:
             _global_collector = MetricsCollector()
             _global_collector.register_builtin_metrics()
+            register_collector(_global_collector)  # G2-1 自注册 core.registry（供 alerting 等经低层获取）
         return _global_collector
 
 

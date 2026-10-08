@@ -76,7 +76,7 @@ from typing import Any, Callable, Deque, Dict, List, Optional, Sequence, Set, Tu
 from urllib import request as urlrequest
 from urllib.error import URLError
 
-from myquant.core.constants import SeverityLevel
+from myquant.core.constants import DEFAULT_DEPENDENCY_MAP, MetricType, SeverityLevel, TRADE_EXCEPTION_ALERT_LEVEL_MAP
 from myquant.core.logger import get_logger
 
 logger = get_logger("monitoring.alerting")
@@ -103,12 +103,7 @@ STRATEGY_RESUME_ALERT_LEVEL: SeverityLevel = SeverityLevel.INFO
 #    不预测未来可能发生的拒单/失败。
 #  - ORDER_REJECTED / ORDER_FAILED / FILL_REPORT_ERROR → ERROR（P1）
 #  - EMERGENCY_LIQUIDATION → CRITICAL（P0，最高优先级）
-TRADE_EXCEPTION_ALERT_LEVEL_MAP: Dict[str, SeverityLevel] = {
-    "order.rejected": SeverityLevel.ERROR,            # P1：拒单
-    "order.failed": SeverityLevel.ERROR,              # P1：订单发送/执行失败
-    "fill.report_error": SeverityLevel.ERROR,          # P1：成交回报异常
-    "emergency.liquidation": SeverityLevel.CRITICAL,  # P0：紧急强平
-}
+# 注：TRADE_EXCEPTION_ALERT_LEVEL_MAP 已下沉 myquant/core/constants（G2-1 断环）
 # A-8 需要订阅并自动告警的交易异常事件类型（顺序即订阅登记顺序）
 TRADE_EXCEPTION_ALERT_EVENT_TYPES: Tuple[str, ...] = (
     "order.rejected",
@@ -1404,8 +1399,7 @@ class AlertGovernor:
         raw_map = dependency_map
         if raw_map is None:
             try:
-                from myquant.monitoring.incident_context import DEFAULT_DEPENDENCY_MAP
-                raw_map = DEFAULT_DEPENDENCY_MAP
+                raw_map = DEFAULT_DEPENDENCY_MAP  # G2-1 下沉 core/constants（顶部导入）
             except Exception as e:  # noqa: BLE001 —— C-7 不可用时退化为空映射（不抑制依赖）
                 logger.warning("加载 C-7 DEFAULT_DEPENDENCY_MAP 失败（依赖抑制按空映射）: %s", e)
                 raw_map = {}
@@ -1660,11 +1654,7 @@ class AlertGovernor:
         col = self._resolve_collector()
         if col is None:
             return
-        try:
-            from myquant.monitoring.metrics_collector import MetricType
-        except Exception as e:  # noqa: BLE001
-            logger.warning("导入 MetricType 失败（治理指标未注册）: %s", e)
-            return
+        # MetricType 已由 core/constants 顶部导入（G2-1 下沉）
         helps = {
             METRIC_ALERT_SUPPRESSED_TOTAL: "Total alerts suppressed by governance (dependency/baseline/meta-cooldown)",
             METRIC_ALERT_AGGREGATED_TOTAL: "Total similar alerts merged by governance aggregation grouping",
@@ -1682,13 +1672,13 @@ class AlertGovernor:
                 logger.warning("治理指标 %s 注册失败（继续其余）: %s", name, e)
 
     def _resolve_collector(self) -> Any:
-        """延迟解析指标采集器；不可用返回 None（仅记 warning）。"""
+        """解析指标采集器：构造注入优先，其次 core.registry 全局注册表；不可用返回 None（仅记 warning）。"""
         col = self._metrics_collector
         if col is not None:
             return col
         try:
-            from myquant.monitoring.metrics_collector import get_metrics_collector
-            col = get_metrics_collector()
+            from myquant.core.registry import get_collector
+            col = get_collector()
             self._metrics_collector = col
             return col
         except Exception as e:  # noqa: BLE001
@@ -3482,7 +3472,8 @@ def _run_a10_self_test() -> int:
     return len(failures)
 
 
-def _run_c9_governance_self_test() -> int:
+def _run_c9_governance_self_test(dynamic_baseline_cls: Any = None,
+                              alert_store_cls: Any = None) -> int:
     """C-9（回写#238）治理自测：依赖抑制 / 元监控独立冷却 / 动态基线降噪 /
     聚合分组 / 周统计 TP-FP-FN 达标判定 / 指标注册 / 防未来 / 防御校验。
 
@@ -3495,8 +3486,11 @@ def _run_c9_governance_self_test() -> int:
     from pathlib import Path
 
     from myquant.database.connection import DatabaseConnection
-    from myquant.monitoring.alert_store import AlertStore
-    from myquant.monitoring.dynamic_baseline import DynamicBaseline
+
+    if dynamic_baseline_cls is None or alert_store_cls is None:
+        raise ValueError("自测需经 __main__ 注入 DynamicBaseline/AlertStore（G2-1 断环）")
+    DynamicBaseline = dynamic_baseline_cls
+    AlertStore = alert_store_cls
 
     passed = 0
     failures: List[str] = []
@@ -3672,6 +3666,10 @@ def _run_c9_governance_self_test() -> int:
 
 
 if __name__ == "__main__":
+    from myquant.monitoring.alert_store import AlertStore
+    from myquant.monitoring.dynamic_baseline import DynamicBaseline
+
     _a10 = _run_a10_self_test()
-    _c9 = _run_c9_governance_self_test()
+    _c9 = _run_c9_governance_self_test(
+        dynamic_baseline_cls=DynamicBaseline, alert_store_cls=AlertStore)
     raise SystemExit(_a10 + _c9)

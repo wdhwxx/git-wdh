@@ -16,7 +16,7 @@ constants.py - 项目常量、状态码、时间单位、枚举类型
 from __future__ import annotations
 
 from enum import Enum, IntEnum, auto
-from typing import Dict
+from typing import Dict, List
 
 
 # ═══════════════════════════════════════════════
@@ -502,6 +502,45 @@ class SeverityLevel(Enum):
 
     def __lt__(self, other: "SeverityLevel") -> bool:
         return self.level < other.level
+
+
+# ═══════════════════════════════════════════════
+#  监控常量（G2-1 下沉：打断 monitoring 内部真环）
+# ═══════════════════════════════════════════════
+
+class MetricType(Enum):
+    """
+    指标类型（与 Prometheus 兼容）
+
+    - COUNTER: 只增不减的计数器（如事件总数、错误次数）
+    - GAUGE: 可增可减的仪表盘（如当前脏数据占比、磁盘使用率）
+    - HISTOGRAM: 直方图（如请求耗时分布，当前版本简化为计数+总和）
+    """
+    COUNTER = "counter"
+    GAUGE = "gauge"
+    HISTOGRAM = "histogram"
+
+    @property
+    def is_monotonic(self) -> bool:
+        """是否为单调递增类型"""
+        return self == MetricType.COUNTER
+
+
+#: 缺省"底层→上层"依赖映射：key=底层（根因候选）category，value=其可引发的上层 category。
+#: 行情断流（watchdog A-4）→ 数据质量告警 / 策略漂移告警；数据质量 → 策略告警。
+#: 可构造注入 dependency_map 覆盖/扩展。
+DEFAULT_DEPENDENCY_MAP: Dict[str, List[str]] = {
+    "watchdog": ["data_quality", "strategy"],
+    "data_quality": ["strategy"],
+}
+
+#: 交易异常事件类型 → 告警级别（A-8 P1~P0：order.rejected 等 P1→ERROR、紧急强平 P0→CRITICAL）
+TRADE_EXCEPTION_ALERT_LEVEL_MAP: Dict[str, SeverityLevel] = {
+    "order.rejected": SeverityLevel.ERROR,            # P1：拒单
+    "order.failed": SeverityLevel.ERROR,              # P1：订单发送/执行失败
+    "fill.report_error": SeverityLevel.ERROR,          # P1：成交回报异常
+    "emergency.liquidation": SeverityLevel.CRITICAL,  # P0：紧急强平
+}
 
 
 # ═══════════════════════════════════════════════

@@ -750,14 +750,8 @@ class DynamicBaseline:
         """set_gauge 一个仪表盘指标；None（样本不足）落 0.0 占位。"""
         col = self._metrics_collector
         if col is None:
-            try:
-                from myquant.monitoring.metrics_collector import get_metrics_collector
-
-                col = get_metrics_collector()
-                self._metrics_collector = col
-            except Exception as e:  # noqa: BLE001
-                logger.warning("获取 metrics_collector 失败（指标未写入）: %s", e)
-                return
+            logger.warning("metrics_collector 未装配（构造注入 metrics_collector=；指标未写入）")
+            return
         try:
             col.set_gauge(name, 0.0 if value is None else float(value), labels=labels)
         except Exception as e:  # noqa: BLE001

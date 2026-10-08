@@ -49,7 +49,7 @@ import time
 import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from myquant.core.constants import SeverityLevel
+from myquant.core.constants import DEFAULT_DEPENDENCY_MAP, MetricType, SeverityLevel
 from myquant.core.event_bus import Event, EventBus, EventType
 from myquant.core.logger import get_logger
 
@@ -76,13 +76,7 @@ _FUTURE_EPS: float = 1.0
 #: 待折叠上下文缓冲保留倍数（超出 window*此倍数的 pending 项被淘汰，防无界增长）
 _PENDING_RETENTION_FACTOR: float = 3.0
 
-#: 缺省"底层→上层"依赖映射：key=底层（根因候选）category，value=其可引发的上层 category。
-#: 行情断流（watchdog A-4）→ 数据质量告警 / 策略漂移告警；数据质量 → 策略告警。
-#: 可构造注入 dependency_map 覆盖/扩展。
-DEFAULT_DEPENDENCY_MAP: Dict[str, List[str]] = {
-    "watchdog": ["data_quality", "strategy"],
-    "data_quality": ["strategy"],
-}
+#: 缺省"底层→上层"依赖映射（G2-1 下沉 core/constants，见顶部导入；此处不再重复定义）
 
 #: 缺省订阅的"告警类事件"类型（EventBus 事件驱动入口；可构造注入 alert_event_types 扩展）。
 #: 任一此类事件到达即按 event.data 归一化为一条告警观察并实时聚合判定。
@@ -564,11 +558,7 @@ class IncidentContextEngine:
         col = self._resolve_collector()
         if col is None:
             return
-        try:
-            from myquant.monitoring.metrics_collector import MetricType
-        except Exception as e:  # noqa: BLE001
-            logger.warning("导入 MetricType 失败（指标未注册）: %s", e)
-            return
+        # MetricType 已由 core/constants 顶部导入（G2-1 下沉）
         helps = {
             METRIC_INCIDENT_TOTAL: "Total number of root-cause incidents opened",
             METRIC_INCIDENT_SUPPRESSED_TOTAL: "Total number of upper-layer alerts suppressed by dependency",
@@ -586,15 +576,8 @@ class IncidentContextEngine:
         col = self._metrics_collector
         if col is not None:
             return col
-        try:
-            from myquant.monitoring.metrics_collector import get_metrics_collector
-
-            col = get_metrics_collector()
-            self._metrics_collector = col
-            return col
-        except Exception as e:  # noqa: BLE001
-            logger.warning("获取 metrics_collector 失败（指标未写入）: %s", e)
-            return None
+        logger.warning("metrics_collector 未装配（构造注入 metrics_collector=；指标未写入）")
+        return None
 
     def _inc_counter(self, name: str, amount: float = 1.0,
                      labels: Optional[Dict[str, str]] = None) -> None:
