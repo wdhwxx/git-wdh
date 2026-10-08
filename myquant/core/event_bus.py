@@ -799,8 +799,7 @@ class EventBus:
         self,
         max_history: int = 1000,
         dedup_window_seconds: float = 60.0,
-        use_object_pool: bool = False,
-        pool_max_idle: int = 1000,
+        event_pool: Optional[Any] = None,
         max_dedup_keys: int = 10_000,
         sync_budget_seconds: float = 5.0,
     ):
@@ -811,11 +810,9 @@ class EventBus:
             事件历史最大保留条数
         dedup_window_seconds : float
             告警去重时间窗口（秒），相同 deduplication_key 的告警在此窗口内只发布一次
-        use_object_pool : bool
-            是否启用事件对象池（P1 第8项）。启用后可通过 acquire_event()/release_event()
-            复用 Event 对象，减少高频事件流的内存分配。默认关闭（向后兼容）。
-        pool_max_idle : int
-            事件对象池空闲对象缓存上限。
+        event_pool : Any | None
+            事件对象池实例（P1 第8项，G2-2 注入化）。注入后 acquire_event()/release_event()
+            复用池内 Event 对象，减少高频事件流的内存分配；None 时等价直接构造（默认）。
         max_dedup_keys : int
             告警去重缓存最大键数（M3：超限清理最旧一半，防无界增长）。
         sync_budget_seconds : float
@@ -832,13 +829,8 @@ class EventBus:
         self._max_dedup_keys = max_dedup_keys
         self._sync_budget_seconds = sync_budget_seconds
         self._wait_events: Dict[str, List[threading.Event]] = defaultdict(list)
-        # P1 第8项：事件对象池（默认关闭，向后兼容）
-        self._use_object_pool = use_object_pool
-        self._event_pool: Optional[Any] = None
-        if use_object_pool:
-            from myquant.utils.memory_pool import EventObjectPool
-
-            self._event_pool = EventObjectPool(max_idle=pool_max_idle, name="eventbus_pool")
+        # P1 第8项：事件对象池（G2-2 断环：经 event_pool 注入，event_bus 不再反向依赖 memory_pool）
+        self._event_pool = event_pool
 
     # ═══════════════════════════════════════════
     #  订阅
@@ -1230,7 +1222,7 @@ class EventBus:
         """
         从事件对象池获取事件对象（P1 第8项）
 
-        启用 use_object_pool=True 时复用池内对象；未启用时等价于直接构造 Event。
+        注入 event_pool 时复用池内对象；未注入时等价于直接构造 Event。
 
         Parameters
         ----------
@@ -2196,8 +2188,8 @@ def reset_event_bus() -> None:
 #  自测 Demo（P1 第8项：批处理模式 + 事件对象池）
 # ═══════════════════════════════════════════════
 
-def _run_self_test() -> int:
-    """运行 EventBus 批处理 / 对象池自测。"""
+def _run_self_test(event_pool_factory: Optional[Callable[..., Any]] = None) -> int:
+    """运行 EventBus 批处理 / 对象池自测（对象池项需经 __main__ 注入工厂，G2-2 断环）。"""
     passed = 0
     failures: List[str] = []
 
@@ -2278,8 +2270,10 @@ def _run_self_test() -> int:
     check("auto_flush 退出自动发布", b_cnt["n"] == 2, f"{b_cnt['n']}")
     check("flushed_total 累计=2", b2.flushed_total == 2, f"{b2.flushed_total}")
 
-    # 6. 对象池集成：use_object_pool=True
-    bus_pool = EventBus(use_object_pool=True, pool_max_idle=10)
+    # 6. 对象池集成：经注入的 event_pool
+    if event_pool_factory is None:
+        raise ValueError("对象池自测需经 __main__ 注入 event_pool_factory（G2-2 断环）")
+    bus_pool = EventBus(event_pool=event_pool_factory(max_idle=10, name="eventbus_pool"))
     pool_recv = {"n": 0}
 
     def on_pool(event: Event) -> None:
@@ -2294,7 +2288,7 @@ def _run_self_test() -> int:
     pool_stats = bus_pool._event_pool.stats()
     check("对象池归还后 in_use=0", pool_stats["in_use"] == 0, f"{pool_stats}")
 
-    # 7. 默认（未启用对象池）acquire_event 等价直接构造
+    # 7. 默认（未注入对象池）acquire_event 等价直接构造
     bus_default = EventBus()
     ev_d = bus_default.acquire_event("D_EVT", data={"y": 2})
     check("未启用对象池时直接构造", ev_d.data.get("y") == 2 and bus_default._event_pool is None, f"{ev_d}")
@@ -2379,5 +2373,7 @@ def _run_self_test() -> int:
 
 
 if __name__ == "__main__":
-    # 自测 Demo：批处理模式 + 事件对象池（P1 第8项）
-    raise SystemExit(_run_self_test())
+    from myquant.utils.memory_pool import EventObjectPool
+
+    raise SystemExit(_run_self_test(
+        event_pool_factory=lambda max_idle, name: EventObjectPool(max_idle=max_idle, name=name)))

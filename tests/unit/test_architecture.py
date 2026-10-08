@@ -43,7 +43,7 @@ v4.2（K-f~K-h）与 v4.1（K-a~K-e）的修正结论全部沿用，摘要如下
        权威违规由 40 修正为 37；回写#255 P0-1/P0-2 消除后再由 37 修正为 35。
   K-g  新增 R-21：任何 myquant 文件必须可解析，_parse is None 即红 —— 封堵 v4.1 的
        errors="replace" 兜底导致的"畸形编码静默归零"盲区（评审 B-4）。
-  K-h  新增 R-22：同层互引计数（只报告不阻断）—— 使 monitoring 153 处内部互引、
+  K-h  新增 R-22：同层互引计数（只报告不阻断）—— 使 monitoring 153 处内部互引（#260 降至 111）、
        core/utils 内部耦合可度量、可递减（评审 B-5；这是 G2 拆包的驱动指标）。
 
 另按评审采纳：S-1 `_is_packaging_cycle` 改为白名单式（显式枚举允许的 re-export
@@ -135,8 +135,8 @@ P0_MUST_FIX: set[tuple[str, str]] = set()
 
 VIOLATION_BASELINE = 22          # K-a + K-f：语义矩阵 α，排除 TYPE_CHECKING 与 __main__；#255 37→35，#257 35→34，#258 34→27，#259 前段 27→24（EX-12-4 + EX-13K+1），EX-09A/B 后 24→22
 TOP_LEVEL_CYCLE_BASELINE = 0     # K-b：顶层真环（剔除包装惯用环与 __main__ 后）
-LAZY_CYCLE_BASELINE = 2          # K-f：全量真环，只减不增（环1 event_bus↔memory_pool、
-                                 #      环2 monitoring 内部4模块；环3 随 EX-12A 消除，#259）
+LAZY_CYCLE_BASELINE = 0          # K-f：全量真环，只减不增（#261 环1 event_bus↔memory_pool 随事件池注入化
+                                 #      打断——全系统真环清零；环2 随 G2-1，#260；环3 随 EX-12A，#259）
 
 OVERSIZE_LIMIT = 1500
 OVERSIZE_WHITELIST = {           # 相对 myquant 的路径（禁 basename）
@@ -203,13 +203,13 @@ ENTRY_ALLOWLIST: set[str] = {
 # ═══════════════════════════ 2c) 薄化冻结（R-24，G0 收尾回写#256） ═══════════════════════════
 # OVERSIZE 白名单 14 项行数基线（2026-10-08 实测冻结）：白名单内文件行数只减不增。
 OVERSIZE_LINE_BASELINE: dict[str, int] = {
-    "monitoring/alerting.py": 3677, "live/engine.py": 2858, "core/event_bus.py": 2383,  # engine 2851→2858：用户提交 1499c09 引入 +7 行（回写#258）
-    "live/scheduler.py": 2363, "monitoring/metrics_collector.py": 2284,
+    "monitoring/alerting.py": 3675, "live/engine.py": 2858, "core/event_bus.py": 2379,  # engine 2851→2858：用户提交 1499c09 引入 +7 行（回写#258）；alerting 3677→3675（#260）；event_bus 2383→2379（#261 事件池注入化）
+    "live/scheduler.py": 2363, "monitoring/metrics_collector.py": 2268,  # 2284→2268（#260 MetricType 下沉 core）
     "monitoring/action_engine.py": 2259, "data_access/manager.py": 2170,
     "live/brokers/qmt_broker.py": 2170, "live/data_feed.py": 2147,
     "gui/backtest_config_dialog.py": 1861, "risk/risk_manager.py": 1901,
     "web/dashboard.py": 1760, "ml/training_pipeline.py": 1651,
-    "monitoring/dynamic_baseline.py": 1552,
+    "monitoring/dynamic_baseline.py": 1546,  # 1552→1546（#260 去全局采集器兜底）
 }
 
 # R-19 零覆盖基线：✅ 已冻结（回写#256）。冻结集合 = 2026-10-08 实测引用级零覆盖业务模块 49 个
@@ -483,7 +483,7 @@ class TestR01aTopLevelCycle:
 
 
 class TestR01bLazyCycle:
-    """R-01b：全量导入图真环数只减不增（基线 2，回写#259 环3 消除）。"""
+    """R-01b：全量导入图真环数只减不增（基线 0，回写#261 环1 消除——全系统真环清零、#260 环2、#259 环3）。"""
 
     def test_lazy_cycle_not_rising(self):
         cycles = _real_cycles(top_only=False)
