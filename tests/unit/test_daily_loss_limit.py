@@ -24,10 +24,11 @@ from unittest import mock
 
 import pytest
 
-from myquant.live.engine import LiveEngine, RiskConfig, build_risk_manager_from_config
+from myquant.live.engine import LiveEngine, RiskConfig
 from myquant.live.portfolio import LivePortfolio
 from myquant.live.state_store import StateStore
 from myquant.models.trade import Order, OrderSide, OrderStatus, OrderType
+from myquant.risk.risk_manager import build_risk_manager_from_config  # 回写#255 P0-2：装配工厂下沉风控层
 from myquant.risk.rules import (
     RULE_REGISTRY,
     DailyLossLimitRule,

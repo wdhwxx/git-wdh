@@ -1823,3 +1823,79 @@ class RiskManager:
             f"events={len(self._events)}, "
             f"dq_paused={self._dq_global_paused})"
         )
+
+
+# ═══════════════════════════════════════════
+#  配置工厂（回写#255·P0-2：由 myquant/live/engine.py 下沉至此）
+# ═══════════════════════════════════════════
+def build_risk_manager_from_config(
+    risk_cfg: Dict[str, Any],
+    position_cfg: Dict[str, Any],
+    strategy_cfg: Optional[Dict[str, Any]] = None,
+    enable_trading_hours: bool = True,
+) -> RiskManager:
+    """
+    从实盘/回测配置创建 RiskManager（H2修复；P0-2 下沉至风控层，回测与实盘同源装配）
+
+    映射配置的 risk_control + position + strategy 段到完整规则库:
+      - position.max_single_position / max_total_positions → position_limit
+      - risk_control.max_order_value → single_order_limit
+      - risk_control.max_daily_trades → rate_limit
+      - risk_control.max_drawdown_pct → max_drawdown
+      - risk_control.max_daily_loss_pct → daily_loss_limit（任务46/P1，默认1%）
+      - strategy.params.stop_loss_pct / take_profit_pct → stop_loss / take_profit
+      - enable_trading_hours → trading_hours（真钱实盘默认启用；回测批量回放可关闭）
+
+    Parameters
+    ----------
+    risk_cfg : Dict
+        risk_control 段
+    position_cfg : Dict
+        position 段
+    strategy_cfg : Dict | None
+        strategy 段（取止盈止损参数）
+    enable_trading_hours : bool
+        是否启用交易时段规则（真钱实盘True；模拟盘/回测可False）
+
+    Returns:
+        RiskManager 实例（含数据质量风控联动）。
+    """
+    risk_cfg = dict(risk_cfg or {})
+    position_cfg = dict(position_cfg or {})
+    strategy_params = dict((strategy_cfg or {}).get("params", {}) or {})
+
+    stop_loss_pct = float(strategy_params.get("stop_loss_pct", 0) or 0)
+    take_profit_pct = float(strategy_params.get("take_profit_pct", 0) or 0)
+
+    rules: Dict[str, Dict[str, Any]] = {
+        "position_limit": {
+            "max_position_pct": float(position_cfg.get("max_single_position", 0.20)),
+            "max_positions": int(position_cfg.get("max_total_positions", 5)),
+        },
+        "single_order_limit": {
+            "max_order_amount": float(risk_cfg.get("max_order_value", 200_000)),
+        },
+        "max_drawdown": {
+            "max_drawdown_pct": float(risk_cfg.get("max_drawdown_pct", 0.15)),
+        },
+        "daily_loss_limit": {
+            "max_daily_loss_pct": float(risk_cfg.get("max_daily_loss_pct", 0.01)),
+        },
+        "stop_loss": {
+            "enabled": stop_loss_pct > 0,
+            "max_loss_pct": stop_loss_pct if stop_loss_pct > 0 else 0.10,
+        },
+        "take_profit": {
+            "enabled": take_profit_pct > 0,
+            "max_profit_pct": take_profit_pct if take_profit_pct > 0 else 0.50,
+        },
+        "rate_limit": {
+            "max_orders_per_day": int(risk_cfg.get("max_daily_trades", 20)),
+            "min_interval_seconds": 0.5,
+        },
+        "price_limit": {"limit_pct": 0.10},
+        "trading_hours": {"enabled": bool(enable_trading_hours)},
+        "blacklist": {},
+        "cash_availability": {"min_cash_reserve": 1000.0},
+    }
+    return RiskManager(config=rules, data_quality_config=DataQualityRiskConfig())

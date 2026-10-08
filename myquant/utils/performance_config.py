@@ -389,10 +389,16 @@ def _main() -> int:
             print(f"    ✓ 拦截: {desc}")
 
     # 4. 引擎模式解析（auto + 策略能力）
-    from myquant.strategies.ma_strategy import MACrossStrategy
+    # P0-1（回写#255）：自测改用本地能力桩（duck-type），消除 L0→L3 反向依赖；
+    #       resolve_engine_mode 仅依赖 strategy.engine_modes() 能力接口，不依赖具体策略类
+    class _EngineCapableStub:
+        """本地自测桩：模拟策略引擎能力（仅实现 resolve_engine_mode 所需接口）。"""
+
+        def engine_modes(self) -> List[str]:
+            return ["event", "mixed", "vectorized"]
 
     auto_cfg = PerformanceConfig.from_dict({"engine": {"mode": "auto"}})
-    resolved = resolve_engine_mode(auto_cfg, MACrossStrategy())
+    resolved = resolve_engine_mode(auto_cfg, _EngineCapableStub())
     print(f"[4] auto 解析: {resolved}")
     assert resolved in ("vectorized", "mixed", "event")
     assert resolve_engine_mode(cfg, None) == "mixed"

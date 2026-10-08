@@ -741,6 +741,7 @@ Pythonwdhmm/
 │   │   ├── test_live_bar_dedup.py    # ✨【回写#139】日线bar去重测试（KP-P3-02：bar_date_to_epoch往返/解析失败0.0/make_bar时间戳确定性且还原日期/引擎同根bar二次推送丢弃且不达撮合/不同日期正常/不同标的同日不误删，7项）✅已完成
     │   ├── test_sim_partial_fill_cap.py # ✨【回写#179】sim_broker 参与率限成交测试（KP-P2-03：默认全量不变/参与率限到 volume*rate/不超限/零成交保留订单/vectorized 负现金计数源码断言，5项）✅已完成
     │   ├── test_adjust_strict.py      # ✨【回写#180】复权因子缺失不再静默降级测试（KP-P2-09：strict raise/降级 attrs raw/生效 attrs hfq/扫描器读 yaml adjust/结果 meta 落盘源码断言，5项）✅已完成
+    │   ├── test_architecture.py       # ✨【回写#255】架构分层门禁（v4.2：R-01 环基线0/3、R-02 跨层违规基线35、R-05/R-09/R-11/R-13/R-14/R-16/R-19/R-20/R-21/R-22；P0_MUST_FIX 已清空）✅已完成
 
 │   │   ├── test_signal_idempotency.py # ✨【回写#43】幂等去重测试（Signal确定性ID/to_order映射/引擎去重/分钟线粒度/start重置/QMT端按订单ID去重/统计双计修复验证，19项）✅已完成
 │   │   ├── test_guard_mounting.py    # ✨【回写#140】防未来铁律1/2/4挂载测试（KP-P2-08：indicators_recorded>0/钩子因果口径/T+1指标桩抛错/T+1信号桩引擎标记失败/止损UPDATE早于CHECK抛错/数据访问未来抛错/无guard注入退化为无操作，10项）✅已完成
@@ -751,7 +752,7 @@ Pythonwdhmm/
 
 │   │   ├── test_broker_resend_pending.py # ✨【回写#45】断线补单对账测试（重连后仅补发未成交/多笔全补/已成交已撤废单不补/部成零重发不伪造/券商在途不补/查询失败异常不补/重复对账不重复报单/多券商独立统计/get_summary暴露last_resend/空订单簿零动作/引擎委托转发/无broker_manager错误码，16项）✅已完成
 
-│   │   ├── test_daily_loss_limit.py # ✨【回写#46】每日亏损限制测试（比例计算4项/规则判定4项/注册装配4项/引擎接线5项：跨日重置日初快照/硬编码1%兜底/配置工厂消费/缺省1%/端到端拒买放行卖，17项）✅已完成
+│   │   ├── test_daily_loss_limit.py # ✨【回写#46】每日亏损限制测试（比例计算4项/规则判定4项/注册装配4项/引擎接线5项：跨日重置日初快照/硬编码1%兜底/配置工厂消费/缺省1%/端到端拒买放行卖，17项）✅已完成；✨【回写#255】import 调整（装配工厂改从 risk.risk_manager 导入）
 
 │   │   ├── test_emergency_liquidation.py # ✨【回写#47】紧急平仓服务测试（预览不下单/预览列撤单计划/确认全仓市价卖出/先撤挂单再卖/优先可卖数量/可卖0跳过/无可卖字段回退全仓/连接失败安全返回/断线重连恢复/单标异常不阻断/拒单记录/指定标只平该标的/无匹配持仓/空仓成功/报告结构完整，15项）✅已完成
 │   │   ├── test_emergency_dryrun.py # ✨【回写#152】熔断强平 dry-run 假成功测试(KP-M02：dry-run 不标 executed/planned 计数不冒充 success/confirm 标 executed/空仓 ok 但 executed=False/guardian 无回调返回 False/engine dry-run CRITICAL，6项)✅已完成
@@ -1019,7 +1020,7 @@ Pythonwdhmm/
 
     │   ├── __init__.py
 
-    │   ├── engine.py                 # ✨【V5·P1】回测引擎升级为三模式调度器：BacktestScheduler（按config engine.mode切换event/vectorized/mixed，统一数据加载+防未来函数校验+结果封装）+ run_backtest()便捷函数；原Engine保留为event真值基准（时间序列事件循环+内置LookaheadGuard：on_market_event记录成交铁律3、_execute_signal记录信号铁律4、on_stop assert_pass()；_bar_date_str/_order_signal_dates映射）；✨【回写#140】context 注入 lookahead_guard 到 extra（KP-P2-08：策略守卫钩子可达 guard）+ record_signal 的 data_end 改用策略 get_signal_data_end 真实上报（去 self-proving 常量）；✨【回写#148】装配实盘同源 RiskManager（KP-P3-07：_execute_signal 提交前 check_order 未通过单记录 skip）；✨【回写#151】SimBroker 构造从 config 传 price_limit_pct/enforce_limit（KP-P2-02 event 路径涨跌停）；✨【回写#174】空基准显式标记 benchmark_missing + result.extra 落盘（KP-P2-04）
+    │   ├── engine.py                 # ✨【V5·P1】回测引擎升级为三模式调度器：BacktestScheduler（按config engine.mode切换event/vectorized/mixed，统一数据加载+防未来函数校验+结果封装）+ run_backtest()便捷函数；原Engine保留为event真值基准（时间序列事件循环+内置LookaheadGuard：on_market_event记录成交铁律3、_execute_signal记录信号铁律4、on_stop assert_pass()；_bar_date_str/_order_signal_dates映射）；✨【回写#140】context 注入 lookahead_guard 到 extra（KP-P2-08：策略守卫钩子可达 guard）+ record_signal 的 data_end 改用策略 get_signal_data_end 真实上报（去 self-proving 常量）；✨【回写#148】装配实盘同源 RiskManager（KP-P3-07：_execute_signal 提交前 check_order 未通过单记录 skip）；✨【回写#151】SimBroker 构造从 config 传 price_limit_pct/enforce_limit（KP-P2-02 event 路径涨跌停）；✨【回写#174】空基准显式标记 benchmark_missing + result.extra 落盘（KP-P2-04）；✨【回写#255】P0-2：RiskManager 装配改从 risk.risk_manager 懒导入（消除 L3→L4 反向依赖）
 
     │   ├── data_loader.py            # ✨【回写#105】已迁移为兼容薄壳（re-export）：DataProviderBase + HistoricalDataProvider + require_ohlcv + EN_TO_CN_COLUMN_MAP 真实实现已于 2026-10-03 下沉至 myquant/data_access/provider.py，本文件仅做 from myquant.data_access.provider import ... 向后兼容，18 处历史调用方（run_*.py/scripts/gui/backtest 内部/tests）零改动；新代码应直接 from myquant.data_access.provider import；原注释「从processed加载，严格end_date过滤防未来」逻辑全部在 provider.py；✨【回写#72】EN_TO_CN_COLUMN_MAP 加 turnover→换手率；✨【回写#83】S1 派生量复权现算 _recompute_price_derived_metrics
 
@@ -1105,7 +1106,7 @@ Pythonwdhmm/
 
     │   ├── __init__.py
 
-    │   ├── risk_manager.py           # 风控核心：仓位限制、止损、流控、拦截；✨【回写#153】撤单计数与日报（KP-P3-06：CANCEL_ORDER 事件/record_cancel_order/set_pending_orders/get_daily_report/reset_daily_counts，check_order 注入计数）；✨【回写#226】B-6 联动——pause_for_circuit_breaker/resume_from_circuit_breaker/circuit_paused（仅回滚熔断自身暂停，不误清数据质量/手动暂停）+ reset 清标记
+    │   ├── risk_manager.py           # 风控核心：仓位限制、止损、流控、拦截；✨【回写#153】撤单计数与日报（KP-P3-06：CANCEL_ORDER 事件/record_cancel_order/set_pending_orders/get_daily_report/reset_daily_counts，check_order 注入计数）；✨【回写#226】B-6 联动——pause_for_circuit_breaker/resume_from_circuit_breaker/circuit_paused（仅回滚熔断自身暂停，不误清数据质量/手动暂停）+ reset 清标记；✨【回写#255】P0-2：build_risk_manager_from_config 装配工厂下沉至此（原 live/engine.py，回测/实盘同源）
 
     │   │                             # ✅已实现：DataQualityRiskConfig + SymbolDataQualityStatus + subscribe_to_event_bus(3类事件) + 脏数据自动暂停(单标的/全局) + 自动恢复
 
@@ -1159,7 +1160,7 @@ Pythonwdhmm/
 
     │   ├── __init__.py
 
-    │   ├── engine.py                 # 实盘引擎继承BaseEngine，协调数据、策略、执行、风控；✨【回写#166】config_version 落快照+启动日志（KP-P5-07：create_live_engine 装配 engine._config_version）；✨【回写#167】auto_recover_on_start 显式必填（KP-P5-08：_require_auto_recover 缺失即 ValueError）✨【回写#139】on_market_data 增 (symbol,date) bar级去重（KP-P3-02：_seen_bars集合，同根bar二次推送直接丢弃不达撮合，stats.bar_dedup_skipped计数，启动clear）；✨【回写#142】成交/订单关系账接线（KP-P4-02：可选 trade_ledger 注入，on_order_update 逐笔订单、on_trade 逐笔成交同步落库，长期归档）；✨【回写#146】on_market_data 捕获行情前收字段注入风控上下文（KP-P3-04：_prev_close_map，_build_risk_context extra 注入 prev_close）；✨【回写#149】定时券商账本对账（KP-P3-08：_setup_scheduler 注册 _broker_accountability_patrol，sync_from_broker 超阈 diff → CRITICAL+pause）；✨【回写#152】_on_force_close 消费 executed（KP-M02：dry-run 恒未真实执行 → 显式 CRITICAL 需人工 confirm 平仓）；✨【回写#207】A-3 引擎统一埋点——_publish_engine_event 统一出口（总线未装配跳过/publish_chain 失败记 warning 不阻断交易/event_ts=业务发生时刻防未来）；_process_signal 发布 SignalEvent（signal_id 归一化后）；_submit_order 发布 ORDER_SUBMIT/ORDER_REJECTED（拒单原因取券商返回 result.extra 回退原单）/SystemErrorEvent（提交异常 component=engine.submit）；on_order_update 按 FILLED/PARTIAL_FILLED/CANCELLED/REJECTED 发布订单级 OrderEvent；on_trade 发布成交级 ORDER_FILLED（trade_id）+ PositionUpdateEvent（apply_trade 后均价 avg_cost）+ 异常 SystemErrorEvent（component=engine.trade）；链路贯穿：order_id 与 signal_id 幂等同源（Signal.to_order）
+    │   ├── engine.py                 # 实盘引擎继承BaseEngine，协调数据、策略、执行、风控；✨【回写#166】config_version 落快照+启动日志（KP-P5-07：create_live_engine 装配 engine._config_version）；✨【回写#167】auto_recover_on_start 显式必填（KP-P5-08：_require_auto_recover 缺失即 ValueError）✨【回写#139】on_market_data 增 (symbol,date) bar级去重（KP-P3-02：_seen_bars集合，同根bar二次推送直接丢弃不达撮合，stats.bar_dedup_skipped计数，启动clear）；✨【回写#142】成交/订单关系账接线（KP-P4-02：可选 trade_ledger 注入，on_order_update 逐笔订单、on_trade 逐笔成交同步落库，长期归档）；✨【回写#146】on_market_data 捕获行情前收字段注入风控上下文（KP-P3-04：_prev_close_map，_build_risk_context extra 注入 prev_close）；✨【回写#149】定时券商账本对账（KP-P3-08：_setup_scheduler 注册 _broker_accountability_patrol，sync_from_broker 超阈 diff → CRITICAL+pause）；✨【回写#152】_on_force_close 消费 executed（KP-M02：dry-run 恒未真实执行 → 显式 CRITICAL 需人工 confirm 平仓）；✨【回写#207】A-3 引擎统一埋点——_publish_engine_event 统一出口（总线未装配跳过/publish_chain 失败记 warning 不阻断交易/event_ts=业务发生时刻防未来）；_process_signal 发布 SignalEvent（signal_id 归一化后）；_submit_order 发布 ORDER_SUBMIT/ORDER_REJECTED（拒单原因取券商返回 result.extra 回退原单）/SystemErrorEvent（提交异常 component=engine.submit）；on_order_update 按 FILLED/PARTIAL_FILLED/CANCELLED/REJECTED 发布订单级 OrderEvent；on_trade 发布成交级 ORDER_FILLED（trade_id）+ PositionUpdateEvent（apply_trade 后均价 avg_cost）+ 异常 SystemErrorEvent（component=engine.trade）；链路贯穿：order_id 与 signal_id 幂等同源（Signal.to_order）；✨【回写#255】P0-2：build_risk_manager_from_config 移出至 risk/risk_manager.py（顶部改从 risk 导入，消除 L4 侧定义）
 
     │   │                             # 【任务27】接入 BrokerManager 多券商管理器：set_broker自动包装(单券商向后兼容)/set_broker_manager(多券商并行)
 
@@ -1356,7 +1357,7 @@ Pythonwdhmm/
 
         ├── timer.py                  # ✨【V5·P2】分阶段计时：回测各阶段（加载/因子/撮合/绩效）耗时统计，与logger回测日志模式（--log-format=backtest）联动输出
 
-        ├── performance_config.py     # ✨【V5·P2】性能配置统一应用：workers/chunk_size/内存开关/预取开关合并为单一配置源，三模式引擎启动时统一读取
+        ├── performance_config.py     # ✨【V5·P2】性能配置统一应用：workers/chunk_size/内存开关/预取开关合并为单一配置源，三模式引擎启动时统一读取；✨【回写#255】P0-1：_main 自测改本地能力桩（_EngineCapableStub），移除 strategies 依赖（L0→L3 消除）
 
         └── memory_pool.py            # ✨【V5·P1】线程安全对象池：循环复用K线/订单对象（减少GC与分配开销），混合引擎高吞吐路径使用
 
@@ -3913,3 +3914,10 @@ pytest 全量 2052 passed/2 skipped/0 failed（220s）。
    f. 补充项（可测量性统计报告入库）：docs/监控档案/可测量性统计_20261007.json——2026-10-07 运行 scripts/监控可测量性统计.py 产出（--fi 输入取自 M1 保命验收 FI-01~05 记录，字段映射至 P0-8 口径）：MTTD avg=0.4608s/max=2.3009s、MTTR avg=0.4621s/max=2.3034s（与 M1 验收内嵌 mttd_seconds/mttr_seconds 交叉验证一致）；classification 因本次未提供 --alerts 输入，TP/FP/FN=0、比率 null（样本不足不造数语义）；临时 FI 输入已清理。报告与 B/C/D/M1 验收报告同列入库（本提交 commit message 引用 #254 补充项）。
    g. 补充项（演练脚本默认输出路径根治 + 存量 KeyError 修复）：scripts/故障演练/季频故障演练.py 与 scripts/灾备演练/年度灾备演练.py 与验收_B/D 同根因——DEFAULT_REPORT_PATH 原为相对路径，从 scripts/ 子目录（scripts/故障演练/、scripts/灾备演练/）启动时报告会写到 scripts/docs/监控档案/，与 docs/监控档案/ 正式落档分叉；且两脚本此前无 sys.path 注入，从子目录启动顶层 import myquant 直接 ImportError。修复：两脚本补 _REPO_ROOT 探测（Path(__file__).resolve().parents[2] 定位项目根 + 向上探测 myquant 目录兜底）+ sys.path 注入 + 默认 --out 改项目根绝对路径（混沌演练→docs/监控档案/混沌演练/季度故障演练报告.json、灾备演练→docs/监控档案/灾备演练/年度灾备演练报告.json）。另修复季频脚本存量键名错误（#248 交付即存在，本次完整运行验证触发）：控制台摘要用 summary['detected'] 而模块实际键为 cases_detected（chaos_drill.py summary: cases_total/cases_detected/detect_rate/tp/fp/fn），完整运行必崩 KeyError——已改为 cases_detected。验证：两脚本从各自子目录 --help 与完整运行均通过（年度灾备 4 项全 PASS；季频 FI-01 单用例 TP=1 FP=0 FN=0、检出率 100%），scripts/docs/ 未再生成；临时验证产物已清理（本提交 commit message 引用 #254 补充项）。
    h. 补充项（全量脚本默认路径专项审计 + 监控配置管理双缺陷修复）：按用户要求对 2026-10-01 至当下 git 产出的全部 scripts/*.py（21 个，含子目录）做 #254 同类缺陷专项审计——19 个安全（已根治 6：验收_B/D/C、两演练；find_project_root/_REPO_ROOT/get_project_path 锚定 10：周复盘/可测量性统计/推理延迟基准/标的预筛选/数据下载/一键平仓/数据导出/结果备份/数据清洗/交易日历/股本变动/复权因子/行情驱动/运行API 等；默认不落盘 1：监控可测量性统计 --out 可选）；**发现 1 个同类缺陷（监控配置管理 D-7 链路，双缺陷）**：①scripts/监控配置管理.py 无 sys.path 注入，从 scripts/ 目录运行顶层 import myquant 直接 ModuleNotFoundError（复现确认）；②业务模块 myquant/monitoring/config_as_code.py 默认路径常量 DEFAULT_CONFIG_DIR="config/monitoring"、DEFAULT_LEDGER_PATH="docs/监控档案/monitoring_config_ledger.json" 为裸相对路径且无项目根探测，从非项目根 CWD 实例化 Registry 会操作 scripts/config/monitoring、落账 scripts/docs/监控档案/（与 #254 落档分叉同根因，且比薄入口默认路径更隐蔽）。修复：config_as_code.py 补 _PROJECT_ROOT 探测（向上找 pyproject.toml/myquant 目录）+ __init__ 默认路径改 _PROJECT_ROOT 拼接（参数注入 config_dir/ledger_path 语义不变，tests 临时目录注入不受影响，常量无外部引用）；监控配置管理.py 补 _REPO_ROOT 探测 + sys.path 注入。验证：py_compile 通过；从 scripts/ 目录运行 --list 正常（4 项配置指纹读取、账本未初始化 version=None 属正常态），scripts/config、scripts/docs 均未生成（本提交 commit message 引用 #254 补充项）。
+## #255 · 2026-10-08 · 架构治理 P0-1/P0-2 消除（performance_config 去 strategies 依赖 + 风控装配工厂下沉 risk）
+   事实来源：本次落地（架构分层治理方案 v5.3 §4.4 G0 启动顺序「P0 必修 2 项」），代码级核验：py_compile 6 文件通过 + performance_config 自测通过 + 架构门禁 23 passed/2 skipped（R-02 基线 37→35 全绿）+ 相关单测 22 passed + 定向回归 279 passed/1 skipped；全量 pytest 结果见提交后终验。
+   a. **P0-1 消除（myquant/utils/performance_config.py）**：_main() 自测第 392 行 rom myquant.strategies.ma_strategy import MACrossStrategy（L0→L3 反向依赖）删除，改为本地能力桩 _EngineCapableStub（仅实现 engine_modes() 接口，duck-type 模拟策略引擎能力）——esolve_engine_mode 本身只依赖 strategy.engine_modes() 能力接口，不依赖具体策略类；模块公开 API（PerformanceConfig/resolve_engine_mode/apply_performance）零变化。
+   b. **P0-2 消除（风控装配工厂下沉）**：uild_risk_manager_from_config 由 myquant/live/engine.py:2685 整体下沉至 myquant/risk/risk_manager.py 末尾（依赖面仅 RiskManager + DataQualityRiskConfig，同模块，不引入新跨层依赖）；live/engine.py 顶部 rom myquant.risk.risk_manager import build_risk_manager_from_config（L4→L3 合法方向），create_live_engine 调用点不变；backtest/engine.py:245 懒导入改 rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向依赖；tests/unit/test_daily_loss_limit.py:27 import 同步调整。
+   c. **门禁同步（tests/unit/test_architecture.py）**：P0_MUST_FIX 两对条目清空（集合置空并注释回写#255）；VIOLATION_BASELINE 37→35（实测违规 35 条，P0 两行消除后）；TestR02CrossLayer docstring 基线 40→35（顺带修正过时注释）。
+   d. **验证结果**：py_compile 6 文件通过；python -m myquant.utils.performance_config 自测全绿（[4] auto 解析=vectorized，能力桩生效）；架构门禁 23 passed/2 skipped（R-02=35 未超基线、违规全部登记、无幽灵、无过期；真环 3 不变；R-21/R-22 通过）；test_daily_loss_limit+test_backtest_risk 22 passed；回测/实盘/风控定向组 279 passed/1 skipped；全量 pytest tests/unit 结果以提交后终验为准。
+   e. **纪律遵守**：业务逻辑归 myquant（performance_config/risk_manager/live/engine/backtest/engine 均在蓝图目录树已标注，本回写同步追加 #255 条目）；无蓝图外新文件；未新增测试文件（性能配置自测保留于模块 __main__ demo，符合 py文件代码规则第 5 条）；严格防未来（resolve_engine_mode 仅消费已配置能力声明；风控装配仅消费配置值，无时序数据引用）；工作区既有未提交改动（docs/系统性审核/鲲鹏量化交易系统_架构分层治理方案_v5.md）未触碰；任务后 git 提交（commit message 引用 #255）。

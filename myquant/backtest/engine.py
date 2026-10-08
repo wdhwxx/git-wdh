@@ -243,7 +243,8 @@ class BacktestEngine(BaseEngine):
         self.broker.connect()
 
         # 1b. KP-P3-07: 装配与实盘同源的 RiskManager（回测执行实盘风控）
-        from myquant.live.engine import (
+        # 回写#255 P0-2：装配工厂下沉至 risk.risk_manager（消除 L3→L4 反向依赖）
+        from myquant.risk.risk_manager import (
             build_risk_manager_from_config,  # 懒导入避免重型耦合
         )
         _cfg = self.config.to_dict()

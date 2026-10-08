@@ -124,12 +124,10 @@ EXCEPTIONS: dict[tuple[str, str], dict] = {
 }
 
 # P0 必修（无例外）：完成后必须从代码中消除，并从 P0_MUST_FIX 删除
-P0_MUST_FIX: set[tuple[str, str]] = {
-    ("myquant/utils/performance_config.py", "myquant.strategies.ma_strategy"),
-    ("myquant/backtest/engine.py", "myquant.live.engine"),
-}
+# 回写#255：P0-1（performance_config→ma_strategy）与 P0-2（backtest.engine→live.engine）已消除，集合清空
+P0_MUST_FIX: set[tuple[str, str]] = set()
 
-VIOLATION_BASELINE = 37          # K-a + K-f：语义矩阵 α，排除 TYPE_CHECKING 与 __main__（实测 37）
+VIOLATION_BASELINE = 35          # K-a + K-f：语义矩阵 α，排除 TYPE_CHECKING 与 __main__；回写#255 P0-1/P0-2 消除后 37→35
 TOP_LEVEL_CYCLE_BASELINE = 0     # K-b：顶层真环（剔除包装惯用环与 __main__ 后）
 LAZY_CYCLE_BASELINE = 3          # K-f：全量真环，只减不增（环1 event_bus↔memory_pool、
                                  #      环2 monitoring 内部4模块、环3 portfolio↔account_reconciler）
@@ -425,7 +423,7 @@ class TestR01bLazyCycle:
 
 
 class TestR02CrossLayer:
-    """R-02：跨层反向 import；例外须登记且未过期且非假豁免。基线 40。"""
+    """R-02：跨层反向 import；例外须登记且未过期且非假豁免。基线 35（回写#255 由 37 收缩）。"""
 
     def test_count_not_rising(self):
         found = _violations(top_only=False)
