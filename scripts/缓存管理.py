@@ -72,6 +72,18 @@ def find_project_root() -> Path:
     raise RuntimeError("无法自动探测项目根目录（找不到 pyproject.toml）。")
 
 
+def _new_factor_cache_factory(project_root: Path):
+    """构造因子缓存工厂（G1 EX-07B：缓存实例由装配层注入，scripts 依赖 L2 合法方向）。"""
+    from myquant.indicators.factor_cache import FactorCache
+
+    def _factory():
+        return FactorCache(
+            cache_dir=str(project_root / "cache" / "factor"),
+            enable_l1=True,
+        )
+    return _factory
+
+
 # ─────────────────────────────────────────────
 # 命令实现
 # ─────────────────────────────────────────────
@@ -80,7 +92,10 @@ def cmd_status(project_root: Path) -> int:
     """查看缓存状态"""
     from myquant.utils.cache_sync import CacheSyncManager
 
-    manager = CacheSyncManager(project_root=project_root)
+    manager = CacheSyncManager(
+        project_root=project_root,
+        factor_cache_factory=_new_factor_cache_factory(project_root),
+    )
     status = manager.get_cache_status()
 
     print()
@@ -137,7 +152,10 @@ def cmd_clear(project_root: Path, force: bool = False) -> int:
     """清空所有缓存"""
     from myquant.utils.cache_sync import CacheSyncManager
 
-    manager = CacheSyncManager(project_root=project_root)
+    manager = CacheSyncManager(
+        project_root=project_root,
+        factor_cache_factory=_new_factor_cache_factory(project_root),
+    )
     status = manager.get_cache_status()
 
     print(f"\n  即将清空所有因子缓存:")
@@ -159,7 +177,10 @@ def cmd_cleanup(project_root: Path) -> int:
     """清理过期缓存"""
     from myquant.utils.cache_sync import CacheSyncManager
 
-    manager = CacheSyncManager(project_root=project_root)
+    manager = CacheSyncManager(
+        project_root=project_root,
+        factor_cache_factory=_new_factor_cache_factory(project_root),
+    )
     cleaned = manager.cleanup_expired_cache()
     print(f"\n  ✓ 已清理过期缓存文件: {cleaned} 个")
     return 0
@@ -169,7 +190,10 @@ def cmd_invalidate(project_root: Path, symbol: str) -> int:
     """失效指定标的缓存"""
     from myquant.utils.cache_sync import CacheSyncManager
 
-    manager = CacheSyncManager(project_root=project_root)
+    manager = CacheSyncManager(
+        project_root=project_root,
+        factor_cache_factory=_new_factor_cache_factory(project_root),
+    )
     removed = manager.invalidate_symbol(symbol)
     print(f"\n  ✓ 已失效 {symbol} 的缓存: {removed} 条")
     return 0
@@ -179,7 +203,10 @@ def cmd_invalidate_factor(project_root: Path, factor_name: str) -> int:
     """失效指定因子缓存"""
     from myquant.utils.cache_sync import CacheSyncManager
 
-    manager = CacheSyncManager(project_root=project_root)
+    manager = CacheSyncManager(
+        project_root=project_root,
+        factor_cache_factory=_new_factor_cache_factory(project_root),
+    )
     removed = manager.invalidate_factor(factor_name)
     print(f"\n  ✓ 已失效因子 {factor_name} 的缓存: {removed} 条")
     return 0
@@ -189,7 +216,10 @@ def cmd_fingerprints(project_root: Path) -> int:
     """查看指纹仓库"""
     from myquant.utils.cache_sync import CacheSyncManager
 
-    manager = CacheSyncManager(project_root=project_root)
+    manager = CacheSyncManager(
+        project_root=project_root,
+        factor_cache_factory=_new_factor_cache_factory(project_root),
+    )
     status = manager.get_cache_status()
     fp = status["fingerprint_store"]
 
@@ -219,7 +249,10 @@ def cmd_fingerprint(project_root: Path, symbol: str) -> int:
     """查看指定标的指纹"""
     from myquant.utils.cache_sync import CacheSyncManager
 
-    manager = CacheSyncManager(project_root=project_root)
+    manager = CacheSyncManager(
+        project_root=project_root,
+        factor_cache_factory=_new_factor_cache_factory(project_root),
+    )
     info = manager.get_fingerprint_info(symbol)
 
     if info is None:
@@ -242,7 +275,10 @@ def cmd_sync(project_root: Path) -> int:
     """手动全量缓存同步"""
     from myquant.utils.cache_sync import CacheSyncManager
 
-    manager = CacheSyncManager(project_root=project_root)
+    manager = CacheSyncManager(
+        project_root=project_root,
+        factor_cache_factory=_new_factor_cache_factory(project_root),
+    )
     print("\n  开始全量缓存同步...")
     result = manager.sync_all(data_source="manual")
 
@@ -257,7 +293,10 @@ def cmd_verify(project_root: Path) -> int:
     from myquant.utils.cache_sync import CacheSyncManager
     from myquant.utils.data_fingerprint import compute_fingerprint_from_file
 
-    manager = CacheSyncManager(project_root=project_root)
+    manager = CacheSyncManager(
+        project_root=project_root,
+        factor_cache_factory=_new_factor_cache_factory(project_root),
+    )
     status = manager.get_cache_status()
     symbols = status["fingerprint_store"]["symbols"]
 

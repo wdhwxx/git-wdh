@@ -44,6 +44,23 @@ def find_project_root() -> Path:
     return script_dir.parent
 
 
+def _new_factor_engine_factory(project_root: Path):
+    """构造因子引擎工厂（G1 EX-08A：引擎由装配层注入，scripts 依赖 L2 合法方向）。
+
+    与 myquant/data_access/financial_service.py 原延迟导入参数保持一致
+    （cache_dir/use_cache/auto_fingerprint）。
+    """
+    from myquant.indicators.factor_engine import FactorEngine
+
+    def _factory():
+        return FactorEngine(
+            cache_dir=str(project_root / "cache" / "factor"),
+            use_cache=True,
+            auto_fingerprint=True,
+        )
+    return _factory
+
+
 def locate_latest_financial_csv(project_root: Path) -> Optional[Path]:
     """在 datasets/raw/financial/ 下定位最新的 financial_history_*.csv。"""
     fin_dir = project_root / "datasets" / "raw" / "financial"
@@ -130,7 +147,10 @@ def main() -> int:
     print(f"  因子回看天数: {args.lookback_days}")
     print("=" * 64)
 
-    svc = FinancialImportService(project_root)
+    svc = FinancialImportService(
+        project_root,
+        factor_engine_factory=_new_factor_engine_factory(project_root),
+    )
     try:
         import_stats = None
         factor_stats = None

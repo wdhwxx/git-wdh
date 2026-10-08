@@ -38,7 +38,7 @@ from myquant.monitoring.metrics_collector import (  # noqa: E402
     collect_pnl_snapshot,
 )
 from myquant.monitoring.metrics_history import MetricsHistoryStore  # noqa: E402
-from myquant.web.dashboard import MonitorCenterDataProvider  # noqa: E402
+from myquant.monitoring.center_provider import MonitorCenterDataProvider  # noqa: E402  # G1 EX-15A：provider 下沉 monitoring（直接覆盖）
 
 
 # ═══════════════════════════════════════════════

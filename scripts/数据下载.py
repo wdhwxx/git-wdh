@@ -370,6 +370,18 @@ def show_sync_status(manager) -> dict:
     return manager.get_sync_report()
 
 
+def _new_factor_cache_factory(project_root: Path):
+    """构造因子缓存工厂（G1 EX-07B：缓存实例由装配层注入，scripts 依赖 L2 合法方向）。"""
+    from myquant.indicators.factor_cache import FactorCache
+
+    def _factory():
+        return FactorCache(
+            cache_dir=str(project_root / "cache" / "factor"),
+            enable_l1=True,
+        )
+    return _factory
+
+
 def run_cache_sync(project_root: Path, symbols: Optional[List[str]] = None) -> dict:
     """
     数据下载完成后执行缓存同步：更新指纹 + 失效变更标的缓存
@@ -386,7 +398,10 @@ def run_cache_sync(project_root: Path, symbols: Optional[List[str]] = None) -> d
     try:
         from myquant.utils.cache_sync import CacheSyncManager
 
-        sync_manager = CacheSyncManager(project_root=project_root)
+        sync_manager = CacheSyncManager(
+            project_root=project_root,
+            factor_cache_factory=_new_factor_cache_factory(project_root),
+        )
 
         if symbols:
             result = sync_manager.sync_symbols(symbols, data_source="download")

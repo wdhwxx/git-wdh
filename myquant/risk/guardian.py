@@ -173,6 +173,28 @@ class HealthCheckResult:
 
 
 # ═══════════════════════════════════════════════
+#  准入守卫注册表（G1 EX-11C）
+# ═══════════════════════════════════════════════
+# 高危写操作准入（KP-M04）：guardian 不再延迟导入 api.middleware.auth（L3→L6 反向），
+# 改为由合法层（L6 api/web 装配器）经 register_operation_guard 注入守卫实例。
+# 未装配时默认放行并记录 decision（与 OperationGuard 未启用时"仅审计留痕"语义一致）。
+_OPERATION_GUARD: Optional[Any] = None
+
+
+def register_operation_guard(guard: Any) -> None:
+    """注册高危写操作准入守卫实例（装配层注入）。
+
+    Args:
+        guard: 准入守卫实例，须实现
+            ``check(scope, operator, reviewer=None, action="") -> (ok, reason)``
+            （如 api.middleware.auth.OperationGuard）。
+    """
+    global _OPERATION_GUARD
+    _OPERATION_GUARD = guard
+    logger.info("[guardian] 高危写操作准入守卫已装配: %s", type(guard).__name__)
+
+
+# ═══════════════════════════════════════════════
 #  风控守护
 # ═══════════════════════════════════════════════
 
@@ -493,11 +515,17 @@ class RiskGuardian:
             reason=reason,
             executed=False,  # v1不实际执行
         )
-        # KP-M04（T-30）：高危写操作准入——未审批拒绝（默认仅审计留痕，不阻断）
-        from myquant.api.middleware.auth import get_operation_guard
-        ok, why = get_operation_guard().check(
-            "force_close", operator="guardian",
-            action=f"force_close_all reason={reason}")
+        # KP-M04（T-30）：高危写操作准入——未装配守卫默认放行（guardian 仍记录 decision）
+        guard = _OPERATION_GUARD
+        if guard is None:
+            logger.warning(
+                "[guardian] 未装配准入守卫（register_operation_guard），强制平仓所有默认放行"
+            )
+            ok, why = True, ""
+        else:
+            ok, why = guard.check(
+                "force_close", operator="guardian",
+                action=f"force_close_all reason={reason}")
         if not ok:
             logger.error(f"[guardian] 强制平仓所有被准入拒绝: {why}")
             return False
@@ -545,11 +573,18 @@ class RiskGuardian:
             details={"symbol": symbol},
             executed=False,
         )
-        # KP-M04（T-30）：高危写操作准入——未审批拒绝（默认仅审计留痕，不阻断）
-        from myquant.api.middleware.auth import get_operation_guard
-        ok, why = get_operation_guard().check(
-            "force_close", operator="guardian",
-            action=f"force_close_symbol {symbol} reason={reason}")
+        # KP-M04（T-30）：高危写操作准入——未装配守卫默认放行（guardian 仍记录 decision）
+        guard = _OPERATION_GUARD
+        if guard is None:
+            logger.warning(
+                "[guardian] 未装配准入守卫（register_operation_guard），强制平仓 %s 默认放行",
+                symbol,
+            )
+            ok, why = True, ""
+        else:
+            ok, why = guard.check(
+                "force_close", operator="guardian",
+                action=f"force_close_symbol {symbol} reason={reason}")
         if not ok:
             logger.error(f"[guardian] 强制平仓 {symbol} 被准入拒绝: {why}")
             return False

@@ -275,7 +275,10 @@ def run_cache_sync_for_symbol(symbol: str, project_root: Path) -> dict:
     try:
         from myquant.utils.cache_sync import CacheSyncManager
 
-        sync_manager = CacheSyncManager(project_root=project_root)
+        sync_manager = CacheSyncManager(
+            project_root=project_root,
+            factor_cache_factory=_new_factor_cache_factory(project_root),
+        )
         result = sync_manager.sync_symbol(symbol, data_source="clean")
 
         logger.info(

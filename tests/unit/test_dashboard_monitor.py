@@ -31,7 +31,7 @@ from myquant.api.routes import (  # noqa: E402
     _mask_alert_details,
     create_app,
 )
-from myquant.web.dashboard import (  # noqa: E402
+from myquant.web.dashboard import (  # noqa: E402  # web 层 re-export 兼容性测试（provider 已下沉 monitoring）
     MonitorCenterDataProvider,
     mask_sensitive_fields,
 )

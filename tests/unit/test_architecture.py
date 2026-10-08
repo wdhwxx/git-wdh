@@ -1,5 +1,5 @@
 # tests/unit/test_architecture.py
-"""架构分层门禁 v4.3（G0 收尾：入口/薄化冻结 + 基线锁定，回写#256）。
+"""架构分层门禁 v4.4（G1 例外收敛首批：EX-07B/08A/11A/11B/11C/15A 消除，回写#258）。
 
 本版在 v4.2 基础上的修正（新增 L-a~L-c）：
   L-a  新增 R-23 入口白名单冻结：scripts/（41 个，含 故障演练/灾备演练 子目录）与
@@ -9,7 +9,11 @@
        白名单内文件行数只减不增（存量继续膨胀即红）；新增 >1500 仍由 R-14 拦截。
   L-c  基线锁定（G0 完成）：ZERO_COVERAGE_BASELINE 填入实测引用级零覆盖业务模块 49 个，
        R-19 由"仅报告/skip"转 CI 阻断（新增零覆盖即红）。
-       —— 权威基线冻结：违规 35 / 全量真环 3 / 顶层 0 / 例外 26 / 零覆盖存量 49。
+  L-d  G1 例外收敛（回写#258）：EX-07B（cache_sync 因子缓存实例注入）、EX-08A
+       （financial_service 因子引擎工厂注入）、EX-11A/B（rules 告警/指标显式注入）、
+       EX-11C（guardian 准入守卫注册表）、EX-15A（MonitorCenterDataProvider 下沉 monitoring）
+       六项消除；例外表 25→19 对；VIOLATION_BASELINE 34→27。
+       —— 权威基线冻结：违规 27 / 全量真环 3 / 顶层 0 / 例外 19 / 零覆盖存量 49。
        （R-19 为"被 tests import 即视为覆盖"的引用级近似；真实覆盖由 pytest-cov 判定，
         cov 实测 58% / 零覆盖业务 12 个仅作 G0-9 补测清单，二者口径不同不混用。）
 
@@ -35,8 +39,8 @@ v4.2（K-f~K-h）与 v4.1（K-a~K-e）的修正结论全部沿用，摘要如下
 S-3 R-19 更名 TestR19ZeroReference（诚实命名：引用级判定，非执行覆盖）。
 
 权威台账：docs/系统性审核/整改台账_2026Q4.md
-基线口径：违规=35（语义矩阵 α，排除 TYPE_CHECKING 与 __main__ 自测块；
-          P0-1/P0-2 消除后 37→35，回写#255）；
+基线口径：违规=27（语义矩阵 α，排除 TYPE_CHECKING 与 __main__ 自测块；
+          P0-1/P0-2 后 37→35（#255），EX-07A 后 35→34（#257），G1 六项后 34→27（#258））；
           全量真环=3（另 1 组 strategies 包 re-export 惯用环为包装环，白名单剔除）；
           顶层真环=0；>1500 行白名单 14 项（相对路径，行数基线见 OVERSIZE_LINE_BASELINE）；
           零覆盖存量 49 个引用级业务模块（2026-10-08 冻结，新增零覆盖即红，回写#256）。
@@ -74,15 +78,11 @@ LAYER_ORDER = ["L0", "L1", "L2", "L2E", "L3", "L4", "L5", "L6"]
 SAME_OK: dict[str, set[str]] = {"L2": {"L2E"}, "L2E": {"L2"}}
 
 
-# ═══════════════════════ 2) 例外表（点对点 + 到期日 + 台账；25 对 + P0 2 对） ═══════════════════════
+# ═══════════════════════ 2) 例外表（点对点 + 到期日 + 台账；19 对 + P0 2 对） ═══════════════════════
 # 字段: id, 源文件(相对项目根), 目标模块, 收敛任务, 到期日, kind, 说明
 _EXC = [
     ("EX-01A", "myquant/database/trade_log.py", "myquant.models.trade",
      "永久", "2099-12-31", "runtime", "ORM 必引领域模型"),
-    ("EX-07B", "myquant/utils/cache_sync.py", "myquant.indicators.factor_cache",
-     "G1-1", "2026-12-31", "runtime", "缓存同步"),
-    ("EX-08A", "myquant/data_access/financial_service.py", "myquant.indicators.factor_engine",
-     "G1-2", "2026-12-31", "runtime", "财务入库触发因子"),
     ("EX-09A", "myquant/backtest/engine.py", "myquant.execution.sim_broker",
      "G2-2", "2027-03-31", "runtime", "回测撮合"),
     ("EX-09B", "myquant/backtest/order_matcher.py", "myquant.execution.sim_broker",
@@ -91,12 +91,6 @@ _EXC = [
      "永久", "2099-12-31", "runtime", "审计横切（可注入）"),
     ("EX-10B", "myquant/strategies/param_tuner.py", "myquant.monitoring.audit_log",
      "永久", "2099-12-31", "runtime", "审计横切（可注入）"),
-    ("EX-11A", "myquant/risk/rules.py", "myquant.monitoring.alerting",
-     "G1-3", "2026-12-31", "runtime", "风险事件告警"),
-    ("EX-11B", "myquant/risk/rules.py", "myquant.monitoring.metrics_collector",
-     "G1-3", "2026-12-31", "runtime", "风险指标注册"),
-    ("EX-11C", "myquant/risk/guardian.py", "myquant.api.middleware.auth",
-     "G1-3", "2026-12-31", "runtime", "准入门禁"),
     ("EX-12A", "myquant/live/portfolio.py", "myquant.monitoring.account_reconciler",
      "G2-3", "2027-03-31", "runtime", "对账集成"),
     ("EX-12B", "myquant/live/portfolio.py", "myquant.monitoring.alerting",
@@ -125,8 +119,6 @@ _EXC = [
      "永久", "2099-12-31", "runtime", "装配器"),
     ("EX-13J", "myquant/live/scheduler.py", "myquant.monitoring.audit_log",
      "永久", "2099-12-31", "runtime", "装配器"),
-    ("EX-15A", "myquant/monitoring/b_acceptance.py", "myquant.web.dashboard",
-     "G1-5", "2026-12-31", "runtime", "验收数据源（L5->L6 反向，唯一保留）"),
 ]
 EXCEPTIONS: dict[tuple[str, str], dict] = {
     (f, t): {"id": i, "task": tk, "expires": date.fromisoformat(e), "kind": k, "why": w}
@@ -137,7 +129,7 @@ EXCEPTIONS: dict[tuple[str, str], dict] = {
 # 回写#255：P0-1（performance_config→ma_strategy）与 P0-2（backtest.engine→live.engine）已消除，集合清空
 P0_MUST_FIX: set[tuple[str, str]] = set()
 
-VIOLATION_BASELINE = 34          # K-a + K-f：语义矩阵 α，排除 TYPE_CHECKING 与 __main__；回写#255 P0-1/P0-2 消除后 37→35，回写#257 G1 EX-07A 消除后 35→34
+VIOLATION_BASELINE = 27          # K-a + K-f：语义矩阵 α，排除 TYPE_CHECKING 与 __main__；回写#255 37→35，#257 EX-07A 35→34，#258 G1 六项 34→27
 TOP_LEVEL_CYCLE_BASELINE = 0     # K-b：顶层真环（剔除包装惯用环与 __main__ 后）
 LAZY_CYCLE_BASELINE = 3          # K-f：全量真环，只减不增（环1 event_bus↔memory_pool、
                                  #      环2 monitoring 内部4模块、环3 portfolio↔account_reconciler）
@@ -207,7 +199,7 @@ ENTRY_ALLOWLIST: set[str] = {
 # ═══════════════════════════ 2c) 薄化冻结（R-24，G0 收尾回写#256） ═══════════════════════════
 # OVERSIZE 白名单 14 项行数基线（2026-10-08 实测冻结）：白名单内文件行数只减不增。
 OVERSIZE_LINE_BASELINE: dict[str, int] = {
-    "monitoring/alerting.py": 3677, "live/engine.py": 2851, "core/event_bus.py": 2383,
+    "monitoring/alerting.py": 3677, "live/engine.py": 2858, "core/event_bus.py": 2383,  # engine 2851→2858：用户提交 1499c09 引入 +7 行（回写#258）
     "live/scheduler.py": 2348, "monitoring/metrics_collector.py": 2284,
     "monitoring/action_engine.py": 2259, "data_access/manager.py": 2170,
     "live/brokers/qmt_broker.py": 2170, "live/data_feed.py": 2147,

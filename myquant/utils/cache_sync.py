@@ -18,7 +18,8 @@ V5回测性能优化 P0 第8项：数据更新后自动更新指纹 + 主动缓�
 
 依赖:
     - myquant.utils.data_fingerprint (FingerprintStore, compute_fingerprint_from_file)
-    - myquant.indicators.factor_cache (FactorCache, get_factor_cache)
+    - 因子缓存实例由装配层经 factor_cache_factory 注入（G1 EX-07B，本模块不直接依赖
+      myquant.indicators.factor_cache；未装配时缓存操作降级为空操作）
     - pandas, pathlib, logging, typing
 """
 
@@ -152,6 +153,7 @@ class CacheSyncManager:
         fingerprint_store_path: Optional[Union[str, Path]] = None,
         cache_dir: Optional[Union[str, Path]] = None,
         project_root: Optional[Union[str, Path]] = None,
+        factor_cache_factory: Optional[Callable[[], Any]] = None,
     ):
         """
         初始化缓存同步管理器
@@ -161,6 +163,9 @@ class CacheSyncManager:
             fingerprint_store_path: 指纹仓库文件路径，None 则使用 cache/fingerprint/。
             cache_dir: 因子缓存目录，None 则使用 cache/factor/。
             project_root: 项目根目录，None 则自动探测。
+            factor_cache_factory: 因子缓存工厂（返回 FactorCache 实例）；
+                由装配层注入（G1 EX-07B，本模块不再直接依赖 indicators.factor_cache）。
+                None 时缓存失效/清理/统计操作降级为空操作并记 warning。
         """
         # 项目根目录探测
         if project_root is None:
@@ -190,8 +195,9 @@ class CacheSyncManager:
         # 指纹仓库
         self.fingerprint_store: FingerprintStore = FingerprintStore(self._fingerprint_store_path)
 
-        # 因子缓存（延迟初始化，避免导入时创建）
-        self._factor_cache = None
+        # 因子缓存（延迟初始化；工厂由装配层注入，避免 L0 反向依赖 L2）
+        self._factor_cache: Optional[Any] = None
+        self._factor_cache_factory: Optional[Callable[[], Any]] = factor_cache_factory
 
         logger.info(
             "CacheSyncManager 初始化: processed=%s, fingerprint_store=%s, cache_dir=%s",
@@ -401,6 +407,8 @@ class CacheSyncManager:
             失效的缓存条目数。
         """
         cache = self._get_factor_cache()
+        if cache is None:
+            return 0
         removed = cache.invalidate(symbol=symbol)
         logger.info("已失效 %s 的缓存: %d 条", symbol, removed)
         return removed
@@ -416,6 +424,8 @@ class CacheSyncManager:
             失效的缓存条目数。
         """
         cache = self._get_factor_cache()
+        if cache is None:
+            return 0
         removed = cache.invalidate(factor_name=factor_name)
         logger.info("已失效因子 %s 的缓存: %d 条", factor_name, removed)
         return removed
@@ -423,6 +433,8 @@ class CacheSyncManager:
     def clear_all_cache(self) -> None:
         """清空所有因子缓存（L1+L2）"""
         cache = self._get_factor_cache()
+        if cache is None:
+            return
         cache.clear()
         logger.info("已清空所有因子缓存")
 
@@ -434,6 +446,8 @@ class CacheSyncManager:
             清理的文件数量。
         """
         cache = self._get_factor_cache()
+        if cache is None:
+            return 0
         cleaned = cache.cleanup_expired()
         logger.info("已清理过期缓存: %d 个文件", cleaned)
         return cleaned
@@ -446,7 +460,7 @@ class CacheSyncManager:
             包含缓存统计、指纹仓库信息的字典。
         """
         cache = self._get_factor_cache()
-        cache_stats = cache.stats()
+        cache_stats: Dict[str, Any] = {} if cache is None else cache.stats()
 
         # L2 缓存文件大小
         l2_size_bytes = 0
@@ -498,13 +512,18 @@ class CacheSyncManager:
     # 内部方法
     # ------------------------------------------------------------------
 
-    def _get_factor_cache(self):
-        """获取或创建因子缓存实例（延迟初始化）"""
+    def _get_factor_cache(self) -> Optional[Any]:
+        """获取或创建因子缓存实例（延迟初始化；工厂由装配层注入）。
+
+        Returns:
+            FactorCache 实例；未装配工厂时返回 None（调用方降级为空操作）。
+        """
+        if self._factor_cache is None and self._factor_cache_factory is not None:
+            self._factor_cache = self._factor_cache_factory()
         if self._factor_cache is None:
-            from myquant.indicators.factor_cache import FactorCache
-            self._factor_cache = FactorCache(
-                cache_dir=str(self.cache_dir),
-                enable_l1=True,
+            logger.warning(
+                "未装配因子缓存工厂（factor_cache_factory 未注入），"
+                "缓存失效/清理/统计操作降级为空操作"
             )
         return self._factor_cache
 
@@ -596,6 +615,8 @@ class CacheSyncManager:
             return 0
 
         cache = self._get_factor_cache()
+        if cache is None:
+            return 0
         total_removed = 0
         for symbol in symbols:
             removed = cache.invalidate(symbol=symbol)
@@ -662,10 +683,14 @@ if __name__ == "__main__":
 
     # ── 测试 2: 首次同步（全部为新增） ──
     print("\n[2] 首次同步（全部为新增，应全部变更）")
+    from myquant.indicators.factor_cache import FactorCache
     manager = CacheSyncManager(
         processed_dir=processed_dir,
         fingerprint_store_path=fingerprint_dir / "store.json",
         cache_dir=cache_dir,
+        factor_cache_factory=lambda: FactorCache(
+            cache_dir=str(cache_dir), enable_l1=True,
+        ),
     )
     result1 = manager.sync_all(data_source="test")
     print(f"    扫描: {result1.total_scanned}")

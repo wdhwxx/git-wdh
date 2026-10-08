@@ -49,7 +49,7 @@ from myquant.monitoring.execution_stats import ExecutionStatsMonitor
 from myquant.monitoring.margin_monitor import MarginMonitor
 from myquant.monitoring.metrics_history import MetricsHistoryStore
 from myquant.risk.rules import LimitUsageMonitor
-from myquant.web.dashboard import MonitorCenterDataProvider
+from myquant.monitoring.center_provider import MonitorCenterDataProvider  # G1 EX-15A：provider 下沉 monitoring（L5→L5 合法）
 
 logger = get_logger("monitoring.b_acceptance")
 

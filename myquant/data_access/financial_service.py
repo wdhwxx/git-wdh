@@ -25,7 +25,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -159,9 +159,17 @@ class FinancialImportService:
     Args:
         project_root: 项目根目录（用于定位数据库与输出目录）。
         db_path: 数据库路径；None 时使用 ``project_root/database/quant.db``。
+        factor_engine_factory: 因子引擎工厂（返回 FactorEngine 实例），由装配层注入
+            （G1 EX-08A，本模块不再直接依赖 indicators.factor_engine）；
+            None 时 compute_factors 跳过因子计算并记 warning。
     """
 
-    def __init__(self, project_root: Path, db_path: Optional[Path] = None) -> None:
+    def __init__(
+        self,
+        project_root: Path,
+        db_path: Optional[Path] = None,
+        factor_engine_factory: Optional[Callable[[], Any]] = None,
+    ) -> None:
         if not project_root or not project_root.exists():
             raise ValueError(f"项目根目录不存在: {project_root!r}")
         self.project_root = Path(project_root)
@@ -171,6 +179,10 @@ class FinancialImportService:
 
         self._conn = get_connection(self.db_path)
         self._queries = DataQueries(self._conn)
+
+        # 因子引擎工厂（G1 EX-08A：由装配层注入，本模块不再直接依赖
+        # myquant.indicators.factor_engine；None 时 compute_factors 跳过因子计算）
+        self._factor_engine_factory: Optional[Callable[[], Any]] = factor_engine_factory
 
     # ─────────────────────────────────────────────
     # 第一阶段：财务 CSV 导入
@@ -375,14 +387,13 @@ class FinancialImportService:
 
         stats = FactorStats()
 
-        # 延迟导入（FactorEngine 依赖较重，按需加载）
-        from myquant.indicators.factor_engine import FactorEngine
+        if self._factor_engine_factory is None:
+            logger.warning(
+                "未装配因子引擎工厂（factor_engine_factory 未注入），跳过因子计算"
+            )
+            return stats
 
-        engine = FactorEngine(
-            cache_dir=str(self.project_root / "cache" / "factor"),
-            use_cache=True,
-            auto_fingerprint=True,
-        )
+        engine = self._factor_engine_factory()
         tech_configs = [spec["engine"] for spec in TECH_FACTOR_SPECS]
         stats.tech_factor_count = sum(
             len(spec["cols"]) for spec in TECH_FACTOR_SPECS

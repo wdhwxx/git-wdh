@@ -949,9 +949,9 @@ class LimitUsageMonitor:
             各维度限额（分母）。None 读 slo.risk.concentration_limit / leverage_limit /
             single_stock_position_limit；读到 None（~）则该维度"未启用"。
         alert_manager : AlertManager | None
-            告警管理器；None 延迟取 get_alert_manager()。
+            告警管理器；None 时风险告警跳过（G1 EX-11A，不再延迟导入 monitoring 单例）。
         metrics_collector : MetricsCollector | None
-            指标采集器；None 延迟取 get_metrics_collector()（进 /api/metrics）。
+            指标采集器；None 时指标写入跳过（G1 EX-11B）。
         account_getter : Callable[[], dict] | None
             只读账户快照源（如 portfolio.get_account），返回含 total_assets/
             market_value/equity 的 dict。
@@ -1174,8 +1174,10 @@ class LimitUsageMonitor:
         """
         mgr = self._alert_manager
         if mgr is None:
-            from myquant.monitoring.alerting import get_alert_manager
-            mgr = get_alert_manager()
+            logger.warning(
+                "未装配告警管理器（alert_manager 未注入），风险告警已跳过"
+            )
+            return
         limit = self._limits[dimension]
         level_cn = "强告警" if level == SeverityLevel.ERROR else "预警"
         mgr.alert(
@@ -1197,22 +1199,20 @@ class LimitUsageMonitor:
             deduplication_key=f"limit:{dimension}:{'error' if level == SeverityLevel.ERROR else 'warn'}",
         )
 
-    # ── 指标写入（懒加载 collector）──────────────────────────
+    # ── 指标写入（注入优先）──────────────────────────────────
     def _write_metrics(self, usages: Dict[str, Optional[float]]) -> None:
         """
         经 set_gauge 写入三个使用率指标（进 /api/metrics）。
 
         未启用维度写 0.0 + labels enabled=false（输出"未配置"语义，不编造数值）。
+        未注入 metrics_collector 时跳过（G1 EX-11B：不再延迟导入 monitoring 单例）。
         """
         col = self._metrics_collector
         if col is None:
-            try:
-                from myquant.monitoring.metrics_collector import get_metrics_collector
-                col = get_metrics_collector()
-                self._metrics_collector = col
-            except Exception as e:  # noqa: BLE001
-                logger.warning("获取 metrics_collector 失败（指标未写入）: %s", e)
-                return
+            logger.warning(
+                "未装配指标采集器（metrics_collector 未注入），指标写入已跳过"
+            )
+            return
         for dim in _ALL_DIMENSIONS:
             usage = usages.get(dim)
             enabled = usage is not None

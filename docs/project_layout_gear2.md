@@ -251,7 +251,7 @@ Pythonwdhmm/
 
 ├── logs/                             # 运行时日志目录；专门分出data_quality子目录存放清洗告警日志，已加入.gitignore
 
-├── cache/                            # ✨【V5·P0】运行时缓存目录（gitignore已忽略，保留骨架）：factor因子L2磁盘缓存 / fingerprint数据指纹仓库 / backtest回测结果缓存 / benchmark性能基准输出 / tmp临时文件（P3-D13-004 整改：5 子目录）；由scripts/缓存管理.py查看清理、scripts/初始化项目目录.py自动创建；L1内存缓存在myquant/indicators/factor_cache.py
+├── cache/                            # ✨【V5·P0】运行时缓存目录（gitignore已忽略，保留骨架）：factor因子L2磁盘缓存 / fingerprint数据指纹仓库 / backtest回测结果缓存 / benchmark性能基准输出 / tmp临时文件（P3-D13-004 整改：5 子目录）；由scripts/缓存管理.py查看清理、scripts/初始化项目目录.py自动创建；L1内存缓存在myquant/indicators/factor_cache.py；✨【回写#258】G1 装配注入（缓存管理 7 处 _new_factor_cache_factory / 其余 4 脚本各 1 处装配，业务逻辑零写入不变）
 
     │
 
@@ -369,7 +369,7 @@ Pythonwdhmm/
 
 │   │                                  # ✅已实现：CleanRuleLibrary规则对象映射（data_access/cleaner/rules_loader.py），支持yaml配置加载
 
-│   ├── data_clean_run.json       # ✨【回写】全量清洗运行时状态文件（不入库）：由gui/data_clean_dialog.py生成、供scripts/数据全量清洗.py --config读取；✅已修复【回写#32】：.gitignore 已追加 config/*.json 覆盖该文件（原⚠️误提交风险已消除）；同类核验：config/ 其余运行时文件（真实 yaml/stock_pool.yaml）均已被 config/*.yaml 覆盖，无同类遗漏；✨【回写#79】含 exclude_st:true + exclude_suspended_days:60（长期停牌/退市规则阈值，GUI 每次清洗重写并保留）
+│   ├── data_clean_run.json       # ✨【回写】全量清洗运行时状态文件（不入库）：由gui/data_clean_dialog.py生成、供scripts/数据全量清洗.py --config读取；✅已修复【回写#32】：.gitignore 已追加 config/*.json 覆盖该文件（原⚠️误提交风险已消除）；同类核验：config/ 其余运行时文件（真实 yaml/stock_pool.yaml）均已被 config/*.yaml 覆盖，无同类遗漏；✨【回写#79】含 exclude_st:true + exclude_suspended_days:60（长期停牌/退市规则阈值，GUI 每次清洗重写并保留）；✨【回写#258】G1 装配注入（缓存管理 7 处 _new_factor_cache_factory / 其余 4 脚本各 1 处装配，业务逻辑零写入不变）
 │   ├── financial_exclude_rules.yaml # ✨【回写#83】财务增量定位排除规则（14条，与 data_clean_run.json 清洗口径一致；P2-③ config化，修改免改代码，删除回退内置+warning）
 
 │   ├── st_blacklist.example.yaml # ✨【回写#70】ST/*ST/S*ST/SST 风险警示股名单模板（真实名单 config/st_blacklist.yaml 不入库，由 GUI「刷新名单」联网生成或人工编辑；full_clean_service.load_st_blacklist 离线读取，resolve_symbols 按 symbol 命中剔除，与代码前缀规则正交串联）
@@ -416,9 +416,9 @@ Pythonwdhmm/
 
 ├── scripts/                          # 一次性运维脚本，只做入口，业务逻辑全部调用myquant内部模块，禁止业务写在脚本内
 
-│   ├── 数据下载.py                    # 数据下载入口：调用fetcher拉取原始数据写入raw；可触发完整清洗流水线输出processed；V5新增--no-cache-sync跳过缓存同步；✨【回写#86】download_daily 池过滤（resolve_incremental_symbols 14条规则）+ processed 写回改 save_cleaned_incremental_parquet（根治 CLI 原始直写弄脏数据）；save_market_data_parquet 已废弃标注；✨【回写#87】顶部 sys.path 注入（与同步股本变动.py 对齐，CLI 直跑免设 PYTHONPATH）
+│   ├── 数据下载.py                    # 数据下载入口：调用fetcher拉取原始数据写入raw；可触发完整清洗流水线输出processed；V5新增--no-cache-sync跳过缓存同步；✨【回写#86】download_daily 池过滤（resolve_incremental_symbols 14条规则）+ processed 写回改 save_cleaned_incremental_parquet（根治 CLI 原始直写弄脏数据）；save_market_data_parquet 已废弃标注；✨【回写#87】顶部 sys.path 注入（与同步股本变动.py 对齐，CLI 直跑免设 PYTHONPATH）；✨【回写#258】G1 装配注入（缓存管理 7 处 _new_factor_cache_factory / 其余 4 脚本各 1 处装配，业务逻辑零写入不变）
 
-│   ├── 数据清洗.py                    # ✨【新增】独立清洗流水线入口脚本：对raw指定范围/标的执行清洗，输出processed，生成质量报告；V5新增--no-cache-sync跳过缓存同步
+│   ├── 数据清洗.py                    # ✨【新增】独立清洗流水线入口脚本：对raw指定范围/标的执行清洗，输出processed，生成质量报告；V5新增--no-cache-sync跳过缓存同步；✨【回写#258】G1 装配注入（缓存管理 7 处 _new_factor_cache_factory / 其余 4 脚本各 1 处装配，业务逻辑零写入不变）
 
 │   ├── 实盘模拟回测.py                # ✨【新增】实盘模拟回测入口（单券商端到端链路验证，akshare真实历史数据）
 
@@ -478,7 +478,7 @@ Pythonwdhmm/
 
 │   ├── 一致性校验.py                  # ✨【V5·P3】三模式一致性校验入口：engine.py/vectorized_engine.py/mixed_engine.py同参数同数据比对收益曲线与成交，差异超阈值即失败
 
-│   ├── 财务数据入库.py              # ✨【回写#36】财务数据入库薄入口：参数解析(--mode import/factors/all/--csv/--lookback-days/--output-dir)+路径探测+调用FinancialImportService；自动定位datasets/raw/financial/最新financial_history_*.csv；输出outputs/财务数据入库报告/全中文HTML+CSV报告；GUI财务数据栏「财务数据入库」选项共用同一服务
+│   ├── 财务数据入库.py              # ✨【回写#36】财务数据入库薄入口：参数解析(--mode import/factors/all/--csv/--lookback-days/--output-dir)+路径探测+调用FinancialImportService；自动定位datasets/raw/financial/最新financial_history_*.csv；输出outputs/财务数据入库报告/全中文HTML+CSV报告；GUI财务数据栏「财务数据入库」选项共用同一服务；✨【回写#258】G1 装配注入（缓存管理 7 处 _new_factor_cache_factory / 其余 4 脚本各 1 处装配，业务逻辑零写入不变）
 │   ├── 财务CSV更新.py              # ✨【回写#74】财务CSV增量同步薄入口：参数(--all/--symbols/--start-date/--end-date/--no-import)+路径探测+调用FinancialSyncService；默认只拉financial_data缺失的清洗保留标的（增量优先，当前=601091.SH类新股）→与本地最新CSV合并去重→落盘→自动入库；全市场重拉与GUI行为一致；输出下一步建议（重跑全量清洗）
 
 │   └── 验收_回测引擎V5.py             # ✨【V5·P1】引擎验收入口：执行统一验收清单（事件/向量化/混合引擎正确性+三模式一致性+回归+性能基准），输出验收报告
@@ -729,7 +729,7 @@ Pythonwdhmm/
 │   │   ├── test_config_version_trace.py # ✨【回写#166】变更管理测试(KP-P5-07：create_live_engine设config_version/缺省空串/快照extra含config_version/键级diff缺键判失败/键级diff通过，5项)✅已完成
 │   │   ├── test_accountability_sync.py # ✨【回写#149】券商权威账本对账测试(KP-P3-08：diff_vs_broker只diff不重建/账实一致通过/patrol超阈CRITICAL+pause/无差异不暂停，4项)✅已完成
 │   │   ├── test_trade_calendar_gate.py # ✨【回写#150】交易日历安全门测试(KP-P3-10：TradingHoursRule非交易日拒绝/交易日放行/显式日历/非交易时段仍拒绝/实盘入口真实日历判定，5项)✅已完成
-│   │   ├── test_abnormal_trade_rules.py # ✨【回写#153】异常交易类风控测试(KP-P3-06：自成交互斥/撤单率超阈/胖手指金额与偏离/注册表/撤单计数+事件+日报+重置，13项)✅已完成
+│   │   ├── test_abnormal_trade_rules.py # ✨【回写#153】异常交易类风控测试(KP-P3-06：自成交互斥/撤单率超阈/胖手指金额与偏离/注册表/撤单计数+事件+日报+重置，13项)✅已完成；✨【回写#258】G1 EX-11A/B：_fire_alert/_write_metrics 改显式注入（alert_manager/metrics_collector 未装配 warning+return，删 try/except import 兜底），构造 docstring 同步 None 时告警/指标跳过
 │   │   ├── test_event_price_limit.py # ✨【回写#151】event路径涨跌停/停牌测试(KP-P2-02：涨停拒买/跌停拒卖/停牌跳过/非涨跌停正常/默认不强制保持既有，5项)✅已完成
 │   │   ├── test_price_limit_fail_closed.py # ✨【回写#146】涨跌停硬拦截fail-closed测试(KP-P3-04：缺prev_close拒绝/涨停拒买/跌停拒卖/正常放行/engine注入prev_close，5项)✅已完成
 
@@ -926,7 +926,7 @@ Pythonwdhmm/
     │   ├── factor_sync_service.py   # ✨【回写#82】方案B复权因子同步业务：akshare stock_zh_a_daily(adjust="hfq-factor") 东财事件表→清洗(1900脏行/NaN/排序去重)→UPSERT adjust_factor(symbol,event_date,factor)；hfq价=raw×factor事件日生效；qfq=hfq/最新因子；限速/失败留痕/as_of防未来；供清洗豁免与data_loader复权现算 ✅已完成
 ；✨【回写#59】新增增量清洗通道 run_incremental_clean/_load_incremental_records/_normalize_incremental_date（读暂存增量→清洗→DB+processed双写，仅清洗模式）；✨【回写#70】新增 ST 风险警示剔除（load_st_blacklist/match_st_name/filter_st_blacklist_symbols/refresh_st_blacklist；resolve_symbols 串联代码前缀规则后；报告含 exclude_st/st_excluded_count/st_excluded_symbols）；✨【回写#71】B类财务缺失留痕（worker_clean 对 financial_data 无记录标的打 warning 并置 result["no_financial"]；run() 聚合 no_financial_symbols 并打印"待补财务标的"；build_report 新增 no_financial_count/no_financial_symbols）
 
-    │   ├── financial_service.py      # ✨【回写#36】财务数据入库服务：FinancialImportService——财务CSV读取→字段映射(net_profit_parent→net_profit/report_date YYYYMMDD→YYYY-MM-DD)→分批批量入库financial_data；FactorEngine向量化计算14个技术因子(SMA5/10/20/60,EMA12/26,MACD_DIF/DEA/HIST,RSI14,BOLL_UP/MID/LOW,ATR14)+5个基本面因子(PE/PB/ROE/毛利率/资产负债率)映射最新报告期→长表写入factor_data；生成全中文表头HTML+CSV入库报告；防未来函数(财务仅取report_date<=trade_date最新一期)；调用方=scripts/财务数据入库.py + GUI财务数据入库选项
+    │   ├── financial_service.py      # ✨【回写#36】财务数据入库服务：FinancialImportService——财务CSV读取→字段映射(net_profit_parent→net_profit/report_date YYYYMMDD→YYYY-MM-DD)→分批批量入库financial_data；FactorEngine向量化计算14个技术因子(SMA5/10/20/60,EMA12/26,MACD_DIF/DEA/HIST,RSI14,BOLL_UP/MID/LOW,ATR14)+5个基本面因子(PE/PB/ROE/毛利率/资产负债率)映射最新报告期→长表写入factor_data；生成全中文表头HTML+CSV入库报告；防未来函数(财务仅取report_date<=trade_date最新一期)；调用方=scripts/财务数据入库.py + GUI财务数据入库选项；✨【回写#258】G1 EX-08A：FinancialImportService 构造新增 factor_engine_factory 注入参数，compute_factors 未装配 logger.warning+return stats（删延迟导入），scripts/财务数据入库.py _new_factor_engine_factory 装配（cache_dir/use_cache/auto_fingerprint 与旧延迟导入一致）
     │   ├── financial_sync_service.py # ✨【回写#74】财务CSV增量同步服务：FinancialSyncService——定位financial_data缺失标的（与#71 no_financial同口径，排除规则对齐清洗14条）→逐标get_financial_history拉多期财务（防未来函数end_date过滤）→按symbol+report_date合并去重keep=新落盘financial_history_YYYYMMDD.csv→可选自动入库FinancialImportService→复查缺失；调用方=scripts/财务CSV更新.py + 豆包定时任务；✨【回写#83】P2-③ 排除规则config化（_load_financial_exclude_rules 读 config/financial_exclude_rules.yaml，缺省回退内置14条+warning）
 
     │   ├── cleaner/                  # ✨【数据清洗核心模块】已重构为面向对象架构
@@ -1112,7 +1112,7 @@ Pythonwdhmm/
 
     │   │                             # ✅已实现：DataQualityRiskConfig + SymbolDataQualityStatus + subscribe_to_event_bus(3类事件) + 脏数据自动暂停(单标的/全局) + 自动恢复
 
-    │   ├── guardian.py               # 风控守护进程：健康监控、强制平仓断开；✨【回写#152】force_close_all/symbol 无回调 return False（KP-M02：不假成功）；✨【回写#186】KP-M04(T-30)：force_close_all/symbol 高危写操作准入守卫（未审批拒绝，默认仅审计留痕）
+    │   ├── guardian.py               # 风控守护进程：健康监控、强制平仓断开；✨【回写#152】force_close_all/symbol 无回调 return False（KP-M02：不假成功）；✨【回写#186】KP-M04(T-30)：force_close_all/symbol 高危写操作准入守卫（未审批拒绝，默认仅审计留痕）；✨【回写#258】G1 EX-11C：模块级 _OPERATION_GUARD 注册表 + register_operation_guard(guard)，force_close_all/force_close_symbol 改守卫取用，未注册 warning+默认放行（与 OperationGuard 未启用时仅审计留痕语义等价）
 
     │   └── rules.py                  # 风控规则库；✨【回写#146】PriceLimitRule 缺昨收/现价 fail-closed（KP-P3-04：拒绝下单而非跳过放行）；✨【回写#148】StopLossRule 增 stop_price(avg_cost) 共享止损触发价口径（KP-P3-07，回测/混合引擎复用）；✨【回写#150】TradingHoursRule 增交易日维度（KP-P3-10：真实交易日历懒加载，非交易日拒绝下单）；✨【回写#153】异常交易类规则（KP-P3-06：SelfTrade 自成交互斥/CancelRate 撤单率/FatFinger 胖手指，注册 RULE_REGISTRY）；✨【回写#223】B-3 限额监控——LimitUsageMonitor（集中度/杠杆/单票仓位三维度 usage=exposure/limit，>=80% WARNING(P2)/>95% ERROR(P1)，category=risk dedup=limit:<dim>；阈值读 slo.risk position_limit_usage_warn/alert；限额 PENDING_CAL=None 不告警 enabled=false 不编造；指标 limit_usage_*3 进 /api/metrics）
 
@@ -1154,7 +1154,7 @@ Pythonwdhmm/
 
     │   ├── __init__.py
 
-    │   └── dashboard.py              # Streamlit看板：8页面（首页/策略/回测/实盘/风控/数据质量/数据/关于）；✅已实现数据质量探查页（任务15）：_render_data_quality渲染 + 从monitoring.data_quality_explorer导入DataQualityExplorer（#S2修复：类定义已迁移到monitoring底层，web层仅做导入保持向后兼容）；数据源=CleanDataQueries(任务13)+MetricsCollector(任务11)；source过滤区分offline/live为实盘对接预留；streamlit未安装时友好提示；✨【回写#215/#219】监控中心页 v1（健康两级/告警筛选确认解决/指标卡片/交易连续状态，详情脱敏）+ RBAC 按钮按角色禁用；✨【回写#222/#228】B-2 权益曲线实时绘制（当日时序回放 live_total_assets）+ PnL 五卡片+对账冻结警告；B-8 业务驾驶舱四视图（对账状态/资金 PnL/限额使用/执行质量，MonitorCenterDataProvider.build_cockpit_payload 与 /api/monitor/cockpit 同源）
+    │   └── dashboard.py              # Streamlit看板：8页面（首页/策略/回测/实盘/风控/数据质量/数据/关于）；✅已实现数据质量探查页（任务15）：_render_data_quality渲染 + 从monitoring.data_quality_explorer导入DataQualityExplorer（#S2修复：类定义已迁移到monitoring底层，web层仅做导入保持向后兼容）；数据源=CleanDataQueries(任务13)+MetricsCollector(任务11)；source过滤区分offline/live为实盘对接预留；streamlit未安装时友好提示；✨【回写#215/#219】监控中心页 v1（健康两级/告警筛选确认解决/指标卡片/交易连续状态，详情脱敏）+ RBAC 按钮按角色禁用；✨【回写#222/#228】B-2 权益曲线实时绘制（当日时序回放 live_total_assets）+ PnL 五卡片+对账冻结警告；B-8 业务驾驶舱四视图（对账状态/资金 PnL/限额使用/执行质量，MonitorCenterDataProvider.build_cockpit_payload 与 /api/monitor/cockpit 同源）；✨【回写#258】G1 EX-15A：MonitorCenterDataProvider 类段 + 脱敏段（P0-7）下沉 monitoring/center_provider.py（新文件），顶部 re-export 保持兼容（MonitorCenterDataProvider + 8 脱敏符号供 __main__ 自测），PAGES 回插 Dashboard 类前（st.radio 导航），行数 1760→~1250（薄化成果）
 
     │
 
@@ -1255,7 +1255,8 @@ Pythonwdhmm/
 
     │   ├── margin_monitor.py          # ✨【回写#229】B-9 保证金率/资金费率：MarginMonitor——保证金占用率=占用/权益、维持保证金=市值×率、强平价距离=(权益-维持保证金)/权益×100、资金费率隔夜成本=Σ市值×费率；EVENT 订阅 ORDER_FILLED/POSITION_UPDATE/TICK + poll() 兜底；距离<strong_flat_distance_pct 或占用超阈→P0/CRITICAL（category=margin dedup=margin:strong_flat/usage）、费率超阈→WARNING；阈值读 slo.margin（PENDING_CAL=None 不告警不编造）；REGISTERED_METRICS 5 项进 set_gauge；LivePortfolio 仅方法内惰性 import；__main__ 自测 12 项
 
-    │   ├── b_acceptance.py            # ✨【回写#230】B-10 B 包保钱包验收业务逻辑：BAcceptanceRunner（隔离环境=临时 AlertStore+真实 AlertManager+真实 EventBus+临时 MetricsHistoryStore(FieldCrypto)）——B-1~B-9 九项检查（对账差异=0 可展示/PnL 防脏门+权益回放/限额分级闭环/延迟 P99 可视化/拒单率 SLO/熔断动作链/新鲜度缺口/驾驶舱四键/保证金强平闭环），阈值全部引用 get_monitoring_config() 真源（禁硬编码）；异常不吞如实记录该项失败；每次 run() 重建隔离跨 run 去重；防未来时间戳；JSON 报告结构；__main__ 自测
+    │   ├── b_acceptance.py            # ✨【回写#230】B-10 B 包保钱包验收业务逻辑：BAcceptanceRunner（隔离环境=临时 AlertStore+真实 AlertManager+真实 EventBus+临时 MetricsHistoryStore(FieldCrypto)）——B-1~B-9 九项检查（对账差异=0 可展示/PnL 防脏门+权益回放/限额分级闭环/延迟 P99 可视化/拒单率 SLO/熔断动作链/新鲜度缺口/驾驶舱四键/保证金强平闭环），阈值全部引用 get_monitoring_config() 真源（禁硬编码）；异常不吞如实记录该项失败；每次 run() 重建隔离跨 run 去重；防未来时间戳；JSON 报告结构；__main__ 自测；✨【回写#258】G1 EX-15A：B-8 数据源 import 改自 myquant.monitoring.center_provider（L5→L5 合法，消除 L5→L6 唯一 top 反向依赖）
+    │   ├── center_provider.py        # ✨【回写#258】G1 EX-15A 监控中心数据提供者（自 web/dashboard.py 下沉 monitoring，L6→L5 合法）：MonitorCenterDataProvider 类段（get_alerts 脱敏详情/get_trading_continuity 三 HINTS 状态/get_reconciliation_status/get_pnl_snapshot/get_intraday_equity_curve/get_limit_usage_view/get_execution_quality_view/build_cockpit_payload 四键驾驶舱 B-8）+ A-11 敏感字段脱敏段（_ACCOUNT/_CREDENTIAL/_BALANCE_KEY_PATTERNS + _lower_key + mask_sensitive_fields，P0-7 §3）+ 交易连续状态 HINTS 常量；类体函数内懒 import（metrics_collector/account_reconciler/core.constants/monitoring 单例）原样保留；web 层 dashboard.py 顶部 re-export 兼容（MonitorCenterDataProvider + 脱敏符号供 __main__ 自测）；511 行（R-14 以下不入白名单）；纯逻辑不依赖 streamlit
 │   └── data_quality_explorer.py # ✨【#S2修复】数据质量探查器（从web/dashboard.py迁移到monitoring底层，消除API依赖Web的架构倒置）：DataQualityExplorer类13方法（实时指标/清洗运行列表/运行详情/等级分布/脏数据统计/总览），纯Python数据层不依赖streamlit，API层和Web层均从此导入；数据源=CleanDataQueries+MetricsCollector；source过滤区分offline/live为实盘对接预留；✨【回写#227】B-7 数据新鲜度 SLI——DataFreshnessSli（既有类零改动追加）：新鲜度滞后 latest_lag_seconds=max(0,now−最新ts) 按标的/数据类分别（slo.data.freshness_max_seconds=60 LOCKED：>60s WARNING/>2×ERROR）；每日缺口 record_gap/gap_provider 按日聚合（gap_allowed=0 缺口即 ERROR(P1)）；因子/财务同步延迟分别设值（PENDING_CAL 未配置不告警不写指标不编造）；指标 data_freshness_lag_seconds(data_key)/data_gap_count/factor|financial_sync_delay_seconds 进 /api/metrics（懒加载）；poll()+DATA_LOADED 事件驱动；防未来（滞后/延迟截断非负）；__main__ 自测 14 项
     │   ├── rolling_performance.py    # ✨【回写#232】C-2 滚动绩效指标（周期/POLL，非 MTTD 类）：RollingPerformanceMonitor——滚动窗口（日/周/月=1/7/30 自然日 trailing）收益 return_pct、夏普 sharpe=mean/std×√252（样本<2 None）、回撤 drawdown_pct=权益路径最大峰谷、胜率 win_rate=日收益>0 占比；日内回撤/亏损（当日已发生绩效点）超 slo.strategy.intraday_drawdown_limit → WARNING（category=strategy，dedup=strategy:intraday_drawdown/loss:<name>，附值）；record() 摄入已发生 (ts,equity) 按策略归组（拒绝未来点防未来）+ replay_from_history(store, metric_name, strategy, ...) 基于 MetricsHistoryStore.query 回放（C-2 验收口径）；阈值读 slo.strategy（PENDING_CAL=None 不告警不编造）；REGISTERED_METRICS 8 项经 set_gauge(labels={"strategy":name})；__main__ 自测 15 项
 
@@ -1347,7 +1348,7 @@ Pythonwdhmm/
 
         ├── memory_watcher.py         # ✨【V5·P0】内存水位监控：跟踪进程内存（psutil），OOM防护——超阈值自动触发预取降级/缓存收缩/策略上下文切换，回测批量运行关键防线
 
-        ├── cache_sync.py             # ✨【V5·P0】缓存同步：L1内存↔L2磁盘缓存写回与失效广播（缓存管理.py/数据下载/数据清洗 --no-cache-sync 跳过）
+        ├── cache_sync.py             # ✨【V5·P0】缓存同步：L1内存↔L2磁盘缓存写回与失效广播（缓存管理.py/数据下载/数据清洗 --no-cache-sync 跳过）；✨【回写#258】G1 EX-07B：CacheSyncManager 构造新增 factor_cache_factory 注入参数，_get_factor_cache 未装配降级（6 处调用 warning+return 0/空/None），docstring 依赖段改装配注入，__main__ 自测改传 factory；scripts/缓存管理.py _new_factor_cache_factory + 7 处装配，数据清洗/数据全量清洗/数据下载各 1 处装配
 
         ├── csv_utils.py              # ✨【回写·2026-09-09】CSV中文表头导出工具：CSV_HEADER_MAPS映射表（trades/equity/batch_summary/param_optimize）+ to_chinese_headers/export_csv_cn（统一utf-8-sig）；仅用于"给人看的"结果/报告类CSV，数据类CSV（行情/下载/清洗/指纹）属程序契约严禁映射
 
@@ -3940,3 +3941,16 @@ esolve_engine_mode 本身只依赖 strategy.engine_modes() 能力接口，不依
    c. **兼容性**：factor_cache 命名空间经导入继续暴露 is_parallel_mode/set_parallel_mode（外部 from myquant.indicators.factor_cache import ... 不受影响）；并行模式语义（并行下 L1 自动关闭）与日志不变。
    d. **验证结果**：py_compile 三文件通过；门禁 26 passed/1 skipped（R-02 违规 34 = 基线，无幽灵）；myquant.utils.parallel __main__ 自测 35/35；myquant.indicators.factor_cache __main__ 自测全过；tests/unit/test_factor_cache_v5.py + test_factor_cache_nofp.py 35 passed；全量 pytest 结果见提交后终验。
    e. **纪律遵守**：无新增文件、无蓝图外文件（两文件均在目录树已标注）；无目录树条目变更（存量修改）；严格防未来（并行模式标志为纯执行模式状态，无时序数据引用）；工作区既有未提交改动（docs/系统性审核/鲲鹏量化交易系统_架构分层治理方案_v5.md）未触碰；任务后 git 提交（commit message 引用 #257）。
+
+## #258 · 2026-10-08 · G1 例外收敛第 2 批：EX-07B/08A/11A/11B/11C/15A 消除（违规 34→27，例外 25→19）
+   事实来源：本次落地（用户指令"第 2 项 EX-07B、EX-08A、EX-11A/B、EX-11C、EX-15A 一并批量完成"），代码级核验：py_compile 12 文件通过 + 门禁 25 passed/1 skipped + 相关单测 80 passed + EX-15A 行为验证（provider 四键/脱敏/同一类）。
+   a. **六项消除（统一手法：反向依赖改为构造/工厂注入，装配责任上移到合法层/scripts）**：
+      ① EX-07B（cache_sync.py ↔ factor_cache，L0→L2）：CacheSyncManager 构造新增 factor_cache_factory；_get_factor_cache() 返回 Optional，6 处调用（invalidate_symbol/invalidate_factor/clear_all_cache/cleanup_expired_cache/get_cache_status/sync_symbols）加 None 降级（warning + return 0/空 {} /return）；__main__ 自测 2 处改传 factory（lambda 包 FactorCache）；scripts/缓存管理.py 新增 _new_factor_cache_factory(project_root) helper + 7 处装配，数据清洗/数据全量清洗/数据下载各 helper + 1 处装配。
+      ② EX-08A（financial_service.py ↔ factor_engine，L1→L2）：构造加 factor_engine_factory；compute_factors 未装配 → logger.warning + return stats；import 补 Callable；scripts/财务数据入库.py 新增 _new_factor_engine_factory（cache_dir/use_cache/auto_fingerprint 与旧延迟导入一致）并装配。
+      ③ EX-11A/B（rules.py ↔ alerting/metrics_collector，L3→L5）：_fire_alert 未注入 alert_manager → warning + return；_write_metrics 未注入 metrics_collector → warning + return（删 try/except import 兜底）；构造 docstring 同步"None 时告警/指标跳过"。
+      ④ EX-11C（guardian.py ↔ api.middleware.auth，L3→L6）：模块级注册表 _OPERATION_GUARD: Optional[Any] = None + register_operation_guard(guard)；force_close_all/force_close_symbol 两处改守卫取用，未装配 → warning + 默认放行（与 OperationGuard 未启用时"仅审计留痕"语义等价，已读 check 定义验证）。
+      ⑤ EX-15A（b_acceptance.py ↔ web.dashboard，L5→L6 唯一 top）：新文件 myquant/monitoring/center_provider.py = 原 dashboard 中 MonitorCenterDataProvider 类段 + _DEFAULT_ALERT_LIMIT + 脱敏三组 PATTERNS + _lower_key + mask_sensitive_fields + 三个 HINTS 常量（511 行，R-14 以下不入白名单，docstring 标注 G1 EX-15A 下沉、web re-export 兼容）；dashboard.py 删类段与脱敏段，注入 re-export（MonitorCenterDataProvider + 7 符号），PAGES 列表回插到 class Dashboard: 前（st.radio 导航用）；b_acceptance.py:52 import 改 from myquant.monitoring.center_provider；myquant/api/routes.py 仍走 web re-export（L6→L6 合法，无需改）。
+   b. **门禁收缩（tests/unit/test_architecture.py，条目追加 #258）**：例外表删除 EX-07B/08A/11A/11B/11C/15A 六条（25 对→19 对，注释同步）；VIOLATION_BASELINE 34→27（R-02 实测违规 27 = 34-7，无幽灵、无用户新提交引入的新违规）；R-24 OVERSIZE_LINE_BASELINE live/engine.py 2851→2858（用户提交 1499c09 引入 +7 行，基线随真实状态同步并注明）；docstring v4.3→v4.4（新增 L-d 段：G1 首批收敛基线声明 违规 27/例外 19）；R-19 零覆盖：test_business_cabin.py 改直接 import monitoring.center_provider（新文件直接覆盖）、test_dashboard_monitor.py 保留 web re-export 路径（web 兼容性测试，dashboard.py 持续被覆盖）。
+   c. **兼容性**：web.dashboard re-export 保持 MonitorCenterDataProvider 及脱敏符号（api/routes.py、dashboard __main__ 自测、旧 import 路径不受影响）；CacheSyncManager/FinancialImportService 新构造参数带默认 None 向后兼容；rules.py 未装配时告警/指标跳过不抛错；guardian 未注册守卫默认放行（语义等价）。
+   d. **验证结果**：py_compile 12 文件通过；门禁 25 passed/1 skipped（实测违规 27 = 基线；例外 19 对无幽灵；R-24 全部 ≤ 基线；R-19 current_zero ⊆ 基线 49）；相关单测 80 passed（test_business_cabin + test_dashboard_monitor + test_limit_usage_monitor + test_factor_cache_v5 + test_factor_cache_nofp）；EX-15A 行为验证：monitoring 与 web re-export 同一类（is True）、build_cockpit_payload 四键齐全（reconciliation/pnl/limit_usage/execution）、mask_sensitive_fields 正确（api_key→****、account→****6666、ok 透传）；全量 pytest 结果见提交后终验。
+   e. **纪律遵守**：新文件 center_provider.py 已登记目录树 monitoring/ 段（#258）；改动文件均在蓝图目录树已标注（cache_sync.py/financial_service.py/rules.py/guardian.py/dashboard.py/b_acceptance.py 条目追加 #258；scripts 5 文件为既有登记薄入口追加 #258）；统一手法=反向依赖改为构造/工厂注入 + 装配责任上移 scripts（业务逻辑零写入脚本）；严格防未来（本批全部只消费已发生状态/纯执行模式标志/装配注入，无时序数据引用）；工作区既有未提交改动（docs/系统性审核/鲲鹏量化交易系统_架构分层治理方案_v5.md）未触碰；任务后 git 提交（commit message 引用 #258）。
