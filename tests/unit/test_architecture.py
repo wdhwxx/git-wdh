@@ -18,6 +18,7 @@ v4.7（G2-5 阶段二，回写#265）：scheduler 对 monitoring 类实例化装
        白名单内文件行数只减不增（存量继续膨胀即红）；新增 >1500 仍由 R-14 拦截。
   L-c  基线锁定（G0 完成）：ZERO_COVERAGE_BASELINE 填入实测引用级零覆盖业务模块 49 个，
        R-19 由"仅报告/skip"转 CI 阻断（新增零覆盖即红）。
+       G0-9 补测（回写#266）：14 模块新增测试文件后从基线移除，49→35。
   L-d  G1 例外收敛（回写#258）：EX-07B（cache_sync 因子缓存实例注入）、EX-08A
        （financial_service 因子引擎工厂注入）、EX-11A/B（rules 告警/指标显式注入）、
        EX-11C（guardian 准入守卫注册表）、EX-15A（MonitorCenterDataProvider 下沉 monitoring）
@@ -36,7 +37,8 @@ v4.7（G2-5 阶段二，回写#265）：scheduler 对 monitoring 类实例化装
        10A/B/13A~K 永久型 14 对）。
        —— 权威基线冻结：违规 22 / 全量真环 2 / 顶层 0 / 例外 14 / 零覆盖存量 49。
        （R-19 为"被 tests import 即视为覆盖"的引用级近似；真实覆盖由 pytest-cov 判定，
-        cov 实测 58% / 零覆盖业务 12 个仅作 G0-9 补测清单，二者口径不同不混用。）
+        cov 实测 58% / 零覆盖业务 12 个仅作 G0-9 补测清单，二者口径不同不混用。
+        G0-9 补测回写#266 后零覆盖存量 49→35，见基线注释。）
 
 v4.2（K-f~K-h）与 v4.1（K-a~K-e）的修正结论全部沿用，摘要如下：
   K-f  修复 `_imports()` 的 __main__ 盲区：`if __name__ == "__main__":` 自测块内的
@@ -207,12 +209,10 @@ OVERSIZE_LINE_BASELINE: dict[str, int] = {
 # （cov 实测 58% / 零覆盖业务 12 个仅作 G0-9 补测清单，不混用）。
 ZERO_COVERAGE_BASELINE: set[str] = {
     "myquant/allocation/base.py", "myquant/allocation/equal_weight.py", "myquant/allocation/target_volatility.py",
-    "myquant/backtest/async_monte_carlo.py", "myquant/backtest/candidate_pool.py",
-    "myquant/backtest/candidate_report.py", "myquant/backtest/config_builder.py", "myquant/backtest/monte_carlo.py",
+    "myquant/backtest/async_monte_carlo.py", "myquant/backtest/monte_carlo.py",
     "myquant/backtest/pdf_report.py", "myquant/backtest/report.py", "myquant/core/async_runtime.py",
-    "myquant/core/config_loader.py", "myquant/core/transports/redis_bus.py",
+    "myquant/core/config_loader.py",
     "myquant/data_access/cleaner/error_codes.py", "myquant/data_access/factory.py", "myquant/data_access/fetcher.py",
-    "myquant/data_access/loader.py", "myquant/data_access/sources/broker_source.py",
     "myquant/data_access/sources/composite_source.py", "myquant/database/migrations/env.py",
     "myquant/database/migrations/versions/0001_initial_schema.py",
     "myquant/database/migrations/versions/0002_add_market_data_composite_index.py",
@@ -222,14 +222,16 @@ ZERO_COVERAGE_BASELINE: set[str] = {
     "myquant/database/migrations/versions/0006_add_metrics_history.py",
     "myquant/database/migrations/versions/0007_add_audit_log.py",
     "myquant/database/migrations/versions/0008_add_value_encrypted.py",
-    "myquant/execution/base.py", "myquant/execution/state_machine.py", "myquant/gui/backtest_config_dialog.py",
-    "myquant/gui/batch_backtest_tab.py", "myquant/gui/cleanup_dialog.py", "myquant/gui/data_clean_dialog.py",
-    "myquant/gui/main_window.py", "myquant/gui/widgets/kline_item.py", "myquant/gui/widgets/plot_helper.py",
-    "myquant/gui/widgets/side_panel.py", "myquant/live/brokers/ptrade_broker.py",
+    "myquant/execution/base.py", "myquant/execution/state_machine.py",
+    "myquant/gui/main_window.py",
     "myquant/strategies/kunpeng_strategy.py", "myquant/strategies/mean_reversion_strategy.py",
     "myquant/strategies/momentum_strategy.py", "myquant/utils/cache_sync.py", "myquant/utils/csv_utils.py",
     "myquant/utils/math_utils.py", "myquant/utils/memory_pool.py", "myquant/utils/parallel.py",
     "myquant/utils/performance_config.py", "myquant/utils/timer.py",
+    # 49 → 42（G0-9 补测 #266 Group A 覆盖 7 模块移除：candidate_pool/config_builder/redis_bus/
+    # broker_source/loader/candidate_report/ptrade_broker）→ 39（Group B 覆盖 3 模块移除：
+    # kline_item/plot_helper/side_panel）→ 35（Group C 覆盖 4 对话框移除：
+    # backtest_config_dialog/batch_backtest_tab/cleanup_dialog/data_clean_dialog）
 }
 
 

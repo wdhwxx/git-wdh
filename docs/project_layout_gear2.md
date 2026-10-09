@@ -776,6 +776,21 @@ Pythonwdhmm/
 │   │   ├── test_data_incremental_clean_dual.py  # ✨【回写#59】增量清洗双通道测试
 │   │   └── test_update_symbol_incremental_start.py  # ✨【回写#67】增量起点以 processed 为准（M5）+ save 失败统计（11项）✅已完成
 
+│   │   ├── test_candidate_pool.py   # ✨【回写#266】候选池构建单元测试（G0-9 补测：load/filter/build，13项）
+│   │   ├── test_config_builder.py   # ✨【回写#266】回测配置构建单元测试（G0-9：exclude前缀/股票池CSV/配置构建，12项）
+│   │   ├── test_redis_bus.py        # ✨【回写#266】Redis传输单元测试（G0-9：Message序列化/RedisTransport，9项，假redis注入）
+│   │   ├── test_broker_source.py    # ✨【回写#266】券商数据源单元测试（G0-9：构造/未连接降级/已连接桩/交易回调，19项）
+│   │   ├── test_ptrade_broker.py    # ✨【回写#266】Ptrade券商适配单元测试（G0-9：构造/配置/下单/目标仓位/健康检查/API占位，15项）
+│   │   ├── test_data_loader.py      # ✨【回写#266】优化数据加载器单元测试（G0-9：LoadStats/构造校验/内存自适应/分块判断，18项）
+│   │   ├── test_candidate_report.py # ✨【回写#266】候选池报告单元测试（G0-9：统计/直方图/HTML/全量报告/PDF[reportlab缺失跳过]，6项）
+│   │   ├── test_kline_item.py       # ✨【回写#266】K线控件占位单元测试（G0-9：构造/set_bars，4项）
+│   │   ├── test_plot_helper.py      # ✨【回写#266】绘图辅助占位单元测试（G0-9：空实现返回None，3项）
+│   │   ├── test_side_panel.py       # ✨【回写#266】侧边面板占位单元测试（G0-9：构造/update空实现，3项）
+│   │   ├── test_data_clean_dialog.py  # ✨【回写#266】数据清洗对话框单元测试（G0-9：match_rule/split_rules/load_all_symbols/offscreen构建，7项）
+│   │   ├── test_batch_backtest_tab.py # ✨【回写#266】批量回测标签页单元测试（G0-9：构造校验/默认值/sizeHint，4项）
+│   │   ├── test_cleanup_dialog.py     # ✨【回写#266】项目清理对话框单元测试（G0-9：offscreen构建/标题，1项）
+│   │   └── test_backtest_config_dialog.py  # ✨【回写#266】回测配置对话框单元测试（G0-9：offscreen构建/旧看板清理，2项）
+
 │   ├── fixtures/                     # 按领域拆分fixture，避免conftest膨胀
 
 │   │   ├── __init__.py
@@ -4059,3 +4074,11 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    f. **R-24 薄化基线同步（治理代码必要开销，回写说明）**：live/scheduler.py 2382→2409（7 处装配点改经注册表 +27 行）、monitoring/action_engine.py 2259→2307（build_action_engine+config 注册 +48 行）——涨幅均为 G2-5 治理注入（消除 4 条违规的代码成本），非业务膨胀；OVERSIZE_LINE_BASELINE 同步至实测，只减不增继续生效。
    g. **验证结果**：py_compile 8 文件通过；门禁 26 passed/1 skipped（真环 0/违规 1 仅剩 EX-01A/例外 1 条/OVERSIZE 新基线）；相关单测（watchdog/meta_monitor/weekly_review/action_engine/scheduler_escalation/scheduler_health_alert/heartbeat/monitoring/chaos_drill/disaster_drill/t1_settle/portfolio_reconciliation/model_drift/live_guard_failover/alert_escalation/incident_response/metrics_history/model_governance）428 passed；全量 pytest 3525 passed/3 skipped（无回归）。
    h. **纪律遵守**：蓝图目录树无新增文件（全部为既有文件修改，无目录树变更）；严格防未来（本批纯装配通道改造，无时序逻辑变更）；工作区既有未提交改动（docs/系统性审核/鲲鹏量化交易系统_架构治理施工清单.md 未跟踪文件）未触碰；任务后 git 提交（commit message 引用 #265）。
+## #266 · 2026-10-09 · G0-9 补测：14 个零覆盖模块新增单元测试（业务逻辑 7 + 小 GUI 占位 3 + 大对话框 4），R-19 零覆盖存量 49→35
+   事实来源：本次落地（用户指令"先补G0-9 补测（12 个零覆盖模块 + ptrade_broker/loader）"），代码级核验：14 个新测试文件 118 passed/1 skipped + 门禁 26 passed/1 skipped（ZERO_COVERAGE_BASELINE 49→35 收缩）+ tests/unit 全量 3623 passed/4 skipped（无回归）。
+   a. **Group A 业务逻辑 7 模块**（tests/unit 新增，真实单测）：test_candidate_pool.py（13 用例，CSV 中文表头导出）、test_config_builder.py（12 用例）、test_redis_bus.py（9 用例，sys.modules 注入假 redis）、test_broker_source.py（19 用例，未连接降级 + 已连接桩 NotImplementedError）、test_ptrade_broker.py（15 用例，SIM 模式复用 QmtBroker 引擎）、test_data_loader.py（18 用例，注入 fake provider/watcher 测 LoadStats/构造校验/内存自适应/分块判断）、test_candidate_report.py（6 用例，PDF 因环境缺 reportlab 用 importorskip 跳过）。
+   b. **Group B 小 GUI 占位 3 模块**：test_kline_item.py（4 用例）、test_plot_helper.py（3 用例）、test_side_panel.py（3 用例）——v1 TODO 占位类的基本行为（构造/存储/空实现不抛错）。
+   c. **Group C 大 GUI 对话框 4 模块**（offscreen 构建 + 纯逻辑）：test_backtest_config_dialog.py（2 用例，含 _cleanup_old_dashboards 旧看板清理）、test_batch_backtest_tab.py（4 用例，构造校验/sizeHint）、test_cleanup_dialog.py（1 用例）、test_data_clean_dialog.py（7 用例，match_rule/split_rules/load_all_symbols）——QT_QPA_PLATFORM=offscreen 于 QApplication 前设置，复用 test_paper_run_dialog 模式。
+   d. **门禁收缩（tests/unit/test_architecture.py，条目追加 #266）**：ZERO_COVERAGE_BASELINE 49→35（14 模块移除：candidate_pool/config_builder/redis_bus/broker_source/loader/candidate_report/ptrade_broker/kline_item/plot_helper/side_panel/backtest_config_dialog/batch_backtest_tab/cleanup_dialog/data_clean_dialog）；docstring L-c/L-末段零覆盖存量计数同步 49→35；R-19 判定为"被 tests import 即视为覆盖"的引用级（AST 扫描），非执行覆盖——pytest-cov 在本环境因 numpy "cannot load module more than once per process" 不可用（既有兼容性问题，回避不修复，不改代码）。
+   e. **验证结果**：14 个新测试文件 118 passed/1 skipped（合并运行无跨文件干扰，offscreen QApplication 复用单实例）；门禁 26 passed/1 skipped（真环 0/违规 1 仅剩 EX-01A/零覆盖 35）；tests/unit 全量 3623 passed/4 skipped（无回归）；全量 pytest 见 commit 后回填。
+   f. **纪律遵守**：先更新蓝图目录树（tests/unit 段登记 14 个新测试文件）再落代码（蓝图优先）；零蓝图外新增文件；测试代码遵守 py文件代码规则（全量类型注解 + Google docstring + 防御式断言）；未触碰任何业务逻辑（纯测试新增 + 门禁基线收缩，零 myquant 源码改动）；任务后 git 提交（commit message 引用 #266）。
