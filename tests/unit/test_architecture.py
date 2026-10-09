@@ -1,5 +1,20 @@
 # tests/unit/test_architecture.py
-"""架构分层门禁 v4.6（G1 例外收敛三批：EX-09A/B 消除，回写#259）。
+"""架构分层门禁 v4.9（G3 常态四条新门禁，回写#267）。
+
+v4.9（G3 常态，回写#267）：新增/强化四条常态门禁——
+  L-n  R-16 装配器集中（强化，替代窄版 live→monitoring）：L0-L4 层禁止直接
+       实例化 L5 组件类（monitoring/acceptance 导出的类）；跨层组件装配必须经
+       core.registry 工厂（get_component / get_* 工厂）或装配器（run_实盘入口.py
+       setup_monitoring_linkage），禁止跨层裸类实例化。基线 0（阻断）。
+  L-o  R-17 事件契约：事件发布/订阅必须引用 EventType 契约（EventType 成员值），
+       禁止 ad-hoc 字符串事件类型（非 main 语境）；订阅允许 '*' 通配符。
+       基线 0（阻断）；另报告未被消费的 EventType 成员（契约完备性驱动）。
+  L-p  R-18 脚本自举：scripts/ 薄入口纪律——禁止新增业务类定义；存量 8 个类定义
+       （4 文件：双券商模拟实盘/实时行情驱动/实盘模拟回测 3 个策略 + 验收_回测引擎V5
+       5 个验收策略）冻结允许（SCRIPT_CLASS_ALLOW），新增脚本类即红。
+  L-q  R-08 配置反查：登记的关键配置键（settings.yaml monitoring 段真源）的每段
+       必须被 myquant 消费（get_monitoring_config().get("...") 反查）；死配置键
+       （登记但代码不读）即红。基线 = 当前已消费键集合。
 
 v4.7（G2-5 阶段二，回写#265）：scheduler 对 monitoring 类实例化装配注册表化——
   L-m  EX-13B/D/H/I 消除：meta_monitor/watchdog/weekly_review/action_engine 四模块
@@ -71,8 +86,8 @@ S-3 R-19 更名 TestR19ZeroReference（诚实命名：引用级判定，非执�
           环3 随 EX-12A 消除，回写#259）；
           顶层真环=0；>1500 行白名单 14 项（相对路径，行数基线见 OVERSIZE_LINE_BASELINE）；
           零覆盖存量 49 个引用级业务模块（2026-10-08 冻结，新增零覆盖即红，回写#256）。
-运行状态：已在 conda_wdh 环境真实运行（门禁 24 passed/1 skipped：R-19 冻结后转真跑，
-          R-05 白名单 1 项按设计 skip；回写#255 前为 23 passed/2 skipped）。
+运行状态：已在 conda_wdh 环境真实运行（门禁 30 passed/1 skipped：G3 新增 R-17/R-18/R-08
+          三条 + R-16 强化后，R-05 白名单 1 项按设计 skip；#266 前为 26 passed/1 skipped）。
 """
 from __future__ import annotations
 
@@ -190,7 +205,41 @@ ENTRY_ALLOWLIST: set[str] = {
     "鲲鹏仿真运测.py", "一键部署.bat",
 }
 
-# ═══════════════════════════ 2c) 薄化冻结（R-24，G0 收尾回写#256） ═══════════════════════════
+# ═══════════════════════════ 2d) G3 常态门禁基线（回写#267） ═══════════════════════════
+# R-16 装配器集中：L0-L4 层禁止直接实例化 L5 组件类（monitoring/acceptance 导出的类）。
+# 跨层组件装配必须经 core.registry 工厂（get_component / get_* 工厂）或装配器
+# （run_实盘入口.py setup_monitoring_linkage）。基线 0（阻断）。
+COMPONENT_HOME_PKGS = ("myquant.monitoring", "myquant.acceptance")
+
+# R-18 脚本自举：scripts/ 薄入口纪律——禁止新增业务类定义；存量 8 个类定义冻结允许
+# （4 文件：双券商模拟实盘/实时行情驱动/实盘模拟回测 3 个演示策略 + 验收_回测引擎V5 5 个验收策略）。
+# 新增脚本类定义（不在本白名单）即红；存量清理只能缩。
+SCRIPT_CLASS_ALLOW: frozenset[tuple[str, str]] = frozenset({
+    ("scripts/双券商模拟实盘.py", "DualMAStrategy"),
+    ("scripts/实时行情驱动.py", "ShortMAStrategy"),
+    ("scripts/实盘模拟回测.py", "DualMAStrategy"),
+    ("scripts/验收_回测引擎V5.py", "_FixedSwitchVecStrategy"),
+    ("scripts/验收_回测引擎V5.py", "_TargetVecStrategy"),
+    ("scripts/验收_回测引擎V5.py", "_TargetLoopStrategy"),
+    ("scripts/验收_回测引擎V5.py", "_SignalStrategy"),
+    ("scripts/验收_回测引擎V5.py", "_FixedSwitchLoopStrategy"),
+})
+
+# R-08 配置反查：登记的关键配置键（settings.yaml monitoring 段真源）的每段必须被
+# myquant 消费（get_monitoring_config().get("...") 反查）。死配置键即红。
+# 基线 = 当前已消费键（探针实测，2026-10-09）；只增不删，新增登记键必须接线。
+CONFIG_KEY_REQUIRED: set[str] = {
+    "monitoring.action_engine", "monitoring.alerts", "monitoring.watchdog",
+    "monitoring.slo.data", "monitoring.slo.risk", "monitoring.slo.trading",
+    "monitoring.slo.reconciliation", "monitoring.slo.engine_heartbeat",
+    "monitoring.slo.exchange_rate_limit", "monitoring.slo.margin",
+    "monitoring.slo.model", "monitoring.slo.signal_decay",
+    "monitoring.slo.regime_matcher", "monitoring.slo.strategy",
+    "monitoring.slo.backtest_consistency", "monitoring.slo.capacity",
+    "monitoring.slo.dynamic_baseline",
+}
+
+
 # OVERSIZE 白名单 14 项行数基线（2026-10-08 实测冻结）：白名单内文件行数只减不增。
 OVERSIZE_LINE_BASELINE: dict[str, int] = {
     "monitoring/alerting.py": 3681, "live/engine.py": 2858, "core/event_bus.py": 2379,  # engine 2851→2858：用户提交 1499c09 引入 +7 行（回写#258）；alerting 3675→3681（#264 工厂注册代码）；event_bus 2383→2379（#261 事件池注入化）
@@ -589,21 +638,209 @@ class TestR14Oversize:
 
 
 class TestR16AssemblerScope:
-    """R-16：live 层的 monitoring 装配只允许 scheduler.py（已登记例外除外）。
+    """R-16 装配器集中（G3 强化，回写#267）：L0-L4 层禁止直接实例化 L5 组件类。
 
-    K-e：v4 的 R-16 未排除 EXCEPTIONS（EX-12A/B 的 portfolio->monitoring），
-    上线即红；本版与例外表保持一致。
+    跨层组件（monitoring/acceptance 导出的类）装配责任必须集中——经 core.registry
+    工厂（get_component / get_* 工厂函数）或装配器（run_实盘入口.py setup_monitoring_linkage）
+    取用；禁止在低层模块内直接 `ClassName(...)` 裸实例化 L5 组件。
+    基线 0（阻断）；例外登记同 R-02 例外表。
     """
 
-    def test_only_scheduler(self):
+    def test_no_lower_layer_direct_assembly(self):
+        bad = []
         exc_or_p0 = set(EXCEPTIONS) | P0_MUST_FIX
-        bad = [f"{f}:{ln} -> {t}"
-               for f, ln, t, _s, _d, _c in _violations(top_only=False)
-               if t.startswith("myquant.monitoring")
-               and f.startswith("myquant/live/")
-               and not f.endswith("live/scheduler.py")
-               and (f, t) not in exc_or_p0]
-        assert not bad, "live 层新增 L4->L5 装配（非 scheduler 且未登记例外）：\n" + "\n".join(bad)
+        lower_layers = {"L0", "L1", "L2", "L2E", "L3", "L4"}
+        for path in _all_py_files():
+            src_layer = _layer_of_file(path)
+            if src_layer not in lower_layers:
+                continue
+            tree = _parse(str(path))
+            if tree is None:
+                continue
+            rel = _rel(path)
+            l5_classes = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and node.module and (
+                    node.module.startswith(COMPONENT_HOME_PKGS[0])
+                    or node.module.startswith(COMPONENT_HOME_PKGS[1])
+                ):
+                    l5_classes.update(a.name for a in node.names if a.name != "*")
+                elif isinstance(node, ast.Import):
+                    for a in node.names:
+                        if a.name.startswith(COMPONENT_HOME_PKGS[0]) \
+                           or a.name.startswith(COMPONENT_HOME_PKGS[1]):
+                            l5_classes.add(a.name.split(".")[-1])
+            if not l5_classes:
+                continue
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                   and node.func.id in l5_classes:
+                    if (rel, _src_module(str(path)).split(".")[-1]) in exc_or_p0:
+                        continue
+                    bad.append(f"{rel}:{node.lineno} {node.func.id}(")
+        assert not bad, (
+            "L0-L4 层直接实例化 L5 组件类（装配责任未集中，须经工厂/装配器）：\n"
+            + "\n".join(bad)
+        )
+
+
+class TestR17EventContract:
+    """R-17 事件契约（G3 新增，回写#267）：发布/订阅必须引用 EventType 契约。
+
+    事件类型必须用 myquant.core.event_bus.EventType 成员（或其 value 字符串），
+    禁止 ad-hoc 字符串事件类型；订阅允许 '*' 通配符。非 main/typing 语境。
+    存量 5 个自测/演示类型（event_bus __main__ 批处理自测 + meta_monitor 自测）
+    冻结允许（EVENT_ADHOC_ALLOW），新增 ad-hoc 类型即红。基线 0（阻断）。
+    """
+
+    _EVENT_TYPE_VALUES: frozenset[str] = frozenset({
+        "market.tick", "market.bar", "market.order_book",
+        "strategy.signal", "strategy.signal_generated",
+        "order.submit", "order.filled", "order.partial_filled",
+        "order.cancelled", "order.rejected", "order.failed",
+        "fill.report_error", "emergency.liquidation",
+        "position.update", "position.open", "position.close",
+        "risk.alert", "risk.violation", "risk.limit_hit",
+        "risk.paused", "risk.resumed",
+        "system.start", "system.stop", "system.error", "data.loaded",
+        "backtest.complete",
+        "data_quality.dirty", "data_quality.pipeline_complete",
+        "data_quality.alert", "data_quality.critical",
+    })
+
+    # 存量自测/演示 ad-hoc 事件类型（__main__ 自测块内，非业务）：冻结允许，待清理只能缩
+    _EVENT_ADHOC_ALLOW: frozenset[str] = frozenset({
+        "TEST_EVT", "B_EVT", "POOL_EVT", "CMP", "META_FILL",
+    })
+
+    def test_no_ad_hoc_event_type(self):
+        bad = []
+        for path in _all_py_files():
+            tree = _parse(str(path))
+            if tree is None:
+                continue
+            rel = _rel(path)
+            main_ranges = sorted(
+                (n.lineno, n.end_lineno or n.lineno)
+                for n in ast.walk(tree) if _is_main_guard(n)
+            )
+            typing_ranges = sorted(
+                (n.lineno, n.end_lineno or n.lineno)
+                for n in ast.walk(tree)
+                if isinstance(n, ast.If) and isinstance(n.test, ast.Name)
+                and n.test.id == "TYPE_CHECKING"
+            )
+            def in_demo(ln):
+                return any(s <= ln <= e for s, e in main_ranges) \
+                    or any(s <= ln <= e for s, e in typing_ranges)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                fn = node.func
+                literal = None
+                if isinstance(fn, ast.Attribute) and isinstance(fn.value, ast.Name):
+                    # emit("x") / subscribe("x") / unsubscribe_all("x")
+                    if fn.attr in ("emit", "subscribe", "unsubscribe_all") and node.args:
+                        a = node.args[0]
+                        if isinstance(a, ast.Constant) and isinstance(a.value, str):
+                            literal = a.value
+                    elif fn.attr == "publish_chain" and node.args:
+                        inner = node.args[0]
+                        if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name) \
+                           and inner.func.id == "Event" and inner.args:
+                            a = inner.args[0]
+                            if isinstance(a, ast.Constant) and isinstance(a.value, str):
+                                literal = a.value
+                elif isinstance(fn, ast.Name) and fn.id == "Event" and node.args:
+                    a = node.args[0]
+                    if isinstance(a, ast.Constant) and isinstance(a.value, str):
+                        literal = a.value
+                if literal is not None and not in_demo(node.lineno) \
+                   and literal != "*" and literal not in self._EVENT_TYPE_VALUES \
+                   and literal not in self._EVENT_ADHOC_ALLOW:
+                    bad.append(f"{rel}:{node.lineno} {literal!r}")
+        assert not bad, "ad-hoc 字符串事件类型（须用 EventType 契约）：\n" + "\n".join(bad)
+
+
+class TestR17EventContractCompleteness:
+    """R-17 契约完备性（只报告、不阻断）：未被消费的 EventType 成员数。
+
+    驱动指标：每个 EventType 成员应被某个模块发布或订阅；无人消费 = 死契约，
+    提示后续接线或清理。不作为 CI 阻断。
+    """
+
+    def test_report_unused_event_types(self):
+        eb = MYQUANT / "core" / "event_bus.py"
+        tree = _parse(str(eb))
+        unused = []
+        if tree is not None:
+            in_enum = False
+            members: set[str] = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ClassDef) and node.name == "EventType":
+                    for st in node.body:
+                        if isinstance(st, ast.Assign):
+                            for t in st.targets:
+                                if isinstance(t, ast.Name) and isinstance(st.value, ast.Constant):
+                                    members.add(t.id)
+            used: set[str] = set()
+            for path in _all_py_files():
+                t2 = _parse(str(path))
+                if t2 is None:
+                    continue
+                for node in ast.walk(t2):
+                    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) \
+                       and node.value.id == "EventType" and isinstance(node.attr, str):
+                        used.add(node.attr)
+            unused = sorted(members - used)
+        print(f"\nR-17 未被消费的 EventType 成员（{len(unused)}）: {unused}")
+
+
+class TestR18ScriptThinEntry:
+    """R-18 脚本自举（G3 新增，回写#267）：scripts/ 薄入口纪律。
+
+    scripts/ 禁止业务逻辑（代码变更治理规则 §1.3）；业务类定义必须归 myquant。
+    存量 8 个类定义冻结允许（SCRIPT_CLASS_ALLOW，4 文件演示/验收策略，待清理）；
+    新增脚本类定义即红（只减不增）。
+    """
+
+    def test_no_new_script_class(self):
+        bad = []
+        for p in sorted((PROJECT_ROOT / "scripts").rglob("*.py")):
+            if "__pycache__" in p.parts:
+                continue
+            tree = _parse(str(p))
+            if tree is None:
+                continue
+            rel = p.relative_to(PROJECT_ROOT).as_posix()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ClassDef):
+                    if (rel, node.name) not in SCRIPT_CLASS_ALLOW:
+                        bad.append(f"{rel}:{node.lineno} class {node.name}")
+        assert not bad, (
+            "scripts/ 新增业务类定义（薄入口纪律，须归 myquant）：\n" + "\n".join(bad)
+            + "\n（存量 8 个已冻结于 SCRIPT_CLASS_ALLOW，待清理只能缩）"
+        )
+
+
+class TestR08ConfigReverseLookup:
+    """R-08 配置反查（G3 新增，回写#267）：登记的关键配置键必须被消费。
+
+    配置真源反查：settings.yaml monitoring 段的关键键（CONFIG_KEY_REQUIRED）每段
+    必须被 myquant 读取（get_monitoring_config().get("...")）。死配置键
+    （登记但代码不再消费）即红；只增不删。
+    """
+
+    def test_no_dead_config_key(self):
+        all_src = "\n".join(_read_text(str(p)) for p in _all_py_files())
+        dead = []
+        for key in sorted(CONFIG_KEY_REQUIRED):
+            segments = key.split(".")[1:]  # 去掉 monitoring 前缀
+            missing = [s for s in segments
+                       if not re.search(r'\.get\("' + re.escape(s) + r'"', all_src)]
+            if missing:
+                dead.append(f"{key}（未消费段: {missing}）")
+        assert not dead, "死配置键（登记但代码未读取，须接线或移除登记）：\n" + "\n".join(dead)
 
 
 class TestR19ZeroReference:
