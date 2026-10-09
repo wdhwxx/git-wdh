@@ -329,6 +329,12 @@ Pythonwdhmm/
 │   │   └── 鲲鹏量化交易系统_50项验收汇总报告_20261004.md  # ✨【回写#184】T-01~50 最终验收：49/50 闭环 + 全量回归 2342 passed/2 skipped + 21 项回归修复记录（提交 6acc9e3）+ 收尾待办
 │   │   └── 鲲鹏量化交易系统_T10_T30律师确认单_20261004.md # ✨【回写#185】T-10 报备六字段口径 + T-30 职责分离适用性 决策材料（方案A/B/C 勾选式，律师回复后落地并闭环）
 
+│   │   ├── probes/                # ✨【回写#268】G3 常态门禁基线核验探针（4 文件，2026-10-09 入库）：R-16 装配器集中（g3_probe/g3_probe2/g3_probe3）、R-17 事件契约（g3_probe2）、R-18 脚本自举（g3_probe/g3_probe2）、R-08 配置反查（g3_probe4）；各探针实测结果即 test_architecture.py v4.9 冻结基线的事实来源（可复现核验门禁基线）
+│   │   │   ├── g3_probe.py        # R-16 live 层跨层裸实例化 + R-17 字符串事件类型 vs EventType + R-18 scripts 类定义 + R-08 config 顶层键
+│   │   │   ├── g3_probe2.py       # R-16 登记组件裸实例化（非工厂模块）+ R-17 契约完备性（未消费成员/订阅字符串）
+│   │   │   ├── g3_probe3.py       # R-16 泛化：L0-L4 层直接实例化 monitoring/acceptance 类（基线 0）
+│   │   │   └── g3_probe4.py       # R-08 配置反查：settings.yaml monitoring 键消费集合（17 键已消费基线）
+
 │   ├── mockups/                      # ✨【回写】GUI设计稿目录（5文件）：数据下载对话框设计稿与渲染图、用户面板参考图、预览页、看板生成板面预览（2026-09-13并入）；对应gui/data_download_dialog.py/backtest_config_dialog.py等已实现对话框，设计存档
 
 │   ├── 监控档案/                # ✨【回写#187】监控模块施工落点（源自《量化系统监控模块施工总清单_V1.2.md》）：P0-1 链路盘点清单 / P0-2 SLO阈值锁定 / P0-3 告警分级 / P0-4 Runbook / P0-5 指标规范 / P0-7 安全合规 / P0-8 可测量性与故障注入 等施工文档
@@ -4091,3 +4097,8 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    e. **门禁 docstring 升版 v4.9 + 运行状态更新**（26→30 passed/1 skipped）；新增 4 个门禁测试函数（R-16 强化改写 + R-17 契约 + R-17 完备性报告 + R-18 + R-08）。
    f. **验证结果**：py_compile test_architecture.py 通过；门禁 30 passed/1 skipped；tests/unit 全量 3627 passed/4 skipped（+4 新门禁函数，无回归）；全量 pytest 3647 passed/4 skipped（较 #266 后 3643 增 4 新门禁，无回归）。
    g. **纪律遵守**：零蓝图外新增文件（全部为既有 test_architecture.py 修改）；纯门禁实现未触碰任何 myquant 业务代码；门禁代码遵守 py文件代码规则（全量类型注解 + Google docstring + 防御式）；治理方案 v5.14→v5.15、施工清单 G3 四条勾选完成；任务后 git 提交（commit message 引用 #267）。
+## #268 · 2026-10-09 · G3 探针脚本入库（docs/系统性审核/probes/，4 文件）
+   事实来源：本次入库（用户指令"入库"）；把 agent 工作区的 4 个 G3 门禁基线核验探针（g3_probe/g3_probe2/g3_probe3/g3_probe4）纳入蓝图目录树并入库，作为 test_architecture.py v4.9 各门禁冻结基线（R-16=0、R-17 业务 0+未消费 5、R-18 存量 8 类、R-08 17 键已消费）的可复现核验来源。
+   a. **落位**：docs/系统性审核/probes/（审计核验工具，随治理文档存档）；蓝图目录树 系统性审核/ 段登记 probes/ 子树（4 文件各带职责注释）。
+   b. **文件内容**：g3_probe.py（R-16 live 跨层裸实例化 + R-17 字符串事件类型 vs EventType + R-18 scripts 类定义 + R-08 config 顶层键）；g3_probe2.py（R-16 登记组件裸实例化 + R-17 契约完备性：未消费成员/订阅字符串）；g3_probe3.py（R-16 泛化：L0-L4 直接实例化 monitoring/acceptance 类，基线 0）；g3_probe4.py（R-08 配置反查：monitoring 键消费集合，17 键已消费基线）。
+   c. **纪律遵守**：探针为独立核验工具（含本机绝对路径 ROOT，一次性诊断用，非运行时依赖，不参与测试/构建）；本次仅新增 probes/ 4 文件 + 蓝图目录树登记 + 回写记录，零 myquant/零门禁/零业务改动；git 提交（commit message 引用 #268）。
