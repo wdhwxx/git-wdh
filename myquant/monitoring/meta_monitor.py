@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from myquant.core.logger import get_logger
+from myquant.core.registry import register_component
 
 logger = get_logger("monitoring.meta")
 
@@ -1193,6 +1194,48 @@ def _run_self_test() -> int:
     print(f"自测结果: 全部 {passed} 项通过 ✅")
     print("=" * 60)
     return 0
+
+
+# ═══════════════════════════════════════════════
+#  G2-5 阶段二：装配工厂（注册表化）
+#  live/scheduler 经 core.registry.get_component("meta_monitor") 取用并调用，
+#  消除 scheduler → monitoring.meta_monitor 反向依赖（EX-13B）。
+#  模块导入即注册；装配责任上移（run_实盘入口.py setup_monitoring_linkage 触发）。
+# ═══════════════════════════════════════════════
+
+def get_meta_monitor(
+    collector: Any = None,
+    metrics_history: Any = None,
+    event_bus: Any = None,
+    **kwargs: Any,
+) -> MetaMonitor:
+    """元监控装配工厂（BASE-5）。
+
+    Parameters
+    ----------
+    collector : Any | None
+        指标采集器实例（None 时由 MetaMonitor 内部延迟取全局采集器）。
+    metrics_history : Any | None
+        指标时序存储实例（巡检复用同一趋势回放源）。
+    event_bus : Any | None
+        全局事件总线实例。
+    **kwargs : Any
+        透传 MetaMonitor 构造参数（cooldown_seconds/stale_threshold_seconds 等）。
+
+    Returns
+    -------
+    MetaMonitor : 元监控实例（监控自身可观测性）。
+    """
+    return MetaMonitor(
+        collector=collector,
+        metrics_history=metrics_history,
+        event_bus=event_bus,
+        **kwargs,
+    )
+
+
+#: G2-5 阶段二：装配工厂注册（模块导入即注册；scheduler 经 get_component 取用）
+register_component("meta_monitor", get_meta_monitor)
 
 
 if __name__ == "__main__":

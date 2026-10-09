@@ -45,6 +45,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 from myquant.core.constants import SeverityLevel
+from myquant.core.registry import register_component
 from myquant.core.settings import get_monitoring_config
 
 logger = logging.getLogger(__name__)
@@ -2148,6 +2149,53 @@ def load_action_engine_config() -> Dict[str, Any]:
            approval_timeout_seconds/interval_seconds/auto_register_rules/rules）。
     """
     return get_monitoring_config().get("action_engine", {}) or {}
+
+
+# ═══════════════════════════════════════════════════════════════
+#  G2-5 阶段二：装配工厂（注册表化）
+#  live/scheduler 经 core.registry 取用并调用，消除 scheduler →
+#  monitoring.action_engine 反向依赖（EX-13I）。
+#  模块导入即注册；装配责任上移（run_实盘入口.py setup_monitoring_linkage 触发）。
+# ═══════════════════════════════════════════════════════════════
+
+def build_action_engine(
+    mode: str = "shadow",
+    cooldown_seconds: float = DEFAULT_RULE_COOLDOWN_SECONDS,
+    approval_timeout_seconds: float = DEFAULT_APPROVAL_TIMEOUT_SECONDS,
+    audit_log: Any = None,
+    **kwargs: Any,
+) -> ActionEngine:
+    """动作引擎装配工厂（D-1 自动化响应编排）。
+
+    Parameters
+    ----------
+    mode : str
+        全局默认安全模式（shadow/confirm/auto）。
+    cooldown_seconds : float
+        同 action_key 冷却窗口（秒，>0）。
+    approval_timeout_seconds : float
+        人工确认超时（秒，>0）。
+    audit_log : AuditLogStore | None
+        审计存储（BASE-7；None 时 ActionEngine 惰性降级）。
+    **kwargs : Any
+        透传 ActionEngine 构造参数（alert_manager/clock/max_history 等）。
+
+    Returns
+    -------
+    ActionEngine : 动作引擎实例。
+    """
+    return ActionEngine(
+        mode=mode,
+        cooldown_seconds=cooldown_seconds,
+        approval_timeout_seconds=approval_timeout_seconds,
+        audit_log=audit_log,
+        **kwargs,
+    )
+
+
+#: G2-5 阶段二：装配工厂注册（模块导入即注册；scheduler 经 get_component 取用）
+register_component("action_engine", build_action_engine)
+register_component("action_engine_config", load_action_engine_config)
 
 
 # ═══════════════════════════════════════════════════════════════

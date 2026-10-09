@@ -1,6 +1,15 @@
 # tests/unit/test_architecture.py
 """架构分层门禁 v4.6（G1 例外收敛三批：EX-09A/B 消除，回写#259）。
 
+v4.7（G2-5 阶段二，回写#265）：scheduler 对 monitoring 类实例化装配注册表化——
+  L-m  EX-13B/D/H/I 消除：meta_monitor/watchdog/weekly_review/action_engine 四模块
+       导入即 register_component 注册装配工厂（core.registry），live/scheduler 仅
+       依赖 L0（core.registry/core.constants）取用并调用；watchdog 3 个装配常量
+       （STALENESS_PROBE_INTERVAL_SECONDS/BROKER_PROBE_INTERVAL_SECONDS/
+       RUNBOOK_BROKER_DISCONNECT）下沉 core/constants（watchdog re-export 兼容）；
+       装配责任上移 run_实盘入口.py setup_monitoring_linkage（先于 attach_engine）。
+       违规 13→1（仅剩永久 EX-01A）、例外表 5→1 条；VIOLATION_BASELINE 13→1。
+
 本版在 v4.2 基础上的修正（新增 L-a~L-c）：
   L-a  新增 R-23 入口白名单冻结：scripts/（41 个，含 故障演练/灾备演练 子目录）与
        根目录（12 个 .py + 一键部署.bat）入口全量登记；新增入口未登记即红。
@@ -101,14 +110,7 @@ _EXC = [
      "永久", "2099-12-31", "runtime", "ORM 必引领域模型"),
     # EX-10A/10B/13A/F/G/J 已随 #263 下沉消除（audit_log/metrics_history/health_check/alert_store 迁 core/，L3/L4→L0 合法）
     # EX-13C/E/K 已随 #264 注册表化消除（scheduler 经 core.registry 取 alert_manager/metrics_collector/account_reconciler 工厂，L4→L0 合法）
-    ("EX-13B", "myquant/live/scheduler.py", "myquant.monitoring.meta_monitor",
-     "永久", "2099-12-31", "runtime", "装配器"),
-    ("EX-13D", "myquant/live/scheduler.py", "myquant.monitoring.watchdog",
-     "永久", "2099-12-31", "runtime", "装配器"),
-    ("EX-13H", "myquant/live/scheduler.py", "myquant.monitoring.weekly_review",
-     "永久", "2099-12-31", "runtime", "装配器"),
-    ("EX-13I", "myquant/live/scheduler.py", "myquant.monitoring.action_engine",
-     "永久", "2099-12-31", "runtime", "装配器"),
+    # EX-13B/D/H/I 已随 #265 阶段二消除（meta_monitor/watchdog/weekly_review/action_engine 类实例化装配注册表化，L4→L0 合法）
 ]
 EXCEPTIONS: dict[tuple[str, str], dict] = {
     (f, t): {"id": i, "task": tk, "expires": date.fromisoformat(e), "kind": k, "why": w}
@@ -119,7 +121,7 @@ EXCEPTIONS: dict[tuple[str, str], dict] = {
 # 回写#255：P0-1（performance_config→ma_strategy）与 P0-2（backtest.engine→live.engine）已消除，集合清空
 P0_MUST_FIX: set[tuple[str, str]] = set()
 
-VIOLATION_BASELINE = 13          # K-a + K-f：语义矩阵 α，排除 TYPE_CHECKING 与 __main__；#255 37→35，#257 35→34，#258 34→27，#259 前段 27→24（EX-12-4 + EX-13K+1），EX-09A/B 后 24→22；#263 下沉消除 EX-10A/10B/13A/F/G/J 后 22→16；#264 注册表化消除 EX-13C/E/K 后 16→13
+VIOLATION_BASELINE = 1           # K-a + K-f：语义矩阵 α，排除 TYPE_CHECKING 与 __main__；#255 37→35，#257 35→34，#258 34→27，#259 前段 27→24（EX-12-4 + EX-13K+1），EX-09A/B 后 24→22；#263 下沉消除 EX-10A/10B/13A/F/G/J 后 22→16；#264 注册表化消除 EX-13C/E/K 后 16→13；#265 阶段二消除 EX-13B/D/H/I 后 13→1（仅剩永久 EX-01A）
 TOP_LEVEL_CYCLE_BASELINE = 0     # K-b：顶层真环（剔除包装惯用环与 __main__ 后）
 LAZY_CYCLE_BASELINE = 0          # K-f：全量真环，只减不增（#261 环1 event_bus↔memory_pool 随事件池注入化
                                  #      打断——全系统真环清零；环2 随 G2-1，#260；环3 随 EX-12A，#259）
@@ -190,8 +192,8 @@ ENTRY_ALLOWLIST: set[str] = {
 # OVERSIZE 白名单 14 项行数基线（2026-10-08 实测冻结）：白名单内文件行数只减不增。
 OVERSIZE_LINE_BASELINE: dict[str, int] = {
     "monitoring/alerting.py": 3681, "live/engine.py": 2858, "core/event_bus.py": 2379,  # engine 2851→2858：用户提交 1499c09 引入 +7 行（回写#258）；alerting 3675→3681（#264 工厂注册代码）；event_bus 2383→2379（#261 事件池注入化）
-    "live/scheduler.py": 2382, "monitoring/metrics_collector.py": 2273,  # 2363→2382（#264 注册表化装配代码）；metrics 2268→2273（#264 工厂注册代码）
-    "monitoring/action_engine.py": 2259, "data_access/manager.py": 2170,
+    "live/scheduler.py": 2409, "monitoring/metrics_collector.py": 2273,  # 2382→2409（#265 阶段二 7 处装配点改经注册表，代码行增长）；metrics 2268→2273（#264 工厂注册代码）
+    "monitoring/action_engine.py": 2307, "data_access/manager.py": 2170,  # 2259→2307（#265 阶段二 build_action_engine+config 注册代码）
     "live/brokers/qmt_broker.py": 2170, "live/data_feed.py": 2147,
     "gui/backtest_config_dialog.py": 1861, "risk/risk_manager.py": 1901,
     "web/dashboard.py": 1760, "ml/training_pipeline.py": 1651,

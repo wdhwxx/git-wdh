@@ -1761,71 +1761,90 @@ def attach_engine(
             logger.warning(f"指标时序存储初始化失败（巡检不落库，仅内存回放）: {e}")
 
         # BASE-5：元监控随巡检装配（监控自身可观测性；失败降级为不采集，不阻断）
+        # G2-5 阶段二（EX-13B）：MetaMonitor 类实例化装配经 core.registry 工厂取用
         try:
             from myquant.core.event_bus import get_event_bus
             from myquant.core.registry import get_component as _get_comp
-            from myquant.monitoring.meta_monitor import MetaMonitor
             _mc_factory = _get_comp("metrics_collector")
             _mc = _mc_factory() if _mc_factory is not None else None
-            meta = MetaMonitor(
-                collector=_mc,
-                metrics_history=patrol._metrics_history,  # 复用巡检时序库（同一趋势回放源）
-                event_bus=get_event_bus(),
-            )
-            patrol.attach_meta_monitor(meta)
+            _meta_factory = _get_comp("meta_monitor")
+            if _meta_factory is None:
+                logger.warning("元监控组件未注册（巡检不含元监控检查项）")
+            else:
+                meta = _meta_factory(
+                    collector=_mc,
+                    metrics_history=patrol._metrics_history,  # 复用巡检时序库（同一趋势回放源）
+                    event_bus=get_event_bus(),
+                )
+                patrol.attach_meta_monitor(meta)
         except Exception as e:  # noqa: BLE001
             logger.warning(f"元监控初始化失败（巡检不含元监控检查项）: {e}")
 
         # A-4（回写#208）：行情活性看门狗——受 monitoring.watchdog.enabled 装配开关控制；
         # enabled=false 时巡检不装配，但 StalenessDetector 类仍可独立实例化测试。
         # bar 到达（EVENT）即刷新时钟；秒级 timer(10s) 兜底检出断流；非交易时段自动豁免。
+        # G2-5 阶段二（EX-13D）：类实例化装配经 core.registry 工厂取用，常量读 core.constants。
         try:
+            from myquant.core.constants import STALENESS_PROBE_INTERVAL_SECONDS
+            from myquant.core.registry import get_component as _get_comp
             from myquant.core.settings import get_monitoring_config
             if get_monitoring_config().get("watchdog", {}).get("enabled", False):
                 from myquant.core.event_bus import get_event_bus
-                from myquant.monitoring.watchdog import StalenessDetector, STALENESS_PROBE_INTERVAL_SECONDS
-                st = StalenessDetector()
-                st.attach_event_bus(get_event_bus())
-                patrol.add_check("market_staleness", st.patrol_check)
-                scheduler.add_interval_task(
-                    st.evaluate, name="行情活性看门狗",
-                    interval_seconds=STALENESS_PROBE_INTERVAL_SECONDS,
-                )
-                logger.info("[attach] A-4 行情活性看门狗已装配")
+                _sd_factory = _get_comp("staleness_detector")
+                if _sd_factory is None:
+                    logger.warning("[attach] 行情活性看门狗组件未注册（跳过 A-4）")
+                else:
+                    st = _sd_factory()
+                    st.attach_event_bus(get_event_bus())
+                    patrol.add_check("market_staleness", st.patrol_check)
+                    scheduler.add_interval_task(
+                        st.evaluate, name="行情活性看门狗",
+                        interval_seconds=STALENESS_PROBE_INTERVAL_SECONDS,
+                    )
+                    logger.info("[attach] A-4 行情活性看门狗已装配")
         except Exception as e:  # noqa: BLE001
             logger.warning(f"[attach] A-4 行情活性看门狗装配失败（不阻断巡检）: {e}")
 
         # A-5（回写#209）：引擎心跳看门狗——受同一 enabled 开关控制；
         # 周期 probe() 调 engine.get_status()，连续 N 次无响应→僵死 P0/ERROR。
         # 阈值全部读 monitoring.slo.engine_heartbeat（N×间隔=50s<60s，R-02/R-04）。
+        # G2-5 阶段二（EX-13D）：类实例化装配经 core.registry 工厂取用。
         try:
+            from myquant.core.registry import get_component as _get_comp
             from myquant.core.settings import get_monitoring_config
             if get_monitoring_config().get("watchdog", {}).get("enabled", False):
-                from myquant.monitoring.watchdog import EngineHeartbeatWatcher
-                hb = EngineHeartbeatWatcher(engine)
-                scheduler.add_interval_task(
-                    hb.probe, name="引擎心跳看门狗",
-                    interval_seconds=hb.probe_interval_seconds,
-                )
-                logger.info("[attach] A-5 引擎心跳看门狗已装配")
+                _hb_factory = _get_comp("engine_heartbeat_watcher")
+                if _hb_factory is None:
+                    logger.warning("[attach] 引擎心跳看门狗组件未注册（跳过 A-5）")
+                else:
+                    hb = _hb_factory(engine)
+                    scheduler.add_interval_task(
+                        hb.probe, name="引擎心跳看门狗",
+                        interval_seconds=hb.probe_interval_seconds,
+                    )
+                    logger.info("[attach] A-5 引擎心跳看门狗已装配")
         except Exception as e:  # noqa: BLE001
             logger.warning(f"[attach] A-5 引擎心跳看门狗装配失败（不阻断巡检）: {e}")
 
         # A-6（回写#210）：券商连接事件路径——BaseBroker 无连接推送回调，
         # 故以快速轮询(5s)+健康→不健康转换点实现事件路径：断连即 P0/CRITICAL。
         # 周期巡检 _check_broker 仅兜底（见 _patrol_job 内 broker 告警闭环）。
+        # G2-5 阶段二（EX-13D）：类实例化装配经 core.registry 工厂取用，常量读 core.constants。
         try:
+            from myquant.core.constants import BROKER_PROBE_INTERVAL_SECONDS
+            from myquant.core.registry import get_component as _get_comp
             from myquant.core.settings import get_monitoring_config
             if get_monitoring_config().get("watchdog", {}).get("enabled", False):
-                from myquant.monitoring.watchdog import (
-                    BrokerConnectionWatcher, BROKER_PROBE_INTERVAL_SECONDS,
-                )
-                bw = BrokerConnectionWatcher(broker)
-                scheduler.add_interval_task(
-                    bw.poll_once, name="券商连接看门狗",
-                    interval_seconds=BROKER_PROBE_INTERVAL_SECONDS,
-                )
-                logger.info("[attach] A-6 券商连接看门狗已装配")
+                _bw_factory = _get_comp("broker_connection_watcher")
+                if _bw_factory is None:
+                    logger.warning("[attach] 券商连接看门狗组件未注册（跳过 A-6）")
+                else:
+                    bw = _bw_factory(broker)
+                    scheduler.add_interval_task(
+                        bw.poll_once, name="券商连接看门狗",
+                        interval_seconds=BROKER_PROBE_INTERVAL_SECONDS,
+                    )
+                    logger.info("[attach] A-6 券商连接看门狗已装配")
         except Exception as e:  # noqa: BLE001
             logger.warning(f"[attach] A-6 券商连接看门狗装配失败（不阻断巡检）: {e}")
 
@@ -1852,9 +1871,9 @@ def attach_engine(
             # 健康→不健康转换点也走 AlertManager，发 P0/CRITICAL（category=broker
             # + details.runbook_id）。与事件路径共用去重键，窗口内不重复刷屏。
             try:
+                from myquant.core.constants import RUNBOOK_BROKER_DISCONNECT
                 from myquant.core.constants import SeverityLevel as _SL
                 from myquant.core.registry import get_component as _get_comp
-                from myquant.monitoring.watchdog import RUNBOOK_BROKER_DISCONNECT
                 _gam_factory = _get_comp("alert_manager")
                 broker_item = report.get("checks", {}).get("broker", {})
                 broker_status = broker_item.get("status", PATROL_HEALTHY)
@@ -2092,7 +2111,7 @@ def attach_engine(
         def _weekly_review_job(**kw) -> None:  # noqa: ARG001
             try:
                 from myquant.core.alert_store import AlertStore
-                from myquant.monitoring.weekly_review import WeeklyReviewReport
+                from myquant.core.registry import get_component as _get_comp
 
                 alert_store = AlertStore()
                 metrics_store: Any = None
@@ -2102,16 +2121,21 @@ def attach_engine(
                     metrics_store = MetricsHistoryStore()
                 except Exception as mexc:  # noqa: BLE001
                     logger.warning(f"[attach] 周复盘指标库不可用（容量趋势跳过）: {mexc}")
-                review = WeeklyReviewReport(alert_store, metrics_store=metrics_store)
-                report = review.generate()
-                path = review.save(
-                    report, output_dir=weekly_review_output_dir
-                )
-                logger.info(
-                    f"[attach] 每周告警复盘已生成: {path} "
-                    f"(TP={report['tp']} FP={report['fp']} FN={report['fn']} "
-                    f"达标={report['passed']})"
-                )
+                # G2-5 阶段二（EX-13H）：WeeklyReviewReport 装配经 core.registry 工厂取用
+                _wr_factory = _get_comp("weekly_review_report")
+                if _wr_factory is None:
+                    logger.warning("[attach] 周复盘报告组件未注册（跳过每周复盘）")
+                else:
+                    review = _wr_factory(alert_store, metrics_store=metrics_store)
+                    report = review.generate()
+                    path = review.save(
+                        report, output_dir=weekly_review_output_dir
+                    )
+                    logger.info(
+                        f"[attach] 每周告警复盘已生成: {path} "
+                        f"(TP={report['tp']} FP={report['fp']} FN={report['fn']} "
+                        f"达标={report['passed']})"
+                    )
             except Exception as exc:  # noqa: BLE001
                 logger.error(f"[attach] 每周告警复盘生成异常: {exc}")
 
@@ -2126,53 +2150,56 @@ def attach_engine(
         # shadow/confirm/auto 三阶段安全模型执行。装配默认关闭（自动化安全先行，需显式开启）。
         # 模式/冷却/审批超时/规则全部读 settings.yaml monitoring.action_engine（R-04 外置）；
         # 审计绑定 AuditLogStore（BASE-7，失败降级内存留痕不阻断）；初始化失败记 warning 不阻断装配。
+        # G2-5 阶段二（EX-13I）：ActionEngine/config 装配经 core.registry 工厂取用。
         try:
-            from myquant.monitoring.action_engine import (
-                ActionEngine,
-                load_action_engine_config,
-            )
-            ae_cfg = load_action_engine_config()
-            if ae_cfg.get("enabled", True):
-                audit_store = None
-                try:
-                    from myquant.core.audit_log import AuditLogStore
-                    audit_store = AuditLogStore()
-                except Exception as aexc:  # noqa: BLE001
-                    logger.warning(f"[attach] D-1 审计存储不可用（内存留痕）: {aexc}")
-                action_engine = ActionEngine(
-                    mode=str(ae_cfg.get("mode", "shadow")),
-                    cooldown_seconds=float(
-                        ae_cfg.get("cooldown_seconds", 300.0)
-                    ),
-                    approval_timeout_seconds=float(
-                        ae_cfg.get("approval_timeout_seconds", 3600.0)
-                    ),
-                    audit_log=audit_store,
-                )
-                if ae_cfg.get("auto_register_rules") and isinstance(
-                    ae_cfg.get("rules"), list
-                ):
-                    action_engine.load_rules(ae_cfg["rules"])
+            from myquant.core.registry import get_component as _get_comp
+            _cfg_factory = _get_comp("action_engine_config")
+            _ae_factory = _get_comp("action_engine")
+            if _cfg_factory is None or _ae_factory is None:
+                logger.warning("[attach] D-1 动作引擎组件未注册（自动化响应编排跳过）")
+            else:
+                ae_cfg = _cfg_factory()
+                if ae_cfg.get("enabled", True):
+                    audit_store = None
+                    try:
+                        from myquant.core.audit_log import AuditLogStore
+                        audit_store = AuditLogStore()
+                    except Exception as aexc:  # noqa: BLE001
+                        logger.warning(f"[attach] D-1 审计存储不可用（内存留痕）: {aexc}")
+                    action_engine = _ae_factory(
+                        mode=str(ae_cfg.get("mode", "shadow")),
+                        cooldown_seconds=float(
+                            ae_cfg.get("cooldown_seconds", 300.0)
+                        ),
+                        approval_timeout_seconds=float(
+                            ae_cfg.get("approval_timeout_seconds", 3600.0)
+                        ),
+                        audit_log=audit_store,
+                    )
+                    if ae_cfg.get("auto_register_rules") and isinstance(
+                        ae_cfg.get("rules"), list
+                    ):
+                        action_engine.load_rules(ae_cfg["rules"])
 
-                def _action_engine_job(**kw) -> None:  # noqa: ARG001
-                    summary = action_engine.run_cycle()
-                    if summary["executed"] or summary["blocked"] or summary["proposed"]:
-                        logger.info(f"[attach] D-1 动作编排周期: {summary}")
+                    def _action_engine_job(**kw) -> None:  # noqa: ARG001
+                        summary = action_engine.run_cycle()
+                        if summary["executed"] or summary["blocked"] or summary["proposed"]:
+                            logger.info(f"[attach] D-1 动作编排周期: {summary}")
 
-                interval = (
-                    float(action_engine_interval)
-                    if action_engine_interval is not None
-                    else float(ae_cfg.get("interval_seconds", 30.0))
-                )
-                task_ids["action_engine"] = scheduler.add_interval_task(
-                    _action_engine_job,
-                    name="自动化响应编排",
-                    interval_seconds=interval,
-                )
-                logger.info(
-                    f"[attach] D-1 自动化响应编排已装配: mode={action_engine.mode}, "
-                    f"rules={len(action_engine.get_rules())}"
-                )
+                    interval = (
+                        float(action_engine_interval)
+                        if action_engine_interval is not None
+                        else float(ae_cfg.get("interval_seconds", 30.0))
+                    )
+                    task_ids["action_engine"] = scheduler.add_interval_task(
+                        _action_engine_job,
+                        name="自动化响应编排",
+                        interval_seconds=interval,
+                    )
+                    logger.info(
+                        f"[attach] D-1 自动化响应编排已装配: mode={action_engine.mode}, "
+                        f"rules={len(action_engine.get_rules())}"
+                    )
         except Exception as e:  # noqa: BLE001
             logger.warning(f"[attach] D-1 自动化响应编排装配失败（不阻断装配）: {e}")
 

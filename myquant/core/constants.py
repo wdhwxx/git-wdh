@@ -542,6 +542,13 @@ TRADE_EXCEPTION_ALERT_LEVEL_MAP: Dict[str, SeverityLevel] = {
     "emergency.liquidation": SeverityLevel.CRITICAL,  # P0：紧急强平
 }
 
+#: watchdog（A-4/A-5/A-6）默认评估/探测间隔（秒）与断连 Runbook 标识。
+#: G2-5 阶段二下沉 core：live/scheduler 装配看门狗时经 L0 取用，消除
+#: scheduler → monitoring.watchdog 反向依赖（EX-13D）。watchdog.py re-export 兼容旧引用。
+STALENESS_PROBE_INTERVAL_SECONDS: float = 10.0   # A-4 行情活性秒级兜底评估间隔
+BROKER_PROBE_INTERVAL_SECONDS: float = 5.0       # A-6 券商连接快速探测默认间隔
+RUNBOOK_BROKER_DISCONNECT: str = "RB-BROKER-DISCONNECT-001"  # A-6 券商断连 Runbook 标识
+
 
 # ═══════════════════════════════════════════════
 #  数据清洗映射表 (阶段9新增)

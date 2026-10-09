@@ -32,25 +32,27 @@ import time
 from collections import deque
 from typing import Any, Callable, Deque, Dict, List, Optional
 
-from myquant.core.constants import SeverityLevel
+from myquant.core.constants import (
+    BROKER_PROBE_INTERVAL_SECONDS,  # G2-5 阶段二下沉 core，re-export 兼容旧引用
+    RUNBOOK_BROKER_DISCONNECT,      # G2-5 阶段二下沉 core，re-export 兼容旧引用
+    STALENESS_PROBE_INTERVAL_SECONDS,  # G2-5 阶段二下沉 core，re-export 兼容旧引用
+    SeverityLevel,
+)
 from myquant.core.logger import get_logger
+from myquant.core.registry import register_component
 from myquant.core.settings import get_monitoring_config
 
 logger = get_logger("monitoring.watchdog")
 
 # ─────────────────────────────────────────────
 # 常量（非业务阈值；业务阈值一律来自 settings.yaml R-04）
+# G2-5 阶段二：A-4/A-6 探测间隔与断连 Runbook 已下沉 myquant/core/constants.py，
+# 本模块 re-export（见顶部导入），供旧引用兼容；此处仅保留本模块私有常量。
 # ─────────────────────────────────────────────
 #: bar 到达间隔 P99 统计保留的样本窗口（最近 N 根 bar 的间隔）
 P99_SAMPLE_WINDOW: int = 200
-#: A-4 行情活性秒级兜底默认评估间隔（秒；远小于 patrol 60s）
-STALENESS_PROBE_INTERVAL_SECONDS: float = 10.0
 #: A-5 引擎 get_status() 单次探针超时上限（秒；超过视为无响应/僵死）
 ENGINE_PROBE_TIMEOUT_SECONDS: float = 3.0
-#: A-6 券商连接快速探测默认间隔（秒；事件路径须远小于 60s 巡检周期）
-BROKER_PROBE_INTERVAL_SECONDS: float = 5.0
-#: A-6 券商断连 Runbook 标识（告警携带 category=broker + runbook_id 触发 Runbook）
-RUNBOOK_BROKER_DISCONNECT: str = "RB-BROKER-DISCONNECT-001"
 
 
 # ═══════════════════════════════════════════════
@@ -803,6 +805,69 @@ def _run_self_test() -> int:
     print("全部通过 ✅")
     print("=" * 60)
     return 0
+
+
+# ═══════════════════════════════════════════════
+#  G2-5 阶段二：装配工厂（注册表化）
+#  live/scheduler 经 core.registry.get_component 取用并调用，消除
+#  scheduler → monitoring.watchdog 反向依赖（EX-13D）。
+#  模块导入即注册；装配责任上移（run_实盘入口.py setup_monitoring_linkage 触发）。
+#  工厂函数签名与类构造一致，支持注入可测参数（R-04 阈值由类内读 settings.yaml）。
+# ═══════════════════════════════════════════════
+
+def get_staleness_detector(**kwargs: Any) -> StalenessDetector:
+    """行情活性看门狗装配工厂（A-4）。
+
+    Parameters
+    ----------
+    **kwargs : Any
+        透传 StalenessDetector 构造参数（bar_timeout_seconds 等，None 读 R-04 真源）。
+
+    Returns
+    -------
+    StalenessDetector : 行情活性检测器实例。
+    """
+    return StalenessDetector(**kwargs)
+
+
+def get_engine_heartbeat_watcher(engine: Any, **kwargs: Any) -> EngineHeartbeatWatcher:
+    """引擎心跳看门狗装配工厂（A-5）。
+
+    Parameters
+    ----------
+    engine : Any
+        实盘引擎（须有 get_status()）。
+    **kwargs : Any
+        透传 EngineHeartbeatWatcher 构造参数（probe_interval_seconds 等）。
+
+    Returns
+    -------
+    EngineHeartbeatWatcher : 引擎心跳检测器实例。
+    """
+    return EngineHeartbeatWatcher(engine, **kwargs)
+
+
+def get_broker_connection_watcher(broker: Any, **kwargs: Any) -> BrokerConnectionWatcher:
+    """券商连接看门狗装配工厂（A-6）。
+
+    Parameters
+    ----------
+    broker : Any
+        券商对象（须有 is_connected 属性/方法）。
+    **kwargs : Any
+        透传 BrokerConnectionWatcher 构造参数（alert_manager/runbook_id 等）。
+
+    Returns
+    -------
+    BrokerConnectionWatcher : 券商连接状态监控实例。
+    """
+    return BrokerConnectionWatcher(broker, **kwargs)
+
+
+#: G2-5 阶段二：装配工厂注册（模块导入即注册；scheduler 经 get_component 取用）
+register_component("staleness_detector", get_staleness_detector)
+register_component("engine_heartbeat_watcher", get_engine_heartbeat_watcher)
+register_component("broker_connection_watcher", get_broker_connection_watcher)
 
 
 if __name__ == "__main__":

@@ -367,6 +367,21 @@ def setup_monitoring_linkage() -> bool:
         from myquant.monitoring.alerting import get_alert_manager
         from myquant.monitoring.metrics_collector import get_metrics_collector
 
+        # G2-5 阶段二（装配责任上移）：导入监控模块以触发 core.registry 装配工厂注册
+        # （meta_monitor/watchdog/weekly_review/action_engine 导入即 register_component；
+        #  attach_engine 装配经 get_component 取用，须先于其执行完成注册）。
+        from myquant.monitoring.action_engine import (  # noqa: F401
+            build_action_engine,
+            load_action_engine_config,
+        )
+        from myquant.monitoring.meta_monitor import get_meta_monitor  # noqa: F401
+        from myquant.monitoring.watchdog import (  # noqa: F401
+            get_broker_connection_watcher,
+            get_engine_heartbeat_watcher,
+            get_staleness_detector,
+        )
+        from myquant.monitoring.weekly_review import get_weekly_review_report  # noqa: F401
+
         bus = get_event_bus()
         alert_mgr = get_alert_manager()
         alert_mgr.subscribe_to_event_bus(bus)

@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from myquant.core.alert_store import AlertStore
+from myquant.core.registry import register_component
 from myquant.monitoring.alerting import weekly_alert_stats
 
 logger = logging.getLogger("monitoring.weekly_review")
@@ -563,6 +564,44 @@ def _run_self_test() -> int:
             failed += 1
     print(f"weekly_review __main__ 自测: {len(checks) - failed}/{len(checks)} 项全绿")
     return 1 if failed else 0
+
+
+# ═══════════════════════════════════════════════
+#  G2-5 阶段二：装配工厂（注册表化）
+#  live/scheduler 经 core.registry.get_component("weekly_review_report") 取用并调用，
+#  消除 scheduler → monitoring.weekly_review 反向依赖（EX-13H）。
+#  模块导入即注册；装配责任上移（run_实盘入口.py setup_monitoring_linkage 触发）。
+# ═══════════════════════════════════════════════
+
+def get_weekly_review_report(
+    alert_store: Any,
+    metrics_store: Any = None,
+    **kwargs: Any,
+) -> WeeklyReviewReport:
+    """每周告警复盘报告生成器装配工厂（§7 每周动作）。
+
+    Parameters
+    ----------
+    alert_store : Any
+        告警持久化存储（须具备 load_history(limit) 接口；None 抛 ValueError）。
+    metrics_store : Any | None
+        指标时序存储（可选；None 时容量趋势输出 no_data，诚实标注）。
+    **kwargs : Any
+        透传 WeeklyReviewReport 构造参数（clock 等）。
+
+    Returns
+    -------
+    WeeklyReviewReport : 周复盘报告生成器实例。
+
+    Raises
+    ------
+    ValueError : alert_store 为 None 时抛出。
+    """
+    return WeeklyReviewReport(alert_store, metrics_store=metrics_store, **kwargs)
+
+
+#: G2-5 阶段二：装配工厂注册（模块导入即注册；scheduler 经 get_component 取用）
+register_component("weekly_review_report", get_weekly_review_report)
 
 
 if __name__ == "__main__":
