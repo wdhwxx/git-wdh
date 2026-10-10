@@ -387,9 +387,13 @@ class LiveEngine(BaseEngine):
         self._trade_mode = str(trade_mode).lower()
 
         # 2) RiskGuardian：健康监控 + 熔断决策（依赖RiskManager）
+        # 0.4：传 trade_mode——LIVE 未装配准入守卫时 force_close fail-closed 拒绝
         self._guardian = None
         if enable_guardian and self._risk_manager is not None:
-            self._guardian = guardian if guardian is not None else RiskGuardian(self._risk_manager)
+            self._guardian = (
+                guardian if guardian is not None
+                else RiskGuardian(self._risk_manager, trade_mode=self._trade_mode)
+            )
 
         # 2.5) LookaheadGuard：防未来函数校验（任务42）
         #      信号生成 record_signal / 成交回报 record_trade / 停止时 assert_pass；

@@ -311,11 +311,13 @@ class OperationGuard:
         self._reviewer = ""
         self._audit_dir = "logs/audit"
         self._high_risk_scopes: Set[str] = set(HIGH_RISK_SCOPES)
+        # 0.4/F-1：配置加载失败留痕（run_实盘入口.py LIVE 装配据此拒启，能力缺失 fail-closed）
+        self._load_error: str = ""
         if config_path:
             self._load(config_path)
 
     def _load(self, config_path: str) -> None:
-        """加载 live_admission.yaml；任何异常 fail-safe 保持默认（enabled=False）。"""
+        """加载 live_admission.yaml；任何异常置 _load_error（F-1：能力缺失由装配层拒启）。"""
         try:
             from myquant.core.config_loader import ConfigLoader
             cfg = ConfigLoader().load(config_path)
@@ -330,7 +332,13 @@ class OperationGuard:
             if isinstance(scopes, list):
                 self._high_risk_scopes = {str(s) for s in scopes if str(s)}
         except Exception as e:
-            logger.warning(f"[admission] 准入配置加载失败，回退仅审计模式: {e}")
+            self._load_error = f"{type(e).__name__}: {e}"
+            logger.warning(f"[admission] 准入配置加载失败: {self._load_error}")
+
+    @property
+    def load_error(self) -> str:
+        """准入配置加载错误（空=加载成功）。"""
+        return self._load_error
 
     @property
     def enabled(self) -> bool:
@@ -346,9 +354,26 @@ class OperationGuard:
         operator: str,
         reviewer: Optional[str] = None,
         action: str = "",
+        actor_type: str = "human",
     ) -> Tuple[bool, str]:
         """
         高危写操作准入检查。
+
+        Parameters
+        ----------
+        scope : str
+            写操作域（HIGH_RISK_SCOPES）
+        operator : str
+            操作主体标识
+        reviewer : str | None
+            外部复核人（require_reviewer=true 时 human 角色必填）
+        action : str
+            操作说明
+        actor_type : str
+            0.4/决策点3 双语义："human" 维持现语义（require_reviewer 时
+            校验复核人）；"system"（guardian/引擎/应急脚本等程序角色）
+            跳过 require_reviewer 复核人校验但**保留审计**——防止把应急
+            强平/系统自动操作焊死在复核人缺失上（R-6），审计记录带 actor_type。
 
         Returns
         -------
@@ -356,18 +381,22 @@ class OperationGuard:
         """
         if scope not in self._high_risk_scopes:
             # 非高危写操作：仅审计留痕，不阻断
-            self.audit(scope, operator, action, "allowed", reviewer, "非高危写操作（仅审计）")
+            self.audit(scope, operator, action, "allowed", reviewer,
+                       "非高危写操作（仅审计）", actor_type=actor_type)
             return True, ""
         if not self._enabled:
-            self.audit(scope, operator, action, "allowed", reviewer, "准入未启用（仅审计留痕）")
+            self.audit(scope, operator, action, "allowed", reviewer,
+                       "准入未启用（仅审计留痕）", actor_type=actor_type)
             return True, ""
-        if self._require_reviewer:
+        if self._require_reviewer and actor_type != "system":
             if not reviewer or reviewer != self._reviewer:
                 desc = SCOPE_DESCRIPTIONS.get(scope, scope)
                 reason = f"高危写操作[{desc}]需配置复核人审批：reviewer 缺失或不匹配"
-                self.audit(scope, operator, action, "denied", reviewer, reason)
+                self.audit(scope, operator, action, "denied", reviewer, reason,
+                           actor_type=actor_type)
                 return False, reason
-        self.audit(scope, operator, action, "approved", reviewer, "审批通过")
+        self.audit(scope, operator, action, "approved", reviewer, "审批通过",
+                   actor_type=actor_type)
         return True, ""
 
     def audit(
@@ -378,6 +407,7 @@ class OperationGuard:
         result: str,
         reviewer: Optional[str] = None,
         reason: str = "",
+        actor_type: str = "human",
     ) -> None:
         """审计留痕：logger + JSONL 落盘 audit_dir/write_audit.jsonl（异常仅告警不阻断）。"""
         from datetime import datetime
@@ -390,10 +420,11 @@ class OperationGuard:
             "result": result,
             "reviewer": reviewer or "",
             "reason": reason,
+            "actor_type": actor_type,
         }
         logger.info(
             f"[admission] {result} scope={scope} operator={operator} "
-            f"action={action} reviewer={reviewer or ''} {reason}"
+            f"action={action} reviewer={reviewer or ''} actor_type={actor_type} {reason}"
         )
         try:
             import json

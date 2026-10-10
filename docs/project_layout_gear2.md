@@ -4322,4 +4322,16 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    f. **验收结果**：验收 0.1+0.2+0.3 共 6 项全过（JSON 落盘 docs/监控档案/实盘安全门禁验收_20261010.json 更新）；tests/unit engine/broker/emergency 域 479 passed；施工清单 §3 0.3 勾选完成。
    g. **纪律遵守**：蓝图优先（先登记目录树再建文件）；零蓝图外新文件；scripts 薄入口纪律；业务逻辑归 myquant（工厂迁入真实模块而非脚本自写）；grep 复验应急链无业务链 import；git 提交（commit message 引用 #289）。
 
+## #290 · 2026-10-10 · 实盘安全门禁第0阶段 0.4 OperationGuard 注册 + fail-closed + actor_type（用例4/R-6/F-1）
+   事实来源：本次落地（用户已拍板决策点3 按推荐结论；施工清单 §4）；代码级核验：run_实盘入口.py 早期注册 OperationGuard、run_mode/guardian LIVE 分支 fail-closed、auth.check 增 actor_type 双语义；验收 0.4-4 / 0.4-R6 / 0.4-F1 3/3 通过；相关单测 344 passed 无回归。
+   a. **myquant/api/middleware/auth.py（改动）**：OperationGuard.check 新增 actor_type: "human"|"system" 参数（决策点3 双语义）——system（guardian/引擎/应急脚本）跳过 require_reviewer 复核人校验但保留审计（R-6 防应急强平被焊死）；audit 记录新增 actor_type 字段；OperationGuard._load 失败改记 _load_error（F-1：配置加载失败由装配层拒启），新增 load_error 属性。
+   b. **myquant/live/run_mode.py（改动）**：apply_mode_to_config LIVE 分支 fail-closed——未装配准入守卫（register_operation_guard 未调用）→ 显式抛 ValueError 拒启（原"默认放行仅审计"改为拒绝，防绕过 CLI 直调进入 LIVE）；已装配时以 actor_type="system" 检查。
+   c. **myquant/risk/guardian.py（改动）**：RiskGuardian 新增 trade_mode 参数（默认 paper 兼容）；force_close_all/force_close_symbol 按模式 fail-closed——LIVE 且未装配守卫 → 拒绝执行（应急请走一键平仓）；已装配守卫以 actor_type="system" 检查（require_reviewer 不焊死 guardian 强平）。
+   d. **myquant/live/engine.py（改动）**：RiskGuardian 创建传 trade_mode=self._trade_mode（0.4 fail-closed 生效）。
+   e. **run_实盘入口.py（改动）**：装配段新增 1.1 高危写操作准入守卫装配（必须在 apply_cli_overrides 之前注册，否则 run_mode fail-closed 误判）；LIVE 模式检查守卫已装配 + 配置加载成功（F-1：load_error 非空 → 拒启）。
+   f. **tests/unit/test_admission_guard.py（改动）**：test_entry_points_wired 适配 0.4 fail-closed（未装配守卫 → LIVE 抛错；装配后放行；register_operation_guard(None) 清理全局）。
+   g. **myquant/acceptance/live_safety_gate.py（扩展）**：新增 0.4-4（清空 guard 拒启）、0.4-R6（require_reviewer 下 system 角色 force_close 可用 + human 拒绝 + 审计保留）、0.4-F1（配置加载失败 load_error → LIVE 拒启判定）三项验收；新增 _last_audit_rows 辅助。
+   h. **验收结果**：验收 0.1~0.4 共 9 项全过（JSON 落盘 docs/监控档案/实盘安全门禁验收_20261010.json 更新）；tests/unit auth/guardian/run_mode 域 344 passed；施工清单 §4 0.4 勾选完成。
+   i. **纪律遵守**：蓝图优先；零蓝图外新文件；阈值引用真源（V3 §九/§十.5/决策点3，不编造）；全局注册表进程内语义（API 进程与实盘进程互不影响，0.8 断言确认实盘侧已注册）；git 提交（commit message 引用 #290）。
+
 

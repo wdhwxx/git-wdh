@@ -254,6 +254,7 @@ class RiskGuardian:
         self,
         risk_manager: RiskManager,
         config: Optional[Dict[str, Any]] = None,
+        trade_mode: str = "paper",
     ):
         """
         初始化风控守护
@@ -264,9 +265,13 @@ class RiskGuardian:
             风控管理器（守护读取其状态/事件）
         config : Dict | None
             守护配置
+        trade_mode : str
+            运行模式（"paper"/"sim"/"live"）。0.4 fail-closed：LIVE 模式
+            未装配准入守卫时强制平仓拒绝执行（不默认放行），防绕过。
         """
         self._risk_manager = risk_manager
         self._config = config or {}
+        self._trade_mode = str(trade_mode).lower()
 
         # 守护配置（默认值）
         self._max_consecutive_rejections = self._config.get("max_consecutive_rejections", 10)
@@ -525,9 +530,16 @@ class RiskGuardian:
             reason=reason,
             executed=False,  # v1不实际执行
         )
-        # KP-M04（T-30）：高危写操作准入——未装配守卫默认放行（guardian 仍记录 decision）
+        # KP-M04（T-30）：高危写操作准入——0.4 fail-closed（LIVE 未装配守卫拒绝执行）；
+        # 已装配时以 system 角色检查（决策点3：跳过复核人校验但保留审计，R-6 防应急强平被焊死）
         guard = _OPERATION_GUARD
         if guard is None:
+            if self._trade_mode == "live":
+                logger.critical(
+                    "[guardian] LIVE 模式未装配准入守卫（register_operation_guard "
+                    "未调用），强制平仓所有 fail-closed 拒绝执行（应急请走一键平仓）"
+                )
+                return False
             logger.warning(
                 "[guardian] 未装配准入守卫（register_operation_guard），强制平仓所有默认放行"
             )
@@ -535,7 +547,7 @@ class RiskGuardian:
         else:
             ok, why = guard.check(
                 "force_close", operator="guardian",
-                action=f"force_close_all reason={reason}")
+                action=f"force_close_all reason={reason}", actor_type="system")
         if not ok:
             logger.error(f"[guardian] 强制平仓所有被准入拒绝: {why}")
             return False
@@ -583,9 +595,17 @@ class RiskGuardian:
             details={"symbol": symbol},
             executed=False,
         )
-        # KP-M04（T-30）：高危写操作准入——未装配守卫默认放行（guardian 仍记录 decision）
+        # KP-M04（T-30）：高危写操作准入——0.4 fail-closed（LIVE 未装配守卫拒绝执行）；
+        # 已装配时以 system 角色检查（决策点3：跳过复核人校验但保留审计，R-6 防应急强平被焊死）
         guard = _OPERATION_GUARD
         if guard is None:
+            if self._trade_mode == "live":
+                logger.critical(
+                    "[guardian] LIVE 模式未装配准入守卫（register_operation_guard "
+                    "未调用），强制平仓 %s fail-closed 拒绝执行（应急请走一键平仓）",
+                    symbol,
+                )
+                return False
             logger.warning(
                 "[guardian] 未装配准入守卫（register_operation_guard），强制平仓 %s 默认放行",
                 symbol,
@@ -594,7 +614,7 @@ class RiskGuardian:
         else:
             ok, why = guard.check(
                 "force_close", operator="guardian",
-                action=f"force_close_symbol {symbol} reason={reason}")
+                action=f"force_close_symbol {symbol} reason={reason}", actor_type="system")
         if not ok:
             logger.error(f"[guardian] 强制平仓 {symbol} 被准入拒绝: {why}")
             return False

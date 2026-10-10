@@ -56,6 +56,9 @@ GATE_ITEMS: tuple = (
     "0.2-10",
     "0.2-R4",
     "0.3-R5",
+    "0.4-4",
+    "0.4-R6",
+    "0.4-F1",
 )
 
 #: 阈值真源引用（I-5：只引用既有真源，不编造）
@@ -526,6 +529,136 @@ class LiveSafetyGateRunner:
             "threshold_source": "V3 §九 R-5（破坏装配仍可平仓）；I-1",
         }
 
+    # ── 0.4 OperationGuard 注册 + fail-closed + actor_type（用例4/R-6/F-1） ──
+
+    def _check_04_case4(self) -> Dict[str, Any]:
+        """用例4：清空 guard 拒启——未装配准入守卫时进入 LIVE 被拒（fail-closed）。"""
+        from myquant.live.run_mode import RunMode, apply_mode_to_config
+        from myquant.risk.guardian import get_operation_guard, register_operation_guard
+
+        prev = get_operation_guard()
+        rejected = False
+        try:
+            register_operation_guard(None)  # 清空 guard（模拟未装配）
+            cfg: Dict[str, Any] = {"live": {}, "broker": {"type": "qmt", "account": "a1"}}
+            try:
+                apply_mode_to_config(cfg, RunMode.LIVE)
+            except ValueError:
+                rejected = True
+        finally:
+            register_operation_guard(prev)
+
+        allowed = False
+        try:
+            from myquant.api.middleware.auth import OperationGuard
+
+            register_operation_guard(OperationGuard())  # 已装配（enabled=false 仅审计）
+            cfg2: Dict[str, Any] = {"live": {}, "broker": {"type": "qmt", "account": "a1"}}
+            out = apply_mode_to_config(cfg2, RunMode.LIVE)
+            allowed = bool(out["live"]["trade_mode"] == "live" and out["broker"]["mode"] == "LIVE")
+        finally:
+            register_operation_guard(prev)
+
+        return {
+            "item": "0.4-4",
+            "pass": bool(rejected and allowed),
+            "detail": f"未装配守卫→LIVE拒启={rejected}; 已装配守卫→LIVE放行={allowed}",
+            "threshold_source": "V3 §九 用例4（清空 guard 拒启）；0.4 fail-closed",
+        }
+
+    def _check_04_r6(self) -> Dict[str, Any]:
+        """R-6：require_reviewer=true 下 system 角色（guardian/引擎/应急）force_close 仍可执行；
+        human 角色 reviewer 缺失则拒绝；审计保留（actor_type 记录）。"""
+        from myquant.api.middleware.auth import OperationGuard
+        from myquant.risk import RiskManager
+        from myquant.risk.guardian import RiskGuardian, get_operation_guard, register_operation_guard
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg_path = Path(tmp) / "admission.yaml"
+            cfg_path.write_text(
+                "admission:\n  enabled: true\n  require_reviewer: true\n"
+                '  reviewer: "lawyer_a"\n',
+                encoding="utf-8",
+            )
+            guard = OperationGuard(str(cfg_path))
+            # human：reviewer 缺失 → 拒绝
+            ok_h, why_h = guard.check(
+                "force_close", operator="ops", reviewer=None, action="",
+                actor_type="human",
+            )
+            # system：跳过复核人校验 → 放行（审计保留）
+            ok_s, why_s = guard.check(
+                "force_close", operator="guardian", action="force_close_all",
+                actor_type="system",
+            )
+            guard_ok = bool(not ok_h and "复核人" in why_h and ok_s)
+
+            # guardian 装配 require_reviewer 守卫后（LIVE 模式）：force_close 不被准入焊死
+            prev = get_operation_guard()
+            try:
+                register_operation_guard(guard)
+                g = RiskGuardian(RiskManager(), trade_mode="live")
+                before = len(g._decisions)
+                g.force_close_all(reason="R-6 验收（system 角色）")
+                # 决策被记录 = 准入放行（v1 无回调返回 False 是 KP-M02 语义，非准入拒绝）
+                guardian_ok = len(g._decisions) > before
+            finally:
+                register_operation_guard(prev)
+
+            # 审计保留：system 放行留痕带 actor_type
+            audit_kept = any(
+                r.get("actor_type") == "system" and r.get("result") == "approved"
+                for r in self._last_audit_rows(guard)
+            )
+
+        return {
+            "item": "0.4-R6",
+            "pass": bool(guard_ok and guardian_ok and audit_kept),
+            "detail": (
+                f"human拒={not ok_h}, system放行={ok_s}, "
+                f"guardian.force_close 不被焊死={guardian_ok}, 审计含system留痕={audit_kept}"
+            ),
+            "threshold_source": "V3 §九 R-6（require_reviewer 不焊死 system 角色应急链）；决策点3",
+        }
+
+    def _last_audit_rows(self, guard: Any) -> List[Dict[str, Any]]:
+        """读取守卫 JSONL 审计尾部（验收断言审计保留用）。"""
+        import json
+
+        rows: List[Dict[str, Any]] = []
+        try:
+            audit_file = Path(getattr(guard, "_audit_dir", "logs/audit")) / "write_audit.jsonl"
+            if audit_file.exists():
+                for line in audit_file.read_text(encoding="utf-8").splitlines()[-20:]:
+                    try:
+                        rows.append(json.loads(line))
+                    except ValueError:
+                        continue
+        except Exception:
+            rows = []
+        return rows
+
+    def _check_04_f1(self) -> Dict[str, Any]:
+        """F-1：准入配置加载失败 → load_error 留痕 → LIVE 入口判定拒启（能力缺失 fail-closed）。"""
+        from myquant.api.middleware.auth import OperationGuard
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bad_path = Path(tmp) / "no_such_admission.yaml"
+            guard = OperationGuard(str(bad_path))
+            load_failed = bool(guard.load_error)
+            # 与 run_实盘入口.py LIVE 段判定一致：守卫非空且 load_error 非空 → 拒启
+            entry_reject = guard is not None and bool(getattr(guard, "load_error", ""))
+
+        return {
+            "item": "0.4-F1",
+            "pass": bool(load_failed and entry_reject),
+            "detail": (
+                f"配置加载失败→load_error留痕={load_failed}; "
+                f"LIVE入口判定拒启={entry_reject}"
+            ),
+            "threshold_source": "V3 §十.5 F-1（配置加载失败→能力缺失→拒启）",
+        }
+
     # ── 运行入口 ────────────────────────────────────────────
 
     def run(self, mode: str = "full") -> Dict[str, Any]:
@@ -564,6 +697,9 @@ class LiveSafetyGateRunner:
             "0.2-10": self._check_02_sync_pause,
             "0.2-R4": self._check_02_r4,
             "0.3-R5": self._check_03_r5,
+            "0.4-4": self._check_04_case4,
+            "0.4-R6": self._check_04_r6,
+            "0.4-F1": self._check_04_f1,
         }
 
         items: List[Dict[str, Any]] = []

@@ -160,18 +160,21 @@ def apply_mode_to_config(config: Dict[str, Any], mode: RunMode) -> Dict[str, Any
         broker_cfg["mode"] = "SIM"
         return config
     # LIVE（真钱实盘）
-    # KP-M04（T-30）：实盘模式切换属高危写操作——准入拒绝则显式抛错（默认仅审计留痕）
+    # KP-M04（T-30）：实盘模式切换属高危写操作——准入拒绝则显式抛错。
+    # 0.4 fail-closed：未装配准入守卫（register_operation_guard 未调用）→ 拒启，
+    # 不再"默认放行"（防绕过 CLI 直调 apply_mode_to_config 进入 LIVE）。
+    # actor_type="system"（决策点3）：run_mode 为系统角色，跳过复核人校验但保留审计。
     guard = get_operation_guard()
     if guard is None:
-        logger.warning(
-            "[run_mode] 未装配准入守卫（register_operation_guard），LIVE 切换默认放行（仅审计留痕）"
+        raise ValueError(
+            "实盘模式切换被准入拒绝：未装配准入守卫（register_operation_guard "
+            "未调用），fail-closed 拒绝进入 LIVE"
         )
-    else:
-        ok, why = guard.check(
-            "mode_switch_live", operator="run_mode",
-            action="apply_mode_to_config -> LIVE")
-        if not ok:
-            raise ValueError(f"实盘模式切换被准入拒绝: {why}")
+    ok, why = guard.check(
+        "mode_switch_live", operator="run_mode",
+        action="apply_mode_to_config -> LIVE", actor_type="system")
+    if not ok:
+        raise ValueError(f"实盘模式切换被准入拒绝: {why}")
     live_cfg["trade_mode"] = "live"
     broker_cfg["mode"] = "LIVE"
     return config

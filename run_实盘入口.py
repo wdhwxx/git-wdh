@@ -771,6 +771,24 @@ def run_live_trading(args: argparse.Namespace) -> int:
     except Exception as e:
         print(f"[错误] 配置加载失败: {e}")
         return 1
+
+    # ── 1.1 高危写操作准入守卫装配（0.4：LIVE fail-closed；决策点3 actor_type 双语义）──
+    # 必须在 apply_cli_overrides（可能经 apply_mode_to_config 切 LIVE）之前注册，
+    # 否则 run_mode 层 fail-closed 会把"未装配守卫"误判为拒绝；F-1：配置加载失败
+    # 记录 load_error，由下方 LIVE 检查拒启（能力缺失）。
+    from myquant.api.middleware.auth import OperationGuard
+    from myquant.risk.guardian import register_operation_guard
+
+    admission_cfg = project_root / "config" / "live_admission.yaml"
+    operation_guard = OperationGuard(
+        config_path=str(admission_cfg) if admission_cfg.exists() else None
+    )
+    register_operation_guard(operation_guard)
+    print(
+        f"  [准入] 高危写操作准入守卫已装配: enabled={operation_guard.enabled}"
+        + (f"（配置加载失败: {operation_guard.load_error}）" if operation_guard.load_error else "")
+    )
+
     try:
         run_mode = apply_cli_overrides(config, args)
     except ValueError as e:
@@ -809,6 +827,17 @@ def run_live_trading(args: argparse.Namespace) -> int:
         return 1
 
     if run_mode is RunMode.LIVE:
+        # 0.4/F-1：LIVE 要求准入守卫已装配且配置加载成功（能力缺失 fail-closed 拒启）
+        from myquant.risk.guardian import get_operation_guard
+
+        live_guard = get_operation_guard()
+        if live_guard is None:
+            print("[错误] LIVE 模式未装配准入守卫（register_operation_guard 未调用），拒绝启动（fail-closed）")
+            return 1
+        if getattr(live_guard, "load_error", ""):
+            print(f"[错误] 准入守卫配置加载失败（{live_guard.load_error}），LIVE 拒绝启动（F-1 能力缺失）")
+            return 1
+
         live_errors = validate_live(run_mode, config, confirm_live=bool(args.confirm_live))
         if args.dry_run:
             # dry-run 为装配预览：confirm 不足不阻断，仅提示；其余安全项仍拦

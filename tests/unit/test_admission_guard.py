@@ -164,9 +164,9 @@ def test_entry_points_wired(tmp_cfg: Path) -> None:
     from myquant.live.portfolio import LivePortfolio
     from myquant.live.run_mode import RunMode, apply_mode_to_config
     from myquant.risk import RiskManager
-    from myquant.risk.guardian import RiskGuardian
+    from myquant.risk.guardian import RiskGuardian, register_operation_guard
 
-    # guardian.force_close_all：默认不阻断
+    # guardian.force_close_all：paper 模式未装配守卫不阻断（v1 仅记录）
     g = RiskGuardian(RiskManager())
     assert g.force_close_all(reason="test") in (True, False)  # 不抛错
 
@@ -174,11 +174,21 @@ def test_entry_points_wired(tmp_cfg: Path) -> None:
     p = LivePortfolio(initial_capital=100_000.0)
     assert p.transfer_cash(1.0, "acc2") is False
 
-    # run_mode.apply_mode_to_config -> LIVE：默认放行写入
+    # 0.4 fail-closed：未装配准入守卫 → run_mode LIVE 切换被拒绝（显式抛错，不再默认放行）
     cfg: Dict = {"live": {}, "broker": {"type": "qmt", "account": "a1"}}
-    out = apply_mode_to_config(cfg, RunMode.LIVE)
-    assert out["live"]["trade_mode"] == "live"
-    assert out["broker"]["mode"] == "LIVE"
+    with pytest.raises(ValueError):
+        apply_mode_to_config(cfg, RunMode.LIVE)
+
+    # 装配守卫（enabled=false 仅审计留痕）后：LIVE 切换放行写入（配置层明确选择）
+    from myquant.api.middleware.auth import OperationGuard
+
+    register_operation_guard(OperationGuard(str(tmp_cfg)))
+    try:
+        out = apply_mode_to_config(cfg, RunMode.LIVE)
+        assert out["live"]["trade_mode"] == "live"
+        assert out["broker"]["mode"] == "LIVE"
+    finally:
+        register_operation_guard(None)
 
     # 启用 + 需复核人后：run_mode LIVE 切换被拒绝（显式抛错）
     tmp_cfg.write_text(
