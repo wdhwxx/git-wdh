@@ -363,7 +363,8 @@ Pythonwdhmm/
 │   │   ├── 未来函数与数据泄漏门禁施工方案.md
 │   │   ├── 未来函数与数据泄漏门禁施工任务清单.md
 │   │   ├── decision_time_contract.md  # ✨【回写#269】决策时点契约模板：decision_time/execution_time/universe(pit_status 显式)/data_availability(adjust=hfq, end_date 必传, basis=eff_disclosure_date)/consumed_columns（主键=name，见 v3.0 §5.2/§11）
-│   │   └── 防泄漏门禁红线清单.md      # ✨【回写#270】治理台账（v3.0 §6.8）：RL-01~14 红线 + 豁免档位（不可豁免/需审批/待数据源建设后启用）+ 对应规则 R01~R11
+│   │   ├── 防泄漏门禁红线清单.md      # ✨【回写#270】治理台账（v3.0 §6.8）：RL-01~14 红线 + 豁免档位（不可豁免/需审批/待数据源建设后启用）+ 对应规则 R01~R11
+│   │   └── 数据列时点台账.md          # ✨【回写#279】列级时点台账（v3.0 §6.1，M0P-01）：datasets/processed 13 业务列 + 派生列（前收盘价）共 14 列逐列登记 derived_at/date_basis/现状判定/目标日基/档位/consumers（实测填写，[]=实测零消费）；每股收益 severity=阻断 target=eff_disclosure_date（现状穿越 v3.0 §6.4.2 ③④）
 
 │
 
@@ -395,6 +396,7 @@ Pythonwdhmm/
 │   ├── settings.yaml            # ✨【回写#198】BASE-3 全局配置主文件（.gitignore !config/settings.yaml 例外入库）：monitoring 块集中承载监控阈值真源——patrol_interval 巡检周期 / watchdog 引擎心跳组态 / alerts 告警行为（store_enabled 落库开关、dedup_window_seconds 去重、cooldown_seconds 冷却、aggregation_window_seconds/escalation_time_seconds/escalation_enabled 装配 AlertRule）/ slo R-04 阈值锁定表（数值与 monitoring.example.yaml 原样并入不迁移）；settings.py 自动加载 config/*.yaml（settings.yaml 排序在前）；改本文件即调全部阈值无需改代码（BASE-3 验收）；无敏感信息（notification 仍在 live_config.yaml 不入库）
 
 │   ├── strategy_registry.yaml  # ✨【回写#271】策略注册表 + ruleset 映射（防泄漏门禁 L-1 契约层，v3.0 §5.2，契约主键=name DEC-01）：7 策略登记（rsrs/ma_cross/grid/momentum/mean_reversion/multi_factor/kunpeng）+ consumed_columns 声明 + ruleset 映射（daily_close_decision：static_scan/cross_sectional/require_pit_asof/consumption_gate/sanity=false）；.gitignore !config/strategy_registry.yaml 例外入库（同 settings.yaml 模式）
+│   ├── data_time_semantics.yaml  # ✨【回写#279】列级时点台账机读版（v3.0 §6.1，M0P-02）：14 列 severity/date_basis/target_basis/consumers（实测填写）；被 consumption.py（R11/RL-13）与 contract.py（R10/RL-11）经 core.config_loader 真实消费（死配置键反查满足）；.gitignore !config/data_time_semantics.yaml 例外入库（同 strategy_registry.yaml 模式）
 
 │   ├── monitoring/                  # ✨【回写#194】P0-6 监控即代码配置目录（模板入库，真实配置不入库）：仪表盘/告警规则/Runbook/采集配置全部落 yaml 版本化管理
 
@@ -824,6 +826,7 @@ Pythonwdhmm/
 │   │   ├── test_consumption_gate.py # ✨【回写#275】消费侧门禁测试（M0-12 核心，13 用例）：AST 提取（df["列"]/df.列/columns/精确匹配过滤）+ 纯函数比对正反向 + 台账缺失 fail-closed/未登记 + 7 策略真实扫描通过 + R11 反向测试（注入引用每股收益必报红）+ 出口断言报红 + 注册幂等
 │   │   ├── test_gate_red_on_injected_leak.py # ✨【回写#276】出口强制测试（M0-08 同批/M0-13 核心，3 用例）：注入引用每股收益 → 出口断言必报红（R11）+ create_engine spy 验证挂载（strategy_id=name）+ create_live_engine spy 验证挂载（真实 ma_cross 装配）
 │   │   ├── test_registry_contract.py # ✨【回写#277】注册强制契约测试（M0-10 缺口补齐，6 用例）：7 策略契约元数据齐全 + 注册表主键=name（DEC-01）+ FakeNoContract 注册抛 AttributeError（M0-04 反向）+ 部分契约仍被拒 + 注册表 name 集合 == strategy_registry.yaml 真源
+│   │   ├── test_ledger_truth_source.py # ✨【回写#279】真实台账真源冒烟（M0P-01/02/03 固化，4 用例，不 monkeypatch）：台账 14 列机读可读 + 每股收益阻断/目标 eff_disclosure_date/收盘价 trade_date/无待确认残留 + 7 策略真实出口全通过 + 真实台账下注入每股收益必报红（R11）
 
 │   │   └── test_gate_governance.py  # ✨【回写#273】门禁中心治理测试（M0-11 核心）：GateConfig 开关（enabled 阻断/disabled 仅审计）、Violation 台账结构、违规落 audit_log（临时库验证）、检查注册冲突/异常 fail-closed
 
@@ -4197,3 +4200,11 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    c. **M0-18 代码真消费配置 + CI job**：run_回测入口.py（lookahead_guard 消费后）与 run_实盘入口.py（apply_cli_overrides 后）消费 config leakage_gate 段 → set_config(GateConfig(enabled=..., audit_violations=...))（与 lookahead_guard 同模式，参照 run_回测入口.py:312-318；消费放入口避免撑大 live/engine.py R-24 白名单文件）；ci.yml 新增第 8 job leakage-gate-check（needs lint+test）：pytest leakage_gate 全量 + test_config_live_check + test_architecture + 强制项校验 python（入库配置 leakage_gate 段 true、注册表 7 策略齐全、入口真消费接线存在——强制项缺失即红）。
    d. **蓝图目录树登记**：ci.yml 条目追加 leakage-gate-check（M0-18）；config 段 backtest_config.example.yaml/live_config.example.yaml 条目追加 leakage_gate 段备注。
    e. **纪律遵守**：蓝图优先；真实配置改动不入库（按 config/ 段既有约定）；消费接线放入口（防死配置纪律，与 lookahead_guard 同模式）；防未来（配置仅声明当前意图，断言只校验已落盘配置）；git 提交（commit message 引用 #278）。
+## #279 · 2026-10-10 · 防泄漏门禁施工·M0P 列级时点台账（文档 + 机读 yaml + consumers 实测）
+   事实来源：本次落地（M0P-01/02/03，轨道 B 阶段 0-P；0-P 须早于 M0 验收，消费侧门禁 severity 数据源就此就位）；代码级核验：leakage_gate 全量 51 passed（47 + 真实台账冒烟 4）；真实台账消费验证：7 策略真实出口全通过 + 注入每股收益必报红（R11）；tests/unit 基线 3630 passed/4 skipped 不受影响（本批仅新增测试文件与配置）。
+   a. **M0P-02 机读台账 config/data_time_semantics.yaml**（14 列 = 13 业务列 + 派生列前收盘价）：每列 derived_at/date_basis/severity/consumers；每股收益 severity=阻断 + target_basis=eff_disclosure_date（现状 date_basis=report_date 穿越，v3.0 §6.4.2 ③④）；收盘价 date_basis=trade_date（R10 断言）；前收盘价 date_basis=shift_1（纯前向）；.gitignore 例外入库（同 strategy_registry.yaml 模式，CI 台账校验依赖）。读取经 core.config_loader（contract.py:84-86 _load_ledger 真实消费点，死配置键反查满足）。
+   b. **M0P-01 台账文档 docs/未来函数与数据泄漏门禁/数据列时点台账.md**：14 列逐列登记 + consumers 实测方法 + 与 §6.4.2 现状表逐条一致（①ann_date 优先 / ②report_deadline_estimate / ③④report_date 穿越）+ 验收对照。
+   c. **M0P-03 consumers 实测**（2026-10-10）：策略=consumed_columns 机读汇总（7 策略 AST 中文列扫描零命中——策略经 bar.close 英文属性消费，中文列由数据层映射，故以声明为准）+ ML/指标（BAR_CN_COLUMN_MAP OHLCV+amount、CN_REQUIRED_COLUMNS OHLC）+ 引擎 grep（前收盘价 mixed_engine.py:955 涨跌停校验）；涨跌幅/振幅/量比/换手率/市盈动 实测零消费（[] 非"待确认"）；每股收益 []（休眠缺陷）；流通股本 multi_factor。
+   d. **新建 tests/leakage_gate/test_ledger_truth_source.py**（真实台账真源冒烟，4 用例，不 monkeypatch）：台账 14 列机读可读 + 关键语义断言 + 7 策略真实出口全通过 + 真实台账下注入每股收益必报红（R11）。
+   e. **蓝图目录树登记**：docs/未来函数与数据泄漏门禁/ 段加 数据列时点台账.md；config/ 段加 data_time_semantics.yaml；tests/leakage_gate/ 段加 test_ledger_truth_source.py，均带 ✨【回写#279】。
+   f. **纪律遵守**：蓝图优先；零蓝图外新增文件；机读台账经 config_loader（防死配置）；consumers 实测不留空不写待确认；严格防未来（只登记已落盘事实）；git 提交（commit message 引用 #279）。

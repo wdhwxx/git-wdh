@@ -135,6 +135,9 @@ config/*.yaml
 # ✨【门禁施工 M0-03 #271】strategy_registry.yaml 例外入库：策略注册表 + ruleset 映射真源
 #   （防泄漏门禁 L-1 契约层，被 exit 强制/contract.py/CI 门禁矩阵消费；无敏感信息），版本化可追溯
 !config/strategy_registry.yaml
+# ✨【门禁施工 M0P-02 #279】data_time_semantics.yaml 例外入库：列级时点台账真源
+#   （防泄漏门禁 0-P，被 consumption.py/contract.py/CI 台账校验消费；无敏感信息），版本化可追溯
+!config/data_time_semantics.yaml
 # L6修复: 运行时状态文件（data_clean_run.json 等），防误提交
 config/*.json
 

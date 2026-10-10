@@ -1,0 +1,92 @@
+# ============================================================
+# config/data_time_semantics.yaml —— 列级时点台账（机读版）
+# ============================================================
+# 归属：未来函数与数据泄漏门禁 · 阶段 0-P（M0P-02）
+# 依据：《未来函数与数据泄漏门禁施工方案.md（v3.0 定稿）》§6.1（台账形态示例）+ §6.4.2（同一语义四套日基现状表）
+# 生成日期：2026-10-10
+# 本文件为真实配置，例外入库（.gitignore !config/strategy_registry.yaml 同批例外），供：
+#   - 消费侧列门禁：myquant/leakage_gate/consumption.py（R11/RL-13，severity=阻断 列被消费即出口报红）
+#   - 契约校验：myquant/leakage_gate/contract.py（R10/RL-11，契约不能自证 PIT，须与台账比对）
+# 读取必须经 myquant.core.config_loader（架构门禁禁用 os/pathlib 直读，见 v3.0 §6.1）
+# consumers 为实测填写（M0P-03）：策略=consumed_columns 声明（机读注册表）+ AST/关键词实测；
+#   引擎=消费点 grep 实测。[] = 实测零消费（如每股收益：休眠缺陷，severity=阻断 待 M1A-12 翻转）。
+# ============================================================
+
+columns:
+  # ---------- 行情族（market_data raw 直读，T 日可得） ----------
+  开盘价:
+    derived_at: ["market_data.open (raw)"]
+    date_basis: trade_date
+    severity: 通过
+    consumers: ["myquant.ml.features.BAR_CN_COLUMN_MAP", "myquant.indicators CN_REQUIRED_COLUMNS"]
+  最高价:
+    derived_at: ["market_data.high (raw)"]
+    date_basis: trade_date
+    severity: 通过
+    consumers: ["myquant.ml.features.BAR_CN_COLUMN_MAP", "myquant.indicators CN_REQUIRED_COLUMNS", "grid ATR（grid_strategy.py:220）"]
+  最低价:
+    derived_at: ["market_data.low (raw)"]
+    date_basis: trade_date
+    severity: 通过
+    consumers: ["myquant.ml.features.BAR_CN_COLUMN_MAP", "myquant.indicators CN_REQUIRED_COLUMNS", "grid ATR（grid_strategy.py:220）"]
+  收盘价:
+    derived_at: ["market_data.close (raw)"]
+    date_basis: trade_date
+    severity: 通过
+    consumers: ["myquant.ml.features.BAR_CN_COLUMN_MAP", "myquant.indicators CN_REQUIRED_COLUMNS", "全部 7 策略（consumed_columns 声明）"]
+    adjust_note: "parquet 存 raw；消费期按 adjust_factor as_of=end_date 现算 hfq（v3.0 §6.1 示例）"
+  成交量:
+    derived_at: ["market_data.volume (raw)"]
+    date_basis: trade_date
+    severity: 通过
+    consumers: ["myquant.ml.features.BAR_CN_COLUMN_MAP", "全部 7 策略（consumed_columns 声明）"]
+  成交额:
+    derived_at: ["market_data.amount (raw)"]
+    date_basis: trade_date
+    severity: 通过
+    consumers: ["myquant.ml.features.BAR_CN_COLUMN_MAP"]
+  涨跌幅:
+    derived_at: ["market_data.pct_chg (raw)"]
+    date_basis: trade_date
+    severity: 通过
+    consumers: []                # 实测零消费（2026-10-10：策略/指标/ML/引擎 0 命中）
+  振幅:
+    derived_at: ["market_data.amplitude (raw)"]
+    date_basis: trade_date
+    severity: 通过
+    consumers: []                # 实测零消费（2026-10-10 实测）
+  量比:
+    derived_at: ["market_data.volume_ratio (raw)"]
+    date_basis: trade_date
+    severity: 通过
+    consumers: []                # 实测零消费（2026-10-10 实测）
+
+  # ---------- 财务/股本族（raw 直读 + cleaner 增量派生，保守正确） ----------
+  换手率:
+    derived_at: ["market_data.turnover (raw)", "myquant/data_access/cleaner/derived_metrics.py:220-224"]
+    date_basis: report_deadline_estimate   # 增量派生：法定披露截止日推定（保守正确，v3.0 §6.4.2 ②）
+    severity: 通过
+    consumers: []                # 实测零消费（回测 metrics.turnover 为资金周转指标，非本数据列）
+  流通股本:
+    derived_at: ["market_data.float_share (raw)", "myquant/data_access/cleaner/derived_metrics.py:226-227"]
+    date_basis: report_deadline_estimate
+    severity: 通过
+    consumers: ["multi_factor（consumed_columns 声明, multi_factor_strategy.py:696）"]
+  市盈动:
+    derived_at: ["market_data.pe_dynamic (raw)", "myquant/data_access/cleaner/derived_metrics.py:229-275"]
+    date_basis: report_deadline_estimate
+    severity: 通过
+    consumers: []                # 实测零消费（2026-10-10 实测）
+  每股收益:
+    derived_at: ["scripts/数据导出_DB到processed.py:129-146", "myquant/data_access/manager.py:1286-1297"]
+    date_basis: report_date      # 现状：穿越（v3.0 §6.4.2 ③④ 同源）
+    target_basis: eff_disclosure_date    # 目标：ann_date 优先统一日落点（M1A-01 收敛）
+    severity: 阻断                # R11/RL-13：severity=阻断 列被消费即出口报红（M1A-12 数据验证通过后翻转）
+    consumers: []                # 实测零消费 → 休眠缺陷（v3.0 §6.1 示例）
+
+  # ---------- 派生列（导出层/增量层） ----------
+  前收盘价:
+    derived_at: ["scripts/数据导出_DB到processed.py:124-128"]
+    date_basis: shift_1          # 纯前向派生（shift(1)）
+    severity: 通过
+    consumers: ["myquant/backtest/mixed_engine.py:955 涨跌停校验（order_matcher bar.pre_close）"]
