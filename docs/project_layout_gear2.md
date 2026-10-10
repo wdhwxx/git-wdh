@@ -4343,4 +4343,12 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    e. **验收结果**：验收 0.1~0.5 共 12 项全过（JSON 落盘 docs/监控档案/实盘安全门禁验收_20261010.json 更新）；tests/unit watchdog/scheduler/engine 域 651 passed；施工清单 §5 0.5 勾选完成。
    f. **纪律遵守**：不跨真源覆盖 settings.yaml（scheduler 三处装配开关未动，真源仍为 config/settings.yaml 经 get_monitoring_config 单读入口）；watchdog 独立模块无反向 import；阈值引用真源（P0-8 MTTD ≤ 1min 用 BROKER_PROBE_INTERVAL_SECONDS 常量核验）；git 提交（commit message 引用 #291）。
 
+## #292 · 2026-10-10 · 实盘安全门禁第0阶段 0.6 对账不一致 → pause（硬，经注入点，禁止反向 import）（用例5/F-4）
+   事实来源：本次落地（施工清单 §6）；代码级核验：LivePortfolio.set_pause_hook 注入点 + reconcile_vs_broker 超阈调 hook + create_live_engine 注入；验收 0.6-5 / 0.6-GREP / 0.6-F4 3/3 通过；相关单测 53 passed 无回归。
+   a. **myquant/live/portfolio.py（改动）**：新增 set_pause_hook(callback) 注入点（0.6 账实差异超阈→禁开仓，实时链）；_fire_reconciliation_alert 超阈路径末尾调 self._pause_hook(diff)，hook 缺失/异常 → logger.critical 降级留痕不阻断对账主链路（F-4）；portfolio 不 import engine（grep 复验无 myquant.live.engine 反向 import；myquant.risk.guardian 访问器为 G1 EX-12C 既有合法依赖）。
+   b. **myquant/live/engine.py（改动）**：create_live_engine 装配段 engine.set_portfolio 后注入 portfolio.set_pause_hook(lambda diff: engine.pause(reason="账实差异超阈（实时对账，禁开仓）"))——与周期链 _broker_accountability_patrol 的 pause 原因可区分（0.2 _pause_source 语义）。
+   c. **myquant/acceptance/live_safety_gate.py（扩展）**：_FakeBroker 桩增 get_account / cash / positions 参数（默认行为不变，兼容既有验收）；新增 0.6-5（差异 100 元→hook 触发禁开仓、一致不误 pause）、0.6-GREP（无 engine 反向 import）、0.6-F4（hook 异常/缺失→降级不阻断）三项验收。
+   d. **验收结果**：验收 0.1~0.6 共 15 项全过（JSON 落盘 docs/监控档案/实盘安全门禁验收_20261010.json 更新）；tests/unit portfolio 域 53 passed；施工清单 §6 0.6 勾选完成。
+   e. **纪律遵守**：注入点方式（portfolio 零反向 import，回调由装配层注入）；与周期链并存（两处 pause reason 不同，隔离复位可区分）；阈值引用真源（容差 LOCKED=0 经 get_monitoring_config 读取，不硬编码）；git 提交（commit message 引用 #292）。
+
 

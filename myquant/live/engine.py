@@ -2864,6 +2864,12 @@ def create_live_engine(
     engine.set_data_feed(feed)
     engine.set_broker(broker)
     engine.set_portfolio(LivePortfolio(initial_capital=initial_capital, account_id=str(name)))
+    # 0.6（回写#292）：实时对账差异超阈 → 禁开仓（用例5）。注入点方式——
+    # portfolio 不反向依赖 engine；回调走 engine.pause（带 reason，0.2 _pause_source
+    # 语义，与周期链 _broker_accountability_patrol 的 pause 原因可区分）。
+    engine._portfolio.set_pause_hook(
+        lambda diff: engine.pause(reason="账实差异超阈（实时对账，禁开仓）")
+    )
     engine.add_strategy(strategy)
 
     # 8) 订阅配置标的（market_data.subscriptions + stock_pool.codes 合并去重）

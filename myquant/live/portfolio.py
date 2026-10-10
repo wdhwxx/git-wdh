@@ -253,6 +253,12 @@ class LivePortfolio:
         # 对账差异告警跳过（warning 留痕），由装配器经 set_alert_manager 注入。
         self._alert_manager: Optional[Any] = alert_manager
 
+        # 0.6（回写#292）：账实差异超阈 → 禁开仓注入点（用例5，实时链）。
+        # 回调由装配层（create_live_engine）注入 engine.pause（带 reason，0.2 语义）；
+        # portfolio **不 import engine**（禁止反向 import，grep 复验）。None 时
+        # 超阈仅告警不阻断（F-4：hook 缺失/异常 → 降级 + CRITICAL，不阻断主链路）。
+        self._pause_hook: Optional[Callable[[Any], None]] = None
+
         logger.info(
             f"实时持仓管理初始化: account={account_id}, "
             f"初始资金={initial_capital:,.0f}"
@@ -636,6 +642,21 @@ class LivePortfolio:
     #  与PaperBroker集成
     # ═══════════════════════════════════════════
 
+    def set_pause_hook(self, callback: Optional[Callable[[Any], None]]) -> None:
+        """
+        0.6（回写#292）账实差异超阈 → 禁开仓注入点（用例5，实时链）。
+
+        装配层（create_live_engine）注入 ``engine.pause`` 回调（带 reason，0.2
+        ``_pause_source`` 语义）；portfolio **不 import engine**（禁止反向 import）。
+        callback 为 None 表示不注入（超阈仅告警不阻断，F-4 降级语义）。
+
+        Parameters
+        ----------
+        callback : Callable[[ReconciliationDiff], None] | None
+            差异超阈时回调（参数为 ReconciliationDiff 快照）。
+        """
+        self._pause_hook = callback
+
     @_locked
     def reconcile_vs_broker(
         self, broker: Any, cash_tolerance: Optional[float] = None,
@@ -740,6 +761,17 @@ class LivePortfolio:
             )
         except Exception as e:  # 告警投递失败不阻断对账主流程
             logger.error("[portfolio] 对账 CRITICAL 告警投递失败（不阻断）: %s", e)
+
+        # 0.6（回写#292）：账实差异超阈 → 禁开仓（用例5，实时链）。
+        # hook 由装配层注入（engine.pause，带 reason）；hook 缺失/异常 → 降级 +
+        # CRITICAL 留痕，不阻断对账/交易主链路（F-4，不静默）。
+        if self._pause_hook is not None:
+            try:
+                self._pause_hook(diff)
+            except Exception as e:  # noqa: BLE001
+                logger.critical(
+                    "[portfolio] 对账禁开仓 hook 执行失败（F-4 降级，交易主链路不阻断）: %s", e
+                )
 
     @_locked
     def diff_vs_broker(

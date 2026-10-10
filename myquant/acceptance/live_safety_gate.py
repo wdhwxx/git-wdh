@@ -62,6 +62,9 @@ GATE_ITEMS: tuple = (
     "0.5-2",
     "0.5-F3",
     "0.5-LIVE",
+    "0.6-5",
+    "0.6-GREP",
+    "0.6-F4",
 )
 
 #: 阈值真源引用（I-5：只引用既有真源，不编造）
@@ -115,15 +118,30 @@ class _FakePosition:
 class _FakeBroker:
     """熔断/应急验收桩券商：get_active_orders / cancel_order 可观测，应急平仓能力齐备。"""
 
-    def __init__(self, active_orders: Optional[List[str]] = None) -> None:
+    def __init__(
+        self,
+        active_orders: Optional[List[str]] = None,
+        cash: float = 100_000.0,
+        positions: Optional[List[Any]] = None,
+    ) -> None:
         """构造桩券商。
 
         Args:
             active_orders: 活跃挂单 order_id 列表（前置状态：有挂单）。
+            cash: 券商账户现金（0.6 对账验收用）。
+            positions: 券商持仓快照；None 时返回默认固定持仓（应急平仓验收前置状态）。
         """
         self._orders: List[str] = list(active_orders or [])
+        self._cash = float(cash)
+        self._positions: Optional[List[Any]] = (
+            list(positions) if positions is not None else None
+        )
         self.cancelled: List[str] = []
         self.submitted: List[Any] = []
+
+    def get_account(self) -> Dict[str, Any]:
+        """券商权威账户快照（0.6 对账验收：现金）。"""
+        return {"cash": self._cash, "account_id": "fake-broker"}
 
     def get_active_orders(self, symbol: Optional[str] = None) -> List[Any]:
         """返回活跃挂单快照（带 order_id 属性的桩对象；symbol 过滤留空=全部）。"""
@@ -147,8 +165,10 @@ class _FakeBroker:
         return True
 
     def get_positions(self) -> List[Any]:
-        """桩：返回固定持仓快照（前置状态：有持仓）。"""
-        return [_FakePosition("000001.SZ", 100, 10.0, available_qty=100)]
+        """桩：返回持仓快照（None→默认固定持仓供应急平仓验收；显式传参→按注入返回）。"""
+        if self._positions is None:
+            return [_FakePosition("000001.SZ", 100, 10.0, available_qty=100)]
+        return list(self._positions)
 
     def submit_order(self, order: Any) -> Any:
         """桩：记录并返回订单（不真实提交）。"""
@@ -787,6 +807,87 @@ class LiveSafetyGateRunner:
             "threshold_source": "V3 §十.5 F-1（装配能力缺失拒启）；施工清单 §5 改动点2",
         }
 
+    # ── 0.6 对账不一致 → pause（硬，经注入点，禁止反向 import）（用例5 / F-4） ──
+
+    def _check_06_case5(self) -> Dict[str, Any]:
+        """用例5：伪造账实差异 100 元 → 对账 CRITICAL + 禁开仓（pause hook 被调）；
+        实时链事件触发（MTTD 无轮询延迟）；一致时 hook 不触发。"""
+        from myquant.live.portfolio import LivePortfolio
+
+        # 本地账 100_000 vs 券商账 99_900 → 现金差 100 元超阈（容差 LOCKED=0）
+        p = LivePortfolio(initial_capital=100_000.0, account_id="acc-0.6")
+        p.set_alert_manager(self._fake_alert_manager())
+        calls: List[Dict[str, Any]] = []
+        p.set_pause_hook(lambda diff: calls.append({"cash_diff": diff.cash_diff}))
+        diff = p.reconcile_vs_broker(_FakeBroker(cash=99_900.0))
+        hook_fired = bool(diff.exceeds_threshold and calls and calls[0]["cash_diff"] == 100.0)
+        # 一致场景：hook 不触发（不误 pause）
+        p2 = LivePortfolio(initial_capital=100_000.0, account_id="acc-0.6b")
+        p2.set_alert_manager(self._fake_alert_manager())
+        calls2: List[Any] = []
+        p2.set_pause_hook(lambda d: calls2.append(d))
+        d2 = p2.reconcile_vs_broker(_FakeBroker(cash=100_000.0, positions=[]))
+        no_false_pause = bool(not d2.exceeds_threshold and not calls2)
+        return {
+            "item": "0.6-5",
+            "pass": bool(hook_fired and no_false_pause),
+            "detail": (
+                f"差异100元→hook触发(禁开仓)={hook_fired}, "
+                f"一致→不误pause={no_false_pause}"
+            ),
+            "threshold_source": "V3 §九 用例5（伪造账实差异→CRITICAL+禁开仓）；容差真源 LOCKED=0",
+        }
+
+    def _check_06_grep(self) -> Dict[str, Any]:
+        """grep 复验：portfolio.py 无 engine 反向 import（0.6 禁止反向依赖 engine；
+        myquant.risk.guardian 访问器为 G1 EX-12C 已批准合法依赖，不在禁止列）。"""
+        import re
+        from pathlib import Path
+
+        src = Path("myquant/live/portfolio.py").read_text(encoding="utf-8")
+        bad = [
+            line for line in src.splitlines()
+            if re.search(r"^\s*(from myquant\.live\.engine\b|import myquant\.live\.engine\b)", line)
+        ]
+        return {
+            "item": "0.6-GREP",
+            "pass": not bad,
+            "detail": f"engine 反向 import 违规={len(bad)}（risk.guardian 访问器 G1 EX-12C 合法）",
+            "threshold_source": "施工清单 §6 改动点4（portfolio 不反向依赖 engine）",
+        }
+
+    def _check_06_f4(self) -> Dict[str, Any]:
+        """F-4：hook 缺失/异常 → 降级 + CRITICAL，不阻断对账主链路（reconcile 仍返回 diff）。"""
+        from myquant.live.portfolio import LivePortfolio
+
+        # hook 抛异常：reconcile_vs_broker 不抛、返回 diff（主链路不阻断）
+        p = LivePortfolio(initial_capital=100_000.0, account_id="acc-0.6f4")
+        p.set_alert_manager(self._fake_alert_manager())
+
+        def boom(_d: Any) -> None:
+            raise RuntimeError("pause hook 爆炸（F-4 模拟）")
+
+        p.set_pause_hook(boom)
+        try:
+            diff = p.reconcile_vs_broker(_FakeBroker(cash=99_900.0))
+            hook_exc_ok = bool(diff.exceeds_threshold)
+        except Exception:
+            hook_exc_ok = False
+        # hook 未注入（None）：超阈仍告警不阻断
+        p2 = LivePortfolio(initial_capital=100_000.0, account_id="acc-0.6f4b")
+        p2.set_alert_manager(self._fake_alert_manager())
+        try:
+            d2 = p2.reconcile_vs_broker(_FakeBroker(cash=99_900.0))
+            hook_none_ok = bool(d2.exceeds_threshold)
+        except Exception:
+            hook_none_ok = False
+        return {
+            "item": "0.6-F4",
+            "pass": bool(hook_exc_ok and hook_none_ok),
+            "detail": f"hook异常→主链路不阻断={hook_exc_ok}, hook未注入→仅告警不阻断={hook_none_ok}",
+            "threshold_source": "V3 §九 F-4（hook 注入失败→降级+CRITICAL，不阻断主链路）",
+        }
+
     # ── 运行入口 ────────────────────────────────────────────
 
     def run(self, mode: str = "full") -> Dict[str, Any]:
@@ -831,6 +932,9 @@ class LiveSafetyGateRunner:
             "0.5-2": self._check_05_case2,
             "0.5-F3": self._check_05_f3,
             "0.5-LIVE": self._check_05_live,
+            "0.6-5": self._check_06_case5,
+            "0.6-GREP": self._check_06_grep,
+            "0.6-F4": self._check_06_f4,
         }
 
         items: List[Dict[str, Any]] = []
