@@ -8,6 +8,9 @@
 报告输出为可打印文本（放于手边，配合《实盘前最终验收与硬性准备实施细则》
 应急预案一节）。
 
+【应急链独立（0.3/R-5）】本脚本与 myquant.live.emergency_liquidation /
+myquant.live.broker_factory 组成应急链，**禁止 import 引擎/风控/guardian/
+熔断/门禁等业务链模块**（引擎模块异常、装配被破坏时应急平仓仍须可用）；
 业务逻辑位于 myquant.live.emergency_liquidation（真实模块），本脚本只做：
   参数解析 → 配置加载 → 券商装配 → 服务调用 → 打印 + 落盘报告。
 
@@ -174,9 +177,9 @@ def main() -> int:
         config_path = project_root / config_path
     cfg = _load_config(config_path)
 
-    # 券商装配（复用引擎工厂，业务逻辑归 myquant）
+    # 券商装配（应急链独立模块：broker_factory 只依赖 brokers，不依赖引擎/风控/门禁）
+    from myquant.live.broker_factory import build_broker_from_config
     from myquant.live.emergency_liquidation import EmergencyLiquidationService
-    from myquant.live.engine import build_broker_from_config
 
     broker_cfg = cfg.get("broker", {}) or {}
     execution_cfg = cfg.get("execution", {}) or {}

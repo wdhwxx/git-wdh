@@ -2666,64 +2666,9 @@ class LiveEngine(BaseEngine):
 #  H2修复：实盘一键装配工厂（配置 → 完整实盘链路）
 # ═══════════════════════════════════════════════
 
-def build_broker_from_config(
-    broker_cfg: Dict[str, Any],
-    execution_cfg: Dict[str, Any],
-    initial_capital: float,
-) -> Any:
-    """
-    从配置创建券商适配器（H2修复）
-
-    支持: paper/sim（本地模拟撮合）/ qmt（迅投QMT）/ ptrade（恒生Ptrade）。
-    xtp 等未实现适配器明确报错，引导经 pyproject 入口点 myquant.brokers 扩展。
-    券商适配器只对接券商原始接口，不做清洗与策略逻辑（蓝图纪律）。
-
-    Parameters
-    ----------
-    broker_cfg : Dict
-        live_config.yaml 的 broker 段
-    execution_cfg : Dict
-        live_config.yaml 的 execution 段（手续费/滑点/交易规则，与回测一致）
-    initial_capital : float
-        初始资金（模拟模式用）
-    """
-    from myquant.live.brokers import PaperBroker, PtradeBroker, QmtBroker
-
-    broker_type = str(broker_cfg.get("type", "paper")).lower()
-    exec_params = {
-        "commission_rate": float(execution_cfg.get("commission_rate", 0.0002)),
-        "min_commission": float(execution_cfg.get("min_commission", 5.0)),
-        "stamp_tax_rate": float(execution_cfg.get("stamp_tax_rate", 0.001)),
-        "transfer_fee_rate": float(execution_cfg.get("transfer_fee_rate", 0.00001)),
-        "slippage_mode": str(execution_cfg.get("slippage_mode", "ratio")),
-        "slippage_value": float(execution_cfg.get("slippage_value", 0.0002)),
-        "enable_t1": bool(execution_cfg.get("enable_t1", True)),
-        "lot_size": int(execution_cfg.get("lot_size", 100)),
-        "price_limit_pct": float(execution_cfg.get("price_limit_pct", 0.10)),
-    }
-
-    if broker_type in ("paper", "sim", "simulation"):
-        return PaperBroker(initial_capital=initial_capital, **exec_params)
-    if broker_type == "qmt":
-        return QmtBroker(
-            qmt_path=str(broker_cfg.get("qmt_path", "")),
-            account_id=str(broker_cfg.get("account", "")),
-            mode=str(broker_cfg.get("mode", "SIM")).upper(),
-            initial_capital=initial_capital,
-            **exec_params,
-        )
-    if broker_type == "ptrade":
-        return PtradeBroker(
-            ptrade_path=str(broker_cfg.get("ptrade_path", "")),
-            account_id=str(broker_cfg.get("account", "")),
-            mode=str(broker_cfg.get("mode", "SIM")).upper(),
-            initial_capital=initial_capital,
-            **exec_params,
-        )
-    raise ValueError(
-        f"未实现的券商适配器: {broker_type} "
-        f"（支持: paper/sim/qmt/ptrade；其他请经 pyproject 入口点 myquant.brokers 扩展）"
-    )
+# 0.3/R-5 应急链解耦：券商装配工厂迁至 broker_factory.py（应急脚本 import 本模块
+# 会把应急链绑死在引擎上）；此处仅 re-import，调用点（create_live_engine 等）不变。
+from myquant.live.broker_factory import build_broker_from_config
 
 
 def _require_auto_recover(state_cfg: Dict[str, Any]) -> bool:

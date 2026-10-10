@@ -55,6 +55,7 @@ GATE_ITEMS: tuple = (
     "0.1-F2",
     "0.2-10",
     "0.2-R4",
+    "0.3-R5",
 )
 
 #: 阈值真源引用（I-5：只引用既有真源，不编造）
@@ -455,6 +456,76 @@ class LiveSafetyGateRunner:
             "threshold_source": "V3 §九 R-4（pause 下应急路径可用）；I-1/I-3",
         }
 
+    # ── 0.3 应急链独立断言（R-5） ──────────────────────────────
+
+    def _check_03_r5(self) -> Dict[str, Any]:
+        """R-5：应急链独立——一键平仓/应急服务/装配工厂不依赖引擎/风控/guardian/门禁；
+        破坏装配（阻断业务链模块 import）后仍可装配券商并 dry_run 平仓（I-1）。"""
+        import subprocess
+        import sys as _sys
+
+        root = Path(__file__).resolve().parents[2]  # myquant/acceptance/… → 项目根
+        forbidden = (
+            "from myquant.live.engine",
+            "from myquant.risk",
+            "from myquant.monitoring.circuit_breaker",
+            "OperationGuard",
+            "from myquant.live.guardian",
+            "from myquant.live.acceptance",
+        )
+        files = [
+            root / "scripts" / "一键平仓.py",
+            root / "myquant" / "live" / "emergency_liquidation.py",
+            root / "myquant" / "live" / "broker_factory.py",
+        ]
+        violations: List[str] = []
+        for f in files:
+            text = f.read_text(encoding="utf-8")
+            for pat in forbidden:
+                if pat in text:
+                    violations.append(f"{f.name}: {pat}")
+        static_ok = not violations
+
+        # 动态断言：阻断 engine/risk/guardian/门禁 import 后应急链仍可用
+        code = (
+            "import sys\n"
+            "for m in ['myquant.live.engine','myquant.risk.risk_manager',"
+            "'myquant.live.guardian','myquant.monitoring.circuit_breaker',"
+            "'myquant.live.acceptance']:\n"
+            "    class _B:\n"
+            "        def __getattr__(self, n): raise ImportError('破坏装配: ' + m)\n"
+            "    sys.modules[m] = _B()\n"
+            "from myquant.live.broker_factory import build_broker_from_config\n"
+            "from myquant.live.emergency_liquidation import EmergencyLiquidationService\n"
+            "b = build_broker_from_config({'type': 'paper'}, {}, 100000)\n"
+            "r = EmergencyLiquidationService(b).execute(confirm=False)\n"
+            "print('OK' if r.get('ok') else 'FAIL')\n"
+        )
+        try:
+            res = subprocess.run(
+                [_sys.executable, "-c", code],
+                cwd=str(root), capture_output=True, text=True, timeout=120,
+            )
+        except Exception as exc:  # noqa: BLE001 - 子进程失败如实记录
+            return {
+                "item": "0.3-R5",
+                "pass": False,
+                "detail": f"阻断装配子进程执行失败: {type(exc).__name__}: {exc}",
+                "threshold_source": "V3 §九 R-5（破坏装配仍可平仓）；I-1",
+            }
+        dynamic_ok = bool(res.returncode == 0 and "OK" in res.stdout)
+        tail = (res.stderr or res.stdout or "")[-200:]
+        detail = (
+            f"静态违规import={violations or '无'}; "
+            f"破坏装配后应急平仓: {'OK' if dynamic_ok else 'FAIL(' + tail + ')'}"
+        )
+        return {
+            "item": "0.3-R5",
+            "pass": bool(static_ok and dynamic_ok),
+            "detail": detail,
+            "threshold_source": "V3 §九 R-5（破坏装配仍可平仓）；I-1",
+        }
+
     # ── 运行入口 ────────────────────────────────────────────
 
     def run(self, mode: str = "full") -> Dict[str, Any]:
@@ -492,6 +563,7 @@ class LiveSafetyGateRunner:
             "0.1-F2": self._check_01_f2,
             "0.2-10": self._check_02_sync_pause,
             "0.2-R4": self._check_02_r4,
+            "0.3-R5": self._check_03_r5,
         }
 
         items: List[Dict[str, Any]] = []
