@@ -817,7 +817,9 @@ Pythonwdhmm/
 
 │   │   └── database.py               # 数据库fixture：临时数据库、初始化schema
 
-│   ├── leakage_gate/                # ✨【回写#273】防泄漏门禁测试（与模块同批提交，解零覆盖红线；pyproject testpaths 已加本目录）：test_gate_governance.py（开关/台账/违规落 audit_log）；后续 test_contract.py/test_registry_contract.py/test_consumption_gate.py/test_gate_red_on_injected_leak.py 依次落地（M0-10~13）
+│   ├── leakage_gate/                # ✨【回写#273】防泄漏门禁测试（与模块同批提交，解零覆盖红线；pyproject testpaths 已加本目录）：test_gate_governance.py（开关/台账/违规落 audit_log）+ test_contract.py（M0-10 核心）；后续 test_registry_contract.py/test_consumption_gate.py/test_gate_red_on_injected_leak.py 依次落地（M0-10~13）
+
+│   │   ├── test_contract.py         # ✨【回写#274】契约校验测试（M0-10 核心，15 用例）：声明完整 R09 正反向（7 策略真源通过/缺 decision_time/pit_status/available_time/basis 错误报红/注册表缺失/未登记）+ 台账比对 R10（缺失 fail-closed/columns 空/目标基不一致/收盘价日基非 trade_date/一致通过）+ ensure_registered 幂等 + 出口断言汇总契约违规报红
 
 │   │   └── test_gate_governance.py  # ✨【回写#273】门禁中心治理测试（M0-11 核心）：GateConfig 开关（enabled 阻断/disabled 仅审计）、Violation 台账结构、违规落 audit_log（临时库验证）、检查注册冲突/异常 fail-closed
 
@@ -925,6 +927,8 @@ Pythonwdhmm/
     │   ├── __init__.py               # ✨【回写#273】泄漏门禁包导出（GateConfig/Violation/LeakageGateError/register_gate_check/assert_all_gates_pass/get_config/set_config）
 
     │   ├── gate.py                   # ✨【回写#273】门禁中心最小壳：GateConfig(enabled 开关/audit_violations)/Violation 违规记录/LeakageGateError/register_gate_check 检查注册（后续门禁模块挂入）/assert_all_gates_pass（enabled 违规→落 audit_log+抛错阻断；disabled 仅审计警告档）；依赖 core.audit_log（L0 合法，BASE-7 哈希链）
+
+    │   ├── contract.py               # ✨【回写#274】契约完整性校验（M0-06）：声明完整（R09/RL-02 契约层：decision_time/available_time/universe.pit_status/consumed_columns/ruleset 深度校验）+ 与列级台账比对（R10/RL-11：台账缺失 fail-closed，契约不能自证 PIT，v3.0 附录 B 注2）；契约真源=config/strategy_registry.yaml（主键=name，DEC-01）；不 import strategies（L0→L3 反向跨层会被 R-02 拦，分层合规）；导入即注册（ensure_registered 幂等）
 
     │
 
@@ -4153,3 +4157,10 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    d. **pyproject.toml testpaths 扩展**：加 tests/leakage_gate（新测试目录须被 pytest 收集，否则写了不跑；与 DEC-05 精神一致）。
    e. **蓝图目录树登记**：myquant/ 段 leakage_gate/ 子树（__init__+gate.py）+ tests/ 段 leakage_gate/ 子树（test_gate_governance.py），均带 ✨【回写#273】。
    f. **纪律遵守**：蓝图优先（先登记目录树再建文件）；零蓝图外新增文件；门禁中心纯治理壳零业务代码触碰；防御式 fail-closed；严格防未来（违规只记录已发生校验结果，审计 created_ts 由 AuditLogStore 取当前时点）；git 提交（commit message 引用 #273）。
+## #274 · 2026-10-10 · 防泄漏门禁施工·M0-06 契约完整性校验（myquant/leakage_gate/contract.py）
+   事实来源：本次落地（进入 M0-06，依赖 M0-05 已提交）；代码级核验：py_compile OK；leakage_gate 24 passed/1 skipped 无；架构门禁 30 passed/1 skipped（R-02 恢复）；tests/unit 全量 3627 passed/4 skipped（零回归，与 #267/#272/#273 基线一致）。
+   a. **新建 myquant/leakage_gate/contract.py**：契约完整性校验（R09 声明完整 + R10 台账比对）。声明完整（RL-02 契约层）：decision_time/execution_time/holding_period 非空、universe 显式 pit_status（附录 B 注4）、data_availability.market_data/financial_data 各 available_time 非空、financial_data.basis 必须 eff_disclosure_date、consumed_columns 非空 list、ruleset 非空；台账比对（RL-11）：台账缺失/不可读/columns 空 → fail-closed 阻断（契约不能自证 PIT，须先 M0P-02）、声明 basis 与台账财务列 target_basis 一致、收盘价 date_basis 必须 trade_date。
+   b. **契约真源 = config/strategy_registry.yaml**（M0-03 机读注册表，主键=name DEC-01）；**不 import strategies**（leakage_gate=L0、strategies=L3，L0→L3 反向跨层被 R-02 拦截——M0-14 验收的临时注入验证在 M0-06 被真实触发并已规避）；策略类属性契约由 M0-04 注册强制在 strategies 层内自校验，本模块校验 yaml 真源 + 台账比对。导入即注册（ensure_registered 幂等，register_gate_check 重复注册 ValueError 捕获）。
+   c. **新建 tests/leakage_gate/test_contract.py**（M0-10 核心，15 用例）：7 策略真源声明完整通过、缺 decision_time/pit_status/available_time/basis 错误报红、注册表缺失/未登记报红、台账缺失 fail-closed/columns 空/目标基不一致/收盘价日基非 trade_date 报红、台账一致通过、ensure_registered 幂等、出口断言汇总契约违规报红。
+   d. **蓝图目录树登记**：leakage_gate/ 段加 contract.py + tests/leakage_gate/ 段加 test_contract.py，均带 ✨【回写#274】。
+   e. **纪律遵守**：蓝图优先；零蓝图外新增文件；分层合规（无跨层 import）；防御式 fail-closed（台账缺失不放行）；严格防未来（只校验已声明契约与已登记台账）；git 提交（commit message 引用 #274）。
