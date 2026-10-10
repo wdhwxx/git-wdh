@@ -369,6 +369,9 @@ Pythonwdhmm/
 │   │   └── 数据列时点台账.md          # ✨【回写#279】列级时点台账（v3.0 §6.1，M0P-01）：datasets/processed 13 业务列 + 派生列（前收盘价）共 14 列逐列登记 derived_at/date_basis/现状判定/目标日基/档位/consumers（实测填写，[]=实测零消费）；每股收益 severity=阻断 target=eff_disclosure_date（现状穿越 v3.0 §6.4.2 ③④）
 │   │   └── 存量guard资产重登记.md     # ✨【回写#280】存量 guard 资产重登记（v3.0 §3，M0B-01/02/03）：§3 资产表 14 行按三档（✅实测有效/⚠️仅自报/❌未接入）逐行加"运行期是否可达"结论 + fail-open 三处登记（engine.py:684-688/provider.py:545-552/manager.py:1298-1299 映射 M1A-04/05/06）+ performance_config.py:31/:168 口径更正
 │   │   └── R03里程碑检查点.md         # ✨【回写#283】R03 单独里程碑检查点（G-04/M1B-03）：跨时间全样本拟合先警告档 + 人工复核调用方维度（factor_preprocessor:223-243/:246-264 的调用方 multi_factor_strategy:747/781/815 均为当日截面/滚动窗口，未确证时间维误用 → 不升阻断）；不并入 1-B 打包估时
+│   ├── 风控实盘安全门禁/           # ✨【回写#287】实盘安全门禁施工落点（源自《风控_实盘安全门禁施工方案优化版.MD V3》，唯一施工依据）：V3 施工方案 + 可执行施工清单（§12 用例映射，逐项勾选）
+│   │   ├── 风控_实盘安全门禁施工方案优化版.MD  # V3 方案（分层模型+不变量 I-1~I-7+缺口清单+分阶段+故障注入矩阵 §九+决策点 §十，待拍板→已拍板）
+│   │   └── 风控_实盘安全门禁施工清单.MD       # ✨【回写#287】可执行施工清单（0.1~0.9 逐项对齐 文件.方法(签名)，施工后跑 §12 对应用例；LIVE 上线门槛 §10）
 
 │
 
@@ -466,6 +469,8 @@ Pythonwdhmm/
 
 │   ├── 验收_D包自治.py             # ✨【回写#251】D-9 D 包验收薄入口：argparse（--out）+ 调 myquant/monitoring/d_acceptance.py（D-1~D-8 验收清单逐项断言），控制台逐项 PASS/FAIL + JSON 报告；业务逻辑零写入脚本；✨【回写#254】补 _REPO_ROOT 探测 + sys.path 注入（scripts/ 目录启动可直跑，原顶层 import 会 ImportError）+ 默认 --out 改项目根绝对路径，根治 scripts/docs/ 落档分叉
 │   ├── 验收_C包保Alpha.py           # ✨【回写#241】C-12 C 包保 Alpha 验收薄入口：argparse（--out 默认 docs/监控档案/C包保Alpha验收_<日期>.json + --db + --mode）+ find_project_root + 调 myquant/monitoring/c_acceptance.py（C-1~C-11 验收项），控制台逐项摘要 + JSON 报告；业务逻辑零写入脚本
+
+│   ├── 验收_实盘安全门禁.py         # ✨【回写#287】实盘安全门禁第0阶段验收薄入口：argparse（--out 默认 docs/监控档案/实盘安全门禁验收_<日期>.json + --mode + --select）+ _REPO_ROOT 探测 + sys.path 注入 + 调 myquant/acceptance/live_safety_gate.py（LiveSafetyGateRunner：0.1~0.9 + LIVE 门槛用例逐项断言），控制台逐项 PASS/FAIL + JSON 报告；业务逻辑零写入脚本
 
 │   ├── 故障演练/季频故障演练.py      # ✨【回写#248】D-6 混沌工程与故障演练薄入口：argparse（--select FI-01…FI-07 + --out + --db + --list）+ _REPO_ROOT 探测 + sys.path 注入 + 调 myquant/monitoring/chaos_drill.py（复用 P0-8 FI-01~07 用例库，逐用例注入→MTTx 计时→TP/FP/FN 分类→复盘报告 JSON），季度演练落盘；业务逻辑零写入脚本；✨【回写#254】默认 --out 改项目根绝对路径（根治 scripts/ 子目录启动落 scripts/docs/ 分叉）+ 修复摘要键错用（summary['detected']→'cases_detected'，#248 存量 KeyError）
 
@@ -610,6 +615,8 @@ Pythonwdhmm/
     │   │   ├── test_business_cabin.py # ✨【回写#228】B-8 驾驶舱测试（9 项）：四键聚合（reconciliation/pnl/limit_usage/execution）/对账冻结/PnL 同源/限额 GAUGE+配置/执行 summary+兜底/空数据防御/API 与看板同源✅已完成
 
     │   │   ├── test_b_acceptance.py # ✨【回写#230】B-10 B 包验收测试（13 项）：九项检查逐项断言/隔离环境重建跨 run 去重/阈值真源引用/防未来时间戳/异常如实记录不吞✅已完成
+
+    │   │   ├── test_live_safety_gate.py # ✨【回写#287】实盘安全门禁第0阶段验收测试：验收项逐项断言/隔离环境重建跨 run 去重/报告 JSON 可序列化字段齐全/异常不吞✅已完成
 
     │   │   ├── test_signal_decay.py # ✨【回写#233】C-4 信号衰减监控测试：信号后收益滚动 IC/信号密度下降/连续无效信号占比计算；衰减超阈 P1/P2 预警（显式注入阈值演示，配置 None 不告警不编造）；衰减曲线数据可输出；防未来（只消费已发生信号-收益对）；防御校验✅已完成
 
@@ -1383,7 +1390,9 @@ Pythonwdhmm/
 
     │   ├── chaos_drill.py          # ✨【回写#248 原monitoring/ 段，#262 迁入】D-6 混沌工程与故障演练：ChaosDrillRunner 季度演练编排（复用 P0-8 FI-01~07 用例库 + MTTx 计时 + TP/FP/FN 分类 + 复盘报告 JSON）；隔离环境=临时 AlertStore+真实 AlertManager；防未来；__main__ 自测
 
-    │   └── disaster_drill.py       # ✨【回写#250 原monitoring/ 段，#262 迁入】D-8 元监控与灾备：DisasterDrillRunner 年度灾备演练（SQLite 备份恢复/RabbitMQ 持久化/主备通道故障切换/心跳不误判）；演练报告 JSON；审计 kind=disaster_drill；防未来；__main__ 自测
+    │   ├── disaster_drill.py       # ✨【回写#250 原monitoring/ 段，#262 迁入】D-8 元监控与灾备：DisasterDrillRunner 年度灾备演练（SQLite 备份恢复/RabbitMQ 持久化/主备通道故障切换/心跳不误判）；演练报告 JSON；审计 kind=disaster_drill；防未来；__main__ 自测
+
+    │   └── live_safety_gate.py     # ✨【回写#287】实盘安全门禁第0阶段验收业务逻辑：LiveSafetyGateRunner（隔离环境=临时 AlertStore+真实 AlertManager+真实 EventBus+临时审计库）——按施工清单 §12 用例映射逐项验收（0.1 用例9/10/F-2、0.2 用例10/R-4/A1、0.3 R-5、0.4 用例4/R-6/F-1、0.5 用例2/F-3、0.6 用例5/F-4、0.7 用例8/C2、0.9 用例12/R-1~R-3/R-7、0.8 用例4/R-5/F-1/F-2/F-5、门槛 用例13/F-6）；阈值引用 P0-2/P0-8 真源；异常不吞；每次 run() 重建隔离；防未来；__main__ 自测
     ├── api/                                     # REST API模块
 
     │   ├── __init__.py                 # API包统一导出：create_app/run_api/FASTAPI_AVAILABLE + 11个响应/请求模型 + APIKeyAuth + FixedWindowLimiter/TokenBucketLimiter/RateLimitResult + ServiceContainer（__all__全量导出，供运行API.py与外部导入）
@@ -4280,5 +4289,15 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
       - **G-05 措辞统一**：方案文档正文 4 处 lookahead_guard 相关"恒真"措辞统一为"时间线排序自检（防引擎级时序错误；不防策略内部泄漏）"（§3 资产表 :418 / RL-08 :641 / R06 :839 / 风险表 :161），与 §12.4-G-05 口径一致。
    f. **蓝图目录树登记**：myquant/ 段 leakage_gate/ 子树 consumption.py 追加 G-02 审计说明、tests/ 段 test_consumption_gate.py 追加 G-02 兜底 5 用例（13→18），均带 ✨【回写#286】。
    g. **纪律遵守**：蓝图优先；总验收以"核对 + 实证"为主（无新增业务功能，仅补 G-02 兜底审计纯函数 + G-05 措辞统一）；R-19 零覆盖（consumption 经显式子模块 import 被 tests 引用）；严格防未来（审计只计数已写源码字面量、不预测未来）；git 提交（commit message 引用 #286）。
+## #287 · 2026-10-10 · 实盘安全门禁第0阶段施工启动·0.1 熔断入进程（施工清单 §1 + V3 §九）
+   事实来源：本次落地（用户拍板决策点3 按推荐结论后批量执行施工清单 §12 用例映射，0.1 先行）；代码级核验：CircuitBreaker 已装配进 create_live_engine 且按 engine_id 隔离；验收 0.1-9（双引擎隔离）/0.1-10（熔断动作链+审计+CRITICAL）/0.1-F2（总线降级）3/3 通过；相关单测 344 passed 无回归。
+   a. **myquant/monitoring/circuit_breaker.py（改动）**：CircuitBreaker.__init__ 新增 engine_id: Optional[str] 参数（缺口13 多引擎隔离）；_on_trigger_event 首行按 data["engine_id"] 过滤（Event/EventFilter 无 engine_id 原生字段，约定发事件侧写入 data；不动 EventBus 核心）；engine_id=None 时不过滤，保持既有单测/自测语义。
+   b. **myquant/live/engine.py（改动）**：create_live_engine 装配段新增 6.7 CircuitBreaker 构造（broker/risk_manager/event_bus=get_event_bus_safe/alert_manager=get_alert_manager/audit_store=AuditLogStore 临时降级/engine_id=str(name)），auto_liquidate=False 不可被配置覆盖；构造后 engine._circuit_breaker 挂载（供 0.8 断言 / 阶段1 /api/risk/status 读取）；审计存储不可用降级 logger 不阻断交易（F-6 语义）。
+   c. **myquant/acceptance/live_safety_gate.py（新建）**：LiveSafetyGateRunner——实盘安全门禁第0阶段验收业务逻辑（隔离环境=临时 AlertStore+真实 AlertManager+真实 EventBus+临时审计库；每次 run() 重建隔离；异常不吞；防未来）；0.1 三项验收 check（0.1-9 引擎隔离 / 0.1-10 熔断动作链 / 0.1-F2 总线降级）；报告 schema 与 B/C/D 包一致（mode/items/summary/generated_at/caveats）。
+   d. **scripts/验收_实盘安全门禁.py（新建）**：薄入口（argparse --out/--mode/--select/--list + _REPO_ROOT 探测 + sys.path 注入），调 LiveSafetyGateRunner，控制台逐项 PASS/FAIL + JSON 落盘（默认 docs/监控档案/实盘安全门禁验收_<日期>.json）；业务逻辑零写入。
+   e. **tests/unit/test_live_safety_gate.py（新建）**：5 项（验收项登记/0.1 全通过/报告可序列化字段齐全/跨 run 隔离重建/异常不吞如实记录 failed）。
+   f. **蓝图目录树登记**：myquant/acceptance/ 段 live_safety_gate.py、scripts/ 段 验收_实盘安全门禁.py、tests/unit 段 test_live_safety_gate.py（均带 ✨【回写#287】）。
+   g. **验收结果**：实跑验收 0.1 三项全过（JSON 落盘 docs/监控档案/实盘安全门禁验收_20261010.json）；tests/unit -k "circuit or engine or acceptance or portfolio" 344 passed；施工清单 §1 0.1 勾选完成。
+   h. **纪律遵守**：蓝图优先（先登记目录树再建文件）；零蓝图外新文件；scripts 薄入口纪律；业务逻辑归 myquant；阈值引用真源（P0-8 MTTD/MTTA，不编造）；严格防未来；git 提交（commit message 引用 #287）。
 
 

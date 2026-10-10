@@ -151,6 +151,11 @@ class CircuitBreaker:
         auto_liquidate 时，若 broker 可用则现场构造 EmergencyLiquidationService。
     config : CircuitBreakerConfig | None
         配置（None 用默认配置）。
+    engine_id : str | None
+        引擎ID（缺口13 多引擎隔离）。非 None 时只消费触发事件 data 内
+        engine_id 与之匹配的事件（约定由发事件侧写入 data["engine_id"]）；
+        None（默认）不过滤，保持既有单测/自测语义。不修改 EventBus 核心，
+        隔离在订阅端 handler 内完成。
     """
 
     def __init__(
@@ -162,6 +167,7 @@ class CircuitBreaker:
         audit_store: Optional[Any] = None,
         liquidation_service: Optional[Any] = None,
         config: Optional[CircuitBreakerConfig] = None,
+        engine_id: Optional[str] = None,
     ) -> None:
         self._broker = broker
         self._risk = risk_manager
@@ -170,6 +176,7 @@ class CircuitBreaker:
         self._audit = audit_store
         self._liquidation = liquidation_service
         self._config = config or CircuitBreakerConfig()
+        self._engine_id = engine_id
 
         # 熔断状态（可观测）
         self._tripped: bool = False
@@ -248,6 +255,11 @@ class CircuitBreaker:
             风控击穿 / 触及限额事件
         """
         data = getattr(event, "data", None) or {}
+        # 缺口13：按 engine_id 隔离（多引擎共享全局 EventBus 单例）。
+        # Event/EventFilter 无 engine_id 原生字段，约定发事件侧写入 data["engine_id"]；
+        # 仅本引擎事件才消费，不修改 EventBus 核心（避免全局影响）。
+        if self._engine_id and str(data.get("engine_id", "") or "") != str(self._engine_id):
+            return
         reason = str(
             data.get("reason")
             or data.get("message")

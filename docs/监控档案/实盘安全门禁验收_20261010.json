@@ -1,0 +1,30 @@
+{
+  "mode": "full",
+  "items": [
+    {
+      "item": "0.1-9",
+      "pass": true,
+      "detail": "A.tripped=True, B.tripped=False, A.撤单=['o1'], B.撤单=[], A.可开仓=False, B.可开仓=True",
+      "threshold_source": "P0-8 MTTD<1min"
+    },
+    {
+      "item": "0.1-10",
+      "pass": true,
+      "detail": "tripped=True, 禁开仓=True, 撤单=['o1', 'o2'], 审计trip=True, CRITICAL告警数=1",
+      "threshold_source": "P0-8 MTTD<1min"
+    },
+    {
+      "item": "0.1-F2",
+      "pass": true,
+      "detail": "总线不可用→subscribe 安全降级，返回订阅数=0",
+      "threshold_source": "V3 §十.5（外部依赖偶发不可用→降级+CRITICAL，不拒启）"
+    }
+  ],
+  "summary": {
+    "passed": 3,
+    "failed": 0,
+    "total": 3
+  },
+  "generated_at": "2026-10-10T19:43:46+0800",
+  "caveats": []
+}

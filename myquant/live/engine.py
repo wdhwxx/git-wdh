@@ -2832,6 +2832,33 @@ def create_live_engine(
     if lookahead_enabled:
         lookahead_guard = LookaheadGuard(strict=bool(lookahead_cfg.get("strict_mode", True)))
 
+    # 6.7) CircuitBreaker（缺口1：熔断动作链在实盘进程通电；缺口13：按 engine_id 隔离）
+    #      auto_liquidate 保持 False（人工确认兜底），不允许被配置覆盖。
+    from myquant.core.audit_log import AuditLogStore
+    from myquant.monitoring import get_alert_manager as _build_get_alert_manager
+    from myquant.monitoring.circuit_breaker import (
+        CircuitBreaker,
+        CircuitBreakerConfig,
+        get_event_bus_safe,
+    )
+
+    _cb_audit_store: Optional[AuditLogStore] = None
+    try:
+        _cb_audit_store = AuditLogStore()
+    except Exception as exc:  # F-6：审计存储不可用不阻断交易，熔断审计降级为 logger
+        logger.warning("[build] 审计存储不可用，熔断审计降级为 logger: %s", exc)
+
+    circuit_breaker = CircuitBreaker(
+        broker=broker,
+        risk_manager=risk_manager,
+        event_bus=get_event_bus_safe(),
+        alert_manager=_build_get_alert_manager(),
+        audit_store=_cb_audit_store,
+        config=CircuitBreakerConfig(auto_liquidate=False),
+        engine_id=str(name),
+    )
+    circuit_breaker.subscribe_to_event_bus()
+
     # 7) 引擎装配（保障组件经构造函数注入，调度器由引擎自建自停）
     engine = LiveEngine(
         risk_config=risk_config,
@@ -2847,6 +2874,8 @@ def create_live_engine(
         snapshot_interval=float(state_cfg.get("backup_interval", 300)),
         trade_mode=trade_mode,
     )
+    # 缺口1 产物：熔断挂引擎（供 0.8 启动断言 / 阶段1 /api/risk/status 读取）
+    engine._circuit_breaker = circuit_breaker
     engine.set_data_feed(feed)
     engine.set_broker(broker)
     engine.set_portfolio(LivePortfolio(initial_capital=initial_capital, account_id=str(name)))
