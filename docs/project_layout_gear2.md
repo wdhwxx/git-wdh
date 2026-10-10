@@ -359,6 +359,11 @@ Pythonwdhmm/
 
 │   └── archive_20260905/             # ✨【回写·2026-09-05】历史存档目录（29文件）：26个交接摘要+交接文档_20260830+根目录早期文档2个（项目交接文档/优化后期迭代项目结构图）；仅追溯历史，不参与当前蓝图主结构
 
+│   ├── 未来函数与数据泄漏门禁/     # ✨【回写#269】防泄漏门禁施工落点（源自《未来函数与数据泄漏门禁施工方案.md v3.0》，唯一施工依据）：施工方案 v3.0 + 施工任务清单 + decision_time_contract 契约模板（L-1 契约层）
+│   │   ├── 未来函数与数据泄漏门禁施工方案.md
+│   │   ├── 未来函数与数据泄漏门禁施工任务清单.md
+│   │   └── decision_time_contract.md  # ✨【回写#269】决策时点契约模板：decision_time/execution_time/universe(pit_status 显式)/data_availability(adjust=hfq, end_date 必传, basis=eff_disclosure_date)/consumed_columns（主键=name，见 v3.0 §5.2/§11）
+
 │
 
 ├── config/                           # 结构化配置文件目录（模板文件入库，真实yaml不提交）
@@ -4102,3 +4107,8 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    a. **落位**：docs/系统性审核/probes/（审计核验工具，随治理文档存档）；蓝图目录树 系统性审核/ 段登记 probes/ 子树（4 文件各带职责注释）。
    b. **文件内容**：g3_probe.py（R-16 live 跨层裸实例化 + R-17 字符串事件类型 vs EventType + R-18 scripts 类定义 + R-08 config 顶层键）；g3_probe2.py（R-16 登记组件裸实例化 + R-17 契约完备性：未消费成员/订阅字符串）；g3_probe3.py（R-16 泛化：L0-L4 直接实例化 monitoring/acceptance 类，基线 0）；g3_probe4.py（R-08 配置反查：monitoring 键消费集合，17 键已消费基线）。
    c. **纪律遵守**：探针为独立核验工具（含本机绝对路径 ROOT，一次性诊断用，非运行时依赖，不参与测试/构建）；本次仅新增 probes/ 4 文件 + 蓝图目录树登记 + 回写记录，零 myquant/零门禁/零业务改动；git 提交（commit message 引用 #268）。
+## #269 · 2026-10-10 · 防泄漏门禁施工启动·M0-01 契约模板（docs/未来函数与数据泄漏门禁/decision_time_contract.md）
+   事实来源：本次落地（DEC-01~06 决策门全部拍板，进入轨道 A·M0 阻塞主线）；代码级核验：文档内容含 decision_time/execution_time/universe/data_availability/consumed_columns，universe 显式 pit_status（按 v3.0 §11 附录 B 契约模板 + §5.2 修正），契约主键=name（DEC-01）。
+   a. **蓝图目录树登记**：docs/ 段新增 未来函数与数据泄漏门禁/ 子树（施工方案 v3.0 + 施工任务清单 + decision_time_contract.md），与 审计档案/系统性审核/监控档案 并列的施工文档档案区。
+   b. **新建 docs/未来函数与数据泄漏门禁/decision_time_contract.md**：L-1 契约层模板，含 decision_time（"T日收盘后 15:00"）/execution_time（"T+1开盘 09:30"）/holding_period/universe（type=static, source=config/stock_pool.yaml, pit_status=未建设，显式声明避免自证 PIT）/data_availability（market_data: available_time+adjust=hfq+adjust_asof=end_date 必传+fields；financial_data: available_time=ann_date+basis=eff_disclosure_date+fields）/consumed_columns（R11 声明侧输入，声明可漏报，实际以 AST 实测为准）。
+   c. **纪律遵守**：蓝图优先（先登记 docs/ 段目录树再建文档）；文档纯登记零代码改动；严格防未来（契约仅声明决策时点语义，不引入未来数据源）；M0-01 依赖 DEC-01 已拍板；git 提交（commit message 引用 #269）。
