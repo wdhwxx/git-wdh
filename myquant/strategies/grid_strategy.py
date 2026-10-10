@@ -90,6 +90,32 @@ class GridStrategy(StrategyBase):
 
     name = "grid"
 
+    # 防泄漏门禁契约元数据（M0-04，主键=name，DEC-01；对齐 config/strategy_registry.yaml）
+    strategy_id: str = "grid_strategy"
+    decision_time: str = "T日收盘后 15:00"
+    execution_time: str = "T+1开盘 09:30"
+    holding_period: str = "波动区间滚动"
+    universe: Dict[str, Any] = {
+        "type": "static",
+        "source": "config/stock_pool.yaml",
+        "pit_status": "未建设",
+    }
+    data_availability: Dict[str, Any] = {
+        "market_data": {
+            "available_time": "T日15:00",
+            "adjust": "hfq",
+            "adjust_asof": "end_date 必传",
+            "fields": ["开盘价", "最高价", "最低价", "收盘价", "成交量", "成交额"],
+        },
+        "financial_data": {
+            "available_time": "ann_date",
+            "basis": "eff_disclosure_date",
+            "fields": [],
+        },
+    }
+    consumed_columns: List[str] = ["收盘价", "最高价", "最低价", "成交量"]  # ATR 用 high/low
+    ruleset: str = "daily_close_decision"
+
     def __init__(
         self,
         grid_lower: float = 10.0,

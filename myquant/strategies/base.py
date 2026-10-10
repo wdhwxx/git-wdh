@@ -224,6 +224,24 @@ class StrategyBase(ABC):
 
     name: str = "base_strategy"
 
+    # ═══════════════════════════════════════════════
+    #  防泄漏门禁契约元数据（M0-04，v3.0 §5.2/§6.2-8）
+    #  ═══════════════════════════════════════════════
+    #  契约主键 = name（DEC-01 拍板；registry 以 name 为键，写表点 registry.py:79）
+    #  子类必须显式覆写以下必填契约字段；未带契约元数据的策略注册即报错
+    #  （registry.register_strategy 注册强制校验，缺失抛 AttributeError）
+    #  契约仅作时间语义声明，校验由 leakage_gate/contract.py（M0-06）负责；
+    #  consumed_columns 为声明侧输入，可漏报，实际以 AST 实测引用列为准（v3.0 §6.1.3）
+    strategy_id: str = ""                       # 展示别名（非主键，仅作展示）
+    contract_type: str = "daily_equity"         # 策略类型
+    decision_time: str = ""                     # 决策时点（如 "T日收盘后 15:00"）
+    execution_time: str = ""                    # 执行时点（如 "T+1开盘 09:30"）
+    holding_period: str = ""                    # 持仓周期（策略自声明）
+    universe: Optional[Dict[str, Any]] = None   # universe 声明（须含 pit_status，避免契约自证 PIT）
+    data_availability: Optional[Dict[str, Any]] = None  # 数据可用时点声明（market_data/financial_data）
+    consumed_columns: Optional[List[str]] = None         # 消费列声明（R11，可漏报）
+    ruleset: str = ""                           # ruleset 映射（config/strategy_registry.yaml）
+
     def __init__(self, **params: Any):
         self.params: Dict[str, Any] = params
         self._initialized = False

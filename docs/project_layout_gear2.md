@@ -1037,11 +1037,11 @@ Pythonwdhmm/
 
     │   ├── __init__.py               # 统一导出：7个策略类 + create_strategy/list_strategies/discover_strategies API
 
-    │   ├── registry.py               # 策略注册器：装饰器注册、动态发现、外部插件入口点
+    │   ├── registry.py               # 策略注册器：装饰器注册、动态发现、外部插件入口点；✨【回写#272】注册强制契约元数据（M0-04：_CONTRACT_REQUIRED_FIELDS 7 字段 + _validate_contract_metadata 写表前校验，未带契约元数据的策略注册即报错；契约主键=name，DEC-01）
 
     │   ├── param_tuner.py            # ✨【回写#247】D-5 参数动态调整：ParamTuner——策略参数随监控反馈动态调整（带审批流：自动提议 → 人工确认 → 生效回滚）；ParamProposal 提议全流程留痕（proposal_history JSON 可序列化）；未批准不生效（propose 只登记建议，approve 人工确认后经注入 apply_fn 生效，reject 否决）；模型版本管理 registry 衔接（approve 生效时经注入 registry_fn 在模型 registry 登记新版本，metadata.hyperparameters=合并后参数，未注入则登记 registry_skipped 留痕不编造）；可回滚（rollback 经注入 rollback_fn 恢复 params_before）；安全模型对齐 D-1（mode=confirm 需 approve / auto 自动生效）；可审计（AuditLogStore kind=param_tuner，审计失败降级不阻断）；参数校验（非空/有限/白名单可配/无通配）；防未来（时间戳一律当前时点，clock 可注入）
 
-    │   ├── base.py                   # 策略抽象基类：信号生成、参数接口、生命周期钩子、通用工具；✨【回写#140】防未来守卫钩子（KP-P2-08：record_indicator_guard/record_stop_loss_guard/record_data_access_guard，data_end 因果口径；get_signal_data_end 供引擎 record_signal 上报真实数据截止日，禁自证常量）；✨【回写#173】StockPoolBuilder 增 filter_by_tradability（KP-P2-01：ST/停牌/次新/20日均量，min_listing_bars）
+    │   ├── base.py                   # 策略抽象基类：信号生成、参数接口、生命周期钩子、通用工具；✨【回写#140】防未来守卫钩子（KP-P2-08：record_indicator_guard/record_stop_loss_guard/record_data_access_guard，data_end 因果口径；get_signal_data_end 供引擎 record_signal 上报真实数据截止日，禁自证常量）；✨【回写#173】StockPoolBuilder 增 filter_by_tradability（KP-P2-01：ST/停牌/次新/20日均量，min_listing_bars）；✨【回写#272】StrategyBase 契约元数据模板（M0-04：strategy_id/decision_time/execution_time/holding_period/universe/data_availability/consumed_columns/ruleset，契约主键=name，子类须显式覆写）
 
     │   │                             # ✨【V5·P1】三接口：on_bar(逐bar事件接口，event引擎用)/generate_signals_vectorized(向量化批量信号，vectorized引擎用)/generate_mixed_loop(混合模式混合循环，mixed引擎用)；6策略均实现双接口（on_bar+generate_signals_vectorized），混合引擎自动适配
 
@@ -4126,3 +4126,10 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    b. **.gitignore 加例外**：`!config/strategy_registry.yaml`（同 settings.yaml 模式，策略注册表为门禁契约真源需入库版本化）。
    c. **蓝图 config/ 段目录树登记**：settings.yaml 后（monitoring/ 前）登记 strategy_registry.yaml。
    d. **纪律遵守**：蓝图优先；配置为真实契约真源（无敏感信息）例外入库；防未来（契约仅声明消费列与时点语义）；M0-03 依赖 DEC-01 已拍板；git 提交（commit message 引用 #271）。
+## #272 · 2026-10-10 · 防泄漏门禁施工·M0-04 注册强制契约元数据（registry.py + base.py + 7 策略）
+   事实来源：本次落地（进入 M0-04，依赖 DEC-01 已拍板）；代码级核验：未带契约元数据的策略注册即报错（反向测试 PASS：FakeNoContract 注册抛 AttributeError 缺少 7 必填字段）；7 策略（rsrs/ma_cross/grid/momentum/mean_reversion/multi_factor/kunpeng）契约全部完整；py_compile 8 文件 OK；策略相关 240 passed；tests/unit 全量 3627 passed/4 skipped（零回归，与 #267 基线一致）。
+   a. **base.py**：StrategyBase 增加契约元数据模板（strategy_id/contract_type/decision_time/execution_time/holding_period/universe/data_availability/consumed_columns/ruleset，默认空/None，契约主键=name，子类须显式覆写；consumed_columns 声明可漏报，以 AST 实测为准 v3.0 §6.1.3）。
+   b. **registry.py**：新增 _CONTRACT_REQUIRED_FIELDS（7 必填字段）+ _validate_contract_metadata（缺失即抛 AttributeError）；register_strategy 写表（:79）前强制校验；typing 补 Tuple。
+   c. **7 个策略文件**：补齐契约元数据（对齐 config/strategy_registry.yaml；grid 消费列含最高价/最低价 ATR、multi_factor 含流通股本；均不含阻断列每股收益）。
+   d. **蓝图 strategies/ 段目录树更新**：registry.py/base.py 注释追加 M0-04 说明。
+   e. **纪律遵守**：蓝图优先（先更新目录树注释再落代码）；仅改既有文件（零新增文件，零蓝图外文件）；契约仅声明时间语义、不含未来数据（防未来）；全量类型注解 + 防御式校验；git 提交（commit message 引用 #272）。

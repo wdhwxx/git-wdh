@@ -25,7 +25,7 @@ __author__ = "Pythonwdhmm"
 
 import importlib
 import pkgutil
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional, Tuple, Type
 
 from myquant.core.logger import get_logger
 from myquant.strategies.base import StrategyBase
@@ -38,6 +38,43 @@ logger = get_logger(__name__)
 # ═══════════════════════════════════════════════
 
 _strategy_registry: Dict[str, Type[StrategyBase]] = {}
+
+
+# ═══════════════════════════════════════════════
+#  防泄漏门禁契约强制（M0-04，v3.0 §5.2/§6.2-8）
+#  ═══════════════════════════════════════════════
+
+# 契约必填字段（策略类必须显式声明的契约元数据，主键 = name，DEC-01）
+_CONTRACT_REQUIRED_FIELDS: Tuple[str, ...] = (
+    "decision_time",
+    "execution_time",
+    "holding_period",
+    "universe",
+    "data_availability",
+    "consumed_columns",
+    "ruleset",
+)
+
+
+def _validate_contract_metadata(cls: Type[StrategyBase]) -> None:
+    """
+    校验策略类契约元数据完整性（注册强制，M0-04）
+
+    未带契约元数据的策略禁止注册：必填契约字段任一缺失（值为空/None）
+    即抛 AttributeError 阻断注册（写表前校验）。
+
+    Args:
+        cls: 待注册的策略类（已确认是 StrategyBase 子类）。
+
+    Raises:
+        AttributeError: 契约必填字段缺失。
+    """
+    missing = [f for f in _CONTRACT_REQUIRED_FIELDS if not getattr(cls, f, None)]
+    if missing:
+        raise AttributeError(
+            f"策略类 {cls.__name__} 未带契约元数据，缺少必填字段: {missing}；"
+            f"未带契约元数据的策略禁止注册（防泄漏门禁 M0-04，v3.0 §5.2）"
+        )
 
 
 # ═══════════════════════════════════════════════
@@ -72,6 +109,9 @@ def register_strategy(cls: Type[StrategyBase]) -> Type[StrategyBase]:
     name = getattr(cls, 'name', None)
     if not name or name == "base_strategy":
         raise AttributeError(f"策略类 {cls.__name__} 必须设置唯一的 name 属性")
+
+    # ★ M0-04 注册强制契约元数据（写表前校验，未带契约即阻断注册）
+    _validate_contract_metadata(cls)
 
     if name in _strategy_registry:
         logger.warning(f"策略 [{name}] 已存在，将被覆盖: {_strategy_registry[name].__name__} → {cls.__name__}")

@@ -141,6 +141,32 @@ class MultiFactorStrategy(StrategyBase):
 
     name = "multi_factor"
 
+    # 防泄漏门禁契约元数据（M0-04，主键=name，DEC-01；对齐 config/strategy_registry.yaml）
+    strategy_id: str = "multi_factor_strategy"
+    decision_time: str = "T日收盘后 15:00"
+    execution_time: str = "T+1开盘 09:30"
+    holding_period: str = "20交易日调仓"
+    universe: Dict[str, Any] = {
+        "type": "static",
+        "source": "config/stock_pool.yaml",
+        "pit_status": "未建设",
+    }
+    data_availability: Dict[str, Any] = {
+        "market_data": {
+            "available_time": "T日15:00",
+            "adjust": "hfq",
+            "adjust_asof": "end_date 必传",
+            "fields": ["开盘价", "最高价", "最低价", "收盘价", "成交量", "成交额"],
+        },
+        "financial_data": {
+            "available_time": "ann_date",
+            "basis": "eff_disclosure_date",
+            "fields": ["流通股本"],
+        },
+    }
+    consumed_columns: List[str] = ["收盘价", "成交量", "流通股本"]  # 流通股本现算（t 时刻可得）
+    ruleset: str = "daily_close_decision"
+
     # 基础因子（纯价格，打分顺序即此顺序）
     BASE_FACTORS: Tuple[str, ...] = ("momentum", "reversal", "low_vol", "vol_price")
 
