@@ -100,7 +100,9 @@ def match_latest_financial(
 ) -> Optional[Dict[str, Any]]:
     """取 ``trade_date`` 时点可见的最新一期财务记录（③④ 共用单一实现）。
 
-    按有效披露日降序排序，取首个 ``<= trade_date`` 的记录；无可见记录返回 None。
+    按 (有效披露日, 报告期) 降序排序，取首个 ``<= trade_date`` 的记录；无可见记录
+    返回 None。排序次键 report_date 保证**同截止日多报告期**时取最新报告期
+    （年报与一季报同于 4-30 截止 → 一季报优先，M1A-08 实证修复）。
     参照 ``financial_service.py:540-551`` 口径（降序 + 首个 <= 交易日）。
 
     Args:
@@ -115,7 +117,12 @@ def match_latest_financial(
     if not trade_date:
         return None
     sorted_records: List[Dict[str, Any]] = sorted(
-        records, key=eff_disclosure_date, reverse=True
+        records,
+        key=lambda rec: (
+            eff_disclosure_date(rec),
+            str(rec.get("report_date") or ""),
+        ),
+        reverse=True,
     )
     for rec in sorted_records:
         eff = eff_disclosure_date(rec)

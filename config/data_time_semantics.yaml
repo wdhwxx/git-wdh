@@ -78,11 +78,11 @@ columns:
     severity: 通过
     consumers: []                # 实测零消费（2026-10-10 实测）
   每股收益:
-    derived_at: ["scripts/数据导出_DB到processed.py:129-146", "myquant/data_access/manager.py:1286-1297"]
-    date_basis: report_date      # 现状：穿越（v3.0 §6.4.2 ③④ 同源）
-    target_basis: eff_disclosure_date    # 目标：ann_date 优先统一日落点（M1A-01 收敛）
-    severity: 阻断                # R11/RL-13：severity=阻断 列被消费即出口报红（M1A-12 数据验证通过后翻转）
-    consumers: []                # 实测零消费 → 休眠缺陷（v3.0 §6.1 示例）
+    derived_at: ["scripts/数据导出_DB到processed.py:129-146", "myquant/data_access/manager.py:1286-1297", "myquant/data_access/time_semantics.py（统一落点，M1A-01/02）"]
+    date_basis: eff_disclosure_date  # M1A-12 翻转（2026-10-10）：ann_date 优先 → report_deadline 推定 → report_date 兜底（重导实证：7/1~8/31 取一季报、9/1 切中报、6-30 无穿越切换）
+    severity: 通过                # M1A-12 翻转（2026-10-10）：依据 M1A-08 数据验证（抽样 5 标的 P1/P2 全过 + 全量非空率 87.64%，3197 parquet 重导）
+    audit: "2026-10-10 施工 M1A-12：severity 阻断→通过，依据 M1A-08 数据验证（重导后抽样比对 7/1 前后无穿越 + 截止日推定 9/1 切中报）；翻转前 R11 对该列保持报红，本次翻转按 §12.4-G-03 记录"
+    consumers: []                # 实测零消费 → 休眠缺陷已修复（v3.0 §6.1 示例）
 
   # ---------- 派生列（导出层/增量层） ----------
   前收盘价:

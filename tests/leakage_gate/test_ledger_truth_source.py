@@ -62,12 +62,14 @@ def test_ledger_machine_readable_and_complete() -> None:
 
 
 def test_ledger_key_semantics() -> None:
-    """台账关键语义：每股收益阻断/目标日基；收盘价 trade_date；无待确认残留。"""
+    """台账关键语义：每股收益翻转通过/目标日基；收盘价 trade_date；无待确认残留。"""
     columns = _load_ledger()["columns"]
     eps = columns["每股收益"]
-    assert eps["severity"] == "阻断", "每股收益必须阻断（M1A-12 验证通过前）"
-    assert eps["target_basis"] == "eff_disclosure_date", "每股收益目标日基必须 eff_disclosure_date"
-    assert eps["date_basis"] == "report_date", "每股收益现状日基 report_date（穿越）"
+    # M1A-12 翻转（2026-10-10）：M1A-08 数据验证通过后 severity 阻断→通过、
+    # date_basis report_date→eff_disclosure_date（G-03 翻转验收锚点）
+    assert eps["severity"] == "通过", "每股收益必须已翻转通过（M1A-12 验收）"
+    assert eps["date_basis"] == "eff_disclosure_date", "每股收益日基必须 eff_disclosure_date（M1A-01 收敛）"
+    assert "audit" in eps and eps["audit"].startswith("2026-10-10"), "翻转必须有审计记录（G-03）"
     assert columns["收盘价"]["date_basis"] == "trade_date", "收盘价日基必须 trade_date"
     assert columns["前收盘价"]["date_basis"] == "shift_1", "前收盘价必须 shift_1 纯前向"
     for name, meta in columns.items():
@@ -88,14 +90,16 @@ def test_real_strategies_pass_real_ledger() -> None:
         assert_all_gates_pass(strategy_id=name, decision_time=_DECISION_TIME)
 
 
-def test_inject_eps_red_on_real_ledger(monkeypatch: pytest.MonkeyPatch) -> None:
-    """真实台账下注入引用每股收益的源码 → 出口必报红（R11/RL-13）。"""
+def test_inject_eps_passes_after_fix(monkeypatch: pytest.MonkeyPatch) -> None:
+    """真实台账下注入引用每股收益的源码 → 出口通过（M1A-12 翻转验收锚点）。
+
+    翻转前（severity=阻断）注入每股收益必报 R11；M1A-12 数据验证通过并翻转
+    severity=通过 后，该列可正常消费，出口不得再报红（G-03 解锁）。
+    """
     contract_ensure_registered()
     consumption_ensure_registered()
     monkeypatch.setattr(
         consumption_module, "_strategy_source",
         lambda _sid: 'def generate_signal(df):\n    eps = df["每股收益"]\n    return eps',
     )
-    with pytest.raises(LeakageGateError) as exc_info:
-        assert_all_gates_pass(strategy_id="rsrs", decision_time=_DECISION_TIME)
-    assert any(v.rule_id == "R11" and "每股收益" in v.message for v in exc_info.value.violations)
+    assert_all_gates_pass(strategy_id="rsrs", decision_time=_DECISION_TIME)

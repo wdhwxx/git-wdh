@@ -130,3 +130,23 @@ class TestMatchLatestFinancial:
         visible = match_latest_financial(records, "2025-09-01")
         assert visible is not None
         assert visible["eps"] == 0.42
+
+    def test_same_eff_takes_newer_report_period(self) -> None:
+        """同有效披露日多报告期（年报与一季报均截止次年 4-30）→ 取最新报告期。
+
+        M1A-08 实证修复：原实现同 eff 时排序不稳定，7/1 时点取到过期年报
+        （如 000001.SZ 取 2025 年报 2.07 而非 2026 一季报 0.67）。
+        """
+        records = [
+            {"report_date": "2025-12-31", "ann_date": "", "eps": 2.07},  # 年报，eff=2026-04-30
+            {"report_date": "2026-03-31", "ann_date": "", "eps": 0.67},  # 一季报，eff=2026-04-30
+            {"report_date": "2026-06-30", "ann_date": "", "eps": 1.24},  # 中报，eff=2026-08-31
+        ]
+        # 7/1 时点：中报未到截止日（8-31），可见 = 一季报（同 eff 4-30 下 report_date 最新）
+        visible = match_latest_financial(records, "2026-07-01")
+        assert visible is not None
+        assert visible["eps"] == 0.67, f"同 eff 应取一季报, 实际 {visible.get('eps')}"
+        # 9/1 时点：中报截止日已过 → 中报
+        visible_later = match_latest_financial(records, "2026-09-01")
+        assert visible_later is not None
+        assert visible_later["eps"] == 1.24
