@@ -44,6 +44,14 @@ from myquant.utils.data_fingerprint import DataFingerprint, compute_fingerprint
 
 logger = logging.getLogger(__name__)
 
+
+class FactorLookaheadError(RuntimeError):
+    """截断重算自检失败：新因子在边界行的全量结果与截断重算结果不一致 → 疑似未来函数。
+
+    仅对新注册因子强制（M1B-05）；存量因子不受影响。阻断进入回测/实盘链路。
+    """
+
+
 # ─────────────────────────────────────────────
 # 常量
 # ─────────────────────────────────────────────
@@ -165,6 +173,19 @@ def _validate_factor_configs(
     return validated
 
 
+def _as_float(value: Any) -> Optional[float]:
+    """把边界行单元值转 float（NaN/非数值/无法转换 → None）。"""
+    if value is None:
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    if np.isnan(f) or np.isinf(f):
+        return None
+    return f
+
+
 def _apply_prefix(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
     """为 DataFrame 的列名添加前缀。
 
@@ -220,6 +241,7 @@ class FactorEngine:
         l2_ttl: int = 604800,
         use_cache: bool = True,
         auto_fingerprint: bool = True,
+        truncated_selfcheck: bool = True,
     ) -> None:
         """
         Args:
@@ -232,9 +254,16 @@ class FactorEngine:
             l2_ttl: L2 缓存过期时间秒（cache 为 None 时生效）。
             use_cache: 全局缓存开关；False 时完全绕过缓存，每次都重新计算。
             auto_fingerprint: 未提供数据指纹时是否自动计算；False 时使用占位符（不推荐）。
+                （v3.0 §10.5 R08 白名单：factor_engine 正确调用，:303-305 auto_fingerprint 兜底）
+            truncated_selfcheck: 是否对新注册因子执行截断重算自检（M1B-05，v3.0 §6.5-3）；
+                仅首次计算该因子名时执行，存量不受影响。确认泄漏（边界行全量≠截断重算）抛
+                FactorLookaheadError 阻断进入回测/实盘链路。
         """
         self._use_cache = use_cache
         self._auto_fingerprint = auto_fingerprint
+        self._truncated_selfcheck = truncated_selfcheck
+        # 已通过/已执行截断重算自检的因子名集合（仅新注册因子强制，存量不受影响）
+        self._self_checked_factors: set[str] = set()
 
         # 初始化缓存
         if cache is not None:
@@ -273,6 +302,89 @@ class FactorEngine:
     def use_cache(self) -> bool:
         """当前是否启用缓存。"""
         return self._use_cache and self._cache is not None
+
+    # ── 截断重算自检（M1B-05，仅新注册因子强制） ──
+
+    def _truncated_recompute_selfcheck(
+        self,
+        data: pd.DataFrame,
+        factor_name: str,
+        params: Dict[str, Any],
+        full_result: pd.DataFrame,
+    ) -> Dict[str, Any]:
+        """对新因子执行截断重算自检（防未来函数，v3.0 §6.5-3）。
+
+        原理：把数据截断到最后 1 根之前的序列重算因子，比较**截断边界行**上
+        全量结果与截断重算结果是否一致。若指标在边界行用了未来数据（如 next bar、
+        全样本标准化），全量值≠截断重算值 → 确认泄漏。
+
+        Args:
+            data: 全量行情数据。
+            factor_name: 因子/指标名称。
+            params: 因子参数。
+            full_result: 已计算的全量因子结果（复用，避免重复全量计算）。
+
+        Returns:
+            Dict[str, Any]: {"checked": bool, "passed": bool, "reason": str}。
+              checked=False 表示因数据不足/异常跳过自检（不阻断）；
+              passed=False 表示确认泄漏（调用方应抛 FactorLookaheadError 阻断）。
+        """
+        if full_result is None or len(full_result) == 0:
+            return {"checked": False, "passed": True, "reason": "全量结果为空，跳过自检"}
+        n = len(data)
+        if n < 30:
+            # 数据过短：warmup 不足，跳过自检（不误伤短序列合法因子）
+            return {"checked": False, "passed": True, "reason": "数据过短，跳过截断重算自检"}
+        trunc = data.iloc[: n - 1]
+        if len(trunc) < 10:
+            return {"checked": False, "passed": True, "reason": "截断后数据过短，跳过自检"}
+        boundary = trunc.index[-1]
+        try:
+            indicator = get_indicator(factor_name, **params)
+            trunc_result = indicator.calculate(trunc)
+        except Exception as e:  # noqa: BLE001 - 自检本身异常不阻断（仅记录；未确证泄漏不放行异常）
+            logger.warning(
+                "截断重算自检跳过（计算异常，不误伤）: factor=%s err=%s", factor_name, e,
+            )
+            return {"checked": False, "passed": True, "reason": f"截断重算异常，跳过自检: {e}"}
+        # 比较边界行（合法 trailing 指标：边界行全量与截断重算值恒等）
+        try:
+            for col in full_result.columns:
+                if col not in trunc_result.columns:
+                    return {
+                        "checked": False, "passed": True,
+                        "reason": f"截断重算缺列 {col}，跳过自检",
+                    }
+                fv = full_result.loc[boundary, col]
+                tv = trunc_result.loc[boundary, col]
+                f_num = _as_float(fv)
+                t_num = _as_float(tv)
+                # 存在性不一致（全量有值/截断为 NaN，或反之）= 该指标在边界行依赖了
+                # 未来/全样本数据（如 shift(-1)、全样本标准化）→ 确认泄漏
+                if (f_num is None) != (t_num is None):
+                    return {
+                        "checked": True, "passed": False,
+                        "reason": (
+                            f"截断重算自检失败：因子 {factor_name!r} 在边界行 {boundary} 列 {col} "
+                            f"全量={fv!r} 截断重算={tv!r}（存在性不一致）——指标引用了未来/全样本数据，"
+                            f"阻断进入回测/实盘链路（M1B-05）"
+                        ),
+                    }
+                if f_num is None and t_num is None:
+                    continue  # 边界行两者皆 NaN（warmup 内）：跳过该列比较
+                if abs(f_num - t_num) > max(1e-8, 1e-8 * abs(t_num)):
+                    return {
+                        "checked": True, "passed": False,
+                        "reason": (
+                            f"截断重算自检失败：因子 {factor_name!r} 在边界行 {boundary} 列 {col} "
+                            f"全量值 {f_num} ≠ 截断重算值 {t_num}（疑似未来函数：该指标在决策时点"
+                            f"引用了未来/全样本数据，阻断进入回测/实盘链路，M1B-05）"
+                        ),
+                    }
+        except Exception as e:  # noqa: BLE001
+            logger.warning("截断重算自检边界比较异常，跳过: factor=%s err=%s", factor_name, e)
+            return {"checked": False, "passed": True, "reason": f"边界比较异常，跳过自检: {e}"}
+        return {"checked": True, "passed": True, "reason": "截断重算自检通过"}
 
     # ── 核心：单因子计算（带缓存） ──
 
@@ -322,6 +434,19 @@ class FactorEngine:
         else:
             result = _compute(data, params)
             hit_level = CACHE_HIT_L3
+
+        # 截断重算自检（M1B-05）：仅新注册因子首次计算强制；存量/缓存命中复用不受影响
+        if (
+            self._truncated_selfcheck
+            and factor_name not in self._self_checked_factors
+        ):
+            self._self_checked_factors.add(factor_name)
+            check = self._truncated_recompute_selfcheck(data, factor_name, params, result)
+            if check.get("checked") and not check.get("passed"):
+                logger.error("截断重算自检失败（阻断）: %s", check["reason"])
+                raise FactorLookaheadError(check["reason"])
+            if check.get("checked"):
+                logger.debug("截断重算自检通过: factor=%s", factor_name)
 
         return result, hit_level
 

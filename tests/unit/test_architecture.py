@@ -195,6 +195,7 @@ ENTRY_ALLOWLIST: set[str] = {
     "scripts/标的预筛选.py", "scripts/清理历史回测输出.py", "scripts/灾备演练/年度灾备演练.py",
     "scripts/生成回测报告.py", "scripts/监控可测量性统计.py", "scripts/监控周复盘.py",
     "scripts/监控配置管理.py", "scripts/结果备份.py", "scripts/缓存管理.py",
+    "scripts/静态扫描.py",  # M1B-07：静态扫描薄入口（R-18 薄入口，委托 leakage_gate.static_scan.main_cli）
     "scripts/财务CSV更新.py", "scripts/财务数据入库.py", "scripts/运行API.py",
     "scripts/验收_B包保钱包.py", "scripts/验收_C包保Alpha.py", "scripts/验收_D包自治.py",
     "scripts/验收_回测引擎V5.py", "scripts/验收_监控M1保命.py",

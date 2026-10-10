@@ -980,6 +980,7 @@ def make_demo_data(
     symbols: Sequence[str] = ("000001.SZ", "000002.SZ", "600000.SH"),
     n_bars: int = 300,
     seed: int = 42,
+    seed_sidecar_path: Optional[str] = None,
 ) -> Dict[str, pd.DataFrame]:
     """构造确定性演示行情（趋势 + 周期噪声），供脚本与自测使用。
 
@@ -987,6 +988,8 @@ def make_demo_data(
         symbols: 标的代码序列。
         n_bars: 每标的 K 线数量（>20）。
         seed: 随机种子（同 seed 结果可复现）。
+        seed_sidecar_path: M2-06 种子 sidecar 路径；非 None 时校验/记录种子
+            （种子不一致 → 阻断），保证参数优化结果可复现、种子留痕。
 
     Returns:
         {symbol: DataFrame}，列为 open/high/low/close/volume/amount，
@@ -994,9 +997,14 @@ def make_demo_data(
 
     Raises:
         ValueError: n_bars 过小。
+        SeedSidecarError: 种子 sidecar 不一致（M2-06 阻断）。
     """
     if n_bars < 20:
         raise ValueError(f"n_bars 至少 20 根以便均线预热，收到: {n_bars}")
+    # M2-06：种子 sidecar 校验/记录（种子不一致 → 阻断）
+    if seed_sidecar_path is not None:
+        from myquant.leakage_gate.sanity import SeedSidecar
+        SeedSidecar(seed_sidecar_path).check_or_record("param_optimizer", seed)
     rng = np.random.default_rng(seed)
     dates = pd.date_range("2023-01-02", periods=n_bars, freq="B")
     data: Dict[str, pd.DataFrame] = {}

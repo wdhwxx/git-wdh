@@ -1,0 +1,18 @@
+# 文件名：.pre-commit-config.yaml
+# 预提交钩子：防泄漏门禁静态扫描（阶段 1-B，M1B-07）
+# -------------------------------------------------
+# 新代码（Python 源码）在提交前必须通过静态扫描，否则不得进入回测/实盘链路。
+# 用法：pip install pre-commit && pre-commit install
+# 扫描委托 scripts/静态扫描.py（薄入口）→ myquant/leakage_gate/static_scan.py。
+# 仅对暂存的 .py 变更文件扫描；未装 pre-commit 时不阻断（CI static-scan-check 兜底）。
+
+repos:
+  - repo: local
+    hooks:
+      - id: leakage-static-scan
+        name: 防泄漏门禁静态扫描（M1B-07）
+        entry: python scripts/静态扫描.py
+        language: system
+        files: '\.py$'
+        pass_filenames: true
+        always_run: false

@@ -31,6 +31,7 @@ from typing import Any, Dict, List, Optional, Set
 from myquant.core.config_loader import ConfigLoader
 from myquant.leakage_gate.contract import _get_entry, _load_ledger, _load_registry
 from myquant.leakage_gate.gate import Violation, register_gate_check
+from myquant.leakage_gate.static_scan import extract_referenced_columns  # noqa: F401  # canonical 单实现（M1B-01）
 
 logger = logging.getLogger("myquant.leakage_gate.consumption")
 
@@ -55,6 +56,9 @@ def extract_columns_from_source(source: str, ledger_keys: Set[str]) -> Set[str]:
       - columns=[...] / 任意字符串常量比对台账键名
       - 非台账键名的字符串常量被过滤（不误报注释/日志等）
 
+    M1B-01 起委托 static_scan.extract_referenced_columns（canonical 单一实现，
+    与静态扫描器输出列引用清单判定一致，v3.0 §6.5 验收）。
+
     Args:
         source: 策略源码文本。
         ledger_keys: 台账全部列名集合（候选过滤）。
@@ -62,22 +66,7 @@ def extract_columns_from_source(source: str, ledger_keys: Set[str]) -> Set[str]:
     Returns:
         Set[str]: 命中的引用列集合。
     """
-    try:
-        tree = ast.parse(source)
-    except SyntaxError as e:
-        logger.error(f"策略源码解析失败: {e}")
-        return set()
-    found: Set[str] = set()
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Constant)
-            and isinstance(node.value, str)
-            and node.value in ledger_keys
-        ):
-            found.add(node.value)
-        elif isinstance(node, ast.Attribute) and node.attr in ledger_keys:
-            found.add(node.attr)
-    return found
+    return extract_referenced_columns(source, ledger_keys)
 
 
 # ═══════════════════════════════════════════════

@@ -180,6 +180,8 @@ Pythonwdhmm/
 
 ├── .env.example                      # 环境变量模板，包含密钥、数据库路径、API Key等示例
 
+├── .pre-commit-config.yaml           # ✨【回写#283】本地 pre-commit 钩子（M1B-07）：leakage-static-scan（防泄漏静态扫描），entry=python scripts/静态扫描.py，仅暂存 .py 变更文件，未装 pre-commit 不阻断（CI static-scan-check 兜底）
+
 ├── alembic.ini                       # ✨【第6项】Alembic迁移配置：script_location=myquant/database/migrations，SQLite URL，英文注释避免Windows GBK解码问题
 
 │
@@ -366,6 +368,7 @@ Pythonwdhmm/
 │   │   ├── 防泄漏门禁红线清单.md      # ✨【回写#270】治理台账（v3.0 §6.8）：RL-01~14 红线 + 豁免档位（不可豁免/需审批/待数据源建设后启用）+ 对应规则 R01~R11
 │   │   └── 数据列时点台账.md          # ✨【回写#279】列级时点台账（v3.0 §6.1，M0P-01）：datasets/processed 13 业务列 + 派生列（前收盘价）共 14 列逐列登记 derived_at/date_basis/现状判定/目标日基/档位/consumers（实测填写，[]=实测零消费）；每股收益 severity=阻断 target=eff_disclosure_date（现状穿越 v3.0 §6.4.2 ③④）
 │   │   └── 存量guard资产重登记.md     # ✨【回写#280】存量 guard 资产重登记（v3.0 §3，M0B-01/02/03）：§3 资产表 14 行按三档（✅实测有效/⚠️仅自报/❌未接入）逐行加"运行期是否可达"结论 + fail-open 三处登记（engine.py:684-688/provider.py:545-552/manager.py:1298-1299 映射 M1A-04/05/06）+ performance_config.py:31/:168 口径更正
+│   │   └── R03里程碑检查点.md         # ✨【回写#283】R03 单独里程碑检查点（G-04/M1B-03）：跨时间全样本拟合先警告档 + 人工复核调用方维度（factor_preprocessor:223-243/:246-264 的调用方 multi_factor_strategy:747/781/815 均为当日截面/滚动窗口，未确证时间维误用 → 不升阻断）；不并入 1-B 打包估时
 
 │
 
@@ -503,6 +506,7 @@ Pythonwdhmm/
 ；✨【回写#258】G1 装配注入（缓存管理 7 处 _new_factor_cache_factory / 其余 4 脚本各 1 处装配，业务逻辑零写入不变）
 │   ├── 财务CSV更新.py              # ✨【回写#74】财务CSV增量同步薄入口：参数(--all/--symbols/--start-date/--end-date/--no-import)+路径探测+调用FinancialSyncService；默认只拉financial_data缺失的清洗保留标的（增量优先，当前=601091.SH类新股）→与本地最新CSV合并去重→落盘→自动入库；全市场重拉与GUI行为一致；输出下一步建议（重跑全量清洗）
 
+│   ├── 静态扫描.py                 # ✨【回写#283】防泄漏静态 AST 扫描薄入口（M1B-07）：参数解析+路径探针+委托 myquant/leakage_gate/static_scan.py main_cli；--all 全量扫描 myquant+scripts / 传 paths 只扫变更文件 / --json 结构化输出；0=无阻断、1=阻断/参数错误；被 .pre-commit-config.yaml leakage-static-scan hook 与 CI static-scan-check job 调用
 │   └── 验收_回测引擎V5.py             # ✨【V5·P1】引擎验收入口：执行统一验收清单（事件/向量化/混合引擎正确性+三模式一致性+回归+性能基准），输出验收报告
 
 │   ├── kunpeng_param_scan.py       # ✨【回写#34补录】鲲鹏策略参数网格扫描工作脚本（两阶段：信号参数扫描→出场+仓位扫描，真实数据 vectorized，输出 results/param_scan/scan_results.json；既有工作脚本补录，非薄入口，无调用方，建议后续薄化或并入 参数优化.py）
@@ -828,6 +832,8 @@ Pythonwdhmm/
 │   │   ├── test_gate_red_on_injected_leak.py # ✨【回写#276】出口强制测试（M0-08 同批/M0-13 核心，3 用例）：注入引用每股收益 → 出口断言必报红（R11）+ create_engine spy 验证挂载（strategy_id=name）+ create_live_engine spy 验证挂载（真实 ma_cross 装配）
 │   │   ├── test_registry_contract.py # ✨【回写#277】注册强制契约测试（M0-10 缺口补齐，6 用例）：7 策略契约元数据齐全 + 注册表主键=name（DEC-01）+ FakeNoContract 注册抛 AttributeError（M0-04 反向）+ 部分契约仍被拒 + 注册表 name 集合 == strategy_registry.yaml 真源
 │   │   ├── test_ledger_truth_source.py # ✨【回写#279】真实台账真源冒烟（M0P-01/02/03 固化，4 用例，不 monkeypatch）：台账 14 列机读可读 + 每股收益阻断/目标 eff_disclosure_date/收盘价 trade_date/无待确认残留 + 7 策略真实出口全通过 + 真实台账下注入每股收益必报红（R11）
+│   │   ├── test_static_scan.py        # ✨【回写#283】静态 AST 扫描器反向测试（M1B-06，27 用例）：R01a/R02/R04/R05/R09/R10 阻断级注入命中必报红 + R01b 放行登记 + R03/R07 警告档（含截面白名单不误报）+ 列引用与 consumption 判定一致 + 内容哈希缓存命中不重扫 + 只扫变更文件 + check_static_scan/check_cross_sectional 门禁 + 横截面 as-of 校验（M1B-04）+ 因子截断重算自检（M1B-05，正常通过/泄漏阻断/短数据跳过）
+    │   │   ├── test_sanity.py             # ✨【回写#284】模型层统计门禁反向测试（轨道 E，M2-01~06，22 用例）：shuffle-label 基线/显著告警/噪声放行 + 训练侧时间越界/窗口退化/epoch 秒口径 + 特征-标签对齐（含样本数不一致）+ 特征白名单注入每股收益必报红（on_columns + 门禁出口）+ SeedSidecar 记录/verify/不一致阻断/monte_carlo 与 param_optimizer 接线
 
 │   │   └── test_gate_governance.py  # ✨【回写#273】门禁中心治理测试（M0-11 核心）：GateConfig 开关（enabled 阻断/disabled 仅审计）、Violation 台账结构、违规落 audit_log（临时库验证）、检查注册冲突/异常 fail-closed
 
@@ -939,6 +945,10 @@ Pythonwdhmm/
     │   ├── contract.py               # ✨【回写#274】契约完整性校验（M0-06）：声明完整（R09/RL-02 契约层：decision_time/available_time/universe.pit_status/consumed_columns/ruleset 深度校验）+ 与列级台账比对（R10/RL-11：台账缺失 fail-closed，契约不能自证 PIT，v3.0 附录 B 注2）；契约真源=config/strategy_registry.yaml（主键=name，DEC-01）；不 import strategies（L0→L3 反向跨层会被 R-02 拦，分层合规）；导入即注册（ensure_registered 幂等）
 
     │   ├── consumption.py            # ✨【回写#275】消费侧列门禁（L0.5，M0-07，v3.0 §6.1.3）：AST 引用列提取（df["列"]/df.列/columns=[...]/字符串常量精确匹配，纯函数 extract_columns_from_source）+ 纯函数比对（实测∪声明 ∩ severity=阻断 ≠ ∅ → R11/RL-13 报红，validate_consumption）+ 台账缺失 fail-closed；策略源码只读文件做 AST 非 import（分层合规）；导入即注册
+
+    │   ├── static_scan.py            # ✨【回写#283】静态 AST 扫描器（阶段 1-B，M1B-01/02/03）：R01a 特征侧负向移位阻断/R01b 标签侧放行登记/R02 center=True 阻断/R04 随机切分阻断/R05 全样本标准化阻断/R03 跨时间全样本拟合警告档（G-04 先警告+人工复核）/R07 横截面告警/R09 report_date 时点匹配阻断/R10 未登记派生列阻断；输出列引用清单供 consumption 消费（canonical 单实现）+ 内容哈希缓存（未变不重扫）+ 只扫变更文件（scan_paths/main_cli）；挂"static_scan"门禁
+    │   ├── cross_sectional.py        # ✨【回写#283】横截面 as-of 校验器（阶段 1-B，M1B-04，v3.0 §6.5-2/RL-07）：validate_asof/validate_cross_sectional_panel 纯函数（当日截面只用当日数据）+ check_cross_sectional 挂"cross_sectional"门禁（R07 警告）；只读源码文件非 import（分层合规）
+    │   ├── sanity.py                 # ✨【回写#284】模型层统计门禁中枢（阶段 2，轨道 E，M2-01~06，v3.0 §6.6）：M2-01 shuffle-label 探测（run_shuffle_label_baseline 打乱标签基线分布+阈值=mean+k*std，check_shuffle_label 真实指标显著>噪声上界→告警/拦截）+ M2-02 validate_train_temporal（特征最近时间 ≤ train_end_time 且 > train_start_time，epoch 秒口径与 _ts_to_str 一致）+ M2-03 validate_feature_label_alignment（特征 available_time ≤ 标签 decision_time）+ M2-04 check_feature_whitelist 挂"feature_whitelist"门禁（features.py BAR_CN_COLUMN_MAP 新增 severity=阻断 列如每股收益→R11 出口报红；AST 读文件非 import）+ M2-05/06 SeedSidecar（随机种子 sidecar 记录在案、种子不一致→SeedSidecarError 阻断）+ check_training_sanity 汇总（供 training_pipeline run() 薄接线）
 
     │
 
@@ -1053,7 +1063,7 @@ Pythonwdhmm/
 
     │   ├── factor_cache.py           # ✨【V5·P0】三级因子缓存：L1进程内dict（LRU）→L2磁盘（cache/factor目录，parquet+元数据校验）→L3永久缓存（指纹一致则复用）；读路径穿透式逐级命中，写路径回填上级；--no-cache-sync跳过写回；联动data_fingerprint指纹与memory_watcher内存水位；✨【回写#101】F-13 L2 改目录分层存储（{factor_name}/{symbol}/{params_hash}_{fp_short}.parquet）消灭下划线因子名解析歧义；nofp 无指纹场景短 TTL 封顶 1 小时 + WARNING 告警
 
-    │   └── factor_engine.py          # ✨【V5·P0】向量化因子引擎：按indicator注册表批量并行计算因子（num_workers），内部复用factor_cache三级缓存，输出因子DataFrame（多因子合并列），防未来函数校验（因子仅用历史）
+    │   └── factor_engine.py          # ✨【V5·P0】向量化因子引擎：按indicator注册表批量并行计算因子（num_workers），内部复用factor_cache三级缓存，输出因子DataFrame（多因子合并列），防未来函数校验（因子仅用历史）；✨【回写#283】M1B-05 截断重算自检模式（truncated_selfcheck 构造参数）：仅新注册因子首次计算时对截断边界行做全量 vs 截断重算比对，确认泄漏（存在性不一致/数值差异）抛 FactorLookaheadError 阻断进入回测/实盘链路，存量因子不受影响；auto_fingerprint（:303-305）为 R08 白名单正确调用不受影响
 
     │   └── factor_validator.py       # ✨【回写#89】F-02 因子有效性校验器：RankIC（Spearman主口径）+PearsonIC（辅口径）截面IC时序、ICIR=mean/std、IC t统计量=ICIR·√N、IC胜率、衰减曲线（1/5/10/20持有期）、5层分层因子收益+换手、FactorProfile档案（样本区间/IC/ICIR/胜率/换手/经济逻辑/状态）、active→observe→eliminated门槛自动流转、ic_weighted_weights（方向校正+下限约束+归一化）、经济逻辑登记（内置4因子逻辑表，额外因子缺economic_logic禁止进组合）；防未来铁律：因子值t时刻trailing，未来收益仅作评估标签（compute_forward_returns显式标注禁止进信号路径）；纯函数无状态，统计复用math_utils
 
@@ -1102,7 +1112,7 @@ Pythonwdhmm/
 
     │   ├── recorder.py               # 交易记录器：成交明细、持仓变动、资金曲线
 
-    │   ├── monte_carlo.py            # ✨【第4项】蒙特卡洛分析：已实现收益重采样引导模拟，破产概率/收益置信区间/净值分位带；✨【V5·P2】新增skip开关（配置monte_carlo.enabled=false或--no-monte-carlo跳过模拟，批量/参数扫描默认关闭，保真模式自动开启）
+    │   ├── monte_carlo.py            # ✨【第4项】蒙特卡洛分析：已实现收益重采样引导模拟，破产概率/收益置信区间/净值分位带；✨【V5·P2】新增skip开关（配置monte_carlo.enabled=false或--no-monte-carlo跳过模拟，批量/参数扫描默认关闭，保真模式自动开启）；✨【回写#284】M2-05 种子 sidecar：MonteCarloAnalyzer 增 seed_sidecar_path（可选，None 零变化）；analyze 时经 SeedSidecar.check_or_record("monte_carlo", seed) 校验/记录随机种子，种子不一致→SeedSidecarError 阻断（结果可复现、种子留痕）
 
     │   ├── pdf_report.py             # ✨【第4项】PDF报告生成（fpdf2纯Python，中文字体自动探测，专业排版可打印存档）
 
@@ -1122,7 +1132,7 @@ Pythonwdhmm/
 
     │   ├── incremental_backtest.py   # ✨【V5·P2】增量回测：基期分段+新增段增量计算+结果拼接（历史结果复用，只重算新增交易日），供scripts/增量回测.py调用；✨【回写#168】_config_signature 10字段 + format_version 升版全量重算（KP-P5-09）
 
-    │   ├── param_optimizer.py        # ✨【V5·P2】参数优化器：网格/随机/坐标下降三策略搜索最优参数，输出参数热度图，供scripts/参数优化.py调用；✨【回写#138】in_sample_end 样本内→样本外分割（KP-P2-05）：ranked_in_sample寻优/ranked_out_sample确认/best样本内选参样本外结论/报告in-out双列/试验次数/WalkForwardResult滚动walk-forward
+    │   ├── param_optimizer.py        # ✨【V5·P2】参数优化器：网格/随机/坐标下降三策略搜索最优参数，输出参数热度图，供scripts/参数优化.py调用；✨【回写#138】in_sample_end 样本内→样本外分割（KP-P2-05）：ranked_in_sample寻优/ranked_out_sample确认/best样本内选参样本外结论/报告in-out双列/试验次数/WalkForwardResult滚动walk-forward；✨【回写#284】M2-06 种子 sidecar：make_demo_data 增 seed_sidecar_path（可选，None 零变化）；生成合成行情前经 SeedSidecar.check_or_record("param_optimizer", seed) 校验/记录随机种子，种子不一致→SeedSidecarError 阻断（参数优化可复现、种子留痕）
 
     │   ├── consistency_check.py      # ✨【V5·P3】三模式一致性校验器：engine/vectorized/mixed同参数同数据比对收益曲线与成交明细，差异超阈值即判定失败，供scripts/一致性校验.py调用
 
@@ -1412,7 +1422,7 @@ Pythonwdhmm/
 
     │   ├── model_registry.py         # 模型注册版本管理；✨【回写#88】ModelVersion 新增 feature_signature 字段并持久化（metadata 优先解析，feature_columns 缺失时回退 signature.columns）；✨【回写#92】status 扩展 retired（失效禁止调用）+ ModelRetiredError + mark_retired（自动降级到版本号最大的非失效版本/无候选清空active+记录last_retire）+ load_model(allow_retired=False 默认拒绝加载失效版本) + register_model(require_win_gate/win_metric 默认 False 零变化，开启后新版本必须跑赢 active 方可激活)；✨【回写#94】F-07 元数据补全+HMAC签名：ModelVersion 新增 data_snapshot/runtime_env/model_params_count/signature(+signature_algorithm/signed_at)（to_dict/from_dict 同步）；register_model 采集补全字段+HMAC 签名（密钥=环境变量 MYQUANT_MODEL_SIG_KEY，无密钥降级跳过签名并告警=默认零变化）；load_model 校验顺序=先验签名再验 checksum；新增 ModelSignatureError；verify_model 加签名校验（元数据被篡改→False）；✨【回写#182】KP-P6-05 治理：status 默认 active→pending_review（register 不再硬编码 active）+ tier/model_card/frozen/approval 治理字段 + approve_version 审批激活（旧 active 归档、写 approval/head.approved_at）；✨【回写#184】win_gate 门控通过→active+approval(win_gate) 自动审批留痕、head.active 仅 active 状态设置（全量回归修复）
 
-    │   ├── training_pipeline.py      # 训练流水线；✨【回写#88】注册 metadata 增加 feature_signature（由实际训练特征 DataFrame 构建，含 config_hash）；✨【回写#92】evaluate_model 增加 compute_ic（numpy 手写 Spearman：回归=预测vs真实收益、分类=正类概率vs标签）写入 metrics["ic"]，run() 增加 enable_win_gate/win_metric（默认 False 零变化，开启后注册侧门控"跑赢当前 active"）；✨【回写#94】F-07 注册侧补全：data_snapshot（训练数据 X/y 内容 sha256 指纹+行数+起止时间，只登记训练时已得事实防未来）+ runtime_env（注册时点 python/numpy/pandas 版本）+ model_params_count（防御式：常见属性计数，算不出记 None 告警不阻断）+ 常驻绩效 max_drawdown（验证集策略收益 sign(pred-0.5)×y 累计净值最大回撤，仅用验证集已得数据）；✨【回写#95】F-08 面板切分日历化：新增 panel_time_series_split（日历缓冲=训练末时间戳+horizon 个唯一交易日、同时间戳整组确定性归属、样本数累计到 train_ratio、参数防御；不动现有 time_series_split 零变化）+ run() 支持 data: DataFrame|Dict[str,DataFrame]（dict 走面板路径 build_panel_dataset→panel_time_series_split）+ data_snapshot 增 symbols 字段；✨【回写#96】F-09 扣费后指标：evaluate_model 增 compute_net（默认 False 零变化）→ metrics 增 net_return（毛策略累计收益−换手惩罚，换手率=方向信号变化比例）与 turnover；win gate 支持 win_metric="net_return"（registry 通用取值零改动），验收"选型报告同时给出毛/净指标"；✨【回写#99】F-12 滚动/扩展窗口 CV + walk-forward（只增不改）：新增 CvSplitConfig（mode=expanding/rolling、n_folds、initial_train_ratio、valid_days、horizon、min_train/min_valid、rolling_window_days，from_dict 参数防御）+ time_series_cv_split（交易日刻度推进、验证段连续不重叠、expanding 训练窗累积 / rolling 固定窗、horizon+1 日历缓冲对齐 F-08/F-06、group_ids 传入即整组归属、铁律11 只用训练时已得数据）+ CvFold/CvReport（各折 train/valid 索引·起止时间·n_train/n_val·评估指标；win_metric 默认 ic；折间均值/标准差/ICIR；to_dict JSON 安全入档）+ WalkForwardResult（逐期时间范围/IC/换手/毛净收益 + 累计净收益稳定性曲线 + ic_mean/ic_std/icir/正 IC 期占比/净值最大回撤）+ TrainingPipeline.run_cv（复用 build_dataset dict→面板 dispatch；每折新模型实例 fit train → evaluate valid（compute_ic=True + drawdown 常驻 + 成本化开启时 net）；不注册 registry，CV 证据供选型）+ walk_forward（同一 fold 生成器逐期重训，输出稳定性曲线）；验收：CV 折间 IC 波动报告入档、超参选择基于 CV 均值（测试演示 alpha 两组对比）禁止单次留出定参
+    │   ├── training_pipeline.py      # 训练流水线；✨【回写#88】注册 metadata 增加 feature_signature（由实际训练特征 DataFrame 构建，含 config_hash）；✨【回写#92】evaluate_model 增加 compute_ic（numpy 手写 Spearman：回归=预测vs真实收益、分类=正类概率vs标签）写入 metrics["ic"]，run() 增加 enable_win_gate/win_metric（默认 False 零变化，开启后注册侧门控"跑赢当前 active"）；✨【回写#94】F-07 注册侧补全：data_snapshot（训练数据 X/y 内容 sha256 指纹+行数+起止时间，只登记训练时已得事实防未来）+ runtime_env（注册时点 python/numpy/pandas 版本）+ model_params_count（防御式：常见属性计数，算不出记 None 告警不阻断）+ 常驻绩效 max_drawdown（验证集策略收益 sign(pred-0.5)×y 累计净值最大回撤，仅用验证集已得数据）；✨【回写#95】F-08 面板切分日历化：新增 panel_time_series_split（日历缓冲=训练末时间戳+horizon 个唯一交易日、同时间戳整组确定性归属、样本数累计到 train_ratio、参数防御；不动现有 time_series_split 零变化）+ run() 支持 data: DataFrame|Dict[str,DataFrame]（dict 走面板路径 build_panel_dataset→panel_time_series_split）+ data_snapshot 增 symbols 字段；✨【回写#96】F-09 扣费后指标：evaluate_model 增 compute_net（默认 False 零变化）→ metrics 增 net_return（毛策略累计收益−换手惩罚，换手率=方向信号变化比例）与 turnover；win gate 支持 win_metric="net_return"（registry 通用取值零改动），验收"选型报告同时给出毛/净指标"；✨【回写#99】F-12 滚动/扩展窗口 CV + walk-forward（只增不改）：新增 CvSplitConfig（mode=expanding/rolling、n_folds、initial_train_ratio、valid_days、horizon、min_train/min_valid、rolling_window_days，from_dict 参数防御）+ time_series_cv_split（交易日刻度推进、验证段连续不重叠、expanding 训练窗累积 / rolling 固定窗、horizon+1 日历缓冲对齐 F-08/F-06、group_ids 传入即整组归属、铁律11 只用训练时已得数据）+ CvFold/CvReport（各折 train/valid 索引·起止时间·n_train/n_val·评估指标；win_metric 默认 ic；折间均值/标准差/ICIR；to_dict JSON 安全入档）+ WalkForwardResult（逐期时间范围/IC/换手/毛净收益 + 累计净收益稳定性曲线 + ic_mean/ic_std/icir/正 IC 期占比/净值最大回撤）+ TrainingPipeline.run_cv（复用 build_dataset dict→面板 dispatch；每折新模型实例 fit train → evaluate valid（compute_ic=True + drawdown 常驻 + 成本化开启时 net）；不注册 registry，CV 证据供选型）+ walk_forward（同一 fold 生成器逐期重训，输出稳定性曲线）；验收：CV 折间 IC 波动报告入档、超参选择基于 CV 均值（测试演示 alpha 两组对比）禁止单次留出定参；✨【回写#284】M2-02/03/04 模型层门禁接线：run() 计算 train_start/train_end 后调 check_training_sanity（逻辑下沉 myquant/leakage_gate/sanity.py，R-24 行数冻结只减不增：接线 5 行 + 顶部 docstring 收紧等量行，文件净增 0 保持 1651）——训练侧时间校验（特征最近时间 ≤ train_end_time 且 > train_start_time，epoch 秒口径）+ 特征-标签对齐 + 特征白名单 R11（BAR_CN_COLUMN_MAP 新增阻断列→拦截）
 
     │   ├── inference_service.py      # 批量/实时预测服务；✨【回写#88】_build_engine 校验升级为注册签名（列集合+顺序双向硬校验），无签名旧模型回退静态列比对；✨【回写#102】F-14 推理结果短 TTL 缓存（result_cache_ttl_ms 默认 0=关闭零变化，key=模型+版本+最新时间戳，同 bar 重复调用复用）
 
@@ -4218,3 +4228,24 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    c. **M0B-03 口径更正**：performance_config.py:168 light_guard 读取点补注释"未接入引擎（仅配置声明同步开关）"——与 :31 既有注释及文档口径一致。
    d. **蓝图目录树登记**：docs/未来函数与数据泄漏门禁/ 段加 存量guard资产重登记.md（✨#280）。
    e. **纪律遵守**：蓝图优先；纯文档登记 + 注释级改动（零业务逻辑变更）；防未来（只登记已落盘事实）；git 提交（commit message 引用 #280）。
+## #283 · 2026-10-10 · 防泄漏门禁施工·轨道D 阶段1-B 静态扫描（M1B-01~07）
+   事实来源：本次落地（进入轨道 D，M1B 静态扫描；依赖 M1A 数据层收口已提交）；代码级核验：py_compile 全部新增/修改文件 OK；leakage_gate 全量 78 passed（原 51 + 静态扫描反向 27）+ 架构门禁 30 passed/1 skipped + 因子引擎相关 57 passed（截断自检零回归，基线 #282 同口径）；真实代码库静态扫描（275 文件）0 阻断 0 警告、R01b 放行登记 2（features.py:663 generate_labels + factor_validator.py:246 compute_forward_returns，与 §10.3 一致）；7 策略静态扫描阻断 0。
+   a. **新建 myquant/leakage_gate/static_scan.py**（M1B-01/02/03）：静态 AST 扫描器 + 列引用清单（canonical，供 consumption.py 消费，判定一致）+ 内容哈希缓存（未变不重扫）+ 只扫变更文件（scan_paths/main_cli）；规则按 §10 逐条标定——R01a 特征侧负向移位阻断 / R01b 标签侧放行登记（按函数上下文判定，AST 拆分）/ R02 center=True 阻断 / R04 train_test_split+KFold(shuffle=True) 阻断 / R05 全样本 StandardScaler 阻断 / R09 report_date 时点匹配阻断（ORDER BY report_date + report_date/trade_date 比较双签名，M1A 修复后收敛 0 命中，白名单 financial_service/time_semantics/derived_metrics 等）/ R10 未登记派生列 .insert() 阻断（前收盘价/每股收益已在台账 0 命中）/ R03 跨时间全样本拟合**警告档**（G-04）/ R07 横截面告警；挂"static_scan"门禁（导入即注册）。
+   b. **新建 myquant/leakage_gate/cross_sectional.py**（M1B-04）：横截面 as-of 校验器——validate_asof / validate_cross_sectional_panel 纯函数（当日截面只用当日数据，RL-07）+ check_cross_sectional 挂"cross_sectional"门禁（R07 警告）；只读源码文件非 import（分层合规）。
+   c. **修改 myquant/indicators/factor_engine.py**（M1B-05）：截断重算自检模式——构造参数 truncated_selfcheck（默认 True）+ _self_checked_factors 集合（仅新注册因子首次计算强制，存量不受影响）+ _truncated_recompute_selfcheck（截断边界行全量 vs 截断重算比对，存在性不一致/数值差异→FactorLookaheadError 阻断）；:303-305 auto_fingerprint 为 R08 白名单正确调用不受影响；正常 sma 通过/泄漏指标（shift(-1)）阻断/短数据跳过。
+   d. **新建 tests/leakage_gate/test_static_scan.py**（M1B-06，27 用例）：阻断级规则反向测试（R01a/R02/R04/R05/R09/R10 注入命中必报红）+ R01b 放行登记 + R03/R07 警告档（含截面白名单不误报）+ 列引用与 consumption 判定一致 + 内容哈希缓存命中不重扫 + 只扫变更文件 + check_static_scan/check_cross_sectional 门禁 + 横截面 as-of（M1B-04）+ 因子截断自检（M1B-05）反向验证。
+   e. **新建 scripts/静态扫描.py 薄入口 + .pre-commit-config.yaml + CI static-scan-check job**（M1B-07）：脚本薄入口委托 static_scan.main_cli；pre-commit hook（leakage-static-scan，暂存 .py 变更文件，未装不阻断 CI 兜底）；CI 独立 job（全库扫描阻断即失败 + 静态扫描反向测试）；新代码不过扫描不得进入回测/实盘链路。
+   f. **test_architecture.py ENTRY_ALLOWLIST 登记**：scripts/静态扫描.py（R-23 入口白名单，相对项目根）。
+   g. **蓝图目录树登记**：myquant/ 段 leakage_gate/ 子树加 static_scan.py+cross_sectional.py、indicators/ 段 factor_engine.py 追加 M1B-05 说明、scripts/ 段加 静态扫描.py、根段加 .pre-commit-config.yaml、tests/ 段 leakage_gate/ 加 test_static_scan.py、docs/未来函数与数据泄漏门禁/ 加 R03里程碑检查点.md，均带 ✨【回写#283】。
+   h. **纪律遵守**：蓝图优先（先登记目录树再落代码）；R-18 脚本薄入口（静态扫描.py 零业务类定义）；新增入口先登记 ENTRY_ALLOWLIST；R-19 零覆盖：static_scan/cross_sectional 经显式子模块 import 被 tests 引用（探针识别）；文件不超 OVERSIZE 1500 行；严格防未来（扫描器只分析已写出源码、自检只比对已发生结果，不预测未来）；git 提交（commit message 引用 #283）。
+
+## #284 · 2026-10-10 · 防泄漏门禁施工·轨道E 阶段2 模型层统计门禁（M2-01~07）
+   事实来源：本次落地（进入轨道 E，M2 模型层统计门禁；依赖轨道 D M1B 静态扫描已提交）；代码级核验：py_compile 全部新增/修改文件 OK；test_sanity.py 22 用例全过；leakage_gate 全量 100 passed（原 78 + sanity 22）+ 架构门禁 30 passed/1 skipped（R-24 冻结绿：training_pipeline 保持 1651）+ ML 端到端 131 passed + 回测/策略/脚本 290 passed/1 skipped（monte_carlo/param_optimizer 种子 sidecar 默认 None 零变化零回归）；真实代码库静态扫描 exit 0（0 阻断 0 警告，sanity.py 无未来函数模式）。
+   a. **新建 myquant/leakage_gate/sanity.py**（M2-01~06 中枢）：shuffle-label 探测（run_shuffle_label_baseline 打乱标签基线分布 mean/std/p95/p99 + 阈值=mean+k*std；check_shuffle_label 真实指标显著 > 噪声上界 → 告警/拦截）+ validate_train_temporal（M2-02 训练侧时间校验，特征最近时间 ≤ train_end_time 且 > train_start_time，epoch 秒口径与 _ts_to_str 一致，避免 tz 字符串往返）+ validate_feature_label_alignment（M2-03 特征 available_time ≤ 标签 decision_time）+ check_feature_whitelist 挂"feature_whitelist"门禁（M2-04，features.py BAR_CN_COLUMN_MAP 新增 severity=阻断 列如每股收益 → R11 出口报红，AST 读文件非 import）+ SeedSidecar（M2-05/06 种子 sidecar 记录在案、种子不一致 → SeedSidecarError 阻断）+ check_training_sanity 汇总。
+   b. **修改 myquant/ml/training_pipeline.py**（M2-02/03/04 接线）：run() 计算 train_start/train_end 后调 check_training_sanity(train_ts, min, max)（逻辑全部下沉 leakage_gate）；R-24 行数冻结只减不增——接线 5 行 + 顶部 docstring 收紧等量行，文件净增 0 保持 1651（架构门禁绿）。
+   c. **修改 myquant/backtest/monte_carlo.py**（M2-05）：MonteCarloAnalyzer 增 seed_sidecar_path（可选，None 零变化）；analyze 时 SeedSidecar.check_or_record("monte_carlo", seed) 校验/记录种子，不一致 → SeedSidecarError 阻断。
+   d. **修改 myquant/backtest/param_optimizer.py**（M2-06）：make_demo_data 增 seed_sidecar_path（可选，None 零变化）；生成合成行情前校验/记录种子，不一致 → SeedSidecarError 阻断。
+   e. **新建 tests/leakage_gate/test_sanity.py**（M2-01~06，22 用例）：shuffle-label 基线/显著告警/噪声放行 + 训练侧时间越界/窗口退化/epoch 秒口径 + 特征-标签对齐（含样本数不一致）+ 特征白名单注入每股收益必报红（on_columns + 门禁出口）+ SeedSidecar 记录/verify/不一致阻断 + monte_carlo/param_optimizer 接线反向。
+   f. **蓝图目录树登记**：myquant/ 段 leakage_gate/ 子树加 sanity.py、backtest/ 段 monte_carlo.py+param_optimizer.py 追加 M2-05/06、ml/ 段 training_pipeline.py 追加 M2-02/03/04、tests/ 段 leakage_gate/ 加 test_sanity.py，均带 ✨【回写#284】。
+   g. **纪律遵守**：蓝图优先（先登记目录树再落代码）；R-24 行数冻结（新增逻辑全下沉 leakage_gate，training_pipeline 净增 0）；R-19 零覆盖：sanity 经显式子模块 import 被 tests 引用（探针识别）；严格防未来（shuffle 只重排已发生标签、校验只比对已给时间与种子，不预测未来）；git 提交（commit message 引用 #284）。
+

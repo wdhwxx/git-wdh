@@ -8,16 +8,12 @@ training_pipeline.py - 训练流水线（内置模型 + 时间序列切分 + 评
   - 内置 numpy 模型（零额外依赖，可插拔）:
       LinearRegressor   岭回归（正规方程 (XᵀX+λI)⁻¹Xᵀy，处理奇异矩阵）
       LogisticRegressor 逻辑回归（梯度下降二分类，内置标准化 + sigmoid 数值稳定）
-      model_factory()   可插拔模型工厂：自定义模型（fit/predict）直接传入，
-                        默认按 label_type 返回内置模型
+      model_factory()   可插拔工厂：自定义模型（fit/predict）直传，默认按 label_type 返回内置
   - time_series_split 时间序列切分（防未来核心）:
-      绝不随机切分：按 timestamp 升序切 train（早期）/ valid（后期），
-        验证集只用训练之后的数据
-      strict_split 严格模式：验证集再向后跳过 horizon 个样本缓冲，
-        训练集样本标签（未来 horizon 期收益）不落入验证集时段（防标签重叠）
+      绝不随机切分：按 timestamp 升序切 train（早期）/ valid（后期），验证集只用之后数据
+      strict_split 严格模式：验证集再向后跳过 horizon 样本，防训练标签重叠
   - evaluate 评估指标（numpy 手写）:
-      回归: MSE / RMSE / MAE / R²
-      分类: accuracy / precision / recall / F1
+      回归: MSE/RMSE/MAE/R²；分类: accuracy/precision/recall/F1
   - run() 训练注册闭环:
       build_dataset(FeatureEngine) → 时间序列切分 → 训练(model_factory)
       → 验证集评估 → ModelRegistry.register_model
@@ -27,18 +23,16 @@ training_pipeline.py - 训练流水线（内置模型 + 时间序列切分 + 评
 防未来函数（铁律4，本任务核心）:
   - 时间序列切分绝不随机，验证集只使用训练之后的数据（strict_split 加 horizon 缓冲）
   - train_end_time 记录训练数据截止（任务21 推理只使用 <= 截止数据）
-  - 特征由任务18 FeatureEngine 保证 trailing 因果；标签仅训练目标列
-  - 本模块无任何预测未来行情的硬编码 / 预测未来收益的方法
+  - 特征由任务18 保证 trailing 因果；标签仅训练目标列；无任何预测未来方法
 
 数据来源（铁律）:
   - 输入只能读取 processed 清洗后数据（或 FeatureEngine 构建的 FeatureDataset），
     禁止读取 raw 原始数据（与总图 myquant/ml/ 注释一致）
 
 为实盘无缝对接（任务21-23 实盘增强前置）:
-  - 训练产出注册到 ModelRegistry：feature_config_hash + feature_columns + train_end_time
-    → 实盘推理侧校验特征一致 + 只用 <= 训练截止数据（防未来）
-  - retrain() 基于最新版本重训（版本链 + parent_version，实盘定期更新模型）
-  - source 区分 offline/live；模型版本热切换 / 回滚由任务19 ModelRegistry 支撑
+  - 训练产出注册 ModelRegistry：feature_config_hash + feature_columns + train_end_time
+    → 推理侧校验特征一致 + 只用 <= 训练截止数据（防未来）
+  - retrain() 基于最新版本重训（版本链 + parent_version）；source 区分 offline/live
   - 全部 numpy 实现，无 sklearn 依赖（当前环境 sklearn/lightgbm/xgboost 均不可用）
 
 依赖: numpy, pandas, myquant.ml.features, myquant.ml.model_registry
@@ -1379,6 +1373,12 @@ class TrainingPipeline:
         train_ts = [dataset.timestamps[int(i)] for i in train_idx]
         train_start = _ts_to_str(float(min(train_ts)))
         train_end = _ts_to_str(float(max(train_ts)))
+
+        # 6b. M2-02/03/04 模型层门禁（逻辑下沉 leakage_gate；违规 → 拦截）
+        from myquant.leakage_gate.sanity import check_training_sanity
+        _sanity_bad = check_training_sanity(train_ts, float(min(train_ts)), float(max(train_ts)))
+        if _sanity_bad:
+            raise TrainingError("训练侧模型层门禁未通过（M2-02/03/04）：" + "; ".join(_sanity_bad))
 
         # 7. F-07 data_snapshot：训练数据快照引用（指纹+行数+起止时间）。
         #    指纹 = 训练实际 X/y 内容的 sha256（np 数组字节布局确定）。

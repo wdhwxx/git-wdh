@@ -201,6 +201,7 @@ class MonteCarloAnalyzer:
         initial_capital: float = 1_000_000.0,
         ruin_threshold: float = 0.5,
         skip: bool = False,
+        seed_sidecar_path: Optional[str] = None,
     ):
         # 参数校验
         if not isinstance(skip, bool):
@@ -220,6 +221,8 @@ class MonteCarloAnalyzer:
         self.initial_capital = initial_capital
         self.ruin_threshold = ruin_threshold
         self.skip = skip
+        # M2-05：种子 sidecar 路径（None=不启用；启用则 analyze 时校验/记录种子）
+        self._seed_sidecar_path = seed_sidecar_path
 
         logger.info(
             f"蒙特卡洛分析器初始化: sim={n_simulations}, horizon={horizon_days}天, "
@@ -275,6 +278,11 @@ class MonteCarloAnalyzer:
                 initial_capital=self.initial_capital,
                 ruin_threshold=self.ruin_threshold,
             )
+
+        # M2-05：种子 sidecar 校验/记录（种子不一致 → 阻断；结果可复现、留痕）
+        if self._seed_sidecar_path is not None:
+            from myquant.leakage_gate.sanity import SeedSidecar
+            SeedSidecar(self._seed_sidecar_path).check_or_record("monte_carlo", self.seed)
 
         # 1. 提取历史日收益（已实现数据，pct_change 不含未来）
         eq_df = self._equity_to_series(equity_curve)
