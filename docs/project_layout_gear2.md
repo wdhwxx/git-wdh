@@ -823,6 +823,7 @@ Pythonwdhmm/
 
 │   │   ├── test_consumption_gate.py # ✨【回写#275】消费侧门禁测试（M0-12 核心，13 用例）：AST 提取（df["列"]/df.列/columns/精确匹配过滤）+ 纯函数比对正反向 + 台账缺失 fail-closed/未登记 + 7 策略真实扫描通过 + R11 反向测试（注入引用每股收益必报红）+ 出口断言报红 + 注册幂等
 │   │   ├── test_gate_red_on_injected_leak.py # ✨【回写#276】出口强制测试（M0-08 同批/M0-13 核心，3 用例）：注入引用每股收益 → 出口断言必报红（R11）+ create_engine spy 验证挂载（strategy_id=name）+ create_live_engine spy 验证挂载（真实 ma_cross 装配）
+│   │   ├── test_registry_contract.py # ✨【回写#277】注册强制契约测试（M0-10 缺口补齐，6 用例）：7 策略契约元数据齐全 + 注册表主键=name（DEC-01）+ FakeNoContract 注册抛 AttributeError（M0-04 反向）+ 部分契约仍被拒 + 注册表 name 集合 == strategy_registry.yaml 真源
 
 │   │   └── test_gate_governance.py  # ✨【回写#273】门禁中心治理测试（M0-11 核心）：GateConfig 开关（enabled 阻断/disabled 仅审计）、Violation 台账结构、违规落 audit_log（临时库验证）、检查注册冲突/异常 fail-closed
 
@@ -4184,3 +4185,8 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    d. **新建 tests/leakage_gate/test_gate_red_on_injected_leak.py（M0-13，3 用例）**：注入引用每股收益的策略源码+台账（每股收益阻断）→ assert_all_gates_pass 出口断言报红（R11 含每股收益）；create_engine spy 验证（monkeypatch "myquant.leakage_gate.assert_all_gates_pass"，_FakeWiredStrategy(StrategyBase) name="fake_wired" 实现 generate_signal，_WiredSentinel 哨兵中断，calls==["fake_wired"]）；create_live_engine spy 验证——初版打桩 MarketDataFeed/create_strategy 失败（函数内 import 不在模块命名空间抛 AttributeError），改为真实已注册策略 ma_cross 装配（paper 模式跳过合规门禁），calls==["ma_cross"]。
    e. **test_architecture.py OVERSIZE_LINE_BASELINE 同步**：live/engine.py 2858→2869（M0-09 出口强制挂载 +11 行治理注入，参照 #265 live/scheduler.py 2382→2409 同型先例：治理代码必要开销回写说明，只减不增继续生效）。
    f. **纪律遵守**：蓝图优先（先更新目录树再落代码）；零蓝图外新增文件；出口挂载零业务逻辑改动（纯治理插桩）；防御式 fail-closed（引擎创建前拦）；严格防未来（decision_time 取当前日期，仅校验已发生事实）；git 提交（commit message 引用 #276）。
+## #277 · 2026-10-10 · 防泄漏门禁施工·M0-10 缺口补齐（test_registry_contract.py 注册强制路径）
+   事实来源：本次落地（M0-10 缺口补齐，依赖 M0-04 已提交）；代码级核验：leakage_gate 全量 47 passed（原 41 + 本批 6）；tests/unit 基线 3627 passed/4 skipped 不受影响（本批仅新增测试文件）。
+   a. **新建 tests/leakage_gate/test_registry_contract.py**（M0-10 注册强制路径缺口，6 用例）：全部已注册策略契约元数据齐全（_CONTRACT_REQUIRED_FIELDS 7 字段非空，遍历注册表）、注册表主键=策略类 name（DEC-01）、_validate_contract_metadata 缺字段直接抛 AttributeError（错误消息含类名，首版断言用 name 已修正）、register_strategy 缺契约注册抛 AttributeError 且不写入注册表、部分契约（仅填 decision_time）仍被拒（完整性=7 字段全有）、注册表 name 集合 == config/strategy_registry.yaml 真源 name 集合（M0-03/M0-04 对齐）。
+   b. **任务清单 M0-10 状态回写 ✅**（test_contract.py 已于 #274 落地，注册强制路径本批补齐；M0-10 全部完成）。
+   c. **纪律遵守**：蓝图优先（先登记目录树再建文件）；零蓝图外新增文件；测试仅校验已注册类与已落盘注册表（防未来）；git 提交（commit message 引用 #277）。
