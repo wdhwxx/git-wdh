@@ -482,6 +482,11 @@ class RiskManager:
         # ═══ 熔断线联动（B-6）：标记"熔断自己造成的禁开仓"，复位时只回滚它 ═══
         self._circuit_paused: bool = False
 
+        # ═══ 引擎暂停联动（0.2/A1）：标记"引擎自己造成的禁开仓"，复位时只回滚它 ═══
+        # 与 _circuit_paused 分离：CRITICAL 巡检 / 对账差异 / 未领回订单由引擎置位，
+        # 复位用 resume_engine_holds（隔离语义，禁止经 resume() 误清数据质量暂停）。
+        self._engine_paused: bool = False
+
         logger.info(
             f"风控管理器初始化: 规则数={len(self._library.rule_names)}, "
             f"状态={self._status.value}, "
@@ -848,10 +853,86 @@ class RiskManager:
         logger.info(f"[risk] 熔断复位，已恢复开仓: {reason}")
         return True
 
+    # ═══════════════════════════════════════════
+    #  引擎暂停联动（0.2/A1）：隔离置位 / 复位（决策点4）
+    # ═══════════════════════════════════════════
+
+    def pause_for_engine(self, reason: str) -> bool:
+        """
+        引擎置位（0.2）：CRITICAL 健康巡检 / 对账差异 / 未领回订单等由引擎发起的暂停。
+
+        仅在当前允许新开仓时才置 PAUSED 并打 _engine_paused 标记（幂等）；
+        若已因其他原因（数据质量/熔断/手动）暂停，则不重复置位、返回 False。
+        复位时由 resume_engine_holds 仅回滚此标记，避免误清其他暂停（A1）。
+
+        Parameters
+        ----------
+        reason : str
+            引擎暂停原因（如 "CRITICAL 健康巡检"）
+
+        Returns
+        -------
+        bool : 是否本次新置为暂停（False=原本就不可开仓）
+        """
+        if not self.can_open_position():
+            logger.info(f"[risk] 引擎暂停：当前已不可开仓，幂等跳过 ({reason})")
+            return False
+        self.pause(f"引擎暂停: {reason}")
+        self._engine_paused = True
+        return True
+
+    def resume_engine_holds(self, reason: str = "引擎恢复") -> bool:
+        """
+        引擎复位（0.2/A1）：只回滚引擎自己造成的暂停（_engine_paused）。
+
+        **禁止调用 resume()**（risk_manager.py 的 resume() 会清除所有数据质量
+        暂停标记，违反决策点4"只清自己置位的"）。仿 _circuit_paused 先例：
+        仅当没有其他暂停原因（数据质量全局/单标的、熔断）时恢复到 NORMAL；
+        其他暂停仍在时保持 PAUSED（风控状态为权威、引擎为投影）。
+
+        Parameters
+        ----------
+        reason : str
+            复位原因
+
+        Returns
+        -------
+        bool : 是否本次执行了恢复（False=引擎未造成暂停，无需回滚）
+        """
+        if not self._engine_paused:
+            logger.info("[risk] 引擎复位：引擎未造成暂停，幂等跳过")
+            return False
+        self._engine_paused = False
+        # 仅当没有其他暂停原因时才恢复 NORMAL（决策点4：只清自己置位的）
+        has_other_pause = bool(
+            self._dq_global_paused
+            or self._circuit_paused
+            or any(s.is_paused for s in self._symbol_quality.values())
+        )
+        if not has_other_pause and self._status == RiskStatus.PAUSED:
+            self._set_status(RiskStatus.NORMAL, reason)
+            self._publish_pause_event(
+                paused=False,
+                pause_level="global",
+                symbol="",
+                reason=reason,
+            )
+            logger.info(f"[risk] 引擎暂停已解除，已恢复开仓: {reason}")
+        else:
+            logger.warning(
+                f"[risk] 引擎暂停已解除，但存在其他暂停原因，风控保持 PAUSED: {reason}"
+            )
+        return True
+
     @property
     def circuit_paused(self) -> bool:
         """是否因熔断线被禁开仓（可观测）。"""
         return self._circuit_paused
+
+    @property
+    def engine_paused(self) -> bool:
+        """是否因引擎被禁开仓（可观测）。"""
+        return self._engine_paused
 
     def _set_status(self, status: RiskStatus, reason: str) -> None:
         """设置风控状态（内部方法）"""
@@ -1807,6 +1888,8 @@ class RiskManager:
         self._dq_symbol_resume_signals.clear()
         # B-6：清除熔断禁开仓标记
         self._circuit_paused = False
+        # 0.2/A1：清除引擎暂停标记
+        self._engine_paused = False
         # 发布恢复事件（供实盘引擎/API消费，任务12-B）
         self._publish_pause_event(
             paused=False,

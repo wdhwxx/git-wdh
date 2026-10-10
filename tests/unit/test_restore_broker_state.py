@@ -134,7 +134,7 @@ class TestEngineRestoreBroker:
         mgr = engine._broker_manager
         mgr.cancel_order = lambda oid: True  # type: ignore[method-assign]
         paused: list = []
-        engine.pause = lambda: paused.append(True)  # type: ignore[method-assign]
+        engine.pause = lambda reason="": paused.append(True)  # type: ignore[method-assign]
         with caplog.at_level(logging.CRITICAL, logger="live.engine"):
             engine._reconcile_restored_orders(
                 [_active_buy_dict("a"), _active_buy_dict("b")]

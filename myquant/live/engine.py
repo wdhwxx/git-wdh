@@ -301,6 +301,8 @@ class LiveEngine(BaseEngine):
         self._state = EngineState.INIT
         self._start_time = 0.0
         self._pause_time = 0.0
+        # 0.2/决策点4：暂停来源记录（隔离复位区分"谁置位"，resume 时只清自己置位的）
+        self._pause_source: str = ""
 
         # 行情历史（为策略提供历史数据）
         self._bar_history: Dict[str, List[Bar]] = {}
@@ -843,24 +845,56 @@ class LiveEngine(BaseEngine):
         )
         return self._lookahead_guard.assert_pass()
 
-    def pause(self) -> None:
-        """暂停引擎（实时模式同时停止行情轮询，节能）"""
+    def pause(self, reason: str = "手动暂停") -> None:
+        """
+        暂停引擎（实时模式同时停止行情轮询，节能）。
+
+        0.2/决策点4：风控状态为权威、引擎为投影——同步置风控暂停
+        （pause_for_engine 隔离语义，不碰数据质量暂停标记），并记录
+        _pause_source 供隔离复位区分"谁置位"。
+        """
         if self._state != EngineState.RUNNING:
             return
         self._state = EngineState.PAUSED
         self._pause_time = time.time()
+        self._pause_source = reason
+        # 0.2：同步风控暂停（隔离置位，仅当风控当前可开仓时生效）
+        if self._risk_manager is not None:
+            try:
+                self._risk_manager.pause_for_engine(reason)
+            except Exception as e:
+                logger.warning(f"[engine] pause 同步风控暂停失败: {e}")
         # C项：实时模式暂停feed轮询（节能，避免无效请求）
         if self._is_realtime_feed() and self._data_feed and hasattr(self._data_feed, 'stop'):
             try:
                 self._data_feed.stop()
             except Exception as e:
                 logger.warning(f"[engine] pause时feed.stop异常: {e}")
-        logger.info("[engine] 引擎已暂停")
+        logger.info(f"[engine] 引擎已暂停: {reason}")
 
-    def resume(self) -> None:
-        """恢复引擎（实时模式同时恢复行情轮询）"""
+    def resume(self, reason: str = "引擎恢复") -> None:
+        """
+        恢复引擎（实时模式同时恢复行情轮询）。
+
+        0.2/A1 硬约束：**禁止调用 risk_manager.resume()**（会清除所有数据质量
+        暂停标记）。改为 resume_engine_holds 隔离复位（只回滚引擎自己置位的）；
+        若风控仍有其他暂停（数据质量/熔断/手动），引擎保持 PAUSED
+        （风控状态为权威、引擎为投影，决策点4）。
+        """
         if self._state != EngineState.PAUSED:
             return
+        if self._risk_manager is not None:
+            try:
+                released = self._risk_manager.resume_engine_holds(reason)
+                if released:
+                    self._pause_source = ""
+                if not self._risk_manager.can_open_position():
+                    logger.warning(
+                        "[engine] 风控仍处于暂停（其他原因），引擎保持 PAUSED"
+                    )
+                    return
+            except Exception as e:
+                logger.warning(f"[engine] resume 同步风控复位失败: {e}")
         self._state = EngineState.RUNNING
         # C项：实时模式恢复feed轮询
         if self._is_realtime_feed() and self._data_feed and hasattr(self._data_feed, 'start'):
@@ -868,7 +902,7 @@ class LiveEngine(BaseEngine):
                 self._data_feed.start(poll_interval=self._realtime_poll_interval)
             except Exception as e:
                 logger.warning(f"[engine] resume时feed.start异常: {e}")
-        logger.info("[engine] 引擎已恢复")
+        logger.info(f"[engine] 引擎已恢复: {reason}")
 
     @property
     def state(self) -> str:
@@ -1879,7 +1913,7 @@ class LiveEngine(BaseEngine):
                 f"[engine] 未领回订单 {len(unclaimed)} 超过阈值 {threshold}，"
                 "暂停引擎（双账本漂移风险）"
             )
-            self.pause()
+            self.pause(reason="未领回订单超阈（双账本漂移风险）")
 
     def _save_state(self, tag: str = "") -> None:
         """保存实盘状态快照（H2修复；停止时/定时快照调用）"""
@@ -2002,6 +2036,8 @@ class LiveEngine(BaseEngine):
                 data_feed=self._data_feed,
                 risk_manager=self._risk_manager,
                 patrol_interval=self._patrol_interval,
+                # 0.2：真钱(live)模式 CRITICAL 健康自动停引擎；paper/sim 不自动停
+                pause_on_critical=(self._trade_mode == "live"),
             )
             if self._guardian is not None:
                 self._scheduler.add_interval_task(
@@ -2048,7 +2084,7 @@ class LiveEngine(BaseEngine):
                 logger.critical(
                     f"[engine] 券商账本差异超阈值，暂停引擎（风控基准非权威账本）: {diff}"
                 )
-                self.pause()
+                self.pause(reason="账实差异超阈（风控基准非权威账本）")
         except Exception as e:
             logger.warning(f"[engine] 券商账本对账失败: {e}")
 

@@ -53,6 +53,8 @@ GATE_ITEMS: tuple = (
     "0.1-9",
     "0.1-10",
     "0.1-F2",
+    "0.2-10",
+    "0.2-R4",
 )
 
 #: 阈值真源引用（I-5：只引用既有真源，不编造）
@@ -77,8 +79,34 @@ class _FakeOrder:
         self.order_id: str = order_id
 
 
+class _FakePosition:
+    """桩持仓对象：quantity/extra.available_qty/market_price（应急平仓读取方式）。"""
+
+    def __init__(
+        self,
+        symbol: str,
+        quantity: float,
+        market_price: float,
+        available_qty: Optional[float] = None,
+    ) -> None:
+        """构造桩持仓。
+
+        Args:
+            symbol: 标的代码。
+            quantity: 持仓总量。
+            market_price: 快照市价。
+            available_qty: 可卖数量（None=不写 extra，走总量回退）。
+        """
+        self.symbol: str = symbol
+        self.quantity: float = quantity
+        self.market_price: float = market_price
+        self.extra: Dict[str, Any] = (
+            {"available_qty": available_qty} if available_qty is not None else {}
+        )
+
+
 class _FakeBroker:
-    """熔断验收桩券商：get_active_orders / cancel_order 可观测。"""
+    """熔断/应急验收桩券商：get_active_orders / cancel_order 可观测，应急平仓能力齐备。"""
 
     def __init__(self, active_orders: Optional[List[str]] = None) -> None:
         """构造桩券商。
@@ -88,9 +116,10 @@ class _FakeBroker:
         """
         self._orders: List[str] = list(active_orders or [])
         self.cancelled: List[str] = []
+        self.submitted: List[Any] = []
 
-    def get_active_orders(self) -> List[Any]:
-        """返回活跃挂单快照（带 order_id 属性的桩对象）。"""
+    def get_active_orders(self, symbol: Optional[str] = None) -> List[Any]:
+        """返回活跃挂单快照（带 order_id 属性的桩对象；symbol 过滤留空=全部）。"""
         return [_FakeOrder(oid) for oid in self._orders]
 
     def cancel_order(self, order_id: str) -> bool:
@@ -99,6 +128,25 @@ class _FakeBroker:
         if order_id in self._orders:
             self._orders.remove(order_id)
         return True
+
+    # ── 应急平仓（R-4/R-5）所需能力 ──
+
+    def is_connected(self) -> bool:
+        """桩：恒已连接。"""
+        return True
+
+    def connect(self) -> bool:
+        """桩：连接成功。"""
+        return True
+
+    def get_positions(self) -> List[Any]:
+        """桩：返回固定持仓快照（前置状态：有持仓）。"""
+        return [_FakePosition("000001.SZ", 100, 10.0, available_qty=100)]
+
+    def submit_order(self, order: Any) -> Any:
+        """桩：记录并返回订单（不真实提交）。"""
+        self.submitted.append(order)
+        return order
 
 
 class _FakeRisk:
@@ -313,6 +361,100 @@ class LiveSafetyGateRunner:
             "threshold_source": "V3 §十.5（外部依赖偶发不可用→降级+CRITICAL，不拒启）",
         }
 
+    # ── 0.2 引擎注入 pause_on_critical + 隔离复位（A1） ──────────────
+
+    def _check_02_sync_pause(self) -> Dict[str, Any]:
+        """用例10（0.2 侧）+ A1：CRITICAL 健康 → engine.pause 同步风控 PAUSED；
+        复位隔离（resume_engine_holds）且不误清数据质量暂停。"""
+        from myquant.live.engine import EngineState, LiveEngine
+        from myquant.risk.risk_manager import RiskManager
+
+        # 场景A（A1 硬约束）：数据质量暂停在，引擎复位不得误清、引擎保持 PAUSED
+        rm_a = RiskManager()
+        eng_a = LiveEngine(risk_manager=rm_a)
+        eng_a._state = EngineState.RUNNING
+        rm_a._pause_for_data_quality(
+            "000001.SZ", "验收注入数据质量暂停", global_pause=True,
+        )
+        eng_a.pause("CRITICAL 健康巡检")
+        eng_a.resume("风险解除")
+        a1_ok = bool(
+            eng_a._state == EngineState.PAUSED
+            and rm_a.is_paused()
+            and rm_a._dq_global_paused  # 数据质量暂停未被误清
+        )
+        detail_a = (
+            f"DQ暂停下: engine保持PAUSED={eng_a._state == EngineState.PAUSED}, "
+            f"风控PAUSED={rm_a.is_paused()}, DQ标记未被误清={rm_a._dq_global_paused}"
+        )
+
+        # 场景B：正常联动（pause 同步置位 / resume 隔离复位）
+        rm_b = RiskManager()
+        eng_b = LiveEngine(risk_manager=rm_b)
+        eng_b._state = EngineState.RUNNING
+        eng_b.pause("CRITICAL 健康巡检")
+        pause_ok = bool(
+            eng_b._state == EngineState.PAUSED
+            and rm_b.is_paused()
+            and rm_b._engine_paused
+            and eng_b._pause_source == "CRITICAL 健康巡检"
+        )
+        eng_b.resume("风险解除")
+        resume_ok = bool(
+            eng_b._state == EngineState.RUNNING
+            and not rm_b.is_paused()
+            and not rm_b._engine_paused
+            and eng_b._pause_source == ""
+        )
+        detail_b = (
+            f"联动: pause同步风控={pause_ok}, resume隔离复位={resume_ok} "
+            f"(pause_source='{eng_b._pause_source}')"
+        )
+
+        passed = bool(a1_ok and pause_ok and resume_ok)
+        return {
+            "item": "0.2-10",
+            "pass": passed,
+            "detail": f"{detail_a}; {detail_b}",
+            "threshold_source": "V3 A1（复位只清自己置位的，不误清数据质量暂停）；P0-8 MTTD<1min",
+        }
+
+    def _check_02_r4(self) -> Dict[str, Any]:
+        """R-4：engine.pause()（风控 PAUSED）状态下，应急平仓路径仍可用（I-1/I-3）。"""
+        from myquant.live.emergency_liquidation import EmergencyLiquidationService
+        from myquant.live.engine import EngineState, LiveEngine
+        from myquant.risk.risk_manager import RiskManager
+
+        rm = RiskManager()
+        eng = LiveEngine(risk_manager=rm)
+        eng._state = EngineState.RUNNING
+        eng.pause("CRITICAL 健康巡检")
+
+        broker = _FakeBroker(["o1"])
+        svc = EmergencyLiquidationService(broker=broker, event_bus=self._bus)
+        report = svc.execute(confirm=False)  # dry_run：只生成计划不真实下单
+
+        passed = bool(
+            report.get("ok") is True
+            and report.get("mode") == "DRY_RUN"
+            and report.get("liquidation", {}).get("planned", 0) >= 1
+            and len(report.get("cancelled_orders", [])) >= 1
+            and report["cancelled_orders"][0].get("dry_run") is True  # dry_run 只生成撤单计划
+            and rm.is_paused()  # 应急链不改变风控暂停状态
+        )
+        detail = (
+            f"engine.PAUSED 下应急平仓: ok={report.get('ok')}, "
+            f"mode={report.get('mode')}, 计划平仓={report.get('liquidation', {}).get('planned', 0)}, "
+            f"撤单计划={len(report.get('cancelled_orders', []))}笔(dry_run), "
+            f"风控保持PAUSED={rm.is_paused()}"
+        )
+        return {
+            "item": "0.2-R4",
+            "pass": passed,
+            "detail": detail,
+            "threshold_source": "V3 §九 R-4（pause 下应急路径可用）；I-1/I-3",
+        }
+
     # ── 运行入口 ────────────────────────────────────────────
 
     def run(self, mode: str = "full") -> Dict[str, Any]:
@@ -348,6 +490,8 @@ class LiveSafetyGateRunner:
             "0.1-9": self._check_01_engine_isolation,
             "0.1-10": self._check_01_circuit_chain,
             "0.1-F2": self._check_01_f2,
+            "0.2-10": self._check_02_sync_pause,
+            "0.2-R4": self._check_02_r4,
         }
 
         items: List[Dict[str, Any]] = []

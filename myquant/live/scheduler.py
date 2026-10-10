@@ -1930,7 +1930,7 @@ def attach_engine(
                     # KP-P5-11: 非健康可执行处置——CRITICAL 且 pause_on_critical 时暂停开仓/降级
                     if level == SeverityLevel.CRITICAL and pause_on_critical and engine is not None:
                         try:
-                            engine.pause()
+                            engine.pause(reason="CRITICAL 健康巡检（KP-P5-11 事故处置）")
                             logger.error(
                                 "[attach] 健康检查 CRITICAL：已暂停引擎（KP-P5-11 事故处置：暂停开仓/降级）"
                             )

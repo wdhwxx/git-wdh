@@ -4300,4 +4300,14 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    g. **验收结果**：实跑验收 0.1 三项全过（JSON 落盘 docs/监控档案/实盘安全门禁验收_20261010.json）；tests/unit -k "circuit or engine or acceptance or portfolio" 344 passed；施工清单 §1 0.1 勾选完成。
    h. **纪律遵守**：蓝图优先（先登记目录树再建文件）；零蓝图外新文件；scripts 薄入口纪律；业务逻辑归 myquant；阈值引用真源（P0-8 MTTD/MTTA，不编造）；严格防未来；git 提交（commit message 引用 #287）。
 
+## #288 · 2026-10-10 · 实盘安全门禁第0阶段 0.2 引擎注入 pause_on_critical + 隔离复位（A1）
+   事实来源：本次落地（施工清单 §2）；代码级核验：attach_engine 传 pause_on_critical=(trade_mode=="live")、engine.pause/resume 与风控同步且复位走新增 resume_engine_holds（不误清数据质量暂停）；验收 0.2-10（同步联动+A1）/0.2-R4（pause 下应急路径可用）2/2 通过；相关单测 347 passed 无回归。
+   a. **myquant/risk/risk_manager.py（改动）**：__init__ 新增 _engine_paused 标记（与 _circuit_paused 分离，引擎暂停专用）；新增 pause_for_engine(reason)（仅可开仓时置 PAUSED+标记，幂等）与 resume_engine_holds(reason)（只回滚 _engine_paused，**不调用 resume()**——resume() 会清所有数据质量暂停违反 A1；仅当无 DQ 全局/单标的/熔断其他暂停时才恢复 NORMAL，决策点4"风控状态为权威、只清自己置位的"）；reset 同步清 _engine_paused；新增 engine_paused 只读属性。
+   b. **myquant/live/engine.py（改动）**：LiveEngine.__init__ 新增 _pause_source 属性（暂停来源，隔离复位区分"谁置位"）；pause(reason="手动暂停") 同步 risk_manager.pause_for_engine(reason) 并落 _pause_source；resume(reason="引擎恢复") 改走 resume_engine_holds 隔离复位（禁调 risk_manager.resume()），风控仍 PAUSED 时引擎保持 PAUSED；_setup_scheduler 的 attach_engine 调用新增 pause_on_critical=(trade_mode=="live")；既有两处 pause 调用点（未领回订单/账实差异）传 reason。
+   c. **myquant/live/scheduler.py（改动）**：CRITICAL 巡检 engine.pause() 传 reason="CRITICAL 健康巡检（KP-P5-11 事故处置）"。
+   d. **tests/unit/test_restore_broker_state.py（改动）**：test_reconcile_超阈值_pause 的 pause mock 适配 reason 关键字参数（新签名行为变更）。
+   e. **myquant/acceptance/live_safety_gate.py（扩展）**：新增 0.2-10（同步联动：pause 同步风控置位/恢复隔离复位/A1 DQ 不误清）与 0.2-R4（engine.PAUSED 下 EmergencyLiquidationService dry_run 应急平仓可用）两项验收；_FakeBroker 扩展应急平仓能力（is_connected/connect/get_positions/submit_order）+ _FakePosition/_FakeOrder 桩对象。
+   f. **验收结果**：验收 0.1+0.2 共 5 项全过（JSON 落盘 docs/监控档案/实盘安全门禁验收_20261010.json 更新）；tests/unit engine/risk 域 347 passed；施工清单 §2 0.2 勾选完成。
+   g. **纪律遵守**：蓝图优先；零蓝图外新文件；scripts 薄入口纪律；阈值引用真源（P0-8/A1/决策点4，不编造）；全仓库 grep 复验无"经 risk_manager.resume() 复位引擎暂停"路径（仅 risk_manager 内部 docstring 示例与熔断复位既有路径）；git 提交（commit message 引用 #288）。
+
 

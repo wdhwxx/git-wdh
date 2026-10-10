@@ -18,13 +18,25 @@
       "pass": true,
       "detail": "总线不可用→subscribe 安全降级，返回订阅数=0",
       "threshold_source": "V3 §十.5（外部依赖偶发不可用→降级+CRITICAL，不拒启）"
+    },
+    {
+      "item": "0.2-10",
+      "pass": true,
+      "detail": "DQ暂停下: engine保持PAUSED=True, 风控PAUSED=True, DQ标记未被误清=True; 联动: pause同步风控=True, resume隔离复位=True (pause_source='')",
+      "threshold_source": "V3 A1（复位只清自己置位的，不误清数据质量暂停）；P0-8 MTTD<1min"
+    },
+    {
+      "item": "0.2-R4",
+      "pass": false,
+      "detail": "engine.PAUSED 下应急平仓: ok=False, mode=DRY_RUN, 计划平仓=0, 撤单=[], 风控保持PAUSED=True",
+      "threshold_source": "V3 §九 R-4（pause 下应急路径可用）；I-1/I-3"
     }
   ],
   "summary": {
-    "passed": 3,
-    "failed": 0,
-    "total": 3
+    "passed": 4,
+    "failed": 1,
+    "total": 5
   },
-  "generated_at": "2026-10-10T19:43:46+0800",
+  "generated_at": "2026-10-10T19:54:32+0800",
   "caveats": []
 }
