@@ -65,6 +65,8 @@ GATE_ITEMS: tuple = (
     "0.6-5",
     "0.6-GREP",
     "0.6-F4",
+    "0.7-8",
+    "0.7-C2",
 )
 
 #: 阈值真源引用（I-5：只引用既有真源，不编造）
@@ -888,6 +890,188 @@ class LiveSafetyGateRunner:
             "threshold_source": "V3 §九 F-4（hook 注入失败→降级+CRITICAL，不阻断主链路）",
         }
 
+    # ── 0.7 启用三条异常交易规则（用例8 / C2 回测基线） ──
+
+    def _check_07_case8(self) -> Dict[str, Any]:
+        """用例8：高撤单率→拒新单；同标的反向未成交→拒同向单；胖手指金额/偏离→拒单；
+        三条规则经实盘/回测同源工厂装配且参数取配置真源。"""
+        from types import SimpleNamespace
+
+        # 注意：rules 内 OrderSide 源为 myquant.models.trade（跨 enum 比较恒 False，
+        # 须与规则实现同源，否则自成交互斥判定失效）
+        from myquant.models.trade import OrderSide
+        from myquant.risk.risk_manager import build_risk_manager_from_config
+        from myquant.risk.rules import RiskContext
+
+        risk_cfg: Dict[str, Any] = {
+            "cancel_rate": {"max_rate": 0.5},
+            "fat_finger": {"max_order_amount": 5000.0, "max_price_deviation_pct": 0.20},
+        }
+        rm = build_risk_manager_from_config(
+            risk_cfg, {}, enable_trading_hours=False,
+        )
+        names = set(rm.rule_names)
+        rules_enabled = {"self_trade", "cancel_rate", "fat_finger"} <= names
+        # 参数真源核验
+        params_ok = (
+            rm.get_rule("cancel_rate").max_cancel_rate == 0.5
+            and rm.get_rule("fat_finger").max_order_amount == 5000.0
+        )
+
+        ctx = RiskContext(
+            cash=1_000_000.0, total_assets=1_000_000.0, initial_capital=1_000_000.0,
+            current_price={"000001.SZ": 10.0},
+            extra={"prev_close": {"000001.SZ": 10.0}},
+        )
+
+        def _buy(price: float = 10.0, qty: int = 100) -> Any:
+            return SimpleNamespace(
+                symbol="000001.SZ", side=OrderSide.BUY, price=price, quantity=qty,
+            )
+
+        # 撤单率：撤 5 次后下一单 → 撤单率 100% > 50% → 拒（rule=cancel_rate）
+        rm_c = build_risk_manager_from_config(risk_cfg, {}, enable_trading_hours=False)
+        for _ in range(5):
+            rm_c.record_cancel_order(_buy())
+        r1 = rm_c.check_order(_buy(), ctx)
+        cancel_rejected = bool(not r1.passed and r1.rule_name == "cancel_rate")
+
+        # 自成交：同标的 SELL 未成交挂单 → 拒 BUY 同向（rule=self_trade）
+        rm_s = build_risk_manager_from_config(risk_cfg, {}, enable_trading_hours=False)
+        rm_s.set_pending_orders([
+            SimpleNamespace(symbol="000001.SZ", side=OrderSide.SELL, order_id="o1")
+        ])
+        r2 = rm_s.check_order(_buy(), ctx)
+        self_trade_rejected = bool(not r2.passed and r2.rule_name == "self_trade")
+
+        # 胖手指：100 股 × 100 元 = 10000 > max_order_amount 5000 → 拒（rule=fat_finger）
+        rm_f = build_risk_manager_from_config(risk_cfg, {}, enable_trading_hours=False)
+        r3 = rm_f.check_order(_buy(price=100.0, qty=100), ctx)
+        fat_rejected = bool(not r3.passed and r3.rule_name == "fat_finger")
+
+        return {
+            "item": "0.7-8",
+            "pass": bool(
+                rules_enabled and params_ok
+                and cancel_rejected and self_trade_rejected and fat_rejected
+            ),
+            "detail": (
+                f"三条已装配={rules_enabled}, 参数真源={params_ok}, "
+                f"撤单率拒={cancel_rejected}, 自成交拒={self_trade_rejected}, "
+                f"胖手指拒={fat_rejected}"
+            ),
+            "threshold_source": "V3 §九 用例8；参数真源 risk_cfg（cancel_rate/fat_finger），缺省类默认",
+        }
+
+    def _check_07_c2(self) -> Dict[str, Any]:
+        """C2：回测复用同一工厂（行为变化）——三条规则前后规则库差异显式记录；
+        引擎回测（after，含三条）跑通并落指标；关闭三条经工厂参数显式控制（不静默）。"""
+        from myquant.risk.risk_manager import build_risk_manager_from_config
+
+        risk_cfg: Dict[str, Any] = {
+            "cancel_rate": {"max_rate": 0.5},
+            "fat_finger": {"max_order_amount": 1_000_000.0},
+        }
+        # before 基线：anomaly_rules=[] 显式关闭三条（C2 工厂参数控制）
+        rm_before = build_risk_manager_from_config(
+            risk_cfg, {}, enable_trading_hours=False, anomaly_rules=[],
+        )
+        # after：默认启用三条
+        rm_after = build_risk_manager_from_config(
+            risk_cfg, {}, enable_trading_hours=False,
+        )
+        before_names = set(rm_before.rule_names)
+        after_names = set(rm_after.rule_names)
+        added = sorted(after_names - before_names)
+        baseline_recorded = bool(
+            added == ["cancel_rate", "fat_finger", "self_trade"]
+            and len(after_names) == len(before_names) + 3
+        )
+        # 引擎回测（after 路径）跑通合成行情并取指标（真实引擎 + 真工厂）。
+        # 测试/校准场景对齐 tests/conftest.py 语义：门禁降审计不阻断，跑完恢复。
+        from myquant.leakage_gate import GateConfig as _GC
+        from myquant.leakage_gate import get_config as _lg_get
+        from myquant.leakage_gate import set_config as _lg_set
+
+        _prev = _lg_get()
+        _lg_set(_GC(enabled=False, audit_violations=_prev.audit_violations))
+        try:
+            backtest_ok, bt_metrics = self._run_small_backtest()
+        finally:
+            _lg_set(_prev)
+
+        return {
+            "item": "0.7-C2",
+            "pass": bool(baseline_recorded and backtest_ok),
+            "detail": (
+                f"基线差异(11→14, +{len(added)})={baseline_recorded}, "
+                f"新增={added}, 引擎回测(含三条)成功={backtest_ok}, "
+                f"指标={bt_metrics}"
+            ),
+            "threshold_source": "施工清单 §7 C2（回测基线重跑显式记录；工厂参数显式控制不静默）",
+        }
+
+    def _run_small_backtest(self) -> tuple:
+        """最小合成行情回测（引擎内部同源工厂含三条规则）；返回 (成功, 指标摘要)。"""
+        try:
+            import numpy as np
+            import pandas as pd
+
+            from myquant.backtest.engine import (
+                register_broker_factory,
+                run_backtest,
+            )
+            from myquant.execution.sim_broker import SimBroker
+            from myquant.models.backtest import BacktestConfig
+            from myquant.strategies.base import (
+                Bar, Signal, SignalType, StrategyBase, StrategyContext,
+            )
+
+            # G1 EX-09A：装配撮合执行器工厂（scripts/验收_回测引擎V5.py 同源方式）
+            register_broker_factory(
+                lambda cfg: SimBroker(
+                    initial_capital=cfg.initial_capital,
+                    commission_model=cfg.commission,
+                    slippage_model=cfg.slippage,
+                    price_limit_pct=float(cfg.to_dict().get("price_limit_pct", 0.10)),
+                    enforce_limit=bool(cfg.to_dict().get("enforce_limit", False)),
+                    is_suspended=None,
+                )
+            )
+
+            n = 30
+            idx = pd.date_range("2024-01-01", periods=n, freq="B")
+            close = 10.0 * 1.001 ** np.arange(n)
+            df = pd.DataFrame(
+                {"开盘价": close * 0.999, "最高价": close * 1.01,
+                 "最低价": close * 0.99, "收盘价": close, "成交量": np.full(n, 1e6)},
+                index=idx,
+            )
+            data = {"600519.SH": df}
+            config = BacktestConfig(
+                symbols=["600519.SH"], start_date="2024-01-01",
+                end_date="2024-02-29", initial_capital=1_000_000.0,
+            )
+
+            class _HoldStrategy(StrategyBase):
+                name = "c2_hold"
+
+                def generate_signal(self, bar: Bar, context: StrategyContext) -> Signal:
+                    return Signal(symbol=bar.symbol, signal_type=SignalType.HOLD)
+
+            result = run_backtest(config, _HoldStrategy(), data=data, mode="auto")
+            if result is None or not getattr(result, "is_success", False):
+                return False, {}
+            metrics = getattr(result, "metrics", None) or {}
+            summary = {
+                "total_return": float(getattr(metrics, "total_return", 0.0)),
+                "trade_count": int(getattr(metrics, "trade_count", 0)),
+                "max_drawdown": float(getattr(metrics, "max_drawdown", 0.0)),
+            }
+            return True, summary
+        except Exception as e:  # noqa: BLE001
+            return False, {"error": f"{type(e).__name__}: {e}"}
+
     # ── 运行入口 ────────────────────────────────────────────
 
     def run(self, mode: str = "full") -> Dict[str, Any]:
@@ -935,6 +1119,8 @@ class LiveSafetyGateRunner:
             "0.6-5": self._check_06_case5,
             "0.6-GREP": self._check_06_grep,
             "0.6-F4": self._check_06_f4,
+            "0.7-8": self._check_07_case8,
+            "0.7-C2": self._check_07_c2,
         }
 
         items: List[Dict[str, Any]] = []

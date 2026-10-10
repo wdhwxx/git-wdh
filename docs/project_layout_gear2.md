@@ -4351,4 +4351,11 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    d. **验收结果**：验收 0.1~0.6 共 15 项全过（JSON 落盘 docs/监控档案/实盘安全门禁验收_20261010.json 更新）；tests/unit portfolio 域 53 passed；施工清单 §6 0.6 勾选完成。
    e. **纪律遵守**：注入点方式（portfolio 零反向 import，回调由装配层注入）；与周期链并存（两处 pause reason 不同，隔离复位可区分）；阈值引用真源（容差 LOCKED=0 经 get_monitoring_config 读取，不硬编码）；git 提交（commit message 引用 #292）。
 
+## #293 · 2026-10-10 · 实盘安全门禁第0阶段 0.7 启用三条异常交易规则（self_trade/cancel_rate/fat_finger，用例8/C2）
+   事实来源：本次落地（施工清单 §7）；代码级核验：build_risk_manager_from_config 装配三条 + anomaly_rules 参数 + 验收用例8/C2；验收 0.7-8 / 0.7-C2 2/2 通过；相关单测 450 passed 无回归。
+   a. **myquant/risk/risk_manager.py（改动）**：build_risk_manager_from_config 装配三条既有异常交易规则（KP-P3-06，代码已存在未装配）——self_trade（无参）、cancel_rate（max_cancel_rate 取 risk_cfg.cancel_rate.max_rate，缺省 0.5）、fat_finger（max_order_amount / max_price_deviation_pct 取 risk_cfg.fat_finger，缺省类默认）；新增 anomaly_rules 可选参数（None=启用全部三条、[]=关闭、传名单只启用部分；未知名 raise）——C2"通过工厂参数显式控制，不静默"；未知规则名 raise（P1-18）保持；typing 增 Iterable。
+   b. **myquant/acceptance/live_safety_gate.py（扩展）**：新增 0.7-8（工厂装配三条 + 参数真源核验 + 撤单率 100%>50% 拒新单 / 同标的 SELL 未成交拒 BUY 同向 / 10000>5000 拒胖手指，走真实 RiskManager.check_order 完整规则链，注意 OrderSide 须与 rules 同源 myquant.models.trade）、0.7-C2（基线规则库 11→14 显式记录 + 引擎回测（含三条）跑通落指标 total_return/trade_count/max_drawdown，门禁临时降审计对齐 tests/conftest.py 语义 + register_broker_factory 装配 SimBroker）。
+   c. **验收结果**：验收 0.1~0.7 共 17 项全过（JSON 落盘 docs/监控档案/实盘安全门禁验收_20261010.json 更新）；tests/unit risk/backtest 域 450 passed；施工清单 §7 0.7 勾选完成。
+   d. **纪律遵守**：阈值引用配置真源（cancel_rate/fat_finger 参数，缺省类默认，不新造数）；回测复用同一工厂（C2 变化显式记录不静默）；P1-18 未知规则名硬失败保持；git 提交（commit message 引用 #293）。
+
 

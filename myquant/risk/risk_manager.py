@@ -53,7 +53,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from myquant.core.event_bus import (
     DataQualityEvent,
@@ -1916,6 +1916,7 @@ def build_risk_manager_from_config(
     position_cfg: Dict[str, Any],
     strategy_cfg: Optional[Dict[str, Any]] = None,
     enable_trading_hours: bool = True,
+    anomaly_rules: Optional[Iterable[str]] = None,
 ) -> RiskManager:
     """
     从实盘/回测配置创建 RiskManager（H2修复；P0-2 下沉至风控层，回测与实盘同源装配）
@@ -1928,6 +1929,9 @@ def build_risk_manager_from_config(
       - risk_control.max_daily_loss_pct → daily_loss_limit（任务46/P1，默认1%）
       - strategy.params.stop_loss_pct / take_profit_pct → stop_loss / take_profit
       - enable_trading_hours → trading_hours（真钱实盘默认启用；回测批量回放可关闭）
+      - anomaly_rules（0.7/C2）：异常交易三条规则（self_trade/cancel_rate/fat_finger）
+        默认全部启用（None）；显式传 [] 关闭全部，传部分名单只启用部分——
+        C2 要求"如需回测关闭某条，通过工厂参数显式控制，不静默"。
 
     Parameters
     ----------
@@ -1939,6 +1943,9 @@ def build_risk_manager_from_config(
         strategy 段（取止盈止损参数）
     enable_trading_hours : bool
         是否启用交易时段规则（真钱实盘True；模拟盘/回测可False）
+    anomaly_rules : Iterable[str] | None
+        0.7：异常交易规则启用名单；None=启用全部三条；[]=全部关闭；
+        传子集（如 ["cancel_rate"]）只启用名单内的。
 
     Returns:
         RiskManager 实例（含数据质量风控联动）。
@@ -1981,4 +1988,33 @@ def build_risk_manager_from_config(
         "blacklist": {},
         "cash_availability": {"min_cash_reserve": 1000.0},
     }
+    # 0.7（回写#293）：启用三条既有异常交易规则（KP-P3-06，代码已存在但未装配）。
+    # 参数取配置真源（risk_cfg.cancel_rate / risk_cfg.fat_finger），缺省用类默认
+    # （阈值引用配置，不在代码里新造数）；三条规则名已在 RULE_REGISTRY（P1-18
+    # 未知规则名硬失败保持）。C2：anomaly_rules 显式控制名单（[]=关闭，不静默）。
+    _anomaly: Dict[str, Dict[str, Any]] = {
+        "self_trade": {},
+        "cancel_rate": {
+            "max_cancel_rate": float(
+                (risk_cfg.get("cancel_rate") or {}).get("max_rate", 0.5)
+            ),
+        },
+        "fat_finger": {
+            "max_order_amount": float(
+                (risk_cfg.get("fat_finger") or {}).get("max_order_amount", 1_000_000)
+            ),
+            "max_price_deviation_pct": float(
+                (risk_cfg.get("fat_finger") or {}).get("max_price_deviation_pct", 0.20)
+            ),
+        },
+    }
+    if anomaly_rules is None:
+        rules.update(_anomaly)
+    else:
+        for name in anomaly_rules:
+            if name not in _anomaly:
+                raise ValueError(
+                    f"[risk] 未知异常交易规则名: {name!r}（可选: {sorted(_anomaly)}）"
+                )
+            rules[name] = _anomaly[name]
     return RiskManager(config=rules, data_quality_config=DataQualityRiskConfig())
