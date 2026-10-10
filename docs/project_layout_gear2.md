@@ -362,7 +362,8 @@ Pythonwdhmm/
 │   ├── 未来函数与数据泄漏门禁/     # ✨【回写#269】防泄漏门禁施工落点（源自《未来函数与数据泄漏门禁施工方案.md v3.0》，唯一施工依据）：施工方案 v3.0 + 施工任务清单 + decision_time_contract 契约模板（L-1 契约层）
 │   │   ├── 未来函数与数据泄漏门禁施工方案.md
 │   │   ├── 未来函数与数据泄漏门禁施工任务清单.md
-│   │   └── decision_time_contract.md  # ✨【回写#269】决策时点契约模板：decision_time/execution_time/universe(pit_status 显式)/data_availability(adjust=hfq, end_date 必传, basis=eff_disclosure_date)/consumed_columns（主键=name，见 v3.0 §5.2/§11）
+│   │   ├── decision_time_contract.md  # ✨【回写#269】决策时点契约模板：decision_time/execution_time/universe(pit_status 显式)/data_availability(adjust=hfq, end_date 必传, basis=eff_disclosure_date)/consumed_columns（主键=name，见 v3.0 §5.2/§11）
+│   │   └── 防泄漏门禁红线清单.md      # ✨【回写#270】治理台账（v3.0 §6.8）：RL-01~14 红线 + 豁免档位（不可豁免/需审批/待数据源建设后启用）+ 对应规则 R01~R11
 
 │
 
@@ -4112,3 +4113,8 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    a. **蓝图目录树登记**：docs/ 段新增 未来函数与数据泄漏门禁/ 子树（施工方案 v3.0 + 施工任务清单 + decision_time_contract.md），与 审计档案/系统性审核/监控档案 并列的施工文档档案区。
    b. **新建 docs/未来函数与数据泄漏门禁/decision_time_contract.md**：L-1 契约层模板，含 decision_time（"T日收盘后 15:00"）/execution_time（"T+1开盘 09:30"）/holding_period/universe（type=static, source=config/stock_pool.yaml, pit_status=未建设，显式声明避免自证 PIT）/data_availability（market_data: available_time+adjust=hfq+adjust_asof=end_date 必传+fields；financial_data: available_time=ann_date+basis=eff_disclosure_date+fields）/consumed_columns（R11 声明侧输入，声明可漏报，实际以 AST 实测为准）。
    c. **纪律遵守**：蓝图优先（先登记 docs/ 段目录树再建文档）；文档纯登记零代码改动；严格防未来（契约仅声明决策时点语义，不引入未来数据源）；M0-01 依赖 DEC-01 已拍板；git 提交（commit message 引用 #269）。
+## #270 · 2026-10-10 · 防泄漏门禁施工·M0-02 红线清单（docs/未来函数与数据泄漏门禁/防泄漏门禁红线清单.md）
+   事实来源：本次落地（进入 M0-02）；代码级核验：治理台账含 RL-01~14 全部红线 + 豁免档位与 v3.0 §6.8 完全一致（RL-02/04/08/10/11/14 不可豁免、RL-01/05/06/07/09/12/13 需审批、RL-03 待数据源建设后启用），对应规则 R01~R11 一一标注。
+   a. **蓝图目录树登记**：docs/未来函数与数据泄漏门禁/ 子树追加 防泄漏门禁红线清单.md（治理台账）。
+   b. **新建 docs/未来函数与数据泄漏门禁/防泄漏门禁红线清单.md**：RL-01~14 治理台账（泄漏类型/强制环节/验收标准/对应规则/豁免档位），与 v3.0 §6.8 逐条一致。
+   c. **纪律遵守**：蓝图优先；文档纯登记零代码改动；严格防未来（红线仅登记泄漏类型与强制环节，不含时间序列数据）；M0-02 无依赖；git 提交（commit message 引用 #270）。
