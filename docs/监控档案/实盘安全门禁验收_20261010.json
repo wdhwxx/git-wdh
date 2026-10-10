@@ -27,16 +27,100 @@
     },
     {
       "item": "0.2-R4",
-      "pass": false,
-      "detail": "engine.PAUSED 下应急平仓: ok=False, mode=DRY_RUN, 计划平仓=0, 撤单=[], 风控保持PAUSED=True",
+      "pass": true,
+      "detail": "engine.PAUSED 下应急平仓: ok=True, mode=DRY_RUN, 计划平仓=1, 撤单计划=1笔(dry_run), 风控保持PAUSED=True",
       "threshold_source": "V3 §九 R-4（pause 下应急路径可用）；I-1/I-3"
+    },
+    {
+      "item": "0.3-R5",
+      "pass": true,
+      "detail": "静态违规import=无; 破坏装配后应急平仓: OK",
+      "threshold_source": "V3 §九 R-5（破坏装配仍可平仓）；I-1"
+    },
+    {
+      "item": "0.4-4",
+      "pass": true,
+      "detail": "未装配守卫→LIVE拒启=True; 已装配守卫→LIVE放行=True",
+      "threshold_source": "V3 §九 用例4（清空 guard 拒启）；0.4 fail-closed"
+    },
+    {
+      "item": "0.4-R6",
+      "pass": true,
+      "detail": "human拒=True, system放行=True, guardian.force_close 不被焊死=True, 审计含system留痕=True",
+      "threshold_source": "V3 §九 R-6（require_reviewer 不焊死 system 角色应急链）；决策点3"
+    },
+    {
+      "item": "0.4-F1",
+      "pass": true,
+      "detail": "配置加载失败→load_error留痕=True; LIVE入口判定拒启=True",
+      "threshold_source": "V3 §十.5 F-1（配置加载失败→能力缺失→拒启）"
+    },
+    {
+      "item": "0.5-2",
+      "pass": true,
+      "detail": "断连转换=connected->disconnected, 联动=['pause', 'resume'], 恢复转换=disconnected->connected, 轮询间隔=5.0s≤60s=True",
+      "threshold_source": "V3 §九 用例2（断连禁开仓 + 恢复仅补发未成交）；P0-8 MTTD ≤ 1min"
+    },
+    {
+      "item": "0.5-F3",
+      "pass": true,
+      "detail": "回调异常隔离=True, 告警异常隔离=True",
+      "threshold_source": "V3 §九 F-3（单 watchdog 异常不拖垮巡检）"
+    },
+    {
+      "item": "0.5-LIVE",
+      "pass": true,
+      "detail": "live+disabled拒启=True, live+enabled放行=True, paper+disabled放行=True",
+      "threshold_source": "V3 §十.5 F-1（装配能力缺失拒启）；施工清单 §5 改动点2"
+    },
+    {
+      "item": "0.6-5",
+      "pass": true,
+      "detail": "差异100元→hook触发(禁开仓)=True, 一致→不误pause=True",
+      "threshold_source": "V3 §九 用例5（伪造账实差异→CRITICAL+禁开仓）；容差真源 LOCKED=0"
+    },
+    {
+      "item": "0.6-GREP",
+      "pass": true,
+      "detail": "engine 反向 import 违规=0（risk.guardian 访问器 G1 EX-12C 合法）",
+      "threshold_source": "施工清单 §6 改动点4（portfolio 不反向依赖 engine）"
+    },
+    {
+      "item": "0.6-F4",
+      "pass": true,
+      "detail": "hook异常→主链路不阻断=True, hook未注入→仅告警不阻断=True",
+      "threshold_source": "V3 §九 F-4（hook 注入失败→降级+CRITICAL，不阻断主链路）"
+    },
+    {
+      "item": "0.7-8",
+      "pass": true,
+      "detail": "三条已装配=True, 参数真源=True, 撤单率拒=True, 自成交拒=True, 胖手指拒=True",
+      "threshold_source": "V3 §九 用例8；参数真源 risk_cfg（cancel_rate/fat_finger），缺省类默认"
+    },
+    {
+      "item": "0.7-C2",
+      "pass": true,
+      "detail": "基线差异(11→14, +3)=True, 新增=['cancel_rate', 'fat_finger', 'self_trade'], 引擎回测(含三条)成功=True, 指标={'total_return': 0.0, 'trade_count': 0, 'max_drawdown': 0.0}",
+      "threshold_source": "施工清单 §7 C2（回测基线重跑显式记录；工厂参数显式控制不静默）"
+    },
+    {
+      "item": "0.9-12",
+      "pass": true,
+      "detail": "无闸BUY放行=True, kill_switch拒BUY=True, risk_paused拒BUY=True, 非交易时段拒BUY=True, 三场景SELL均放行=True",
+      "threshold_source": "V3 §九 用例12（绕过引擎直调 broker 也被拦）；kill_switch 标志文件与阶段4 同真源"
+    },
+    {
+      "item": "0.9-R7",
+      "pass": true,
+      "detail": "SELL放行=True, 应急卖单放行=True, BUY拒=True",
+      "threshold_source": "V3 §九 R-7（硬闸只拒 BUY；SELL/平仓/应急卖单永远放行 I-1/I-3）"
     }
   ],
   "summary": {
-    "passed": 4,
-    "failed": 1,
-    "total": 5
+    "passed": 19,
+    "failed": 0,
+    "total": 19
   },
-  "generated_at": "2026-10-10T19:54:32+0800",
+  "generated_at": "2026-10-10T20:41:29+0800",
   "caveats": []
 }

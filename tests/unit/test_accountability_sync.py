@@ -59,7 +59,7 @@ class TestAccountabilityPatrol:
         # 制造权威账本差异（券商现金被改小）
         broker.cash = 0.0
         paused: list = []
-        engine.pause = lambda: paused.append(True)  # type: ignore[method-assign]
+        engine.pause = lambda *a, **k: paused.append(True)  # type: ignore[method-assign]
         with caplog.at_level(logging.CRITICAL, logger="live.engine"):
             engine._broker_accountability_patrol()
         assert paused == [True]
@@ -69,6 +69,6 @@ class TestAccountabilityPatrol:
         """DoD：账实一致 → 不暂停。"""
         engine = _make_engine()
         paused: list = []
-        engine.pause = lambda: paused.append(True)  # type: ignore[method-assign]
+        engine.pause = lambda *a, **k: paused.append(True)  # type: ignore[method-assign]
         engine._broker_accountability_patrol()
         assert paused == []

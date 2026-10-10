@@ -2759,6 +2759,16 @@ def create_live_engine(
 
     # 2) 券商适配器
     broker = build_broker_from_config(broker_cfg, execution_cfg, initial_capital)
+    # 0.9（回写#294）：broker 提交边界硬闸——状态源接线（薄闸在基类不可绕过）。
+    # 非交易时段判定与 TradingHoursRule 同源（交易日历 + 时段，broker 不重写）；
+    # risk_paused 判定经延迟闭包引用后续装配的 risk_manager（submit 时才求值）。
+    from myquant.risk.rules import TradingHoursRule as _GateTradingHoursRule
+
+    _gate_th = _GateTradingHoursRule()
+    broker.set_trading_hours_checker(
+        lambda: _gate_th._is_trading_day(datetime.now().date())
+        and _gate_th._is_trading_time()
+    )
 
     # 3) 行情接入（流式清洗默认开启，与回测数据纪律一致）
     feed = MarketDataFeed(
@@ -2801,6 +2811,13 @@ def create_live_engine(
         risk_manager = build_risk_manager_from_config(
             risk_cfg, position_cfg, strategy_cfg,
             enable_trading_hours=(trade_mode != "paper"),
+        )
+        # 0.9（回写#294）：risk_paused 判定注入 broker 薄闸（状态非 NORMAL 或熔断禁开仓）
+        from myquant.risk.risk_manager import RiskStatus as _GateRiskStatus
+
+        broker.add_risk_pause_checker(
+            lambda: risk_manager.status != _GateRiskStatus.NORMAL
+            or bool(getattr(risk_manager, "_circuit_paused", False))
         )
 
     # 6) StateStore（崩溃恢复；目录遵循配置，默认 datasets/live_state）

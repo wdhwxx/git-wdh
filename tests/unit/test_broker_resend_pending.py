@@ -96,7 +96,7 @@ class FakeBroker(BaseBroker):
         return [dict(o) for o in self._remote_orders]
 
     # ── 下单（幂等去重 + 状态机）──
-    def submit_order(self, order: Order) -> Order:
+    def _submit_order_impl(self, order: Order) -> Order:
         self.submit_calls.append(order)
         existing = self._orders.get(order.order_id)
         if existing is not None:

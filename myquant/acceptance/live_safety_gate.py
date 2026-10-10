@@ -67,6 +67,8 @@ GATE_ITEMS: tuple = (
     "0.6-F4",
     "0.7-8",
     "0.7-C2",
+    "0.9-12",
+    "0.9-R7",
 )
 
 #: 阈值真源引用（I-5：只引用既有真源，不编造）
@@ -1072,6 +1074,124 @@ class LiveSafetyGateRunner:
         except Exception as e:  # noqa: BLE001
             return False, {"error": f"{type(e).__name__}: {e}"}
 
+    # ── 0.9 broker 提交边界硬闸（用例12 / R-7） ──
+
+    def _check_09_case12(self) -> Dict[str, Any]:
+        """用例12：绕过引擎直调 broker.submit_order 的 BUY → kill_switch / risk_paused /
+        非交易时段下被硬闸拒绝（REJECTED + gate 标记）；SELL 放行（即时）。"""
+        from myquant.live.brokers.paper_broker import PaperBroker
+        from myquant.models.trade import Order, OrderSide, OrderStatus, Position
+
+        def _buy() -> Order:
+            return Order(symbol="000001.SZ", side=OrderSide.BUY, quantity=100, price=10.0)
+
+        def _sell() -> Order:
+            return Order(symbol="000001.SZ", side=OrderSide.SELL, quantity=100, price=10.0)
+
+        def _new_broker() -> PaperBroker:
+            b = PaperBroker(initial_capital=1_000_000.0)
+            b.positions["000001.SZ"] = Position(
+                symbol="000001.SZ", quantity=100, avg_cost=9.0, market_price=10.0,
+            )
+            b.connect()
+            return b
+
+        # ── kill_switch（标志文件真源）──
+        with tempfile.TemporaryDirectory() as tmp:
+            flag = Path(tmp) / "kill_switch.flag"
+            b1 = _new_broker()
+            b1.set_kill_switch_flag_path(str(flag))
+            # 无标志：BUY 正常放行（不误伤）
+            normal_ok = b1.submit_order(_buy()).status != OrderStatus.REJECTED
+            # 置位标志：BUY 拒
+            flag.write_text("1", encoding="utf-8")
+            r1 = b1.submit_order(_buy())
+            ks_rejected = bool(
+                r1.status == OrderStatus.REJECTED
+                and r1.extra.get("gate") == "broker_submission_gate"
+            )
+            # SELL 放行（kill_switch 下仍可提交）
+            r_sell1 = b1.submit_order(_sell())
+            ks_sell_ok = r_sell1.extra.get("gate") != "broker_submission_gate"
+
+        # ── risk_paused（注入判定）──
+        b2 = _new_broker()
+        b2.add_risk_pause_checker(lambda: True)
+        r2 = b2.submit_order(_buy())
+        rp_rejected = bool(
+            r2.status == OrderStatus.REJECTED
+            and r2.extra.get("gate") == "broker_submission_gate"
+        )
+        rp_sell_ok = b2.submit_order(_sell()).extra.get("gate") != "broker_submission_gate"
+
+        # ── 非交易时段（注入判定）──
+        b3 = _new_broker()
+        b3.set_trading_hours_checker(lambda: False)
+        r3 = b3.submit_order(_buy())
+        th_rejected = bool(
+            r3.status == OrderStatus.REJECTED
+            and r3.extra.get("gate") == "broker_submission_gate"
+        )
+        th_sell_ok = b3.submit_order(_sell()).extra.get("gate") != "broker_submission_gate"
+
+        return {
+            "item": "0.9-12",
+            "pass": bool(
+                normal_ok and ks_rejected and ks_sell_ok
+                and rp_rejected and rp_sell_ok
+                and th_rejected and th_sell_ok
+            ),
+            "detail": (
+                f"无闸BUY放行={normal_ok}, kill_switch拒BUY={ks_rejected}, "
+                f"risk_paused拒BUY={rp_rejected}, 非交易时段拒BUY={th_rejected}, "
+                f"三场景SELL均放行={ks_sell_ok and rp_sell_ok and th_sell_ok}"
+            ),
+            "threshold_source": "V3 §九 用例12（绕过引擎直调 broker 也被拦）；kill_switch 标志文件与阶段4 同真源",
+        }
+
+    def _check_09_r7(self) -> Dict[str, Any]:
+        """R-7：0.9 硬闸置位 → SELL / 平仓 / 应急卖单仍能提交（硬闸只拒 BUY）。"""
+        from myquant.live.brokers.paper_broker import PaperBroker
+        from myquant.models.trade import Order, OrderSide, OrderStatus, Position
+
+        b = PaperBroker(initial_capital=1_000_000.0)
+        b.positions["000001.SZ"] = Position(
+            symbol="000001.SZ", quantity=100, avg_cost=9.0, market_price=10.0,
+        )
+        b.connect()
+        # 全部闸条件同时置位（kill_switch + risk_paused + 非交易时段）
+        with tempfile.TemporaryDirectory() as tmp:
+            flag = Path(tmp) / "kill_switch.flag"
+            flag.write_text("1", encoding="utf-8")
+            b.set_kill_switch_flag_path(str(flag))
+            b.add_risk_pause_checker(lambda: True)
+            b.set_trading_hours_checker(lambda: False)
+
+            sell = b.submit_order(
+                Order(symbol="000001.SZ", side=OrderSide.SELL, quantity=100, price=10.0)
+            )
+            sell_ok = sell.extra.get("gate") != "broker_submission_gate"
+            # 平仓/应急卖单：SELL 全量 = 平仓语义
+            emergency = b.submit_order(
+                Order(symbol="000001.SZ", side=OrderSide.SELL, quantity=50, price=10.0,
+                      tag="应急平仓")
+            )
+            emergency_ok = emergency.extra.get("gate") != "broker_submission_gate"
+            # 对照：BUY 在全部置位下被拒（硬闸只拒 BUY）
+            buy = b.submit_order(
+                Order(symbol="000001.SZ", side=OrderSide.BUY, quantity=100, price=10.0)
+            )
+            buy_rejected = bool(
+                buy.status == OrderStatus.REJECTED
+                and buy.extra.get("gate") == "broker_submission_gate"
+            )
+        return {
+            "item": "0.9-R7",
+            "pass": bool(sell_ok and emergency_ok and buy_rejected),
+            "detail": f"SELL放行={sell_ok}, 应急卖单放行={emergency_ok}, BUY拒={buy_rejected}",
+            "threshold_source": "V3 §九 R-7（硬闸只拒 BUY；SELL/平仓/应急卖单永远放行 I-1/I-3）",
+        }
+
     # ── 运行入口 ────────────────────────────────────────────
 
     def run(self, mode: str = "full") -> Dict[str, Any]:
@@ -1121,6 +1241,8 @@ class LiveSafetyGateRunner:
             "0.6-F4": self._check_06_f4,
             "0.7-8": self._check_07_case8,
             "0.7-C2": self._check_07_c2,
+            "0.9-12": self._check_09_case12,
+            "0.9-R7": self._check_09_r7,
         }
 
         items: List[Dict[str, Any]] = []

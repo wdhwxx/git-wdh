@@ -427,9 +427,9 @@ class QmtBroker(BaseBroker):
     # ═══════════════════════════════════════════════
 
     @_locked
-    def submit_order(self, order: Order) -> Order:
+    def _submit_order_impl(self, order: Order) -> Order:
         """
-        提交订单
+        提交订单（0.9 起由基类薄闸 submit_order 调用的具体实现）
 
         SIM 模式流程:
           1. 校验订单合法性（复用基类 _validate_order）

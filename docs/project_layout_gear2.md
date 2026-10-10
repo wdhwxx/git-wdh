@@ -4358,4 +4358,14 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    c. **验收结果**：验收 0.1~0.7 共 17 项全过（JSON 落盘 docs/监控档案/实盘安全门禁验收_20261010.json 更新）；tests/unit risk/backtest 域 450 passed；施工清单 §7 0.7 勾选完成。
    d. **纪律遵守**：阈值引用配置真源（cancel_rate/fat_finger 参数，缺省类默认，不新造数）；回测复用同一工厂（C2 变化显式记录不静默）；P1-18 未知规则名硬失败保持；git 提交（commit message 引用 #293）。
 
+## #294 · 2026-10-10 · 实盘安全门禁第0阶段 0.9 broker 提交边界硬闸（基类不可绕过，用例12/R-7）
+   事实来源：本次落地（施工清单 §9）；代码级核验：submit_order 基类薄闸包装 + _submit_order_impl 抽象 + 三状态源接线；验收 0.9-12 / 0.9-R7 2/2 通过；brokers 域回归 878 passed 无回归。
+   a. **myquant/live/brokers/base_broker.py（改动）**：submit_order 改基类不可绕过包装入口（非抽象）——先 _submission_gate(order)：仅拦 BUY（SELL/平仓/撤单永远放行 I-1/I-3），三条件 kill_switch 标志文件（默认 run/kill_switch.flag，与阶段4 监护进程同一真源，可 set_kill_switch_flag_path 覆盖）/ risk_paused 注入回调列表（set_risk_pause_checker / add_risk_pause_checker）/ 非交易时段注入回调（set_trading_hours_checker，TradingHoursRule 同源）；有拒绝原因 → _gate_reject（logger.error + get_operation_guard().audit(scope="broker_submission_gate", actor_type="system") + 返回 REJECTED 订单 extra.gate="broker_submission_gate"）；原 abstractmethod submit_order 改名 abstractmethod _submit_order_impl（子类实现）；新增 kill_switch_active()；__init__ 增 _risk_pause_checkers/_trading_hours_checker/_kill_switch_flag_path。
+   b. **myquant/live/brokers/paper_broker.py / qmt_broker.py（改动）**：submit_order → _submit_order_impl（保留 @_locked；ptrade 继承 QmtBroker 无需改；manager.py:484/630 透传经 broker.submit_order 自动过闸）。
+   c. **myquant/live/engine.py（装配）**：create_live_engine 接线——broker 创建后注入非交易时段判定（TradingHoursRule 同源 _is_trading_day/_is_trading_time）；risk_manager 装配后注入 risk_paused 判定（status != RiskStatus.NORMAL or _circuit_paused，延迟闭包引用后续 risk_manager）。
+   d. **myquant/acceptance/live_safety_gate.py（扩展）**：新增 0.9-12（用例12：PaperBroker 桩 connect + 注入持仓，kill_switch 临时标志文件置位/risk_paused 注入 True/非交易时段注入 False 各拒 BUY 且 SELL 放行、无标志 BUY 不误伤）、0.9-R7（三闸同时置位：SELL/应急卖单仍放行 + BUY 被拒，硬闸只拒 BUY）。
+   e. **tests 适配（回写#294）**：test_broker_manager_failover / test_broker_resend_pending / test_t1_settle 的 BaseBroker 桩 submit_order → _submit_order_impl（抽象方法约束）；test_emergency_dryrun / test_emergency_liquidation / test_strategies 桩为普通类不受影响。
+   f. **验收结果**：验收 0.1~0.9 共 19 项全过（JSON 落盘 docs/监控档案/实盘安全门禁验收_20261010.json 更新）；tests/unit brokers 域 878 passed（含 R-1~R-4 反向用例与 paper 全量路径）；施工清单 §9 0.9 勾选完成。
+   g. **纪律遵守**：基类层不可绕过（"绕过引擎直调 broker" 也过闸，用例12 成立条件）；SELL/平仓/撤单永不误伤（I-1/I-3，R-7 对照断言）；状态源接线与 0.1/0.2/阶段4 同一真源（kill_switch 文件 / risk_manager 状态 / TradingHoursRule 同源判定，broker 零反向 import）；阈值/路径引用真源（run/kill_switch.flag 常量，不编造）；git 提交（commit message 引用 #294）。
+
 

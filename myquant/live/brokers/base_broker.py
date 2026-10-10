@@ -47,7 +47,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 
 from myquant.core.logger import get_logger
 from myquant.execution.base import ExecutionInterface
-from myquant.models.trade import Order, OrderType, Position, Trade
+from myquant.models.trade import Order, OrderSide, OrderType, Position, Trade
 
 logger = get_logger(__name__)
 
@@ -177,6 +177,11 @@ class BaseBroker(ExecutionInterface):
         # 本地订单簿（order_id → Order）：提交的订单统一登记，供查单/补单对账；
         # 子类（如 PaperBroker）若已有 self.orders 命名，get_orders() 会兼容兜底
         self._orders: Dict[str, Order] = {}
+
+        # 0.9（回写#294）：提交边界硬闸状态源接线（装配层注入，broker 不反向依赖）
+        self._risk_pause_checkers: List[Callable[[], bool]] = []
+        self._trading_hours_checker: Optional[Callable[[], bool]] = None
+        self._kill_switch_flag_path: str = self._KILL_SWITCH_FLAG_DEFAULT
 
         # 统计
         self._stats = {
@@ -593,13 +598,127 @@ class BaseBroker(ExecutionInterface):
                 logger.error(f"[{self.broker_name}] 行情回调异常({symbol}): {e}")
 
     # ═══════════════════════════════════════════
-    #  订单操作（继承自ExecutionInterface，子类必须实现）
+    #  订单操作（继承自ExecutionInterface，子类必须实现 _submit_order_impl）
     # ═══════════════════════════════════════════
 
-    @abstractmethod
+    # 0.9（回写#294）：broker 提交边界硬闸——submit_order 基类不可绕过包装：
+    # 先过薄闸（kill_switch / risk_paused / 非交易时段 → 拒 BUY；SELL/平仓/撤单
+    # 永远放行 I-1/I-3），再进子类 _submit_order_impl 具体逻辑。所有适配器自动生效，
+    # "绕过引擎直调 broker.submit_order" 也经过包装（用例12 成立条件）。
+    # 状态源：kill_switch 标志文件（与阶段4 监护进程同一真源，文件存在=置位）；
+    # risk_paused / 非交易时段经装配层注入判定回调（broker 不反向依赖 risk/engine）。
+    _KILL_SWITCH_FLAG_DEFAULT = "run/kill_switch.flag"
+
+    def set_risk_pause_checker(self, checker: Optional[Callable[[], bool]]) -> None:
+        """注入 risk_paused 判定（RiskManager 状态非 NORMAL；装配层注入）。"""
+        self._risk_pause_checkers = [checker] if checker is not None else []
+
+    def add_risk_pause_checker(self, checker: Callable[[], bool]) -> None:
+        """追加 risk_paused 判定回调（多源：状态暂停 / 熔断暂停）。"""
+        self._risk_pause_checkers.append(checker)
+
+    def set_trading_hours_checker(self, checker: Optional[Callable[[], bool]]) -> None:
+        """注入交易时段判定（TradingHoursRule 同源：True=当前可交易；装配层注入）。"""
+        self._trading_hours_checker = checker
+
+    def set_kill_switch_flag_path(self, path: Optional[str]) -> None:
+        """覆盖 kill_switch 标志文件路径（默认 run/kill_switch.flag，阶段4 同一真源）。"""
+        self._kill_switch_flag_path = str(path) if path else self._KILL_SWITCH_FLAG_DEFAULT
+
+    def kill_switch_active(self) -> bool:
+        """kill_switch 激活判定：标志文件存在即置位（零依赖，进程崩了文件还在）。"""
+        try:
+            from pathlib import Path
+
+            return Path(self._kill_switch_flag_path).exists()
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[broker] kill_switch 标志读取异常（按未置位处理）: {e}")
+            return False
+
+    def _submission_gate(self, order: Order) -> Optional[str]:
+        """0.9 提交薄闸：仅拦 BUY；SELL/平仓/撤单永远放行。返回拒绝原因或 None。"""
+        if order.side != OrderSide.BUY:
+            return None
+        # 1) kill_switch 激活（文件信号真源，阶段4 监护进程同一通道）
+        if self.kill_switch_active():
+            return "kill_switch 激活（标志文件存在），拒绝开仓（broker 提交边界硬闸）"
+        # 2) risk_paused（RiskManager 状态非 NORMAL，装配层注入判定）
+        for checker in self._risk_pause_checkers:
+            try:
+                if checker():
+                    return "风控暂停（risk_paused），拒绝开仓（broker 提交边界硬闸）"
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"[broker] risk_pause_checker 异常（按未暂停处理）: {e}")
+        # 3) 非交易时段（TradingHoursRule 同源判定，装配层注入）
+        if self._trading_hours_checker is not None:
+            try:
+                if not self._trading_hours_checker():
+                    return "非交易时段，拒绝开仓（broker 提交边界硬闸）"
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"[broker] trading_hours_checker 异常（按可交易处理）: {e}")
+        return None
+
+    def _gate_reject(self, order: Order, reason: str) -> Order:
+        """薄闸拒单：留审计（scope=broker_submission_gate）+ 返回 REJECTED 订单。"""
+        logger.error(f"[broker] 提交硬闸拒绝 {order.symbol} {order.side.value}: {reason}")
+        try:
+            from myquant.api.middleware.auth import get_operation_guard
+
+            guard = get_operation_guard()
+            if guard is not None:
+                guard.audit(
+                    "broker_submission_gate", operator=self.broker_name,
+                    action=f"submit_order {order.symbol} {order.side.value} qty={order.quantity}",
+                    result="denied", reviewer=None, reason=reason,
+                    actor_type="system",
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[broker] 提交硬闸审计留痕失败（不阻断拒单）: {e}")
+        from myquant.models.trade import OrderStatus
+
+        rejected = Order(
+            symbol=order.symbol,
+            side=order.side,
+            order_type=order.order_type,
+            quantity=order.quantity,
+            price=order.price,
+            stop_price=order.stop_price,
+            status=OrderStatus.REJECTED,
+            strategy_id=order.strategy_id,
+            extra={**dict(order.extra or {}), "gate": "broker_submission_gate",
+                   "rejected_reason": reason},
+        )
+        return rejected
+
     def submit_order(self, order: Order) -> Order:
         """
-        提交订单（子类必须实现）
+        提交订单（基类薄闸入口，不可绕过；子类实现 _submit_order_impl）。
+
+        【0.9 提交边界硬闸】先过薄闸再进具体逻辑：
+          - BUY：kill_switch 激活 / risk_paused / 非交易时段 → 返回 REJECTED 订单 + 审计；
+          - SELL / 平仓 / 撤单：永远放行（I-1/I-3，R-7 应急卖单不受影响）。
+
+        【防未来函数】订单提交只使用当前已知信息，不假设成交价。
+        成交价格由券商撮合决定，通过_trade回调异步通知。
+
+        Parameters
+        ----------
+        order : Order
+            订单对象
+
+        Returns
+        -------
+        Order : 订单（状态已更新，通常为 SUBMITTED、REJECTED）
+        """
+        reject_reason = self._submission_gate(order)
+        if reject_reason is not None:
+            return self._gate_reject(order, reject_reason)
+        return self._submit_order_impl(order)
+
+    @abstractmethod
+    def _submit_order_impl(self, order: Order) -> Order:
+        """
+        提交订单（子类必须实现；0.9 起原 submit_order 逻辑改名为本方法）。
 
         【防未来函数】订单提交只使用当前已知信息，不假设成交价。
         成交价格由券商撮合决定，通过_trade回调异步通知。

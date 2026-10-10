@@ -62,7 +62,7 @@ class FakeBroker(BaseBroker):
         self.received_statuses: List[OrderStatus] = []  # 提交前状态快照
 
     # ── 抽象方法实现 ──
-    def submit_order(self, order: Order) -> Order:
+    def _submit_order_impl(self, order: Order) -> Order:
         self.submit_calls.append(order)
         self.received_statuses.append(order.status)   # 提交前状态（验证副本为 PENDING）
         if self._mode == "raise":

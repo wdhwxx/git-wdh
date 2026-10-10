@@ -46,7 +46,7 @@ def _install_hooks(monkeypatch, *, is_healthy, is_critical, calls, engine=None):
 def _run_patrol(monkeypatch, *, is_healthy, is_critical, pause_on_critical, engine):
     calls: list = []
     paused: list = []
-    eng = SimpleNamespace(pause=lambda: paused.append(True)) if engine is None else engine
+    eng = SimpleNamespace(pause=lambda *a, **k: paused.append(True)) if engine is None else engine
     _install_hooks(monkeypatch, is_healthy=is_healthy, is_critical=is_critical, calls=calls, engine=eng)
     sched = LiveScheduler()
     tasks = attach_engine(

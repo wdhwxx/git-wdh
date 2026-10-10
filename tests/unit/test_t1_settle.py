@@ -52,7 +52,7 @@ class _NoSettleBroker(BaseBroker):
     def __init__(self) -> None:
         super().__init__(name="nosettle")
 
-    def submit_order(self, order: Order) -> Order:
+    def _submit_order_impl(self, order: Order) -> Order:
         return order
 
     def cancel_order(self, order_id: str) -> bool:
