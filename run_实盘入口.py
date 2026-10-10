@@ -948,6 +948,17 @@ def run_live_trading(args: argparse.Namespace) -> int:
     except Exception as e:
         print(f"  [健康] 健康探针注册失败（不影响交易主链路）: {e}")
 
+    # ── 6.6 启动自检断言（0.8：装配=0 根因治理；能力缺失→拒启，外部依赖→降级）──
+    from myquant.live.engine import startup_assertions
+
+    _sa_problems = startup_assertions(engine, config, run_mode)
+    if _sa_problems:
+        print("[安全拦截] 启动自检断言未通过（能力缺失，拒绝启动）：")
+        for _p in _sa_problems:
+            print(f"  - {_p}")
+        return 2
+    print("  [自检] 启动自检断言通过（0.8：熔断/watchdog/守卫/pause_on_critical/应急链）")
+
     # ── 7. 试运行模式：打印装配结果后退出 ──
     if args.dry_run:
         status = engine.get_status()

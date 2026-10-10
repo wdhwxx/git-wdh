@@ -114,13 +114,43 @@
       "pass": true,
       "detail": "SELL放行=True, 应急卖单放行=True, BUY拒=True",
       "threshold_source": "V3 §九 R-7（硬闸只拒 BUY；SELL/平仓/应急卖单永远放行 I-1/I-3）"
+    },
+    {
+      "item": "0.8-4",
+      "pass": true,
+      "detail": "清空 guard 后自检问题含守卫项=True（问题数=2）",
+      "threshold_source": "V3 §九 用例4（清空 guard 装配 → 拒启，不是警告放行）；0.8 施工清单 §8"
+    },
+    {
+      "item": "0.8-R5",
+      "pass": true,
+      "detail": "自检问题数=2（仅报告不执行平仓）, 一键平仓脚本存在=True, broker_factory 可导入=True",
+      "threshold_source": "V3 §九 R-5（自检失败不拦应急链，一键平仓独立可用）"
+    },
+    {
+      "item": "0.8-F1",
+      "pass": true,
+      "detail": "守卫 load_error 非空 → 自检问题含 F-1 拒启项=True",
+      "threshold_source": "V3 §十.5 F-1（配置加载失败=能力缺失拒启）；0.4 装配层同一判定"
+    },
+    {
+      "item": "0.8-F2",
+      "pass": true,
+      "detail": "告警渠道为空 → 拒启项=False（应无）, CRITICAL 降级日志=True",
+      "threshold_source": "V3 §十.5 F-2（外部依赖不可用→降级+CRITICAL，不拒启）"
+    },
+    {
+      "item": "0.8-F5",
+      "pass": true,
+      "detail": "时钟不可用 → 拒启项=False（应无）, CRITICAL 降级日志=True",
+      "threshold_source": "V3 §十.5 F-5（外部依赖时钟异常→降级+CRITICAL，不拒启）"
     }
   ],
   "summary": {
-    "passed": 19,
+    "passed": 24,
     "failed": 0,
-    "total": 19
+    "total": 24
   },
-  "generated_at": "2026-10-10T20:41:29+0800",
+  "generated_at": "2026-10-10T21:01:47+0800",
   "caveats": []
 }

@@ -4368,4 +4368,13 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    f. **验收结果**：验收 0.1~0.9 共 19 项全过（JSON 落盘 docs/监控档案/实盘安全门禁验收_20261010.json 更新）；tests/unit brokers 域 878 passed（含 R-1~R-4 反向用例与 paper 全量路径）；施工清单 §9 0.9 勾选完成。
    g. **纪律遵守**：基类层不可绕过（"绕过引擎直调 broker" 也过闸，用例12 成立条件）；SELL/平仓/撤单永不误伤（I-1/I-3，R-7 对照断言）；状态源接线与 0.1/0.2/阶段4 同一真源（kill_switch 文件 / risk_manager 状态 / TradingHoursRule 同源判定，broker 零反向 import）；阈值/路径引用真源（run/kill_switch.flag 常量，不编造）；git 提交（commit message 引用 #294）。
 
+## #295 · 2026-10-10 · 实盘安全门禁第0阶段 0.8 启动自检断言（装配=0 根因治理，用例4/R-5/F-1/F-2/F-5）
+   事实来源：本次落地（施工清单 §8）；代码级核验：startup_assertions 七项断言 + 二分处置 + 入口接入；验收 0.8-4 / 0.8-R5 / 0.8-F1 / 0.8-F2 / 0.8-F5 5/5 通过；全量回归 3670 passed 无回归。
+   a. **myquant/live/engine.py（新增模块级函数）**：startup_assertions(engine, config, run_mode) -> List[str]——七项断言：①熔断器已注入（0.1）、②watchdog.enabled（0.5 启动门）、③准入守卫已注册且 load_error 为空（0.4/F-1）、④pause_on_critical 生效前提（engine._trade_mode=="live" 且 _scheduler_enabled，0.2）、⑤告警渠道配置非空（B2）、⑥系统时钟可用（F-5）、⑦应急链可用（0.3：broker_factory 可导入 + 一键平仓脚本存在）。二分处置（决策点5）：①②③④⑦能力缺失→计入问题列表（入口拒启 return 2）；⑤⑥外部依赖→logger.critical 降级不拒启（F-2 语义）；每项独立 try-except（单项异常不影响其余）。
+   b. **run_实盘入口.py（装配段 6.6）**：create_live_engine 成功后、dry-run 预览前调用 startup_assertions——问题列表非空 → 打印"启动自检断言未通过（能力缺失，拒绝启动）"并 return 2；通过 → 打印 "[自检] 启动自检断言通过"。
+   c. **myquant/acceptance/live_safety_gate.py（扩展）**：新增 0.8-4（清空 guard 装配→自检问题含守卫项）、0.8-R5（自检仅报告不执行平仓 + 一键平仓脚本存在 + broker_factory 可导入）、0.8-F1（guard load_error 非空→F-1 拒启项）、0.8-F2（告警渠道空→CRITICAL 降级无拒启项，_CaptureHandler 捕获日志）、0.8-F5（时钟异常→CRITICAL 降级无拒启项）；辅助 _CaptureHandler 日志捕获类 + _run_08_problems 受控环境执行。
+   d. **架构门禁基线更新（回写#295）**：test_architecture.py 登记 EX-14F（engine→monitoring.alerting 自检告警断言）；VIOLATION_BASELINE 7→8；OVERSIZE_LINE_BASELINE engine 2941→3063（startup_assertions 增长）。
+   e. **验收结果**：验收 0.1~0.9 + 0.8 共 24 项全过（JSON 落盘 docs/监控档案/实盘安全门禁验收_20261010.json 更新）；tests/unit 全量 3670 passed；施工清单 §8 0.8 勾选完成。
+   f. **纪律遵守**：业务逻辑归 myquant（run_实盘入口.py 保持薄入口，只调 startup_assertions）；二分标准写死（能力→拒启/外部→降级，不引入配置开关防"关掉断言上真钱"）；阈值/断言对象全部来自装配产物与单读配置入口（不新造数）；每项可开关（独立 try-except）；git 提交（commit message 引用 #295）。
+
 

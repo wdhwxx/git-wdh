@@ -139,6 +139,8 @@ _EXC = [
      "永久", "2099-12-31", "runtime", "0.9 提交边界硬闸：_gate_reject 经 get_operation_guard() 留审计（薄闸审计是 broker 基类永久契约）"),
     ("EX-14E", "myquant/live/engine.py", "engine",
      "永久", "2099-12-31", "assembly", "R-16 装配例外：0.1 熔断入进程在 create_live_engine 直接实例化 CircuitBreaker（施工清单§2 落点即引擎装配段，蓝图#287）；非跨层 import 例外（不参与 R-02 ghost 检查）"),
+    ("EX-14F", "myquant/live/engine.py", "myquant.monitoring.alerting",
+     "永久", "2099-12-31", "runtime", "0.8 启动自检断言：告警渠道配置非空检查经 get_alert_manager()（外部依赖降级检查，蓝图#295）"),
 ]
 EXCEPTIONS: dict[tuple[str, str], dict] = {
     (f, t): {"id": i, "task": tk, "expires": date.fromisoformat(e), "kind": k, "why": w}
@@ -149,7 +151,7 @@ EXCEPTIONS: dict[tuple[str, str], dict] = {
 # 回写#255：P0-1（performance_config→ma_strategy）与 P0-2（backtest.engine→live.engine）已消除，集合清空
 P0_MUST_FIX: set[tuple[str, str]] = set()
 
-VIOLATION_BASELINE = 7           # K-a + K-f：语义矩阵 α，排除 TYPE_CHECKING 与 __main__；#255 37→35，#257 35→34，#258 34→27，#259 前段 27→24（EX-12-4 + EX-13K+1），EX-09A/B 后 24→22；#263 下沉消除 EX-10A/10B/13A/F/G/J 后 22→16；#264 注册表化消除 EX-13C/E/K 后 16→13；#265 阶段二消除 EX-13B/D/H/I 后 13→1（仅剩永久 EX-01A）；#294 实盘安全门禁施工登记 EX-14A~E 后 1→7（engine 熔断装配×2、验收审计×3、base_broker 薄闸审计×1）
+VIOLATION_BASELINE = 8           # K-a + K-f：语义矩阵 α，排除 TYPE_CHECKING 与 __main__；#255 37→35，#257 35→34，#258 34→27，#259 前段 27→24（EX-12-4 + EX-13K+1），EX-09A/B 后 24→22；#263 下沉消除 EX-10A/10B/13A/F/G/J 后 22→16；#264 注册表化消除 EX-13C/E/K 后 16→13；#265 阶段二消除 EX-13B/D/H/I 后 13→1（仅剩永久 EX-01A）；#294 实盘安全门禁施工登记 EX-14A~E 后 1→7（engine 熔断装配×2、验收审计×3、base_broker 薄闸审计×1）；#295 0.8 自检登记 EX-14F 后 7→8（engine 告警渠道断言×1）
 TOP_LEVEL_CYCLE_BASELINE = 0     # K-b：顶层真环（剔除包装惯用环与 __main__ 后）
 LAZY_CYCLE_BASELINE = 0          # K-f：全量真环，只减不增（#261 环1 event_bus↔memory_pool 随事件池注入化
                                  #      打断——全系统真环清零；环2 随 G2-1，#260；环3 随 EX-12A，#259）
@@ -254,12 +256,12 @@ CONFIG_KEY_REQUIRED: set[str] = {
 
 
 # OVERSIZE 白名单 14 项行数基线（2026-10-08 实测冻结）：白名单内文件行数只减不增。
-# 2026-10-10 实盘安全门禁第0阶段施工增长（蓝图回写#291/#293/#294 已登记）：
-#   engine 2869→2941（0.1 熔断入进程 + 0.5 启动门 + 0.6 pause hook + 0.9 薄闸状态源接线）
+# 2026-10-10 实盘安全门禁第0阶段施工增长（蓝图回写#291/#293/#294/#295 已登记）：
+#   engine 2869→2941（0.1 熔断入进程 + 0.5 启动门 + 0.6 pause hook + 0.9 薄闸状态源接线）→3063（0.8 启动自检断言 startup_assertions）
 #   scheduler 2409→2419（0.5 watchdog 回调注入）
 #   risk_manager 1901→2020（0.7 三条异常交易规则 + anomaly_rules 参数）
 OVERSIZE_LINE_BASELINE: dict[str, int] = {
-    "monitoring/alerting.py": 3681, "live/engine.py": 2941, "core/event_bus.py": 2379,  # engine 2858→2869（#275 M0-09 出口强制挂载 +11 行治理注入）；alerting 3675→3681（#264 工厂注册代码）；event_bus 2383→2379（#261 事件池注入化）
+    "monitoring/alerting.py": 3681, "live/engine.py": 3063, "core/event_bus.py": 2379,  # engine 2858→2869（#275 M0-09 出口强制挂载 +11 行治理注入）；alerting 3675→3681（#264 工厂注册代码）；event_bus 2383→2379（#261 事件池注入化）
     "live/scheduler.py": 2419, "monitoring/metrics_collector.py": 2273,  # 2382→2409（#265 阶段二 7 处装配点改经注册表，代码行增长）；metrics 2268→2273（#264 工厂注册代码）
     "monitoring/action_engine.py": 2307, "data_access/manager.py": 2200,  # 2170→2186→2200（#281 M1A-01/06 每股收益时点日基收敛+失败可观测化；M1A-10 available_time 增量派生+存量补列）
     "live/brokers/qmt_broker.py": 2170, "live/data_feed.py": 2147,

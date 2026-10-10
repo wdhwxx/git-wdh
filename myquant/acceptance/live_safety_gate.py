@@ -69,6 +69,11 @@ GATE_ITEMS: tuple = (
     "0.7-C2",
     "0.9-12",
     "0.9-R7",
+    "0.8-4",
+    "0.8-R5",
+    "0.8-F1",
+    "0.8-F2",
+    "0.8-F5",
 )
 
 #: 阈值真源引用（I-5：只引用既有真源，不编造）
@@ -228,6 +233,17 @@ class _FakeAuditStore:
 # ═══════════════════════════════════════════════
 #  验收执行器
 # ═══════════════════════════════════════════════
+
+
+class _CaptureHandler(logging.Handler):
+    """日志捕获 handler（0.8 验收：断言降级 CRITICAL 留痕）。"""
+
+    def __init__(self, records: list) -> None:
+        super().__init__()
+        self._records = records
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self._records.append(record)
 
 
 class LiveSafetyGateRunner:
@@ -1192,6 +1208,152 @@ class LiveSafetyGateRunner:
             "threshold_source": "V3 §九 R-7（硬闸只拒 BUY；SELL/平仓/应急卖单永远放行 I-1/I-3）",
         }
 
+    # ── 0.8 启动自检断言（用例4 / R-5 / F-1 / F-2 / F-5） ──
+
+    def _run_08_problems(self, engine: Any, monkeypatch: Any, **monkey) -> list:
+        """在受控环境跑 startup_assertions（monkey 安装后返回问题列表）。"""
+        from myquant.live.engine import startup_assertions
+        from myquant.live.run_mode import RunMode
+
+        return list(startup_assertions(engine, {}, RunMode.LIVE))
+
+    def _check_08_case4(self) -> Dict[str, Any]:
+        """用例4：清空 guard 装配 → 自检问题列表含守卫项（LIVE 拒启语义）。"""
+        from types import SimpleNamespace
+
+        from myquant.risk.guardian import get_operation_guard, register_operation_guard
+
+        old = get_operation_guard()
+        try:
+            register_operation_guard(None)
+            engine_like = SimpleNamespace(
+                _circuit_breaker=object(), _trade_mode="live", _scheduler_enabled=True,
+            )
+            problems = self._run_08_problems(engine_like, None)
+            guard_problem = any("准入守卫未注册" in p for p in problems)
+        finally:
+            register_operation_guard(old)
+        return {
+            "item": "0.8-4",
+            "pass": bool(guard_problem),
+            "detail": f"清空 guard 后自检问题含守卫项={guard_problem}（问题数={len(problems)}）",
+            "threshold_source": "V3 §九 用例4（清空 guard 装配 → 拒启，不是警告放行）；0.8 施工清单 §8",
+        }
+
+    def _check_08_f1(self) -> Dict[str, Any]:
+        """F-1：守卫配置加载失败 → 自检问题含 F-1 项（能力缺失拒启）。"""
+        from types import SimpleNamespace
+
+        from myquant.risk.guardian import get_operation_guard, register_operation_guard
+
+        old = get_operation_guard()
+        try:
+            register_operation_guard(SimpleNamespace(load_error="测试配置损坏", enabled=True))
+            engine_like = SimpleNamespace(
+                _circuit_breaker=object(), _trade_mode="live", _scheduler_enabled=True,
+            )
+            problems = self._run_08_problems(engine_like, None)
+            f1_problem = any("F-1" in p and "加载失败" in p for p in problems)
+        finally:
+            register_operation_guard(old)
+        return {
+            "item": "0.8-F1",
+            "pass": bool(f1_problem),
+            "detail": f"守卫 load_error 非空 → 自检问题含 F-1 拒启项={f1_problem}",
+            "threshold_source": "V3 §十.5 F-1（配置加载失败=能力缺失拒启）；0.4 装配层同一判定",
+        }
+
+    def _check_08_f2(self) -> Dict[str, Any]:
+        """F-2：告警渠道未配置/不可用 → CRITICAL 降级，不产生拒启项。"""
+        import logging
+        from types import SimpleNamespace
+
+        import pytest
+
+        def _no_channels():
+            return SimpleNamespace(channels=[])
+
+        engine_like = SimpleNamespace(
+            _circuit_breaker=object(), _trade_mode="live", _scheduler_enabled=True,
+        )
+        records: list = []
+        handler = _CaptureHandler(records)
+        logging.getLogger("live.engine").addHandler(handler)
+        try:
+            with pytest.MonkeyPatch.context() as mp:
+                mp.setattr("myquant.monitoring.alerting.get_alert_manager", _no_channels)
+                problems = self._run_08_problems(engine_like, mp)
+        finally:
+            logging.getLogger("live.engine").removeHandler(handler)
+        alert_problem = any("告警" in p for p in problems)
+        degraded_logged = any("告警渠道未配置" in r.getMessage() for r in records)
+        return {
+            "item": "0.8-F2",
+            "pass": bool(not alert_problem and degraded_logged),
+            "detail": (
+                f"告警渠道为空 → 拒启项={alert_problem}（应无）, CRITICAL 降级日志={degraded_logged}"
+            ),
+            "threshold_source": "V3 §十.5 F-2（外部依赖不可用→降级+CRITICAL，不拒启）",
+        }
+
+    def _check_08_f5(self) -> Dict[str, Any]:
+        """F-5：系统时钟不可用 → CRITICAL 降级，不产生拒启项。"""
+        import logging
+        from types import SimpleNamespace
+
+        import pytest
+
+        class _BrokenClock:
+            @staticmethod
+            def now():
+                raise RuntimeError("时钟损坏")
+
+        engine_like = SimpleNamespace(
+            _circuit_breaker=object(), _trade_mode="live", _scheduler_enabled=True,
+        )
+        records: list = []
+        handler = _CaptureHandler(records)
+        logging.getLogger("live.engine").addHandler(handler)
+        try:
+            with pytest.MonkeyPatch.context() as mp:
+                mp.setattr("myquant.live.engine.datetime", _BrokenClock)
+                problems = self._run_08_problems(engine_like, mp)
+        finally:
+            logging.getLogger("live.engine").removeHandler(handler)
+        clock_problem = any("时钟" in p for p in problems)
+        degraded_logged = any("系统时钟不可用" in r.getMessage() for r in records)
+        return {
+            "item": "0.8-F5",
+            "pass": bool(not clock_problem and degraded_logged),
+            "detail": f"时钟不可用 → 拒启项={clock_problem}（应无）, CRITICAL 降级日志={degraded_logged}",
+            "threshold_source": "V3 §十.5 F-5（外部依赖时钟异常→降级+CRITICAL，不拒启）",
+        }
+
+    def _check_08_r5(self) -> Dict[str, Any]:
+        """R-5：自检失败不拦应急链——自检只返回问题列表，不执行/依赖平仓；
+        一键平仓脚本与 broker_factory 应急链仍存在可独立执行。"""
+        from types import SimpleNamespace
+
+        engine_like = SimpleNamespace(
+            _circuit_breaker=object(), _trade_mode="live", _scheduler_enabled=True,
+        )
+        problems = self._run_08_problems(engine_like, None)
+        # 自检返回列表（不抛异常、不执行平仓）；应急脚本文件存在
+        script = Path(__file__).resolve().parent.parent.parent / "scripts" / "一键平仓.py"
+        script_ok = script.exists()
+        # 应急链模块可导入（0.3 产物）
+        from myquant.live.broker_factory import build_broker_from_config  # noqa: F401
+
+        return {
+            "item": "0.8-R5",
+            "pass": bool(script_ok),
+            "detail": (
+                f"自检问题数={len(problems)}（仅报告不执行平仓）, 一键平仓脚本存在={script_ok}, "
+                f"broker_factory 可导入=True"
+            ),
+            "threshold_source": "V3 §九 R-5（自检失败不拦应急链，一键平仓独立可用）",
+        }
+
     # ── 运行入口 ────────────────────────────────────────────
 
     def run(self, mode: str = "full") -> Dict[str, Any]:
@@ -1243,6 +1405,11 @@ class LiveSafetyGateRunner:
             "0.7-C2": self._check_07_c2,
             "0.9-12": self._check_09_case12,
             "0.9-R7": self._check_09_r7,
+            "0.8-4": self._check_08_case4,
+            "0.8-R5": self._check_08_r5,
+            "0.8-F1": self._check_08_f1,
+            "0.8-F2": self._check_08_f2,
+            "0.8-F5": self._check_08_f5,
         }
 
         items: List[Dict[str, Any]] = []

@@ -2939,3 +2939,125 @@ def _assert_live_watchdog_gate(trade_mode: str) -> None:
                 "（A-4/A-5/A-6 看门狗未启用，能力缺失 fail-closed；"
                 "请在 config/settings.yaml 开启 monitoring.watchdog.enabled）"
             )
+
+
+def startup_assertions(
+    engine: Any,
+    config: Dict[str, Any],
+    run_mode: Any,
+) -> List[str]:
+    """
+    0.8（回写#295）启动自检断言（装配=0 的根因治理）。
+
+    把"装配"变成"不满足就拒启"：防止第0阶段（0.1~0.9）做完被后续改动拆掉。
+    返回问题列表（空 = 通过）。二分处置（决策点5，V3 §十.5）：
+      - 能力缺失（代码装配产物）→ 计入问题列表（入口拒启，return 2）；
+      - 外部依赖不可用（告警渠道/系统时钟）→ logger.critical 降级 + CRITICAL，
+        不计入问题列表（不因单个外部依赖抖动拒启，F-2 语义）。
+    每项独立 try-except：单项异常不影响其余断言（决策点5 可开关语义）。
+
+    Parameters
+    ----------
+    engine : LiveEngine
+        已装配的实盘引擎实例。
+    config : Dict
+        live 配置（当前仅作签名预留，断言对象全部来自装配产物/单读配置入口）。
+    run_mode : RunMode
+        运行模式（LIVE 全断言；paper/sim/monitor 只断言引擎装配，即已通过）。
+
+    Returns
+    -------
+    List[str] : 自检问题列表（空 = 通过；非空 = 能力缺失，入口应拒启）。
+    """
+    from myquant.live.run_mode import RunMode as _RunMode
+
+    if run_mode is not _RunMode.LIVE:
+        # paper/sim/monitor：引擎装配成功即通过（live 专属门禁不适用）
+        return []
+
+    problems: List[str] = []
+
+    # ① 熔断器已注入且已订阅（0.1 产物；能力缺失）
+    try:
+        if getattr(engine, "_circuit_breaker", None) is None:
+            problems.append(
+                "熔断器未注入（engine._circuit_breaker is None，0.1 产物缺失，能力缺失拒启）"
+            )
+    except Exception as e:  # noqa: BLE001
+        problems.append(f"熔断断言异常（视为能力缺失拒启）: {e}")
+
+    # ② watchdog enabled（0.5 启动门；能力缺失——LIVE 必备三看门狗）
+    try:
+        from myquant.core.settings import get_monitoring_config
+
+        if not get_monitoring_config().get("watchdog", {}).get("enabled", False):
+            problems.append(
+                "monitoring.watchdog.enabled=false（0.5 启动门被关，LIVE 能力缺失拒启）"
+            )
+    except Exception as e:  # noqa: BLE001
+        problems.append(f"watchdog 配置不可读（0.5 能力缺失拒启）: {e}")
+
+    # ③ 准入守卫已注册且配置加载成功（0.4/F-1；能力缺失）
+    try:
+        from myquant.risk.guardian import get_operation_guard
+
+        guard = get_operation_guard()
+        if guard is None:
+            problems.append("准入守卫未注册（0.4 产物缺失，能力缺失拒启）")
+        elif getattr(guard, "load_error", ""):
+            problems.append(
+                f"准入守卫配置加载失败（{getattr(guard, 'load_error', '')}，F-1 能力缺失拒启）"
+            )
+    except Exception as e:  # noqa: BLE001
+        problems.append(f"准入守卫断言异常（能力缺失拒启）: {e}")
+
+    # ④ pause_on_critical 生效（0.2 产物：live 模式 CRITICAL 健康自动停引擎）
+    try:
+        if getattr(engine, "_trade_mode", None) != "live":
+            problems.append(
+                "engine._trade_mode != live（pause_on_critical 装配前提缺失，0.2 产物）"
+            )
+        elif not getattr(engine, "_scheduler_enabled", True):
+            problems.append(
+                "调度器被禁用（pause_on_critical 巡检无法装配，0.2 产物，能力缺失拒启）"
+            )
+    except Exception as e:  # noqa: BLE001
+        problems.append(f"pause_on_critical 断言异常（能力缺失拒启）: {e}")
+
+    # ⑤ 告警渠道配置非空（B2；外部依赖 → 降级 CRITICAL，不拒启）
+    try:
+        from myquant.monitoring.alerting import get_alert_manager
+
+        am = get_alert_manager()
+        channels = getattr(am, "channels", None) or []
+        if not channels:
+            logger.critical(
+                "[startup_assertions] 告警渠道未配置（B2）：LIVE 下关键告警无法送达"
+                "（外部依赖降级，不拒启，F-2 语义）"
+            )
+    except Exception as e:  # noqa: BLE001
+        logger.critical(
+            f"[startup_assertions] 告警管理器不可用（外部依赖降级，不拒启）: {e}"
+        )
+
+    # ⑥ 系统时钟可用（F-5；外部依赖 → 降级 CRITICAL，不拒启）
+    try:
+        datetime.now()
+    except Exception as e:  # noqa: BLE001
+        logger.critical(
+            f"[startup_assertions] 系统时钟不可用（F-5 外部依赖降级，不拒启）: {e}"
+        )
+
+    # ⑦ 应急链旁路可用（0.3 产物；能力缺失——弱断言：工厂模块可导入 + 一键平仓脚本存在）
+    try:
+        from myquant.live.broker_factory import build_broker_from_config  # noqa: F401
+
+        emergency_script = (
+            _Path(__file__).resolve().parent.parent.parent / "scripts" / "一键平仓.py"
+        )
+        if not emergency_script.exists():
+            problems.append("一键平仓应急脚本缺失（0.3 应急链，能力缺失拒启）")
+    except Exception as e:  # noqa: BLE001
+        problems.append(f"应急链不可用（0.3 产物缺失，能力缺失拒启）: {e}")
+
+    return problems
