@@ -1840,6 +1840,16 @@ def attach_engine(
                     logger.warning("[attach] 券商连接看门狗组件未注册（跳过 A-6）")
                 else:
                     bw = _bw_factory(broker)
+                    # 0.5（回写#291）用例2：断连→禁开仓（engine.pause），恢复→解除禁开仓
+                    # （engine.resume 走 resume_engine_holds，不误清 DQ——0.2 语义）。
+                    # 回调由装配层注入，watchdog 模块不反向依赖 engine（F-3：异常不拖垮巡检）。
+                    if engine is not None and callable(getattr(engine, "pause", None)):
+                        bw.attach_disconnect_callback(
+                            lambda: engine.pause(reason="券商断连（A-6 watchdog，禁开仓）")
+                        )
+                        bw.attach_recover_callback(
+                            lambda: engine.resume(reason="券商连接恢复（A-6 watchdog，仅补发未成交）")
+                        )
                     scheduler.add_interval_task(
                         bw.poll_once, name="券商连接看门狗",
                         interval_seconds=BROKER_PROBE_INTERVAL_SECONDS,

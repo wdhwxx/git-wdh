@@ -4334,4 +4334,13 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    h. **验收结果**：验收 0.1~0.4 共 9 项全过（JSON 落盘 docs/监控档案/实盘安全门禁验收_20261010.json 更新）；tests/unit auth/guardian/run_mode 域 344 passed；施工清单 §4 0.4 勾选完成。
    i. **纪律遵守**：蓝图优先；零蓝图外新文件；阈值引用真源（V3 §九/§十.5/决策点3，不编造）；全局注册表进程内语义（API 进程与实盘进程互不影响，0.8 断言确认实盘侧已注册）；git 提交（commit message 引用 #290）。
 
+## #291 · 2026-10-10 · 实盘安全门禁第0阶段 0.5 watchdog 收归 live 启动门（用例2/F-3/启动断言）
+   事实来源：本次落地（施工清单 §5）；代码级核验：BrokerConnectionWatcher 回调联动 + create_live_engine 启动断言 + scheduler A-6 注入；验收 0.5-2 / 0.5-F3 / 0.5-LIVE 3/3 通过；相关单测 651 passed 无回归。
+   a. **myquant/monitoring/watchdog.py（改动）**：BrokerConnectionWatcher.__init__ 新增 on_disconnect / on_recover 可选回调（0.5 用例2 断连禁开仓、恢复解除禁开仓）+ attach_disconnect_callback / attach_recover_callback 注入方法；_fire_disconnect_alert / _recover 内调用回调并 try-except 隔离（F-3：回调异常仅告警不拖垮看门狗）。watchdog 模块不反向依赖 engine（回调由装配层注入）。
+   b. **myquant/live/scheduler.py（改动）**：A-6 券商连接看门狗装配处（watchdog.enabled 开关三处装配点不动，settings.yaml 唯一读入口）注入断连/恢复回调——engine.pause(reason=券商断连，禁开仓) / engine.resume(reason=券商连接恢复，走 resume_engine_holds 不误清 DQ，仅补发未成交)。
+   c. **myquant/live/engine.py（改动）**：新增模块级 _assert_live_watchdog_gate(trade_mode)（0.5 启动门：trade_mode=live 且 monitoring.watchdog.enabled=false → raise ValueError，F-1 装配能力缺失拒启；paper/sim 尊重配置原值 false 可运行）；create_live_engine 尾段调用同一断言。
+   d. **myquant/acceptance/live_safety_gate.py（扩展）**：新增 0.5-2（断连转换→on_disconnect pause、恢复→on_recover resume、轮询间隔 5s ≤ P0-8 1min）、0.5-F3（回调异常与告警路径异常隔离）、0.5-LIVE（启动门 live+disabled 拒启 / live+enabled 放行 / paper+disabled 放行，mock settings 真源不落盘）三项验收。
+   e. **验收结果**：验收 0.1~0.5 共 12 项全过（JSON 落盘 docs/监控档案/实盘安全门禁验收_20261010.json 更新）；tests/unit watchdog/scheduler/engine 域 651 passed；施工清单 §5 0.5 勾选完成。
+   f. **纪律遵守**：不跨真源覆盖 settings.yaml（scheduler 三处装配开关未动，真源仍为 config/settings.yaml 经 get_monitoring_config 单读入口）；watchdog 独立模块无反向 import；阈值引用真源（P0-8 MTTD ≤ 1min 用 BROKER_PROBE_INTERVAL_SECONDS 常量核验）；git 提交（commit message 引用 #291）。
+
 

@@ -581,6 +581,8 @@ class BrokerConnectionWatcher:
         broker: Any,
         alert_manager: Any = None,
         runbook_id: str = RUNBOOK_BROKER_DISCONNECT,
+        on_disconnect: Optional[Callable[[], None]] = None,
+        on_recover: Optional[Callable[[], None]] = None,
     ) -> None:
         """
         Parameters
@@ -591,12 +593,26 @@ class BrokerConnectionWatcher:
             告警管理器；None 延迟取 get_alert_manager()。
         runbook_id : str
             断连 Runbook 标识（随告警 details 携带，触发 Runbook）。
+        on_disconnect / on_recover : Callable | None
+            0.5（回写#291）断连/恢复联动回调（用例2 断连禁开仓、恢复仅补发未成交）。
+            由装配层（live.scheduler）注入 engine.pause / engine.resume —— watchdog 模块
+            不反向依赖 engine，回调异常仅告警不拖垮看门狗（F-3）。
         """
         self._broker = broker
         self._alert_manager = alert_manager
         self._runbook_id = runbook_id
         self._last_connected: Optional[bool] = None  # None=尚未采样
         self._disconnect_alerted: bool = False
+        self._on_disconnect = on_disconnect
+        self._on_recover = on_recover
+
+    def attach_disconnect_callback(self, cb: Optional[Callable[[], None]]) -> None:
+        """装配层注入断连联动回调（用例2：断连→禁开仓）。"""
+        self._on_disconnect = cb
+
+    def attach_recover_callback(self, cb: Optional[Callable[[], None]]) -> None:
+        """装配层注入恢复联动回调（用例2：恢复→解除禁开仓，仅补发未成交）。"""
+        self._on_recover = cb
 
     def _read_connected(self) -> bool:
         """读取券商连接状态（兼容属性与方法两种 duck-typing）。异常视为未连接。"""
@@ -667,6 +683,12 @@ class BrokerConnectionWatcher:
             deduplication_key="watchdog:broker_disconnected",
         )
         self._disconnect_alerted = True
+        # 0.5（回写#291）：断连联动（用例2 禁开仓）——回调异常仅告警不拖垮看门狗（F-3）
+        if self._on_disconnect is not None:
+            try:
+                self._on_disconnect()
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"[watchdog] 断连联动回调异常（禁开仓未生效）: {e}")
 
     def _recover(self) -> None:
         """券商重连恢复：发 INFO 恢复。"""
@@ -685,6 +707,12 @@ class BrokerConnectionWatcher:
             logger.warning(f"券商连接恢复告警失败: {e}")
         finally:
             self._disconnect_alerted = False
+        # 0.5（回写#291）：恢复联动（用例2 解除禁开仓，仅补发未成交）——异常仅告警（F-3）
+        if self._on_recover is not None:
+            try:
+                self._on_recover()
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"[watchdog] 恢复联动回调异常: {e}")
 
     @property
     def last_connected(self) -> Optional[bool]:

@@ -59,6 +59,9 @@ GATE_ITEMS: tuple = (
     "0.4-4",
     "0.4-R6",
     "0.4-F1",
+    "0.5-2",
+    "0.5-F3",
+    "0.5-LIVE",
 )
 
 #: 阈值真源引用（I-5：只引用既有真源，不编造）
@@ -659,6 +662,131 @@ class LiveSafetyGateRunner:
             "threshold_source": "V3 §十.5 F-1（配置加载失败→能力缺失→拒启）",
         }
 
+    # ── 0.5 watchdog 收归 live 启动门（用例2 / F-3 / 启动断言） ──
+
+    def _check_05_case2(self) -> Dict[str, Any]:
+        """用例2：券商断连 → 看门狗告警 + 禁开仓（on_disconnect→engine.pause）；
+        恢复 → on_recover（resume，仅补发未成交）；MTTD ≤ P0-8 1min（轮询间隔）。"""
+        from myquant.core.constants import BROKER_PROBE_INTERVAL_SECONDS
+        from myquant.monitoring.watchdog import BrokerConnectionWatcher
+
+        events: List[str] = []
+        mgr = self._fake_alert_manager()
+        bw = BrokerConnectionWatcher(
+            broker=_FakeBroker(), alert_manager=mgr,
+            on_disconnect=lambda: events.append("pause"),
+            on_recover=lambda: events.append("resume"),
+        )
+        # 健康 → 断连（模拟拔网线 60s 后看门狗检测到转换）
+        d1 = bw.on_state(True)
+        d2 = bw.on_state(False)
+        # 恢复
+        d3 = bw.on_state(True)
+
+        mttd_ok = BROKER_PROBE_INTERVAL_SECONDS <= 60  # P0-8 MTTD ≤ 1min（轮询级）
+        return {
+            "item": "0.5-2",
+            "pass": bool(
+                d1["transition"] == "initial"
+                and d2["transition"] == "connected->disconnected"
+                and d3["transition"] == "disconnected->connected"
+                and events == ["pause", "resume"]
+                and mttd_ok
+            ),
+            "detail": (
+                f"断连转换={d2['transition']}, 联动={events}, "
+                f"恢复转换={d3['transition']}, 轮询间隔={BROKER_PROBE_INTERVAL_SECONDS}s≤60s={mttd_ok}"
+            ),
+            "threshold_source": "V3 §九 用例2（断连禁开仓 + 恢复仅补发未成交）；P0-8 MTTD ≤ 1min",
+        }
+
+    def _fake_alert_manager(self) -> Any:
+        class _M:
+            def alert(self, **kw: Any) -> None:
+                return None
+
+        return _M()
+
+    def _check_05_f3(self) -> Dict[str, Any]:
+        """F-3：单个 watchdog 检测器异常不拖垮——回调异常被吞（告警级）；轮询异常任务级隔离。"""
+        from myquant.monitoring.watchdog import BrokerConnectionWatcher
+
+        def boom() -> None:
+            raise RuntimeError("断连联动回调爆炸（F-3 模拟）")
+
+        bw = BrokerConnectionWatcher(
+            broker=_FakeBroker(), alert_manager=self._fake_alert_manager(),
+            on_disconnect=boom,
+        )
+        # 回调抛异常不应把 on_state 拖垮（转换判定仍返回）：先采健康，再断连触发回调
+        try:
+            bw.on_state(True)
+            d = bw.on_state(False)
+            callback_isolated = bool(d["transition"] == "connected->disconnected")
+        except Exception:
+            callback_isolated = False
+        # 断连告警路径本身异常也应隔离（_fire_disconnect_alert 内部已有 try-except）
+        bw2 = BrokerConnectionWatcher(broker=_FakeBroker(), alert_manager=None)
+        try:
+            bw2.on_state(True)
+            bw2.on_state(False)
+            alert_isolated = True
+        except Exception:
+            alert_isolated = False
+        return {
+            "item": "0.5-F3",
+            "pass": bool(callback_isolated and alert_isolated),
+            "detail": f"回调异常隔离={callback_isolated}, 告警异常隔离={alert_isolated}",
+            "threshold_source": "V3 §九 F-3（单 watchdog 异常不拖垮巡检）",
+        }
+
+    def _check_05_live(self) -> Dict[str, Any]:
+        """0.5 启动门（F-1 能力缺失）：LIVE + watchdog 未启用 → 拒启；启用 → 放行；
+        paper 尊重配置原值（false 可运行）。"""
+        from unittest import mock
+
+        from myquant.live.engine import _assert_live_watchdog_gate
+
+        # live + watchdog disabled → ValueError（拒启）
+        with mock.patch(
+            "myquant.core.settings.get_monitoring_config",
+            return_value={"watchdog": {"enabled": False}},
+        ):
+            try:
+                _assert_live_watchdog_gate("live")
+                live_rejected = False
+            except ValueError:
+                live_rejected = True
+        # live + watchdog enabled → 放行
+        with mock.patch(
+            "myquant.core.settings.get_monitoring_config",
+            return_value={"watchdog": {"enabled": True}},
+        ):
+            try:
+                _assert_live_watchdog_gate("live")
+                live_allowed = True
+            except ValueError:
+                live_allowed = False
+        # paper + disabled → 放行（尊重配置原值）
+        with mock.patch(
+            "myquant.core.settings.get_monitoring_config",
+            return_value={"watchdog": {"enabled": False}},
+        ):
+            try:
+                _assert_live_watchdog_gate("paper")
+                paper_ok = True
+            except ValueError:
+                paper_ok = False
+        return {
+            "item": "0.5-LIVE",
+            "pass": bool(live_rejected and live_allowed and paper_ok),
+            "detail": (
+                f"live+disabled拒启={live_rejected}, live+enabled放行={live_allowed}, "
+                f"paper+disabled放行={paper_ok}"
+            ),
+            "threshold_source": "V3 §十.5 F-1（装配能力缺失拒启）；施工清单 §5 改动点2",
+        }
+
     # ── 运行入口 ────────────────────────────────────────────
 
     def run(self, mode: str = "full") -> Dict[str, Any]:
@@ -700,6 +828,9 @@ class LiveSafetyGateRunner:
             "0.4-4": self._check_04_case4,
             "0.4-R6": self._check_04_r6,
             "0.4-F1": self._check_04_f1,
+            "0.5-2": self._check_05_case2,
+            "0.5-F3": self._check_05_f3,
+            "0.5-LIVE": self._check_05_live,
         }
 
         items: List[Dict[str, Any]] = []

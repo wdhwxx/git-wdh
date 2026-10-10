@@ -2880,4 +2880,39 @@ def create_live_engine(
     # KP-P5-07: config_version 落引擎（来自 live_config.config_version，变更管理版本留痕）
     engine._config_version = str(config.get("config_version", "") or "")
 
+    # 0.5（回写#291）：LIVE 启动门——watchdog 为 live 必备装配能力（A-4 行情活性 /
+    # A-5 引擎心跳 / A-6 券商断连 三看门狗，装配开关 monitoring.watchdog.enabled 唯一真源
+    # config/settings.yaml，scheduler 侧不跨真源覆盖）。live 且未启用 → 拒启
+    # （F-1 能力缺失 fail-closed）；paper/sim 尊重配置原值（false 可运行）。
+    _assert_live_watchdog_gate(trade_mode)
+
     return engine
+
+
+def _assert_live_watchdog_gate(trade_mode: str) -> None:
+    """
+    0.5（回写#291）LIVE 启动门：watchdog 未启用 → 拒启（F-1 能力缺失 fail-closed）。
+
+    三看门狗（A-4 行情活性 / A-5 引擎心跳 / A-6 券商断连）是 LIVE 必备装配能力，
+    装配开关 monitoring.watchdog.enabled 唯一真源 config/settings.yaml
+    （scheduler 侧不跨真源覆盖）；paper/sim 尊重配置原值（false 可运行）。
+
+    Parameters
+    ----------
+    trade_mode : str
+        引擎运行模式（live/paper/sim）。
+
+    Raises
+    ------
+    ValueError
+        trade_mode=live 且 watchdog 未启用时拒启。
+    """
+    if str(trade_mode).lower() == "live":
+        from myquant.core.settings import get_monitoring_config
+
+        if not get_monitoring_config().get("watchdog", {}).get("enabled", False):
+            raise ValueError(
+                "LIVE 模式拒绝启动：monitoring.watchdog.enabled=false"
+                "（A-4/A-5/A-6 看门狗未启用，能力缺失 fail-closed；"
+                "请在 config/settings.yaml 开启 monitoring.watchdog.enabled）"
+            )
