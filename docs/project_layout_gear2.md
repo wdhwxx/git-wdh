@@ -828,7 +828,7 @@ Pythonwdhmm/
 
 │   │   ├── test_contract.py         # ✨【回写#274】契约校验测试（M0-10 核心，15 用例）：声明完整 R09 正反向（7 策略真源通过/缺 decision_time/pit_status/available_time/basis 错误报红/注册表缺失/未登记）+ 台账比对 R10（缺失 fail-closed/columns 空/目标基不一致/收盘价日基非 trade_date/一致通过）+ ensure_registered 幂等 + 出口断言汇总契约违规报红
 
-│   │   ├── test_consumption_gate.py # ✨【回写#275】消费侧门禁测试（M0-12 核心，13 用例）：AST 提取（df["列"]/df.列/columns/精确匹配过滤）+ 纯函数比对正反向 + 台账缺失 fail-closed/未登记 + 7 策略真实扫描通过 + R11 反向测试（注入引用每股收益必报红）+ 出口断言报红 + 注册幂等
+│   │   ├── test_consumption_gate.py # ✨【回写#275】消费侧门禁测试（M0-12 核心，13 用例）：AST 提取（df["列"]/df.列/columns/精确匹配过滤）+ 纯函数比对正反向 + 台账缺失 fail-closed/未登记 + 7 策略真实扫描通过 + R11 反向测试（注入引用每股收益必报红）+ 出口断言报红 + 注册幂等；✨【回写#286】追加总验收 G-02 兜底 5 用例：audit_blocked_column_literals 显式阻断列命中计数/缺失空/多列排序/默认从台账加载/空阻断列（13→18 用例）
 │   │   ├── test_gate_red_on_injected_leak.py # ✨【回写#276】出口强制测试（M0-08 同批/M0-13 核心，3 用例）：注入引用每股收益 → 出口断言必报红（R11）+ create_engine spy 验证挂载（strategy_id=name）+ create_live_engine spy 验证挂载（真实 ma_cross 装配）
 │   │   ├── test_registry_contract.py # ✨【回写#277】注册强制契约测试（M0-10 缺口补齐，6 用例）：7 策略契约元数据齐全 + 注册表主键=name（DEC-01）+ FakeNoContract 注册抛 AttributeError（M0-04 反向）+ 部分契约仍被拒 + 注册表 name 集合 == strategy_registry.yaml 真源
 │   │   ├── test_ledger_truth_source.py # ✨【回写#279】真实台账真源冒烟（M0P-01/02/03 固化，4 用例，不 monkeypatch）：台账 14 列机读可读 + 每股收益阻断/目标 eff_disclosure_date/收盘价 trade_date/无待确认残留 + 7 策略真实出口全通过 + 真实台账下注入每股收益必报红（R11）
@@ -946,7 +946,7 @@ Pythonwdhmm/
 
     │   ├── contract.py               # ✨【回写#274】契约完整性校验（M0-06）：声明完整（R09/RL-02 契约层：decision_time/available_time/universe.pit_status/consumed_columns/ruleset 深度校验）+ 与列级台账比对（R10/RL-11：台账缺失 fail-closed，契约不能自证 PIT，v3.0 附录 B 注2）；契约真源=config/strategy_registry.yaml（主键=name，DEC-01）；不 import strategies（L0→L3 反向跨层会被 R-02 拦，分层合规）；导入即注册（ensure_registered 幂等）
 
-    │   ├── consumption.py            # ✨【回写#275】消费侧列门禁（L0.5，M0-07，v3.0 §6.1.3）：AST 引用列提取（df["列"]/df.列/columns=[...]/字符串常量精确匹配，纯函数 extract_columns_from_source）+ 纯函数比对（实测∪声明 ∩ severity=阻断 ≠ ∅ → R11/RL-13 报红，validate_consumption）+ 台账缺失 fail-closed；策略源码只读文件做 AST 非 import（分层合规）；导入即注册
+    │   ├── consumption.py            # ✨【回写#275】消费侧列门禁（L0.5，M0-07，v3.0 §6.1.3）：AST 引用列提取（df["列"]/df.列/columns=[...]/字符串常量精确匹配，纯函数 extract_columns_from_source）+ 纯函数比对（实测∪声明 ∩ severity=阻断 ≠ ∅ → R11/RL-13 报红，validate_consumption）+ 台账缺失 fail-closed；策略源码只读文件做 AST 非 import（分层合规）；导入即注册；✨【回写#286】总验收 G-02 兜底：audit_blocked_column_literals（阻断列中文字面量出现次数审计——R11 的 AST 扫描对间接引用 col="每股收益";df[col] 不生效，本审计对 severity:阻断 列名做源码字面量计数返回 warning，不阻断，供人工复核；补充防线不替代出口主判据）
 
     │   ├── static_scan.py            # ✨【回写#283】静态 AST 扫描器（阶段 1-B，M1B-01/02/03）：R01a 特征侧负向移位阻断/R01b 标签侧放行登记/R02 center=True 阻断/R04 随机切分阻断/R05 全样本标准化阻断/R03 跨时间全样本拟合警告档（G-04 先警告+人工复核）/R07 横截面告警/R09 report_date 时点匹配阻断/R10 未登记派生列阻断；输出列引用清单供 consumption 消费（canonical 单实现）+ 内容哈希缓存（未变不重扫）+ 只扫变更文件（scan_paths/main_cli）；挂"static_scan"门禁
     │   ├── cross_sectional.py        # ✨【回写#283】横截面 as-of 校验器（阶段 1-B，M1B-04，v3.0 §6.5-2/RL-07）：validate_asof/validate_cross_sectional_panel 纯函数（当日截面只用当日数据）+ check_cross_sectional 挂"cross_sectional"门禁（R07 警告）；只读源码文件非 import（分层合规）
@@ -4265,4 +4265,20 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    h. **修改 .github/workflows/ci.yml**（M3-03 门禁矩阵扩展）：新增第 12 job leakage-audit-matrix（needs:[lint,test]）——豁免流专项 + 审计报告专项（含 cleanup 衔接）+ tests/leakage_gate 全量防回归 + M3 台账/接线断言（模块存在、cleanup_service 纳入模式、gate 集成豁免钩子、包导出）；头部注释登记门禁矩阵（台账+静态扫描+消费侧+sanity+契约+PIT+专项全绿）；ci.yml yaml.safe_load 校验 12 job 全绿。
    i. **蓝图目录树登记**：myquant/ 段 leakage_gate/ 子树加 report.py+exemption.py、gate.py 追加 M3-01/02 说明、utils/ 段 cleanup_service.py 记录块追加 M3-01 衔接、tests/ 段 leakage_gate/ 加 test_report.py+test_exemption.py，均带 ✨【回写#285】。
    j. **纪律遵守**：蓝图优先（先登记目录树再落代码）；R-19 零覆盖（report/exemption 经显式子模块 import 被 tests 引用，探针识别）；新增文件不超 OVERSIZE 1500 行；L0 分层合规（report/exemption 只依赖同包 gate 与 core.audit_log，不 import L3/L4）；严格防未来（报告只汇总已发生门禁/降级/版本事实、豁免只按已给有效期与当前时点判定，不预测未来）；git 提交（commit message 引用 #285）。
+
+## #286 · 2026-10-10 · 防泄漏门禁施工·总验收 V（V-01~V-05 全通过）
+   事实来源：本次总验收（进入总验收 V，施工收尾；轨道 A~F 全部落地已提交）；代码级核验：V-01 专项测试包 135 passed（tests/leakage_gate 127 + tests/scripts/test_数据导出_pit.py 8）+ V-02 CI 门禁矩阵对应测试 179 passed/1 skipped（leakage_gate + test_config_live_check + test_architecture）+ 真实静态扫描（278 文件）exit 0（0 阻断，R01b 放行登记 2 同基线）+ ci.yml 12 job yaml 校验通过；V-03 入口强制核对（出口断言接线实证）；V-04 审计产物核对（report.py 已产出）。
+   a. **V-01 专项测试包全绿**：`tests/leakage_gate/` + `tests/scripts/test_数据导出_pit.py` 全部通过（135 passed/0 failed）——每道门禁反向测试（注入泄漏必报红）全绿（门禁自证，§8.2-1）。
+   b. **V-02 CI 门禁矩阵全绿**：台账 + 静态扫描 + 消费侧 + sanity + 契约 + PIT 对应测试组合全绿（179 passed/1 skipped）；真实静态扫描 exit 0；ci.yml 门禁矩阵 job（leakage-gate-check + static-scan-check + leakage-audit-matrix + data-clean）覆盖全部六类。
+   c. **V-03 入口强制核对通过**：出口断言唯一收敛点实证——`backtest/engine.py create_engine(:1032→assert_all_gates_pass :1061)`、`live/engine.py create_live_engine(:2702→assert_all_gates_pass :2798)` 汇总全部注册门禁（static_scan/consumption/contract/cross_sectional/feature_whitelist）；`factor_engine.py` truncated_selfcheck 默认 True 对新注册因子强制截断重算（M1B-05）——新增因子/策略不经静态扫描与截断重算不得进入回测/实盘链路。
+   d. **V-04 审计产物核对通过**：`report.py`（M3-01）每次实验产出 `leakage_report.json`（门禁统计+消费侧列引用+复权降级清单+数据版本 sidecar+lookahead 统计），保留期 30 天 + 与清理脚本衔接。
+   e. **V-05 施工检查项 G-01~G-05 逐项核对通过**：
+      - **G-01 重导出边界表述**：方案 §1.2/§6.4.1/§8.2-2 口径已统一（"无需重导出"仅指无需救历史结论，修复 ③④ 后仍需重导 parquet 纠数据本身；§8.2-2 验收含重导后抽样比对一步）；
+      - **G-02 R11 间接引用绕过明示**：**本轮补齐兜底审计**——`consumption.audit_blocked_column_literals`（对 severity:阻断 列名做源码中文字面量出现计数，warning 不阻断，供人工复核间接引用/误报）+ 动态列名访问人工检查项（§12.4 文档明示）+ 白名单/豁免兜底（M0 白名单 + M3-02 exemption.py）；补充防线不替代出口主判据；
+      - **G-03 severity 翻转过渡态**：`每股收益` 当前台账仍为阻断（未翻转），R11 对消费/特征引用持续报红（test_ledger_truth_source 实证）；未发生翻转故无翻转审计动作（符合"修复确证前保持阻断"口径）；
+      - **G-04 R03 单独里程碑检查点**：轨道 D 已建 `R03里程碑检查点.md` + 警告档起步（G-04 不阻塞 R09/R10/R11 上线，已落实）；
+      - **G-05 措辞统一**：方案文档正文 4 处 lookahead_guard 相关"恒真"措辞统一为"时间线排序自检（防引擎级时序错误；不防策略内部泄漏）"（§3 资产表 :418 / RL-08 :641 / R06 :839 / 风险表 :161），与 §12.4-G-05 口径一致。
+   f. **蓝图目录树登记**：myquant/ 段 leakage_gate/ 子树 consumption.py 追加 G-02 审计说明、tests/ 段 test_consumption_gate.py 追加 G-02 兜底 5 用例（13→18），均带 ✨【回写#286】。
+   g. **纪律遵守**：蓝图优先；总验收以"核对 + 实证"为主（无新增业务功能，仅补 G-02 兜底审计纯函数 + G-05 措辞统一）；R-19 零覆盖（consumption 经显式子模块 import 被 tests 引用）；严格防未来（审计只计数已写源码字面量、不预测未来）；git 提交（commit message 引用 #286）。
+
 

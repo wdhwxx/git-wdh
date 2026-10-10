@@ -151,6 +151,40 @@ def validate_consumption(
     return sorted((set(declared) | actual) & blocked)
 
 
+def audit_blocked_column_literals(
+    sources: Sequence[str],
+    blocked_columns: Optional[Sequence[str]] = None,
+) -> List[Dict[str, int]]:
+    """
+    阻断列名字面量出现次数审计（总验收 G-02 兜底，R11 补充防线，警告档不阻断）。
+
+    背景：R11 的 AST 列引用扫描对**间接引用**不生效——`col = "每股收益"; df[col]`、
+    `df[cols]`（变量列表）、循环遍历列名等场景静态扫不到（v3.0 §12.4-G-02）。
+    本审计对 `severity: 阻断` 的列名做源码中文字面量出现计数：命中即返回
+    （**警告，不阻断**），由人工复核是否为间接引用或误报。此为 R11 的补充防线，
+    不替代主判据 `validate_consumption` 的出口报红。
+
+    Args:
+        sources: 待审计的源码文本列表。
+        blocked_columns: 阻断列清单；None 时从列级台账加载（severity=阻断）。
+
+    Returns:
+        List[Dict[str, int]]: [{column, count}] 命中（count>0，按列排序）；无命中为空列表。
+    """
+    if blocked_columns is not None:
+        blocked = sorted(str(c) for c in blocked_columns)
+    else:
+        blocked = sorted(_blocked_columns(_load_ledger() or {}))
+    if not blocked:
+        return []
+    hits: List[Dict[str, int]] = []
+    for col in blocked:
+        count = sum(text.count(col) for text in sources)
+        if count > 0:
+            hits.append({"column": col, "count": count})
+    return hits
+
+
 # ═══════════════════════════════════════════════
 #  门禁检查入口
 # ═══════════════════════════════════════════════

@@ -196,3 +196,48 @@ def test_ensure_registered_idempotent() -> None:
     consumption_module.ensure_registered()
     assert "consumption" in _GATE_CHECKS
     assert [n for n in _GATE_CHECKS if n == "consumption"].count("consumption") == 1
+
+
+# ═══════════════════════════════════════════════
+#  阻断列名字面量出现次数审计（总验收 G-02 兜底，R11 补充防线）
+# ═══════════════════════════════════════════════
+
+def test_g02_audit_literal_hit() -> None:
+    """显式阻断列：源码出现阻断列中文字面量 → 计数命中（警告档，不阻断）。"""
+    hits = consumption_module.audit_blocked_column_literals(
+        ['col = "每股收益"\ndf[col]  # 间接引用', "logger.info('每股收益说明')"],
+        blocked_columns=["每股收益"],
+    )
+    assert hits == [{"column": "每股收益", "count": 2}]
+
+
+def test_g02_audit_no_hit_when_absent() -> None:
+    """源码未出现阻断列字面量 → 空。"""
+    hits = consumption_module.audit_blocked_column_literals(
+        ['val = df["收盘价"]'], blocked_columns=["每股收益"]
+    )
+    assert hits == []
+
+
+def test_g02_audit_counts_each_blocked_column() -> None:
+    """多个阻断列各自计数，按列排序。"""
+    hits = consumption_module.audit_blocked_column_literals(
+        ['a = "流通股本"\nb = "流通股本" + "每股收益"'],
+        blocked_columns=["每股收益", "流通股本"],
+    )
+    # 按列排序（Unicode：每股收益 < 流通股本）
+    assert hits == [{"column": "每股收益", "count": 1}, {"column": "流通股本", "count": 2}]
+
+
+def test_g02_audit_defaults_from_ledger(monkeypatch: pytest.MonkeyPatch) -> None:
+    """blocked_columns 未传 → 从台账加载 severity=阻断 列。"""
+    hits = consumption_module.audit_blocked_column_literals(
+        ['eps = "每股收益"  # 间接引用路径 col="每股收益"; df[col]']
+    )
+    # 台账（_make_ledger）中阻断列为每股收益；源码含赋值+注释两处字面量 → 计数 2
+    assert hits == [{"column": "每股收益", "count": 2}]
+
+
+def test_g02_audit_empty_blocked() -> None:
+    """无阻断列 → 空（不抛错）。"""
+    assert consumption_module.audit_blocked_column_literals(["x"], blocked_columns=[]) == []
