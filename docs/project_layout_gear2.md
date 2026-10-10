@@ -798,6 +798,7 @@ Pythonwdhmm/
 │   │   ├── test_run_mode.py       # ✨【回写#52】运行模式切割接口测试(枚举/resolve优先级/apply写回/validate_live安全门/check一致性，19项)✅已完成
 
 │   │   ├── test_acceptance.py     # ✨【回写#52】仿真绩效准入评估测试(全达标/回测比较/未达标/数据缺失NA/阈值覆盖/非法输入/序列化，11项)✅已完成
+│   │   ├── test_kill_switch_signal.py # ✨【回写#297】跨进程急停信号+ack回路测试（10项）：写标志含 requested_at+请求方/空 actor 拒绝/未置位 None/ack 往返（acted_at+动作结果）/超时未 ack 升级 CRITICAL 提示"急停未生效，请用一键平仓"/超时内 PENDING 不误升级/ack 后健康 OK/未置位健康/复位删标志+ack/与 0.9 硬闸同一真源（写标志后 broker.kill_switch_active=True）✅已完成
 │   │   ├── test_compliance_gate.py # ✨【回写#144】报备合规门禁测试(KP-P6-01：缺字段拦截exit2/放行exit0/开关未开/状态非approved/日期非法/自定义字段/validate_live联动/engine拦截/快照落盘，12项)✅已完成
 │   │   ├── test_admission_guard.py # ✨【回写#186】KP-M04(T-30) 写操作准入守卫测试（默认仅审计fail-safe/启用拒绝无复核人/复核人匹配放行/单人审批/非高危不阻断/审计JSONL落盘/require_scope/配置缺失回退，11项）✅已完成
 │   │   ├── test_paper_run_dialog.py  # ✨【回写#65】仿真运行弹窗 GUI 测试（offscreen）
@@ -1282,6 +1283,8 @@ Pythonwdhmm/
     │   ├── emergency_liquidation.py  # ✨【回写#47补录】紧急平仓服务（EmergencyLiquidationService：execute(confirm=False默认dry_run)生成撤单+平仓计划；先撤挂单再卖/优先可卖数量/单标异常不阻断/报告结构化）；被engine._setup_force_close与scripts/一键平仓.py调用；✨【回写#152】增 executed/planned 字段（KP-M02：dry-run 恒 executed=False、计划计 planned 不冒充 success、真实撤单/平仓置 executed）；✨【回写#226】B-6 联动——可选 event_bus，真实全平（executed=True）后发布 EMERGENCY_LIQUIDATION 供 A-8/熔断联动，dry_run 不发布
 
     │   ├── run_mode.py               # ✨【回写#52】运行模式切割接口：RunMode枚举(MONITOR/PAPER/SIM/LIVE)+describe+resolve(专先CLI>配置>默认paper)+apply_mode_to_config写回+validate_live实盘安全门(--confirm-live+证券qmt/ptrade+账户)+check_mode_consistency配置一致性；被run_实盘入口与create_live_engine消费；未来实盘切割 --mode sim→--mode live --confirm-live 一步切换；✨【回写#144】validate_live 增 KP-P6-01 报备合规门禁（LIVE 未备案拒绝启动）；✨【回写#186】KP-M04(T-30)：apply_mode_to_config->LIVE 实盘切换准入守卫（拒绝显式抛 ValueError）
+
+    │   ├── kill_switch_signal.py      # ✨【回写#297】跨进程急停信号 + ack 回路（V3 决策点2，阶段4 监护进程同一通道）：request_kill_switch（写标志含 requested_at+请求方）/acknowledge_kill_switch（写 ack 含 acted_at+动作结果）/check_kill_switch_health（超时未 ack → CRITICAL 提示"急停未生效，请用一键平仓"）/clear_kill_switch；与 0.9 base_broker 的 kill_switch.flag 同一真源（文件存在=置位，零依赖进程崩了文件还在）；决策点1 语义=置位禁开仓（0.9 硬闸只拒 BUY）+撤全部挂单（监护进程消费后调 EmergencyLiquidationService.cancel_all）+全平人工二次确认（auto_liquidate=False 保持）；不依赖 engine/risk/门禁（应急链独立）
 
     │   ├── acceptance.py             # ✨【回写#52】仿真绩效准入评估器(任务T10)：SimulationAcceptanceEvaluator对照表5阈值(DEFAULT_THRESHOLDS可覆盖)逐项判定8指标，缺数据判NA不误通过，产出AcceptanceReport(to_dict/to_text)；供scripts/仿真准入评估.py消费；✨【回写#144】增 ComplianceGate/ComplianceReport（KP-P6-01 程序化交易报备门禁：六字段齐全+开关+已备案+日期格式，exit_code 0/2，快照落盘）
 
@@ -4385,5 +4388,14 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    d. **施工清单 §10 勾选（LIVE 上线门槛 ①~⑥）**：①0.1–0.9 全勾选；②V3 §九 31/31 验收通过（用例 1~13 覆盖 1-10/12-13，用例11=券商侧人工；R-1~R-7、F-1~F-6 全覆盖）；③决策点 3（actor_type 双语义，system 跳 reviewer 校验但审计留痕）已拍板落地、4/5 按推荐落地；④probe 档最小额度集已生效（单笔 50 万 max_order_value→single_order_limit、单日 20 笔 max_daily_trades→rate_limit、总敞口 95% + 持仓 5 只→position_limit、在途笔数→QmtBroker 幂等去重，均经 build_risk_manager_from_config 配置真源接线）；⑤券商侧防护为外部配置，需人工在前台开启后确认（不变量 I-7 生效前不得上真钱）；⑥告警渠道经 LIVE-13 实测送达。
    e. **验收结果**：验收 0.1~0.9 + LIVE 门槛共 31 项全过（JSON 落盘 docs/监控档案/实盘安全门禁验收_20261010.json 更新）；tests/unit 全量 3670 passed（此前 R02/R14 架构门禁 2 失败已修复）；架构门禁 30 passed。
    f. **纪律遵守**：阈值/路径全部引用真源（daily_loss 上限=config max_daily_loss_pct、单笔=config max_order_value、日历注入=构造参数不编造）；故障注入可复现（blocker 文件占用、本地 HTTP 端口）；验收载体不可拆（Oversize 白名单唯一合法路径，不拆分规避）；git 提交（commit message 引用 #296）。
+
+## #297 · 2026-10-10 · 决策点 1/2 拍板落地：Kill Switch 语义固化 + 跨进程急停信号与 ack 回路
+   事实来源：本次落地（施工清单 §13）；代码级核验：myquant/live/kill_switch_signal.py 急停信号 + ack 回路模块（纯 stdlib，无跨层 import）；单测 10/10 通过；决策点 1/2 拍板结论已回写施工清单 §13。
+   a. **决策点 1 拍板（Kill Switch 语义 = 禁开仓 + 撤全部挂单 + 全平人工二次确认）**：0.9 已落地"禁开仓（硬闸只拒 BUY）+ SELL/平仓/撤单放行 + auto_liquidate=False 保持"；置位时撤全部挂单由阶段 4 监护进程消费急停信号后调 EmergencyLiquidationService.cancel_all 执行；全平保持人工确认（不放开自动全平）。
+   b. **myquant/live/kill_switch_signal.py（新建，回写#297）**：跨进程急停信号 + ack 回路（决策点 2，与阶段 4 监护进程同一通道，纯 stdlib 不依赖 engine/risk/门禁——应急链独立）：KillSwitchRequest/KillSwitchAck 数据模型（requested_at+请求方 / acted_at+动作结果，ISO 8601 带时区 + Unix 秒双时间戳）；request_kill_switch（原子写标志含 requested_at+actor+reason，actor 非空否则 ValueError）；kill_switch_requested（读请求）；acknowledge_kill_switch（写 ack 含 acted_at+result）；kill_switch_ack（读 ack）；check_kill_switch_health（未置位健康/未 ack 未超时 PENDING/超时未 ack → OVERDUE + CRITICAL 明确提示"急停未生效，请用一键平仓"——决策点2 必做，防"人误以为已急停而放弃其他手段"；ack 在时限内 OK）；clear_kill_switch（复位删标志+ack）；_atomic_write_json 原子写（temp+fsync+os.replace，防崩溃半截文件）。真源：KILL_SWITCH_FLAG_DEFAULT="run/kill_switch.flag" 与 0.9 base_broker 同一真源（文件存在=置位）；超时阈值引用 P0-8 MTTR（默认 60s）。
+   c. **tests/unit/test_kill_switch_signal.py（新建，10 项）**：写标志含 requested_at+请求方 / 空 actor 拒绝 / 未置位 None / ack 往返（acted_at+动作结果）/ 超时未 ack 升级 CRITICAL 提示用一键平仓 / 超时内 PENDING 不误升级 / ack 后健康 OK / 未置位健康 / 复位删标志+ack / 与 0.9 硬闸同一真源（写标志后 PaperBroker.kill_switch_active=True）。
+   d. **蓝图目录树登记（回写#297）**：myquant/live/ 段新增 kill_switch_signal.py、tests/unit 段新增 test_kill_switch_signal.py，均带 ✨【回写#297】。
+   e. **验收结果**：tests/unit/test_kill_switch_signal.py 10/10 通过；架构门禁无新增违规（新模块纯 stdlib 无跨层 import，行数 < OVERSIZE_LIMIT）；全量回归无回归。
+   f. **纪律遵守**：业务逻辑归 myquant（kill_switch_signal.py 为 live/ 段业务模块）；新建文件先登记蓝图目录树再建；阈值/路径引用真源（kill_switch.flag 与 0.9 同源、超时引用 P0-8，不新造数）；防御式（原子写、异常降级按未置位处理不误判）；git 提交（commit message 引用 #297）。
 
 
