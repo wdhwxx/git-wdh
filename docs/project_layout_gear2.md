@@ -394,6 +394,8 @@ Pythonwdhmm/
 
 │   ├── settings.yaml            # ✨【回写#198】BASE-3 全局配置主文件（.gitignore !config/settings.yaml 例外入库）：monitoring 块集中承载监控阈值真源——patrol_interval 巡检周期 / watchdog 引擎心跳组态 / alerts 告警行为（store_enabled 落库开关、dedup_window_seconds 去重、cooldown_seconds 冷却、aggregation_window_seconds/escalation_time_seconds/escalation_enabled 装配 AlertRule）/ slo R-04 阈值锁定表（数值与 monitoring.example.yaml 原样并入不迁移）；settings.py 自动加载 config/*.yaml（settings.yaml 排序在前）；改本文件即调全部阈值无需改代码（BASE-3 验收）；无敏感信息（notification 仍在 live_config.yaml 不入库）
 
+│   ├── strategy_registry.yaml  # ✨【回写#271】策略注册表 + ruleset 映射（防泄漏门禁 L-1 契约层，v3.0 §5.2，契约主键=name DEC-01）：7 策略登记（rsrs/ma_cross/grid/momentum/mean_reversion/multi_factor/kunpeng）+ consumed_columns 声明 + ruleset 映射（daily_close_decision：static_scan/cross_sectional/require_pit_asof/consumption_gate/sanity=false）；.gitignore !config/strategy_registry.yaml 例外入库（同 settings.yaml 模式）
+
 │   ├── monitoring/                  # ✨【回写#194】P0-6 监控即代码配置目录（模板入库，真实配置不入库）：仪表盘/告警规则/Runbook/采集配置全部落 yaml 版本化管理
 
 │   │   ├── dashboard.example.yaml   # ✨【回写#194】仪表盘配置模板（P0-6：面板布局/数据源/刷新周期）
@@ -4118,3 +4120,9 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    a. **蓝图目录树登记**：docs/未来函数与数据泄漏门禁/ 子树追加 防泄漏门禁红线清单.md（治理台账）。
    b. **新建 docs/未来函数与数据泄漏门禁/防泄漏门禁红线清单.md**：RL-01~14 治理台账（泄漏类型/强制环节/验收标准/对应规则/豁免档位），与 v3.0 §6.8 逐条一致。
    c. **纪律遵守**：蓝图优先；文档纯登记零代码改动；严格防未来（红线仅登记泄漏类型与强制环节，不含时间序列数据）；M0-02 无依赖；git 提交（commit message 引用 #270）。
+## #271 · 2026-10-10 · 防泄漏门禁施工·M0-03 策略注册表（config/strategy_registry.yaml）
+   事实来源：本次落地（进入 M0-03，依赖 DEC-01 已拍板）；代码级核验：7 策略已登记（rsrs/ma_cross/grid/momentum/mean_reversion/multi_factor/kunpeng，契约主键=name），consumed_columns 基于策略实际消费列（Grep 核验：全部消费收盘价/成交量，grid 另最高价/最低价 ATR，multi_factor 另流通股本；均不含阻断列每股收益，对齐 v3.0 §10.8），ruleset 映射 daily_close_decision（static_scan/cross_sectional/require_pit_asof/consumption_gate/sanity=false）。
+   a. **新建 config/strategy_registry.yaml**：策略注册表 + ruleset 映射（v3.0 §5.2），7 策略逐条登记 decision_time/execution_time/universe(pit_status)/data_availability(hfq+end_date 必传+eff_disclosure_date)/consumed_columns/ruleset/owner。
+   b. **.gitignore 加例外**：`!config/strategy_registry.yaml`（同 settings.yaml 模式，策略注册表为门禁契约真源需入库版本化）。
+   c. **蓝图 config/ 段目录树登记**：settings.yaml 后（monitoring/ 前）登记 strategy_registry.yaml。
+   d. **纪律遵守**：蓝图优先；配置为真实契约真源（无敏感信息）例外入库；防未来（契约仅声明消费列与时点语义）；M0-03 依赖 DEC-01 已拍板；git 提交（commit message 引用 #271）。

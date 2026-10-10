@@ -1,0 +1,206 @@
+# ============================================================
+# config/strategy_registry.yaml —— 策略注册表 + ruleset 映射（防泄漏门禁 L-1 契约层）
+# ============================================================
+# 归属：未来函数与数据泄漏门禁 · 阶段 0-A（M0-03）
+# 依据：《未来函数与数据泄漏门禁施工方案.md（v3.0 定稿）》§5.2（附录 B 契约模板 + §5.2 修正）
+# 生成日期：2026-10-10
+# 契约主键 = name（策略类属性）；strategy_id 仅展示别名（DEC-01 拍板，见 v3.0 §5.2 修正 2）
+# 本文件为真实配置，例外入库（.gitignore !config/strategy_registry.yaml），供：
+#   - 出口强制：run_回测入口.py / run_实盘入口.py 读契约做 assert_all_gates_pass
+#   - 契约校验：myquant/leakage_gate/contract.py（阶段 0-A M0-06）
+#   - CI 门禁矩阵：.github/workflows/ci.yml（M0-18）
+# 消费列（consumed_columns）为声明侧输入（R11，声明可漏报，实际以 AST 实测为准，见 v3.0 §10.8）
+# ============================================================
+
+strategies:
+  # ---------- RSRS 阻力支撑策略（ma_strategy.py:78） ----------
+  - strategy_id: rsrs_strategy
+    name: "rsrs"                 # ← 唯一主键（registry 以 name 为键）
+    type: daily_equity
+    decision_time: "T日收盘后 15:00"
+    execution_time: "T+1开盘 09:30"
+    holding_period: "20交易日"
+    universe:
+      type: "static"
+      source: "config/stock_pool.yaml"
+      pit_status: "未建设"         # 显式声明，避免契约自证 PIT（v3.0 附录 B 注4）
+    data_availability:
+      market_data:
+        available_time: "T日15:00"
+        adjust: "hfq"             # 真实配置为 hfq（非 raw），消费期现算
+        adjust_asof: "end_date 必传"
+        fields: [开盘价, 最高价, 最低价, 收盘价, 成交量, 成交额]
+      financial_data:
+        available_time: "ann_date"
+        basis: "eff_disclosure_date"   # 统一时点日落点函数（v3.0 §6.4.2）
+        fields: []
+    consumed_columns: [收盘价, 成交量]
+    ruleset: daily_close_decision
+    owner: "pythonwdhmm"
+
+  # ---------- 双均线交叉策略（ma_strategy.py:607） ----------
+  - strategy_id: ma_cross_strategy
+    name: "ma_cross"
+    type: daily_equity
+    decision_time: "T日收盘后 15:00"
+    execution_time: "T+1开盘 09:30"
+    holding_period: "10交易日"
+    universe:
+      type: "static"
+      source: "config/stock_pool.yaml"
+      pit_status: "未建设"
+    data_availability:
+      market_data:
+        available_time: "T日15:00"
+        adjust: "hfq"
+        adjust_asof: "end_date 必传"
+        fields: [开盘价, 最高价, 最低价, 收盘价, 成交量, 成交额]
+      financial_data:
+        available_time: "ann_date"
+        basis: "eff_disclosure_date"
+        fields: []
+    consumed_columns: [收盘价, 成交量]
+    ruleset: daily_close_decision
+    owner: "pythonwdhmm"
+
+  # ---------- 网格策略（grid_strategy.py:91） ----------
+  - strategy_id: grid_strategy
+    name: "grid"
+    type: daily_equity
+    decision_time: "T日收盘后 15:00"
+    execution_time: "T+1开盘 09:30"
+    holding_period: "波动区间滚动"
+    universe:
+      type: "static"
+      source: "config/stock_pool.yaml"
+      pit_status: "未建设"
+    data_availability:
+      market_data:
+        available_time: "T日15:00"
+        adjust: "hfq"
+        adjust_asof: "end_date 必传"
+        fields: [开盘价, 最高价, 最低价, 收盘价, 成交量, 成交额]
+      financial_data:
+        available_time: "ann_date"
+        basis: "eff_disclosure_date"
+        fields: []
+    consumed_columns: [收盘价, 最高价, 最低价, 成交量]   # ATR 用 high/low（grid_strategy.py:220）
+    ruleset: daily_close_decision
+    owner: "pythonwdhmm"
+
+  # ---------- 动量策略（momentum_strategy.py:91） ----------
+  - strategy_id: momentum_strategy
+    name: "momentum"
+    type: daily_equity
+    decision_time: "T日收盘后 15:00"
+    execution_time: "T+1开盘 09:30"
+    holding_period: "20交易日"
+    universe:
+      type: "static"
+      source: "config/stock_pool.yaml"
+      pit_status: "未建设"
+    data_availability:
+      market_data:
+        available_time: "T日15:00"
+        adjust: "hfq"
+        adjust_asof: "end_date 必传"
+        fields: [开盘价, 最高价, 最低价, 收盘价, 成交量, 成交额]
+      financial_data:
+        available_time: "ann_date"
+        basis: "eff_disclosure_date"
+        fields: []
+    consumed_columns: [收盘价, 成交量]
+    ruleset: daily_close_decision
+    owner: "pythonwdhmm"
+
+  # ---------- 均值回归策略（mean_reversion_strategy.py:94） ----------
+  - strategy_id: mean_reversion_strategy
+    name: "mean_reversion"
+    type: daily_equity
+    decision_time: "T日收盘后 15:00"
+    execution_time: "T+1开盘 09:30"
+    holding_period: "5交易日"
+    universe:
+      type: "static"
+      source: "config/stock_pool.yaml"
+      pit_status: "未建设"
+    data_availability:
+      market_data:
+        available_time: "T日15:00"
+        adjust: "hfq"
+        adjust_asof: "end_date 必传"
+        fields: [开盘价, 最高价, 最低价, 收盘价, 成交量, 成交额]
+      financial_data:
+        available_time: "ann_date"
+        basis: "eff_disclosure_date"
+        fields: []
+    consumed_columns: [收盘价, 成交量]
+    ruleset: daily_close_decision
+    owner: "pythonwdhmm"
+
+  # ---------- 多因子策略（multi_factor_strategy.py:142） ----------
+  - strategy_id: multi_factor_strategy
+    name: "multi_factor"
+    type: daily_equity
+    decision_time: "T日收盘后 15:00"
+    execution_time: "T+1开盘 09:30"
+    holding_period: "20交易日调仓"
+    universe:
+      type: "static"
+      source: "config/stock_pool.yaml"
+      pit_status: "未建设"
+    data_availability:
+      market_data:
+        available_time: "T日15:00"
+        adjust: "hfq"
+        adjust_asof: "end_date 必传"
+        fields: [开盘价, 最高价, 最低价, 收盘价, 成交量, 成交额]
+      financial_data:
+        available_time: "ann_date"
+        basis: "eff_disclosure_date"
+        fields: [流通股本]           # 财务派生列（流通股本现算，t 时刻可得，v3.0 §10.4）
+    consumed_columns: [收盘价, 成交量, 流通股本]   # 流通股本（multi_factor_strategy.py:696）
+    ruleset: daily_close_decision
+    owner: "pythonwdhmm"
+
+  # ---------- 鲲鹏策略（kunpeng_strategy.py:153） ----------
+  - strategy_id: kunpeng_strategy
+    name: "kunpeng"
+    type: daily_equity
+    decision_time: "T日收盘后 15:00"
+    execution_time: "T+1开盘 09:30"
+    holding_period: "30交易日"
+    universe:
+      type: "static"
+      source: "config/stock_pool.yaml"
+      pit_status: "未建设"
+    data_availability:
+      market_data:
+        available_time: "T日15:00"
+        adjust: "hfq"
+        adjust_asof: "end_date 必传"
+        fields: [开盘价, 最高价, 最低价, 收盘价, 成交量, 成交额]
+      financial_data:
+        available_time: "ann_date"
+        basis: "eff_disclosure_date"
+        fields: []
+    consumed_columns: [收盘价, 成交量]
+    ruleset: daily_close_decision
+    owner: "pythonwdhmm"
+
+# ============================================================
+# ruleset 映射（v3.0 §5.2：策略 → 门禁规则集）
+# daily_close_decision：日线收盘决策的默认规则集
+#   static_scan       → 静态扫描（R01/R02/R03/R04/R05/R06/R07 等，R03 单独里程碑检查点）
+#   cross_sectional   → 截面 as-of 对齐（RL-07）
+#   require_pit_asof  → 财务 join 必须走 eff_disclosure_date（RL-02，R09）
+#   consumption_gate  → 消费侧门禁（RL-13，R11）
+#   sanity            → 时间线排序自检（RL-08；防引擎级时序错误，不防策略内部泄漏，G-05 措辞）
+# ============================================================
+rulesets:
+  daily_close_decision:
+    static_scan: true
+    cross_sectional: true
+    require_pit_asof: true
+    consumption_gate: true
+    sanity: false                 # G-05：升序自回放恒真，降为"时间线排序自检"，不计入门禁效力
