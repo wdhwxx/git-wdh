@@ -40,7 +40,7 @@ __version__ = "0.2.0"
 __author__ = "Pythonwdhmm"
 
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, ClassVar, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -126,6 +126,11 @@ class BacktestEngine(BaseEngine):
         )
         result = engine.run()
     """
+
+    # M1A-04（v3.0 §6.4.7-A）：_bar_date_str 时间戳异常哨兵计数（可观测化）。
+    # 异常不再静默——每发生一次计数 +1，测试/审计可断言次数；
+    # 哨兵值 "" 交由 LookaheadGuard 记警告档 violation（跳过行为可见）。
+    _bar_date_failures: ClassVar[int] = 0
 
     def __init__(
         self,
@@ -684,7 +689,9 @@ class BacktestEngine(BaseEngine):
         try:
             return datetime.fromtimestamp(bar.timestamp).strftime('%Y-%m-%d')
         except (OSError, ValueError, OverflowError):
-            # timestamp异常时返回空字符串，LookaheadGuard会跳过日期校验
+            # M1A-04：异常返回哨兵值 "" 并计数（不再静默）。
+            # 哨兵 "" 使 LookaheadGuard 侧记警告档 violation（跳过行为可见）。
+            BacktestEngine._bar_date_failures += 1
             return ""
 
     def _run_lookahead_assert(self) -> bool:

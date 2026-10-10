@@ -45,6 +45,7 @@ P2-D7-003 整改声明：
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 from dataclasses import dataclass, field
@@ -52,6 +53,8 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from myquant.core.exceptions import LookaheadError
+
+logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════
@@ -270,6 +273,17 @@ class LookaheadGuard:
                     "message": f"信号日[{signal_date}]使用了截止日[{data_end}]的因子数据，data_end 必须 <= signal_date",
                 }
                 self._handle_violation(violation)
+        elif not signal_date:
+            # M1A-04（v3.0 §6.4.7-A）：空信号日（时间戳异常哨兵）不再静默跳过——
+            # 记警告档 violation，使"日期校验跳过"行为可见（警告档仅记录不阻断）。
+            self._handle_violation({
+                "rule": "铁律4-因子仅用历史数据",
+                "severity": "警告",
+                "symbol": symbol,
+                "signal_date": signal_date,
+                "data_end": data_end,
+                "message": f"信号日为空（时间戳异常哨兵），铁律4 日期校验跳过：symbol={symbol}",
+            })
 
         with self._lock:
             self._signals.append(rec)
@@ -321,6 +335,17 @@ class LookaheadGuard:
             if price_type and price_type.upper() not in ("OPEN", "VWAP"):
                 # T+1用收盘价成交也可能是合理的（如次日收盘确认），但标准模式应为开盘
                 pass
+        elif not trade_date:
+            # M1A-04（v3.0 §6.4.7-A）：空成交日（时间戳异常哨兵）不再静默跳过——
+            # 记警告档 violation，使"日期校验跳过"行为可见（警告档仅记录不阻断）。
+            self._handle_violation({
+                "rule": "铁律3-信号T日收盘→T+1开盘",
+                "severity": "警告",
+                "symbol": symbol,
+                "trade_date": trade_date,
+                "signal_date": signal_date,
+                "message": f"成交日为空（时间戳异常哨兵），铁律3 日期校验跳过：symbol={symbol}",
+            })
 
         with self._lock:
             self._trades.append(rec)
@@ -427,11 +452,11 @@ class LookaheadGuard:
     # ── 内部：违规处理 ──
 
     def _handle_violation(self, violation: Dict[str, Any]) -> None:
-        """处理违规（严格模式立即抛异常，否则记录）"""
+        """处理违规（严格模式立即抛异常，否则记录；警告档仅记录不抛）"""
         with self._lock:
             self._violations.append(violation)
 
-        if self._strict:
+        if self._strict and violation.get("severity") != "警告":
             raise LookaheadError(
                 rule_name=violation.get("rule", ""),
                 details=violation.get("message", ""),
@@ -451,7 +476,8 @@ class LookaheadGuard:
 
         Raises
         ------
-        LookaheadError : 存在未来函数违规时抛出
+        LookaheadError : 存在阻断档未来函数违规时抛出
+        （M1A-04：仅警告档违规——空日期哨兵——返回 True 不阻断，违规列表仍可见）
         """
         if not self._enabled:
             return True
@@ -460,6 +486,14 @@ class LookaheadGuard:
             violations = list(self._violations)
 
         if violations:
+            blocking = [v for v in violations if v.get("severity") != "警告"]
+            if not blocking:
+                # 仅警告档违规（空日期哨兵）：可见但非阻断
+                return True
+
+            # M1A-04 审计落点：阻断档违规落 audit_log（append-only 哈希链）
+            _append_audit(violations)
+
             # 汇总违规信息
             summary_lines = [
                 f"防未来函数校验未通过！共发现 {len(violations)} 处违规：",
@@ -510,6 +544,42 @@ class LookaheadGuard:
             f"trades={s['trades_recorded']}, "
             f"violations={s['violations']})"
         )
+
+
+# ═══════════════════════════════════════════════
+#  M1A-04 审计落点（v3.0 §6.4.7-A：阻断档违规落 audit_log）
+# ═══════════════════════════════════════════════
+
+
+def _append_audit(violations: List[Dict[str, Any]]) -> None:
+    """guard 违规落 audit_log（BASE-7 哈希链 append-only）；写失败记 error 不阻断主流程。
+
+    Args:
+        violations: 待落审计的违规列表。
+    """
+    try:
+        # M1A-04：延迟导入避免 core<->database 循环（lookahead_guard 被 core/__init__
+        # 顶层导出，顶层 import audit_log 会经 audit_log→database→core.logger 成环）
+        from myquant.core.audit_log import AuditLogStore
+
+        detail = {
+            "count": len(violations),
+            "violations": [
+                {
+                    "rule": v.get("rule", ""),
+                    "severity": v.get("severity", "错误"),
+                    "symbol": v.get("symbol", ""),
+                    "signal_date": v.get("signal_date", ""),
+                    "message": v.get("message", ""),
+                }
+                for v in violations
+            ],
+        }
+        AuditLogStore().append(
+            "lookahead_guard", "violation", actor="lookahead_guard", detail=detail
+        )
+    except Exception as e:  # noqa: BLE001 - 审计写失败不阻断主流程（防未来：已发生即记录，失败仅 error）
+        logger.error(f"防未来函数违规落审计失败（不阻断主流程）: {e}")
 
 
 # ═══════════════════════════════════════════════

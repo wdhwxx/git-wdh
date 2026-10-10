@@ -43,6 +43,7 @@ import pandas as pd
 import pytest
 
 from myquant.models.market_data import Bar, BarFrequency
+from myquant.strategies.registry import _strategy_registry
 from myquant.strategies import (
     GridStrategy,
     MACrossStrategy,
@@ -457,14 +458,19 @@ class TestStrategyRegistry:
         assert cls is MACrossStrategy
 
     def test_register_new_strategy(self):
-        """register_strategy 装饰器注册自定义策略"""
+        """register_strategy 装饰器注册自定义策略（测试后清理，防污染全局注册表）"""
         class CustomTestStrategy(MACrossStrategy):
             name = "custom_test_strategy_reg"
         # register_strategy 是装饰器，接收类，用 cls.name 作为注册键
         register_strategy(CustomTestStrategy)
-        assert "custom_test_strategy_reg" in list_strategies()
-        created = create_strategy("custom_test_strategy_reg")
-        assert isinstance(created, CustomTestStrategy)
+        try:
+            assert "custom_test_strategy_reg" in list_strategies()
+            created = create_strategy("custom_test_strategy_reg")
+            assert isinstance(created, CustomTestStrategy)
+        finally:
+            # M1A 回归修复：注册副作用必须回滚，否则污染全局 _strategy_registry，
+            # 使 tests/leakage_gate 的 yaml 真源对齐与真实出口冒烟（遍历全部注册表）误红
+            _strategy_registry.pop("custom_test_strategy_reg", None)
 
     def test_discover_strategies(self):
         """discover_strategies 可调用且不崩溃"""

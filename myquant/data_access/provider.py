@@ -38,15 +38,20 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import pandas as pd
 
+from myquant.core.audit_log import AuditLogStore
 from myquant.core.logger import get_logger
 from myquant.utils.file_utils import get_project_path
 from myquant.utils.time_utils import parse_datetime
 
 logger = get_logger("data_access.provider")
+
+#: M1A-05（v3.0 §6.4.7-B）：复权降级事件可观测集合（adjust_strict=False 时
+#: 无因子事件静默降级 raw 的标的清单）；供测试/审计断言降级可见，不静默。
+_adjust_degraded_symbols: Set[str] = set()
 
 
 #: 英文列名 → 中文列名映射（引擎内部统一使用中文表头）
@@ -82,7 +87,6 @@ REQUIRED_EN_OHLCV_COLUMNS: Tuple[str, ...] = (
 
 def require_ohlcv(df: pd.DataFrame, symbol: str = "") -> None:
     """校验 DataFrame 包含核心 OHLCV 列（中文列优先，兼容英文列）。
-
     #38 中文列改造后，回测入口统一以中文列为主校验口径；
     英文列作为旧缓存/旧数据源的兼容形态保留（引擎 get_bars 已做 EN→CN 转换）。
 
@@ -103,6 +107,29 @@ def require_ohlcv(df: pd.DataFrame, symbol: str = "") -> None:
         f"{prefix}行情缺少 OHLCV 列（需中文列 {REQUIRED_CN_OHLCV_COLUMNS} "
         f"或英文列 {REQUIRED_EN_OHLCV_COLUMNS}），实际列: {cols}"
     )
+
+
+# ═══════════════════════════════════════════
+#  M1A-05 降级事件审计（v3.0 §6.4.7-B）
+# ═══════════════════════════════════════════
+
+
+def _append_adjust_degradation(symbol: str, adjust: str) -> None:
+    """复权降级事件落 audit_log（append-only 哈希链）；写失败记 error 不阻断主流程。
+
+    Args:
+        symbol: 降级标的代码。
+        adjust: 请求的复权方式（降级后实际生效 raw）。
+    """
+    try:
+        AuditLogStore().append(
+            "data_access",
+            "adjust_degradation",
+            actor="HistoricalDataProvider",
+            detail={"symbol": symbol, "requested_adjust": adjust, "effective": "raw"},
+        )
+    except Exception as e:  # noqa: BLE001 - 审计写失败不阻断主流程（防未来：已发生即记录，失败仅 error）
+        logger.error(f"复权降级事件落审计失败（不阻断主流程）: {e}")
 
 
 # ═══════════════════════════════════════════
@@ -201,6 +228,7 @@ class HistoricalDataProvider(DataProviderBase):
         default_adjust: str = "raw",
         data_format: str = "parquet",
         factor_svc: Optional[Any] = None,
+        default_adjust_strict: bool = False,
     ):
         """
         Parameters
@@ -216,6 +244,10 @@ class HistoricalDataProvider(DataProviderBase):
                      或 "csv"（子目录 {symbol_safe}/bar_*.csv 文件，旧格式兼容）
         factor_svc : FactorSyncService | None
             复权因子服务（方案B #82，hfq/qfq 现算用）；None 则懒加载默认 DB 服务
+        default_adjust_strict : bool
+            M1A-05（v3.0 §6.4.5-2）：复权因子缺失时默认是否拒绝静默降级 raw。
+            真实配置（backtest_config.yaml / backtest_kunpeng.yaml data.adjust_strict）
+            应显式设 true；构造处读取配置后传入，使配置键真实生效。
         """
         if processed_dir is None:
             self._processed_dir = get_project_path("datasets", "processed")
@@ -223,6 +255,7 @@ class HistoricalDataProvider(DataProviderBase):
             self._processed_dir = Path(processed_dir)
         self._default_period = default_period
         self._default_adjust = default_adjust
+        self._default_adjust_strict = default_adjust_strict
         self._data_format = data_format.lower()
         self._factor_svc = factor_svc
 
@@ -352,7 +385,7 @@ class HistoricalDataProvider(DataProviderBase):
         end_date: Optional[str] = None,
         period: str = "daily",
         adjust: Optional[str] = None,
-        adjust_strict: bool = False,
+        adjust_strict: Optional[bool] = None,
     ) -> pd.DataFrame:
         """
         从processed目录加载K线数据
@@ -374,11 +407,16 @@ class HistoricalDataProvider(DataProviderBase):
             K线周期
         adjust : str | None
             复权方式（hfq/qfq/none）；None 使用构造默认；找不到对应文件时自动降级。
+        adjust_strict : bool | None
+            M1A-05：复权因子缺失时拒绝静默降级 raw；None 使用构造默认
+            （default_adjust_strict，真实配置 data.adjust_strict 显式设 true）。
 
         Returns
         -------
         pd.DataFrame : index=日期(datetime), columns=[开盘价,最高价,最低价,收盘价,成交量,成交额]
         """
+        if adjust_strict is None:
+            adjust_strict = self._default_adjust_strict
         filepath = self._find_data_file(symbol, period, adjust or self._default_adjust)
         if filepath is None:
             logger.warning(f"未找到 {symbol} 的processed数据文件")
@@ -532,14 +570,26 @@ class HistoricalDataProvider(DataProviderBase):
         symbol: str,
         adjust: str,
         end_date: Optional[str],
-        adjust_strict: bool = False,
+        adjust_strict: Optional[bool] = None,
     ) -> pd.DataFrame:
         """按复权因子表现算 hfq/qfq 价（processed 只存 raw，消费端内存变换）。
 
         - hfq价 = raw价 × factor（事件日及之后生效）
         - qfq价 = hfq价 / 最新因子（最新因子按 end_date 截断，防未来函数）
         - 标的无因子事件时降级返回 raw 并告警（不阻断回测）；KP-P2-09：adjust_strict 时 raise
+
+        M1A-05（v3.0 §6.4.5-1）：end_date=None 且 adjust=qfq 时，qfq 的
+        ``iloc[-1]`` 会取到真实最新因子，历史价被未来除权信息缩放（穿越）——
+        显式告警并标记，回测/实盘调用必须传 end_date。
         """
+        if adjust_strict is None:
+            adjust_strict = self._default_adjust_strict
+        if end_date is None and adjust == "qfq":
+            # M1A-05：end_date 缺失时 qfq 取全量因子表最新因子（穿越风险），显式告警
+            logger.warning(
+                f"{symbol} adjust=qfq 但 end_date 缺失：将取全量因子表最新因子，"
+                f"历史价被未来除权信息缩放（防未来函数风险；回测/实盘必须传 end_date）"
+            )
         factors = self._get_factor_lookup(symbol, as_of=end_date)
         if not factors:
             if adjust_strict:
@@ -547,6 +597,9 @@ class HistoricalDataProvider(DataProviderBase):
                     f"{symbol} 无复权因子事件，adjust={adjust} 且 adjust_strict=True，拒绝静默降级 raw"
                 )
             logger.warning(f"{symbol} 无复权因子事件，adjust={adjust} 降级为不复权 raw")
+            # M1A-05（v3.0 §6.4.7-B）：降级事件可观测——记集合 + 落审计（写失败仅 error 不阻断）
+            _adjust_degraded_symbols.add(symbol)
+            _append_adjust_degradation(symbol, adjust)
             df = df.copy()
             df.attrs["adjust_effective"] = "raw"
             return df
@@ -643,6 +696,7 @@ class HistoricalDataProvider(DataProviderBase):
         end_date: Optional[str] = None,
         period: str = "daily",
         adjust: Optional[str] = None,
+        adjust_strict: Optional[bool] = None,
     ) -> Dict[str, pd.DataFrame]:
         """
         批量加载多标的数据
@@ -662,6 +716,8 @@ class HistoricalDataProvider(DataProviderBase):
             K线周期
         adjust : str | None
             复权方式（hfq/qfq/none）；None 使用构造默认；找不到对应文件时自动降级。
+        adjust_strict : bool | None
+            M1A-05：复权因子缺失时拒绝静默降级 raw；None 使用构造默认。
 
         Returns
         -------
@@ -669,12 +725,78 @@ class HistoricalDataProvider(DataProviderBase):
         """
         result = {}
         for symbol in symbols:
-            df = self.get_bars(symbol, start_date, end_date, period, adjust)
+            df = self.get_bars(
+                symbol, start_date, end_date, period, adjust, adjust_strict=adjust_strict
+            )
             if not df.empty:
                 result[symbol] = df
             else:
                 logger.warning(f"跳过 {symbol}: 无有效数据")
         return result
+
+    # ═══════════════════════════════════════════
+    #  PIT 访问能力（v3.0 §6.4.6，M1A-05）
+    # ═══════════════════════════════════════════
+
+    def load_asof(
+        self,
+        symbol: str,
+        decision_time: str,
+        start_date: Optional[str] = None,
+        period: str = "daily",
+        adjust: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """PIT 访问：加载 ``decision_time`` 时点可见的行情（严格防未来）。
+
+        等价于 ``get_bars(symbol, start_date, end_date=decision_time)``——只返回
+        ``index <= decision_time`` 的 bar，绝不返回决策时点之后的数据。
+
+        Args:
+            symbol: 标的代码。
+            decision_time: 决策时点 YYYY-MM-DD（信号/写入时点，防未来基准）。
+            start_date: 开始日期（可选）。
+            period: K线周期。
+            adjust: 复权方式（None 使用构造默认）。
+
+        Returns:
+            pd.DataFrame: 仅含 ``<= decision_time`` 的 bar。
+        """
+        return self.get_bars(
+            symbol, start_date, decision_time, period=period, adjust=adjust
+        )
+
+    @staticmethod
+    def asof_join(
+        left: pd.DataFrame,
+        right: pd.DataFrame,
+        left_on: str = "日期",
+        right_on: str = "日期",
+        direction: str = "backward",
+    ) -> pd.DataFrame:
+        """按日期 asof 连接（PIT 语义：左表每行取右表 ``<=`` 该日期的最近行）。
+
+        direction 默认 ``backward``（只取过去，防未来函数）；一侧为空时返回左表
+        副本（不抛错）。
+
+        Args:
+            left: 左表（须含 ``left_on`` 日期列，datetime 类型）。
+            right: 右表（须含 ``right_on`` 日期列，datetime 类型）。
+            left_on: 左表日期列名。
+            right_on: 右表日期列名。
+            direction: merge_asof 方向（默认 backward=只取历史）。
+
+        Returns:
+            pd.DataFrame: 合并结果（右表列带后缀；一侧为空时返回左表副本）。
+        """
+        if left.empty or right.empty:
+            return left.copy()
+        return pd.merge_asof(
+            left.sort_values(left_on),
+            right.sort_values(right_on),
+            left_on=left_on,
+            right_on=right_on,
+            direction=direction,
+        )
 
     def refresh(self) -> None:
         """重新扫描目录（数据更新后调用）"""

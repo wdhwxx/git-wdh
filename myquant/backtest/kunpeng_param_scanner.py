@@ -20,7 +20,7 @@ import json
 import math
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from myquant.core.logger import get_logger
 
@@ -199,11 +199,12 @@ class KunpengParamScanner:
         """加载真实行情（HistoricalDataProvider，复权方式读 config/backtest_kunpeng.yaml data.adjust）。"""
         from myquant.backtest.data_loader import HistoricalDataProvider
 
-        adjust = self._read_data_adjust()
+        adjust, adjust_strict = self._read_data_adjust_config()
         self._active_adjust = adjust  # KP-P2-09：实际生效复权，供结果 meta 落盘
         provider = HistoricalDataProvider(
             processed_dir=self._processed_dir,
             default_adjust=adjust,
+            default_adjust_strict=adjust_strict,  # M1A-05：data.adjust_strict 配置真实生效
             data_format="parquet",
         )
         return provider.load_multiple(
@@ -211,12 +212,14 @@ class KunpengParamScanner:
             start_date=self.START_DATE,
             end_date=None,
             adjust=adjust,
+            adjust_strict=adjust_strict,
         )
 
-    def _read_data_adjust(self) -> str:
-        """读取 config/backtest_kunpeng.yaml 的 data.adjust（KP-P2-09：扫描器复权与配置一致）。
+    def _read_data_adjust_config(self) -> Tuple[str, bool]:
+        """读取 config/backtest_kunpeng.yaml 的 data.adjust + data.adjust_strict
+        （KP-P2-09：扫描器复权与配置一致；M1A-05：adjust_strict 配置真实生效）。
 
-        缺省 raw；读取失败/非法值回退 raw 并告警（不崩扫描）。
+        缺省 (raw, False)；读取失败/非法值回退 raw 并告警（不崩扫描）。
         """
         project_root = Path(__file__).resolve().parents[2]
         yml = project_root / "config" / "backtest_kunpeng.yaml"
@@ -224,14 +227,16 @@ class KunpengParamScanner:
             import yaml
             with open(yml, "r", encoding="utf-8") as f:
                 cfg = yaml.safe_load(f)
-            adj = str(((cfg or {}).get("data", {}) or {}).get("adjust", "raw"))
+            data_cfg = (cfg or {}).get("data", {}) or {}
+            adj = str(data_cfg.get("adjust", "raw"))
             if adj not in ("raw", "hfq", "qfq"):
                 logger.warning(f"yaml data.adjust={adj!r} 非法，回退 raw")
-                return "raw"
-            return adj
+                adj = "raw"
+            adjust_strict = bool(data_cfg.get("adjust_strict", False))
+            return adj, adjust_strict
         except Exception as exc:
             logger.warning(f"读取 backtest_kunpeng.yaml data.adjust 失败，回退 raw: {exc}")
-            return "raw"
+            return "raw", False
 
     # ── 阶段3：单组合评估 ──
 

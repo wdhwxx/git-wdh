@@ -40,6 +40,11 @@ logger = get_logger("data_access.manager")
 from .fetcher import DataFetcher
 from .sources.base import MarketDataResult
 from .cleaner import load_clean_config, run_clean_pipeline
+from myquant.data_access.time_semantics import (
+    eff_disclosure_date,
+    match_latest_financial,
+    next_day,
+)
 from myquant.utils.file_utils import (
     ensure_dir, get_project_path, write_csv, read_csv,
     read_json, write_json, file_sha256, file_lock,
@@ -63,6 +68,7 @@ VOLUME_ZERO_THRESHOLD = 0   # 成交量为0视为停牌或异常
 PROCESSED_COLUMN_TEMPLATE: List[str] = [
     "日期", "开盘价", "最高价", "最低价", "收盘价", "成交量", "成交额",
     "涨跌幅", "振幅", "量比", "换手率", "流通股本", "市盈动", "每股收益",
+    "available_time",  # M1A-10：财务列=有效披露日+1（与全量导出一致，防两路径分叉）
 ]
 
 
@@ -322,6 +328,12 @@ class DataManager:
             "total_failed": 0,
             "last_update_time": None,
         }
+        # M1A-06（v3.0 §6.4.7-C）：增量 B 类派生量失败可观测化。
+        # 原实现 except → logger.warning("跳过（不影响写入）") 会把派生量新逻辑的
+        # 异常吞掉并继续写入缺列行（假修复不可见）；改为失败计数 + 阈值断言，
+        # 连续失败达到阈值时日志升级 error，暴露问题而非静默。
+        self._b_class_derivation_failures: int = 0
+        self._b_class_failure_threshold: int = 5
 
     # ── 属性 ──
 
@@ -332,6 +344,11 @@ class DataManager:
     @property
     def update_stats(self) -> Dict:
         return dict(self._update_stats)
+
+    @property
+    def b_class_derivation_failures(self) -> int:
+        """增量 B 类派生量连续失败次数（M1A-06 可观测化，v3.0 §6.4.7-C）。"""
+        return self._b_class_derivation_failures
 
     # ═══════════════════════════════════════════
     # 增量更新
@@ -1151,6 +1168,7 @@ class DataManager:
             "volume_ratio": "量比", "float_share": "流通股本",
             "pe_dynamic": "市盈动", "turnover": "换手率",
             "eps": "每股收益",
+            "available_time": "available_time",  # M1A-10：财务列可用时点（eff+1）
         }
         _cn_to_en: Dict[str, str] = {v: k for k, v in _en_to_cn.items()}
 
@@ -1251,7 +1269,7 @@ class DataManager:
                 from ..database.queries import DataQueries
                 dq = DataQueries(self._db)
                 fin_rows = dq.conn.execute(
-                    "SELECT report_date, circ_mv, total_mv, net_profit, eps "
+                    "SELECT report_date, ann_date, circ_mv, total_mv, net_profit, eps "
                     "FROM financial_data WHERE symbol=? ORDER BY report_date",
                     (symbol,),
                 )
@@ -1283,20 +1301,26 @@ class DataManager:
                         if "date" in rec and "trade_date" not in rec:
                             rec["trade_date"] = rec["date"]
                     compute_b_class_metrics(cleaned, fin_b, share_records=share_recs)
-                    # 每股收益：按交易日匹配最近一期（同全量导出口径，防未来函数）
-                    fin_dates = [str(f.get("report_date", "")) for f in fin_all]
-                    fin_eps = [f.get("eps") for f in fin_all]
+                    # 每股收益：按交易日匹配最近一期（统一时点日落点，v3.0 §6.4.2，
+                    # M1A-01 修 ④：ann_date 优先 → report_deadline 推定 → report_date 兜底；
+                    # 与全量导出口径共用 match_latest_financial 单一实现，不再各自为政）
+                    # M1A-10：available_time = 有效披露日 + 1（与全量导出一致，防分叉）
                     for rec in cleaned:
-                        trade_date = str(rec.get("date") or "")
-                        eps_val = None
-                        for i, fd in enumerate(fin_dates):
-                            if fd <= trade_date:
-                                eps_val = fin_eps[i]
-                            else:
-                                break
-                        rec["eps"] = eps_val
+                        matched = match_latest_financial(fin_all, str(rec.get("date") or ""))
+                        rec["eps"] = (matched or {}).get("eps")
+                        eff = eff_disclosure_date(matched) if matched else ""
+                        rec["available_time"] = next_day(eff) if eff else None
             except Exception as e:
-                logger.warning("增量 B 类派生量计算失败，跳过（不影响写入）: %s: %s", symbol, e)
+                self._b_class_derivation_failures += 1
+                _fail_msg = f"增量 B 类派生量计算失败: {symbol}: {e}"
+                if self._b_class_derivation_failures >= self._b_class_failure_threshold:
+                    logger.error(
+                        "增量 B 类派生量连续失败达到阈值(%d)次，最近一次: %s",
+                        self._b_class_derivation_failures,
+                        _fail_msg,
+                    )
+                else:
+                    logger.warning(_fail_msg)
 
         # 剔除上下文行（已存在存量中，不重复写入）
         if context_rows:
@@ -1321,6 +1345,12 @@ class DataManager:
         # 列对齐存量 schema；写回前对存量部分做逐值等价校验，不等则抛异常不写出。
         merged = cleaned_df
         if existing_df is not None and not existing_df.empty:
+            # M1A-10：存量缺 available_time（旧 schema）→ 补空列（None），
+            # 使增量派生列可合并、合并后 schema 与全量导出一致（存量行值不变，
+            # 逐值等价校验仍通过——新列存量侧全 None）。
+            if "available_time" not in existing_df.columns:
+                existing_df = existing_df.copy()
+                existing_df["available_time"] = None
             if not cleaned_df.empty:
                 cleaned_df = cleaned_df.reindex(columns=existing_df.columns)
             if "日期" not in existing_df.columns or "日期" not in cleaned_df.columns:

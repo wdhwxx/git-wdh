@@ -80,15 +80,26 @@ class TestAnnDatePointInTime:
         assert len(pe_rows) == 1
         assert pe_rows[0]["factor_value"] == 25.0
 
-    def test_null_ann_date_falls_back_to_report_date(self) -> None:
-        """向后兼容：ann_date 为 NULL 的存量行回退 report_date 做时点过滤。"""
+    def test_null_ann_date_falls_back_to_deadline(self) -> None:
+        """M1A-02 统一语义：ann_date 为 NULL 的存量行回退法定披露截止日（保守正确）。
+
+        旧实现回退 report_date（报告期当天即可见，偏乐观）；统一时点日落点
+        （v3.0 §6.4.2）回退 report_deadline 推定——Q2 截止日 08-31，报告期后
+        08-31 前不可见（宁可晚见不可早见）。
+        """
         # 存量数据无公告日，Q2 报告期 2024-06-30
         legacy = _row("2024-06-30", None, pe=30.0)
+        # 信号日 2024-07-01：仍在 Q2 法定截止日（08-31）之前 → 不可见
         svc = _make_service([legacy], ["2024-07-01"])
         rows = svc._build_fundamental_rows(["000001"], lookback_days=1)
         pe_rows = [r for r in rows if r["factor_name"] == "市盈率PE"]
-        assert len(pe_rows) == 1
-        assert pe_rows[0]["factor_value"] == 30.0
+        assert pe_rows == []
+        # 信号日 2024-09-01：已过 Q2 法定截止日 → 可见
+        svc2 = _make_service([legacy], ["2024-09-01"])
+        rows2 = svc2._build_fundamental_rows(["000001"], lookback_days=1)
+        pe_rows2 = [r for r in rows2 if r["factor_name"] == "市盈率PE"]
+        assert len(pe_rows2) == 1
+        assert pe_rows2[0]["factor_value"] == 30.0
 
     def test_no_disclosed_report_before_first_ann_date(self) -> None:
         """最早公告日之前的信号日无任何基本面因子行。"""

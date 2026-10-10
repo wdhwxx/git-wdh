@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 # 任何跨修订号的 IC 档案 / 回测绩效不可直接比较。
 DATASET_SCHEMA_REVISIONS: Dict[str, int] = {
     "market_data": 2,        # 振幅/量比/流通股本等派生列加入（见蓝图 #33）
-    "financial_data": 2,     # F-15 新增 ann_date 公告日列，时点语义变更
+    "financial_data": 3,     # rev2: F-15 新增 ann_date（时点语义变更）；rev3: M1A-01 每股收益时点日基收敛 eff_disclosure_date（历史分布变更，#281）
     "factor_data": 1,
 }
 

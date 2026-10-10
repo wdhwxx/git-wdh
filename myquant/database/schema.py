@@ -695,8 +695,9 @@ def _migrate_financial_data_columns(connection) -> None:
 
     公告日（实际披露日）区别于报告期（report_date）：Q2 报告期 6/30
     实际披露常在 8 月底，用 report_date <= trade_date 会在披露前
-    错误引用未来财报。ann_date 为 NULL 的存量行在查询时回退 report_date，
-    保持向后兼容。幂等：先 PRAGMA 判断列是否存在。
+    错误引用未来财报。ann_date 为 NULL 的存量行在查询时回退统一时点日落点
+    （v3.0 §6.4.2：法定披露截止日推定 report_deadline，M1A-02 收敛）。
+    幂等：先 PRAGMA 判断列是否存在。
     """
     existing_rows = connection.execute(
         "PRAGMA table_info(financial_data)"

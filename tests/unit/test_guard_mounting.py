@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from myquant.backtest.engine import run_backtest
+from myquant.backtest.engine import BacktestEngine, run_backtest
 from myquant.core.exceptions import LookaheadError
 from myquant.core.lookahead_guard import LookaheadGuard
 from myquant.models.backtest import BacktestConfig
@@ -198,3 +198,76 @@ class TestStopLossAndDataAccessMounting:
         guard.record_data_access("000001.SZ", "2025-06-16", "2025-06-17", source="test")
         with pytest.raises(LookaheadError):
             guard.assert_pass()
+
+
+@pytest.mark.lookahead
+class TestFailOpenObservability:
+    """M1A-04（v3.0 §6.4.7-A）：fail-open 可观测化。
+
+    - engine._bar_date_str 时间戳异常返回哨兵并计数（不再静默）；
+    - guard 空日期（哨兵）记警告档 violation——可见但非阻断；
+    - 阻断档违规仍抛错并落 audit_log（审计落点）。
+    """
+
+    def test_bar_date_str_abnormal_counts(self) -> None:
+        """时间戳异常：返回哨兵 "" 并计数 +1（可观测化）。"""
+        BacktestEngine._bar_date_failures = 0
+
+        class _FakeBar:
+            timestamp = 10**300  # datetime.fromtimestamp 溢出
+
+        out = BacktestEngine._bar_date_str(_FakeBar())
+        assert out == ""
+        assert BacktestEngine._bar_date_failures == 1
+
+    def test_bar_date_str_normal_no_count(self) -> None:
+        """正常时间戳不计数。"""
+        BacktestEngine._bar_date_failures = 0
+
+        class _FakeBar:
+            timestamp = 1_752_537_600.0  # 2025-07-15
+
+        out = BacktestEngine._bar_date_str(_FakeBar())
+        assert out == "2025-07-15"
+        assert BacktestEngine._bar_date_failures == 0
+
+    def test_record_signal_empty_signal_date_warns(self) -> None:
+        """空信号日（哨兵）：记警告档 violation，assert_pass 不阻断。"""
+        guard = LookaheadGuard()
+        guard.record_signal("000001.SZ", "", "BUY", data_end="2025-07-10")
+        assert len(guard.violations) == 1
+        assert guard.violations[0]["severity"] == "警告"
+        assert guard.assert_pass() is True
+
+    def test_record_trade_empty_trade_date_warns(self) -> None:
+        """空成交日（哨兵）：记警告档 violation，assert_pass 不阻断。"""
+        guard = LookaheadGuard()
+        guard.record_trade("000001.SZ", "", signal_date="2025-07-15")
+        assert len(guard.violations) == 1
+        assert guard.violations[0]["severity"] == "警告"
+        assert guard.assert_pass() is True
+
+    def test_strict_mode_warning_not_raise(self) -> None:
+        """严格模式下警告档仅记录不抛（空日期是数据异常不是未来函数违规）。"""
+        guard = LookaheadGuard()
+        guard.strict = True
+        guard.record_signal("000001.SZ", "", "BUY")
+        assert len(guard.violations) == 1
+        assert guard.violations[0]["severity"] == "警告"
+
+    def test_blocking_violation_raises_with_audit(self, monkeypatch) -> None:
+        """阻断档违规仍抛错，且审计落点被调用（M1A-04 审计可观测）。"""
+        calls: list = []
+
+        class _FakeAuditStore:
+            def append(self, *args, **kwargs):
+                calls.append((args, kwargs))
+
+        monkeypatch.setattr(
+            "myquant.core.audit_log.AuditLogStore", lambda: _FakeAuditStore()
+        )
+        guard = LookaheadGuard()
+        guard.record_signal("000001.SZ", "2025-07-15", "BUY", data_end="2025-07-16")
+        with pytest.raises(LookaheadError):
+            guard.assert_pass()
+        assert calls, "阻断档违规必须落 audit_log（审计落点）"

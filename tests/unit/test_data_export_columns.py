@@ -22,10 +22,12 @@ from myquant.database.schema import CREATE_FINANCIAL_DATA_SQL, CREATE_MARKET_DAT
 
 _EXPORT_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "数据导出_DB到processed.py"
 
-#: 目标中文列集合（与增量 _en_to_cn 列集合一致）；#135/KP-P2-10 补 前收盘价 派生列
+#: 目标中文列集合（与增量 _en_to_cn 列集合一致）；#135/KP-P2-10 补 前收盘价 派生列；
+#: M1A-10 补 available_time（财务列=有效披露日+1，v3.0 §6.4.4）
 EXPECTED_CN_COLUMNS: List[str] = [
     "开盘价", "最高价", "最低价", "收盘价", "前收盘价", "成交量", "成交额",
     "涨跌幅", "振幅", "量比", "换手率", "流通股本", "市盈动", "每股收益",
+    "available_time",
 ]
 
 _INSERT_MARKET_SQL: str = (

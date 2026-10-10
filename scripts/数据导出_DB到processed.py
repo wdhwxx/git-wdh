@@ -27,6 +27,7 @@ quant.db → processed 完整导出脚本
 from __future__ import annotations
 
 import argparse
+import json
 import sqlite3
 import sys
 import time
@@ -36,6 +37,16 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
 from myquant.data_access.full_clean_service import resolve_incremental_symbols
+from myquant.data_access.time_semantics import (
+    eff_disclosure_date,
+    match_latest_financial,
+    next_day,
+)
+from myquant.utils.data_versioner import (
+    DATASET_SCHEMA_REVISIONS,
+    DatasetVersion,
+    assert_versions_compatible,
+)
 
 
 #: 英文列名 → 中文显示名（导出到 processed 时表头全中文）
@@ -126,26 +137,36 @@ def load_symbol_data(conn: sqlite3.Connection, symbol: str) -> pd.DataFrame:
     # 用 insert 紧跟收盘价列，保证列顺序稳定（CI 契约断言依赖）。
     _pre_close = pd.to_numeric(df["收盘价"], errors="coerce").shift(1)
     df.insert(int(df.columns.get_loc("收盘价")) + 1, "前收盘价", _pre_close)
-    # 每股收益 = 按交易日匹配最近一期 financial_data.eps（防未来函数）
+    # 每股收益 = 按交易日匹配最近一期 financial_data.eps。
+    # 统一时点日落点（v3.0 §6.4.2，M1A-01 修 ③）：有效披露日 = ann_date 优先
+    # → report_deadline 推定 → report_date 兜底，仅取有效披露日 <= 交易日的最
+    # 近一期；旧实现按 report_date 匹配会把"披露晚于交易日"的财报提前可见（穿越）。
     fin_cur = conn.cursor()
-    fin_cur.execute("SELECT report_date, eps FROM financial_data WHERE symbol=? ORDER BY report_date", (symbol,))
-    fin_rows = fin_cur.fetchall()
+    fin_cur.execute(
+        "SELECT report_date, ann_date, eps FROM financial_data WHERE symbol=? ORDER BY report_date",
+        (symbol,),
+    )
+    fin_rows = [
+        dict(zip(("report_date", "ann_date", "eps"), row))
+        for row in fin_cur.fetchall()
+    ]
     if fin_rows:
-        # 按交易日向后填充（只用该日之前最近一期）
-        fin_dates = [r[0] for r in fin_rows]
-        fin_eps = [r[1] for r in fin_rows]
-        eps_list = []
-        for trade_date_str in df['日期'].dt.strftime('%Y-%m-%d'):
-            eps_val = None
-            for i, fd in enumerate(fin_dates):
-                if fd <= trade_date_str:
-                    eps_val = fin_eps[i]
-                else:
-                    break
-            eps_list.append(eps_val)
+        eps_list: List[Optional[float]] = []
+        avail_list: List[Optional[str]] = []
+        for td in df["日期"].dt.strftime("%Y-%m-%d"):
+            matched = match_latest_financial(fin_rows, td)
+            eps_list.append((matched or {}).get("eps"))
+            # M1A-10（v3.0 §6.4.4）：财务列 available_time = 有效披露日 + 1
+            # （披露次日方可消费，禁止与 trade_date 混同）；无可匹配记录时
+            # 每股收益不可用 → available_time 置 None（无可用时点）。
+            eff = eff_disclosure_date(matched) if matched else ""
+            avail_list.append(next_day(eff) if eff else None)
         df["每股收益"] = eps_list
+        df["available_time"] = avail_list
     else:
         df["每股收益"] = None
+        # 无财务记录：每股收益恒 None，无可用时点
+        df["available_time"] = None
     # 扁平式统一：日期列转整数 YYYYMMDD（与增量链路/manager._get_processed_last_date 读取口径一致）
     df["日期"] = df["日期"].dt.strftime("%Y%m%d").astype(int)
     return df
@@ -254,6 +275,54 @@ def export_all(
                       f"失败={stats['failed']} | 耗时={elapsed:.0f}秒")
 
         stats["duration"] = time.time() - start_time
+
+        # M1A-10（v3.0 §6.4.4）：导出批次 sidecar——available_time 逐列规则 +
+        # 时点日基口径留痕（财务列=eff_disclosure_date+1，行情列=trade_date）。
+        # M1A-11（DEC-06）：schema_revision 从 data_versioner 单一真源读取；
+        # 若已存在旧批次 manifest 且 financial_data rev 不同（口径变更后混用
+        # 旧批次），由 assert_versions_compatible 阻断（跨口径比较守卫生产接入）。
+        manifest = {
+            "export_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "available_time_rule": {
+                "每股收益": "eff_disclosure_date + 1（披露次日方可消费；v3.0 §6.4.4）",
+                "其他行情列": "trade_date（T 日可得）",
+            },
+            "schema_revision": dict(DATASET_SCHEMA_REVISIONS),
+            "stats": {
+                "total": stats["total"],
+                "exported": stats["exported"],
+                "skipped": stats["skipped"],
+                "failed": stats["failed"],
+            },
+        }
+        manifest_path = output_dir / "export_manifest.json"
+        if manifest_path.exists():
+            try:
+                old_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                old_rev = int((old_manifest.get("schema_revision") or {}).get("financial_data"))
+                # 构造快照仅供兼容断言（只看 schema_revision；行数/日期/指纹非导出场景关注点）
+                stored = {
+                    "financial_data": DatasetVersion(
+                        dataset="financial_data", schema_revision=old_rev,
+                        row_count=0, min_date="", max_date="", columns_hash="",
+                    )
+                }
+                current = {
+                    "financial_data": DatasetVersion(
+                        dataset="financial_data",
+                        schema_revision=manifest["schema_revision"]["financial_data"],
+                        row_count=0, min_date="", max_date="", columns_hash="",
+                    )
+                }
+                assert_versions_compatible(stored, current)
+            except (ValueError, KeyError, TypeError) as e:
+                # M1A-11：旧 manifest 缺失/异常时仅告警不阻断（首次接入或损坏留痕）
+                print(f"  ⚠️ 旧批次 manifest 兼容断言跳过（{e}）")
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        print(f"  批次 sidecar 已写入: {manifest_path}")
+
         return stats
 
     finally:

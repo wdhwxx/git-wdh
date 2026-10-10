@@ -377,9 +377,10 @@ def test_存量逐值等价_冲突保留存量(monkeypatch, tmp_path: Path) -> N
 # ── 列模板对齐：无存量新建仍为全量 14 列（修复 18 只 10 列缺陷） ──
 
 
-def test_无财务标的新建文件仍14列(monkeypatch, tmp_path: Path) -> None:
-    """无存量 + DB 无 financial_data（_db 为 None）→ 新建文件列 = 全量 14 列模板，
-    B 类 4 列（换手率/流通股本/市盈动/每股收益）存在且为 None，行数据不被改动。"""
+def test_无财务标的新建文件仍15列(monkeypatch, tmp_path: Path) -> None:
+    """无存量 + DB 无 financial_data（_db 为 None）→ 新建文件列 = 全量模板（14 业务列
+    + available_time，M1A-10），B 类 4 列（换手率/流通股本/市盈动/每股收益）存在且为
+    None，available_time 亦为 None（无财务记录无可用时点），行数据不被改动。"""
     symbol = "TST.SZ"
     manager, processed = _make_manager(
         monkeypatch, tmp_path, [_bar("20260919", 11, 11.5, 10.8, 11.2)],
@@ -391,6 +392,7 @@ def test_无财务标的新建文件仍14列(monkeypatch, tmp_path: Path) -> Non
     assert list(df.columns) == [
         "日期", "开盘价", "最高价", "最低价", "收盘价", "成交量", "成交额",
         "涨跌幅", "振幅", "量比", "换手率", "流通股本", "市盈动", "每股收益",
+        "available_time",
     ]
     assert len(df) == 1
     assert int(df["日期"].iloc[0]) == 20260919
@@ -398,5 +400,6 @@ def test_无财务标的新建文件仍14列(monkeypatch, tmp_path: Path) -> Non
     assert df["流通股本"].isna().all()
     assert df["市盈动"].isna().all()
     assert df["每股收益"].isna().all()
+    assert df["available_time"].isna().all()
     # 行情列透传不被改动
     assert float(df["收盘价"].iloc[0]) == 11.2

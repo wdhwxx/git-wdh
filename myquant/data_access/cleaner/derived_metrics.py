@@ -23,6 +23,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
+from myquant.data_access.time_semantics import report_deadline
+
 logger = logging.getLogger(__name__)
 
 #: 量比计算窗口（过去 N 日平均成交量）
@@ -252,27 +254,18 @@ def compute_b_class_metrics(
 
 
 def _report_deadline(report_date: str) -> str:
-    """财报报告期 → 法定披露截止日（发布日推算，P1-① #83）。
+    """兼容别名：收敛至统一时点日落点（M1A-02，v3.0 §6.4.2）。
 
-    规则：一季报 4-30 / 半年报 8-31 / 三季报 10-31 / 年报 次年 4-30；
-    异常报告期格式保留原值（不阻断下游，交接方案原定）。
+    旧本地实现（P1-① #83）已收敛至 myquant/data_access/time_semantics.report_deadline，
+    本别名仅保留以兼容既有调用点，新代码请直接使用 time_semantics.report_deadline。
+
+    Args:
+        report_date: 报告期日期 YYYY-MM-DD。
+
+    Returns:
+        str: 法定披露截止日 YYYY-MM-DD；异常格式返回原值。
     """
-    if not report_date or len(report_date) < 10:
-        return report_date
-    try:
-        year = int(report_date[:4])
-    except (ValueError, TypeError):
-        return report_date
-    month_day = report_date[5:10]
-    if month_day == "03-31":
-        return f"{year}-04-30"
-    if month_day == "06-30":
-        return f"{year}-08-31"
-    if month_day == "09-30":
-        return f"{year}-10-31"
-    if month_day == "12-31":
-        return f"{year + 1}-04-30"
-    return report_date
+    return report_deadline(report_date)
 
 
 def _annualize_factor(report_date: str) -> float:

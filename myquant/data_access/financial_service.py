@@ -30,6 +30,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import pandas as pd
 
 from myquant.core.logger import get_logger
+from myquant.data_access.time_semantics import eff_disclosure_date
 from myquant.database import get_connection
 from myquant.database.queries import DataQueries
 
@@ -533,9 +534,10 @@ class FinancialImportService:
                 continue
             if not fin:
                 continue
-            # 有效披露日 = ann_date 优先，缺失回退 report_date
+            # 有效披露日 = 统一时点日落点（M1A-02：ann_date 优先，
+            # 缺失回退法定披露截止日推定 → report_date 兜底）
             def _eff_date(r: Dict[str, Any]) -> str:
-                return str(r.get("ann_date") or r.get("report_date") or "")
+                return eff_disclosure_date(r)
 
             # 按有效披露日降序排序（覆盖原 report_date 排序假设）
             fin_sorted = sorted(fin, key=_eff_date, reverse=True)
