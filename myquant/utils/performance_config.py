@@ -165,7 +165,7 @@ class PerformanceConfig:
         parallel = perf_cfg.get("parallel", {}) or {}
         bt_log = perf_cfg.get("backtest_logging", {}) or {}
         timer = perf_cfg.get("timer", {}) or {}
-        light_guard = perf_cfg.get("light_lookahead_guard", {}) or {}
+        light_guard = perf_cfg.get("light_lookahead_guard", {}) or {}  # M0B-03：未接入引擎（仅配置声明同步开关，v3.0 §3 口径）
         monte_carlo = perf_cfg.get("monte_carlo", {}) or {}
         incremental = perf_cfg.get("incremental", {}) or {}
         memory = perf_cfg.get("memory", {}) or {}

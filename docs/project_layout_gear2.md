@@ -365,6 +365,7 @@ Pythonwdhmm/
 │   │   ├── decision_time_contract.md  # ✨【回写#269】决策时点契约模板：decision_time/execution_time/universe(pit_status 显式)/data_availability(adjust=hfq, end_date 必传, basis=eff_disclosure_date)/consumed_columns（主键=name，见 v3.0 §5.2/§11）
 │   │   ├── 防泄漏门禁红线清单.md      # ✨【回写#270】治理台账（v3.0 §6.8）：RL-01~14 红线 + 豁免档位（不可豁免/需审批/待数据源建设后启用）+ 对应规则 R01~R11
 │   │   └── 数据列时点台账.md          # ✨【回写#279】列级时点台账（v3.0 §6.1，M0P-01）：datasets/processed 13 业务列 + 派生列（前收盘价）共 14 列逐列登记 derived_at/date_basis/现状判定/目标日基/档位/consumers（实测填写，[]=实测零消费）；每股收益 severity=阻断 target=eff_disclosure_date（现状穿越 v3.0 §6.4.2 ③④）
+│   │   └── 存量guard资产重登记.md     # ✨【回写#280】存量 guard 资产重登记（v3.0 §3，M0B-01/02/03）：§3 资产表 14 行按三档（✅实测有效/⚠️仅自报/❌未接入）逐行加"运行期是否可达"结论 + fail-open 三处登记（engine.py:684-688/provider.py:545-552/manager.py:1298-1299 映射 M1A-04/05/06）+ performance_config.py:31/:168 口径更正
 
 │
 
@@ -4208,3 +4209,10 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    d. **新建 tests/leakage_gate/test_ledger_truth_source.py**（真实台账真源冒烟，4 用例，不 monkeypatch）：台账 14 列机读可读 + 关键语义断言 + 7 策略真实出口全通过 + 真实台账下注入每股收益必报红（R11）。
    e. **蓝图目录树登记**：docs/未来函数与数据泄漏门禁/ 段加 数据列时点台账.md；config/ 段加 data_time_semantics.yaml；tests/leakage_gate/ 段加 test_ledger_truth_source.py，均带 ✨【回写#279】。
    f. **纪律遵守**：蓝图优先；零蓝图外新增文件；机读台账经 config_loader（防死配置）；consumers 实测不留空不写待确认；严格防未来（只登记已落盘事实）；git 提交（commit message 引用 #279）。
+## #280 · 2026-10-10 · 防泄漏门禁施工·M0B 存量 guard 资产重登记（§3 三档 + fail-open 三处 + 口径更正）
+   事实来源：本次落地（M0B-01/02/03，轨道 B 阶段 0-B；纯文档登记 + 1 处注释口径更正）；代码级核验：performance_config.py py_compile OK；test_config_live_check + test_architecture 52 passed/1 skipped。
+   a. **M0B-01 资产表三档重登记**：建 docs/未来函数与数据泄漏门禁/存量guard资产重登记.md，§3 资产表 14 行按三档（✅实测有效/⚠️仅自报/❌未接入）逐行补"运行期是否可达"结论——light_lookahead_guard 如实登记 ❌ 未接入（运行期零调用，不叠加效力）；无"计为资产但零调用"模块；策略注册（registry）生产实测有效且 5 个绕过点已由 M0-08/09 出口唯一收敛点封堵；CI guard 断言已改真实配置（M0-17，§6.2-12 旧缺口已闭环）。
+   b. **M0B-02 fail-open 三处登记**：engine.py:684-688（时间戳异常→空串→guard 跳过校验）→ M1A-04（哨兵值+计数+审计落点）；provider.py:545-552（无因子静默降级 raw）→ M1A-05（sidecar+adjust_strict 默认治理+load_asof）；manager.py:1298-1299（增量派生吞异常）→ M1A-06（失败计数+断言阈值，与 M1A-01 同批）。三处均有处置结论并映射轨道 C。
+   c. **M0B-03 口径更正**：performance_config.py:168 light_guard 读取点补注释"未接入引擎（仅配置声明同步开关）"——与 :31 既有注释及文档口径一致。
+   d. **蓝图目录树登记**：docs/未来函数与数据泄漏门禁/ 段加 存量guard资产重登记.md（✨#280）。
+   e. **纪律遵守**：蓝图优先；纯文档登记 + 注释级改动（零业务逻辑变更）；防未来（只登记已落盘事实）；git 提交（commit message 引用 #280）。
