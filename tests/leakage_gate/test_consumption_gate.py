@@ -17,9 +17,11 @@ import myquant.leakage_gate.consumption as consumption_module
 import myquant.leakage_gate.contract as contract_module
 from myquant.leakage_gate.gate import (
     _GATE_CHECKS,
+    GateConfig,
     LeakageGateError,
     assert_all_gates_pass,
     reset_gate_checks,
+    set_config,
 )
 
 _DECISION_TIME: str = "2026-10-10"
@@ -55,9 +57,12 @@ def _monkey_ledger(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture(autouse=True)
 def _clean_gates() -> None:
+    """重置注册表并恢复 enabled=True（对抗 tests/conftest.py 的测试隔离关闭）。"""
     reset_gate_checks()
+    set_config(GateConfig())
     yield
     reset_gate_checks()
+    set_config(GateConfig())
 
 
 # ═══════════════════════════════════════════════

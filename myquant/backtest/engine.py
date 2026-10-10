@@ -1045,6 +1045,18 @@ class BacktestScheduler:
         Raises:
             NotImplementedError: 显式模式但策略不支持时抛出。
         """
+        # ── M0-08 出口强制：防泄漏门禁（v3.0 §5.4 唯一出口收敛点）──
+        # 所有回测入口（run_回测入口.py:325 / run_批量回测 / run_鲲鹏批量回测 /
+        # run_鲲鹏参数优化）均收敛至 BacktestScheduler.create_engine
+        # （v3.0 §6.2-9 已核验无绕过路径）；无契约/引用阻断列的策略在引擎创建前被拦。
+        # 注：测试环境经 tests/conftest.py 关闭 enabled（仅审计），真实出口默认阻断。
+        if strategy is not None:
+            from myquant.leakage_gate import assert_all_gates_pass
+
+            assert_all_gates_pass(
+                strategy_id=getattr(strategy, "name", "") or "",
+                decision_time=time.strftime("%Y-%m-%d"),
+            )
         mode = self.resolve_mode(strategy)
         if strategy is not None and not strategy.supports_mode(mode):
             raise NotImplementedError(

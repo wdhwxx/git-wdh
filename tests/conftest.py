@@ -62,6 +62,29 @@ def _backtest_broker_factory_registered() -> None:
 
 
 # ═══════════════════════════════════════════════════════════════
+#  防泄漏门禁出口强制 · 测试隔离（M0-08/M0-09）
+# ═══════════════════════════════════════════════════════════════
+# BacktestScheduler.create_engine（engine.py）与 create_live_engine（live/engine.py）
+# 已挂 assert_all_gates_pass（v3.0 §5.4 唯一出口）。tests/unit 引擎测试大量使用
+# 未登记注册表的 fake 策略/缺台账环境，若出口默认阻断将全量回归；
+# 故测试会话关闭 enabled（仅审计不阻断）——真实出口行为由
+# tests/leakage_gate/ 专项测试显式开启验证（test_gate_governance /
+# test_contract / test_consumption_gate / test_gate_red_on_injected_leak 均
+# 在各自 fixture 中 set_config(GateConfig()) 恢复开启）。
+
+@pytest.fixture(scope="session", autouse=True)
+def _leakage_gate_test_isolation() -> None:
+    """测试会话将防泄漏门禁出口断言设为仅审计（enabled=False）。
+
+    说明：生产出口默认 enabled=True（违规抛 LeakageGateError 阻断引擎创建）；
+    测试环境经本 fixture 关闭阻断，避免未登记 fake 策略/台账缺失引发全量回归。
+    """
+    from myquant.leakage_gate import GateConfig, set_config
+
+    set_config(GateConfig(enabled=False, audit_violations=True))
+
+
+# ═══════════════════════════════════════════════════════════════
 #  统一中文列 OHLCV 构造工厂（#38 中文列规范）
 # ═══════════════════════════════════════════════════════════════
 

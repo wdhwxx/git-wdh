@@ -242,7 +242,7 @@ CONFIG_KEY_REQUIRED: set[str] = {
 
 # OVERSIZE 白名单 14 项行数基线（2026-10-08 实测冻结）：白名单内文件行数只减不增。
 OVERSIZE_LINE_BASELINE: dict[str, int] = {
-    "monitoring/alerting.py": 3681, "live/engine.py": 2858, "core/event_bus.py": 2379,  # engine 2851→2858：用户提交 1499c09 引入 +7 行（回写#258）；alerting 3675→3681（#264 工厂注册代码）；event_bus 2383→2379（#261 事件池注入化）
+    "monitoring/alerting.py": 3681, "live/engine.py": 2869, "core/event_bus.py": 2379,  # engine 2858→2869（#275 M0-09 出口强制挂载 +11 行治理注入）；alerting 3675→3681（#264 工厂注册代码）；event_bus 2383→2379（#261 事件池注入化）
     "live/scheduler.py": 2409, "monitoring/metrics_collector.py": 2273,  # 2382→2409（#265 阶段二 7 处装配点改经注册表，代码行增长）；metrics 2268→2273（#264 工厂注册代码）
     "monitoring/action_engine.py": 2307, "data_access/manager.py": 2170,  # 2259→2307（#265 阶段二 build_action_engine+config 注册代码）
     "live/brokers/qmt_broker.py": 2170, "live/data_feed.py": 2147,

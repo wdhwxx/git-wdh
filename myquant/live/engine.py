@@ -2791,6 +2791,17 @@ def create_live_engine(
     strategy_params.setdefault("capital_base", initial_capital)
     strategy = create_strategy(strategy_name, **strategy_params)
 
+    # ── M0-09 出口强制：防泄漏门禁（v3.0 §5.4 唯一出口收敛点，实盘出口同拦）──
+    # 与回测出口（BacktestScheduler.create_engine，M0-08）对齐：无契约/引用阻断列的
+    # 策略在实盘引擎装配前即被拦。
+    # 注：测试环境经 tests/conftest.py 关闭 enabled（仅审计），真实出口默认阻断。
+    from myquant.leakage_gate import assert_all_gates_pass
+
+    assert_all_gates_pass(
+        strategy_id=strategy_name,
+        decision_time=datetime.now().strftime("%Y-%m-%d"),
+    )
+
     # 5) RiskManager（真钱实盘启用交易时段规则；模拟盘不启用）
     # P1-07：真钱(live)模式忽略 enabled:false——配置错=无保护是 fail-open，
     # 强制启用完整规则库并 CRITICAL 告警；paper/sim/monitor 尊重配置。
