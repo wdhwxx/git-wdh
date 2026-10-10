@@ -21,6 +21,7 @@ leakage_gate - 防泄漏门禁中心（L4 治理层落点，模块分层 L0）
 防未来函数：本包只记录已发生的校验结果，不预测未来。
 """
 
+from myquant.leakage_gate import consumption  # noqa: F401  # 导入即注册消费侧门禁（M0-07）
 from myquant.leakage_gate import contract  # noqa: F401  # 导入即注册契约检查（M0-06）
 from myquant.leakage_gate.gate import (
     GateConfig,

@@ -821,6 +821,8 @@ Pythonwdhmm/
 
 │   │   ├── test_contract.py         # ✨【回写#274】契约校验测试（M0-10 核心，15 用例）：声明完整 R09 正反向（7 策略真源通过/缺 decision_time/pit_status/available_time/basis 错误报红/注册表缺失/未登记）+ 台账比对 R10（缺失 fail-closed/columns 空/目标基不一致/收盘价日基非 trade_date/一致通过）+ ensure_registered 幂等 + 出口断言汇总契约违规报红
 
+│   │   ├── test_consumption_gate.py # ✨【回写#275】消费侧门禁测试（M0-12 核心，13 用例）：AST 提取（df["列"]/df.列/columns/精确匹配过滤）+ 纯函数比对正反向 + 台账缺失 fail-closed/未登记 + 7 策略真实扫描通过 + R11 反向测试（注入引用每股收益必报红）+ 出口断言报红 + 注册幂等
+
 │   │   └── test_gate_governance.py  # ✨【回写#273】门禁中心治理测试（M0-11 核心）：GateConfig 开关（enabled 阻断/disabled 仅审计）、Violation 台账结构、违规落 audit_log（临时库验证）、检查注册冲突/异常 fail-closed
 
 │   └── benchmarks/                   # 性能基准测试目录（marker控制开关，默认不跑）
@@ -929,6 +931,8 @@ Pythonwdhmm/
     │   ├── gate.py                   # ✨【回写#273】门禁中心最小壳：GateConfig(enabled 开关/audit_violations)/Violation 违规记录/LeakageGateError/register_gate_check 检查注册（后续门禁模块挂入）/assert_all_gates_pass（enabled 违规→落 audit_log+抛错阻断；disabled 仅审计警告档）；依赖 core.audit_log（L0 合法，BASE-7 哈希链）
 
     │   ├── contract.py               # ✨【回写#274】契约完整性校验（M0-06）：声明完整（R09/RL-02 契约层：decision_time/available_time/universe.pit_status/consumed_columns/ruleset 深度校验）+ 与列级台账比对（R10/RL-11：台账缺失 fail-closed，契约不能自证 PIT，v3.0 附录 B 注2）；契约真源=config/strategy_registry.yaml（主键=name，DEC-01）；不 import strategies（L0→L3 反向跨层会被 R-02 拦，分层合规）；导入即注册（ensure_registered 幂等）
+
+    │   ├── consumption.py            # ✨【回写#275】消费侧列门禁（L0.5，M0-07，v3.0 §6.1.3）：AST 引用列提取（df["列"]/df.列/columns=[...]/字符串常量精确匹配，纯函数 extract_columns_from_source）+ 纯函数比对（实测∪声明 ∩ severity=阻断 ≠ ∅ → R11/RL-13 报红，validate_consumption）+ 台账缺失 fail-closed；策略源码只读文件做 AST 非 import（分层合规）；导入即注册
 
     │
 
@@ -4164,3 +4168,10 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    c. **新建 tests/leakage_gate/test_contract.py**（M0-10 核心，15 用例）：7 策略真源声明完整通过、缺 decision_time/pit_status/available_time/basis 错误报红、注册表缺失/未登记报红、台账缺失 fail-closed/columns 空/目标基不一致/收盘价日基非 trade_date 报红、台账一致通过、ensure_registered 幂等、出口断言汇总契约违规报红。
    d. **蓝图目录树登记**：leakage_gate/ 段加 contract.py + tests/leakage_gate/ 段加 test_contract.py，均带 ✨【回写#274】。
    e. **纪律遵守**：蓝图优先；零蓝图外新增文件；分层合规（无跨层 import）；防御式 fail-closed（台账缺失不放行）；严格防未来（只校验已声明契约与已登记台账）；git 提交（commit message 引用 #274）。
+## #275 · 2026-10-10 · 防泄漏门禁施工·M0-07 消费侧列门禁（myquant/leakage_gate/consumption.py）
+   事实来源：本次落地（进入 M0-07，依赖 M0-06 已提交）；代码级核验：py_compile OK；leakage_gate 37 passed + 架构门禁 30 passed（68 passed/1 skipped）；tests/unit 全量 3627 passed/4 skipped（零回归）。
+   a. **新建 myquant/leakage_gate/consumption.py**（L0.5 消费侧列门禁，v3.0 §6.1.3）：纯函数 extract_columns_from_source（AST 扫描 df["列名"]/df.列名/columns=[...]/字符串常量精确匹配，非台账键过滤不误报）+ validate_consumption（实测∪声明 ∩ severity=阻断 ≠ ∅ → 命中）+ check_consumption（台账缺失 fail-closed R11/未登记 R11/命中阻断列 R11 报红）；策略源码只读文件做 AST 定位（_file_defines_name 找 name 类）非 import（L0→L3 分层合规）；复用 contract._load_ledger/_load_registry/_get_entry（同包 L0）；导入即注册（ensure_registered 幂等）。
+   b. **新建 tests/leakage_gate/test_consumption_gate.py**（M0-12 核心，13 用例）：AST 提取 5 例（df 下标/属性/columns 列表/精确匹配过滤/语法错误安全）+ 纯函数比对 3 例（命中阻断列/声明侧命中/无命中通过）+ 装配 4 例（台账缺失 fail-closed/未登记/7 策略真实扫描通过/**R11 反向测试注入引用每股收益必报红**）+ 出口断言报红 + 注册幂等。
+   c. **测试坑位记录**：consumption.py 经 `from contract import _load_ledger` 绑定函数对象，monkeypatch 须打 consumption 模块命名空间（打 contract 模块无效）——fixture 注释已记录。
+   d. **蓝图目录树登记**：leakage_gate/ 段加 consumption.py + tests/leakage_gate/ 段加 test_consumption_gate.py，均带 ✨【回写#275】。
+   e. **纪律遵守**：蓝图优先；零蓝图外新增文件；分层合规（只读策略源码文件非 import）；防御式 fail-closed；严格防未来（只比对已发生引用与已登记台账）；git 提交（commit message 引用 #275）。
