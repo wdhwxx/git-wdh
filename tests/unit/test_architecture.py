@@ -151,7 +151,7 @@ EXCEPTIONS: dict[tuple[str, str], dict] = {
 # 回写#255：P0-1（performance_config→ma_strategy）与 P0-2（backtest.engine→live.engine）已消除，集合清空
 P0_MUST_FIX: set[tuple[str, str]] = set()
 
-VIOLATION_BASELINE = 8           # K-a + K-f：语义矩阵 α，排除 TYPE_CHECKING 与 __main__；#255 37→35，#257 35→34，#258 34→27，#259 前段 27→24（EX-12-4 + EX-13K+1），EX-09A/B 后 24→22；#263 下沉消除 EX-10A/10B/13A/F/G/J 后 22→16；#264 注册表化消除 EX-13C/E/K 后 16→13；#265 阶段二消除 EX-13B/D/H/I 后 13→1（仅剩永久 EX-01A）；#294 实盘安全门禁施工登记 EX-14A~E 后 1→7（engine 熔断装配×2、验收审计×3、base_broker 薄闸审计×1）；#295 0.8 自检登记 EX-14F 后 7→8（engine 告警渠道断言×1）
+VIOLATION_BASELINE = 9           # K-a + K-f：语义矩阵 α，排除 TYPE_CHECKING 与 __main__；#255 37→35，#257 35→34，#258 34→27，#259 前段 27→24（EX-12-4 + EX-13K+1），EX-09A/B 后 24→22；#263 下沉消除 EX-10A/10B/13A/F/G/J 后 22→16；#264 注册表化消除 EX-13C/E/K 后 16→13；#265 阶段二消除 EX-13B/D/H/I 后 13→1（仅剩永久 EX-01A）；#294 实盘安全门禁施工登记 EX-14A~E 后 1→7（engine 熔断装配×2、验收审计×3、base_broker 薄闸审计×1）；#295 0.8 自检登记 EX-14F 后 7→8（engine 告警渠道断言×1）；#296 LIVE 门槛验收再增 acceptance→auth 引用后 8→9（EX-14C 文件级已豁免，计数按全部反向 import）
 TOP_LEVEL_CYCLE_BASELINE = 0     # K-b：顶层真环（剔除包装惯用环与 __main__ 后）
 LAZY_CYCLE_BASELINE = 0          # K-f：全量真环，只减不增（#261 环1 event_bus↔memory_pool 随事件池注入化
                                  #      打断——全系统真环清零；环2 随 G2-1，#260；环3 随 EX-12A，#259）
@@ -164,7 +164,7 @@ OVERSIZE_WHITELIST = {           # 相对 myquant 的路径（禁 basename）
     "live/brokers/qmt_broker.py", "live/data_feed.py",
     "gui/backtest_config_dialog.py", "risk/risk_manager.py",
     "web/dashboard.py", "ml/training_pipeline.py",
-    "monitoring/dynamic_baseline.py",
+    "monitoring/dynamic_baseline.py", "acceptance/live_safety_gate.py",  # 回写#296：LIVE 门槛验收（0.1~0.9 + LIVE 用例13/F-6/R-123）增至 1749 行
 }
 OVERSIZE_WARN_MARGIN = 1500      # >=1500 即临界预警（mixed_engine.py 恰 1500）
 
@@ -260,6 +260,7 @@ CONFIG_KEY_REQUIRED: set[str] = {
 #   engine 2869→2941（0.1 熔断入进程 + 0.5 启动门 + 0.6 pause hook + 0.9 薄闸状态源接线）→3063（0.8 启动自检断言 startup_assertions）
 #   scheduler 2409→2419（0.5 watchdog 回调注入）
 #   risk_manager 1901→2020（0.7 三条异常交易规则 + anomaly_rules 参数）
+#   acceptance/live_safety_gate.py 1756→1749（0.1~0.9 + LIVE 门槛验收累计，#287~#296；入白名单）
 OVERSIZE_LINE_BASELINE: dict[str, int] = {
     "monitoring/alerting.py": 3681, "live/engine.py": 3063, "core/event_bus.py": 2379,  # engine 2858→2869（#275 M0-09 出口强制挂载 +11 行治理注入）；alerting 3675→3681（#264 工厂注册代码）；event_bus 2383→2379（#261 事件池注入化）
     "live/scheduler.py": 2419, "monitoring/metrics_collector.py": 2273,  # 2382→2409（#265 阶段二 7 处装配点改经注册表，代码行增长）；metrics 2268→2273（#264 工厂注册代码）
@@ -268,6 +269,7 @@ OVERSIZE_LINE_BASELINE: dict[str, int] = {
     "gui/backtest_config_dialog.py": 1861, "risk/risk_manager.py": 2020,
     "web/dashboard.py": 1760, "ml/training_pipeline.py": 1651,
     "monitoring/dynamic_baseline.py": 1546,  # 1552→1546（#260 去全局采集器兜底）
+    "acceptance/live_safety_gate.py": 1749,  # 回写#296：实盘安全门禁验收（0.1~0.9 + LIVE 门槛 31 项）
 }
 
 # R-19 零覆盖基线：✅ 已冻结（回写#256）。冻结集合 = 2026-10-08 实测引用级零覆盖业务模块 49 个

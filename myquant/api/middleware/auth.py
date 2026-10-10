@@ -40,7 +40,8 @@ from __future__ import annotations
 import hashlib
 import os
 import secrets
-from typing import Any, Dict, Optional, Set, Tuple
+from collections import deque
+from typing import Any, Deque, Dict, Optional, Set, Tuple
 
 from myquant.core.logger import get_logger
 
@@ -313,6 +314,10 @@ class OperationGuard:
         self._high_risk_scopes: Set[str] = set(HIGH_RISK_SCOPES)
         # 0.4/F-1：配置加载失败留痕（run_实盘入口.py LIVE 装配据此拒启，能力缺失 fail-closed）
         self._load_error: str = ""
+        # F-6（回写#296）：审计存储故障 → 本地降级缓冲（待恢复补写）+ CRITICAL；
+        # 门禁判定照常执行，不因审计故障阻断交易，也不静默（无留痕事后无法复现）。
+        self._audit_buffer: Deque[Dict[str, Any]] = deque(maxlen=1000)
+        self._audit_buffer_alerted: bool = False
         if config_path:
             self._load(config_path)
 
@@ -434,7 +439,50 @@ class OperationGuard:
             with (d / "write_audit.jsonl").open("a", encoding="utf-8") as f:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
         except Exception as e:
-            logger.warning(f"[admission] 审计落盘失败（仅告警不阻断）: {e}")
+            # F-6（回写#296）：审计存储不可用 → 本地降级缓冲 + CRITICAL（不阻断判定）
+            self._audit_buffer.append(record)
+            if not self._audit_buffer_alerted:
+                self._audit_buffer_alerted = True
+                logger.critical(
+                    f"[admission] 审计存储不可用，进入本地降级缓冲（F-6，待恢复补写，"
+                    f"门禁判定照常执行）: {e}"
+                )
+            else:
+                logger.warning(
+                    f"[admission] 审计落盘仍失败（降级缓冲累计 {len(self._audit_buffer)} 条）: {e}"
+                )
+            return
+        # 落盘成功 → 尝试补写降级缓冲（F-6：审计恢复后补写，补写失败保留）
+        self._flush_audit_buffer()
+
+    def _flush_audit_buffer(self) -> None:
+        """F-6：审计存储恢复后补写降级缓冲记录；补写失败保留待下次。"""
+        if not self._audit_buffer:
+            return
+        import json
+        from pathlib import Path
+        d = Path(self._audit_dir)
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            n = len(self._audit_buffer)
+            remaining: Deque[Dict[str, Any]] = deque()
+            with (d / "write_audit.jsonl").open("a", encoding="utf-8") as f:
+                while self._audit_buffer:
+                    rec = self._audit_buffer.popleft()
+                    try:
+                        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                    except Exception:
+                        remaining.append(rec)
+            if remaining:
+                self._audit_buffer = remaining
+                logger.warning(
+                    f"[admission] 审计缓冲补写部分失败（剩余 {len(remaining)} 条保留）"
+                )
+            else:
+                self._audit_buffer_alerted = False
+                logger.info(f"[admission] 审计存储恢复，已补写降级缓冲 {n} 条（F-6）")
+        except Exception as e:
+            logger.warning(f"[admission] 审计缓冲补写失败（保留待下次）: {e}")
 
 
 _default_guard: Optional[OperationGuard] = None

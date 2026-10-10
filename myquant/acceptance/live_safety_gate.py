@@ -74,6 +74,13 @@ GATE_ITEMS: tuple = (
     "0.8-F1",
     "0.8-F2",
     "0.8-F5",
+    "LIVE-1",
+    "LIVE-3",
+    "LIVE-6",
+    "LIVE-7",
+    "LIVE-13",
+    "LIVE-F6",
+    "LIVE-R123",
 )
 
 #: 阈值真源引用（I-5：只引用既有真源，不编造）
@@ -1297,8 +1304,7 @@ class LiveSafetyGateRunner:
         }
 
     def _check_08_f5(self) -> Dict[str, Any]:
-        """F-5：系统时钟不可用 → CRITICAL 降级，不产生拒启项。"""
-        import logging
+        """F-5：系统时钟不可达 → 拒绝 live 启动（V3 §九 9.3），paper 不受影响。"""
         from types import SimpleNamespace
 
         import pytest
@@ -1311,22 +1317,18 @@ class LiveSafetyGateRunner:
         engine_like = SimpleNamespace(
             _circuit_breaker=object(), _trade_mode="live", _scheduler_enabled=True,
         )
-        records: list = []
-        handler = _CaptureHandler(records)
-        logging.getLogger("live.engine").addHandler(handler)
-        try:
-            with pytest.MonkeyPatch.context() as mp:
-                mp.setattr("myquant.live.engine.datetime", _BrokenClock)
-                problems = self._run_08_problems(engine_like, mp)
-        finally:
-            logging.getLogger("live.engine").removeHandler(handler)
-        clock_problem = any("时钟" in p for p in problems)
-        degraded_logged = any("系统时钟不可用" in r.getMessage() for r in records)
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("myquant.live.engine.datetime", _BrokenClock)
+            problems = self._run_08_problems(engine_like, mp)
+        clock_problem = any("系统时钟不可用" in p and "F-5" in p for p in problems)
         return {
             "item": "0.8-F5",
-            "pass": bool(not clock_problem and degraded_logged),
-            "detail": f"时钟不可用 → 拒启项={clock_problem}（应无）, CRITICAL 降级日志={degraded_logged}",
-            "threshold_source": "V3 §十.5 F-5（外部依赖时钟异常→降级+CRITICAL，不拒启）",
+            "pass": bool(clock_problem),
+            "detail": (
+                f"时钟不可达 → 拒启项={clock_problem}（V3 9.3：拒绝 live 启动，允许 paper；"
+                f"不得默认放行）"
+            ),
+            "threshold_source": "V3 §九 9.3 F-5（时钟源不可达 → 拒绝 live 启动，允许 paper，不可默认放行）",
         }
 
     def _check_08_r5(self) -> Dict[str, Any]:
@@ -1352,6 +1354,250 @@ class LiveSafetyGateRunner:
                 f"broker_factory 可导入=True"
             ),
             "threshold_source": "V3 §九 R-5（自检失败不拦应急链，一键平仓独立可用）",
+        }
+
+    # ── LIVE 门槛验收（用例 1/3/6/7/13 + R-1~R-3 + F-6，施工清单 §10） ──
+
+    def _check_live_1(self) -> Dict[str, Any]:
+        """用例1：杀引擎进程 → 状态快照可恢复（恢复机制存在 + StateStore 装配；
+        执行级证据=既有单测 test_restore_broker_state / test_t1_settle 崩溃恢复域）。"""
+        from myquant.live.engine import LiveEngine
+
+        has_recover = any(
+            name for name in ("_recover_state", "restore_state", "_restore_state")
+            if hasattr(LiveEngine, name)
+        )
+        try:
+            from myquant.live.state_store import StateStore  # noqa: F401
+            store_ok = True
+        except Exception:  # noqa: BLE001
+            store_ok = False
+        return {
+            "item": "LIVE-1",
+            "pass": bool(has_recover and store_ok),
+            "detail": (
+                f"引擎恢复方法存在={has_recover}, StateStore 可导入={store_ok}"
+                "（执行级恢复/对账证据见 tests/unit/test_restore_broker_state.py 等）"
+            ),
+            "threshold_source": "V3 §九 用例1（杀引擎→快照可恢复+未成交单对账）；恢复时限引用 P0-2",
+        }
+
+    def _check_live_3(self) -> Dict[str, Any]:
+        """用例3：max_daily_loss_pct 已突破 → 风控拒开仓（BUY 拒、SELL 平仓放行）。"""
+        from myquant.models.trade import Order, OrderSide
+        from myquant.risk.risk_manager import build_risk_manager_from_config
+        from myquant.risk.rules import RiskContext
+
+        rm = build_risk_manager_from_config(
+            {"max_daily_loss_pct": 0.01}, {}, enable_trading_hours=False,
+        )
+        ctx = RiskContext(
+            cash=1_000_000.0, total_assets=950_000.0, initial_capital=1_000_000.0,
+            day_start_assets=1_000_000.0,  # 日初快照 100 万 → 当前 95 万 = 已亏 5% > 1% 上限
+            current_price={"000001.SZ": 10.0},
+            extra={"prev_close": {"000001.SZ": 10.0}},
+        )
+        buy = Order(symbol="000001.SZ", side=OrderSide.BUY, quantity=100, price=10.0)
+        sell = Order(symbol="000001.SZ", side=OrderSide.SELL, quantity=100, price=10.0)
+        r_buy = rm.check_order(buy, ctx)
+        r_sell = rm.check_order(sell, ctx)
+        buy_rejected = bool(not r_buy.passed and r_buy.rule_name == "daily_loss_limit")
+        sell_allowed = bool(r_sell.passed)
+        return {
+            "item": "LIVE-3",
+            "pass": bool(buy_rejected and sell_allowed),
+            "detail": f"日亏突破→BUY拒={buy_rejected}（rule=daily_loss_limit）, SELL放行={sell_allowed}",
+            "threshold_source": "V3 §九 用例3（手动改 max_daily_loss_pct 到已突破→风控拒绝开仓，不是警告）",
+        }
+
+    def _check_live_6(self) -> Dict[str, Any]:
+        """用例6：系统时间被篡改（实际 20:00 判为交易时段外）→ 拒开仓（TradingHoursRule 同源）。"""
+        from datetime import datetime
+
+        from myquant.models.trade import Order, OrderSide
+        from myquant.risk.rules import RiskContext, TradingHoursRule
+
+        rule = TradingHoursRule(trading_calendar={datetime.now().date()})  # 注入日历使今天为交易日（隔离真实周六）
+        ctx = RiskContext(
+            cash=1_000_000.0, total_assets=1_000_000.0, initial_capital=1_000_000.0,
+            current_price={"000001.SZ": 10.0},
+            extra={"current_time": "20:00:00"},  # 篡改后的系统时间（实际非交易时段）
+        )
+        buy = Order(symbol="000001.SZ", side=OrderSide.BUY, quantity=100, price=10.0)
+        r = rule.check(buy, ctx)
+        rejected = bool(not r.passed and r.rule_name == "trading_hours")
+        # 时段内（09:35）放行对照
+        ctx2 = RiskContext(
+            cash=1_000_000.0, total_assets=1_000_000.0, initial_capital=1_000_000.0,
+            current_price={"000001.SZ": 10.0},
+            extra={"current_time": "09:35:00"},
+        )
+        allowed = bool(rule.check(buy, ctx2).passed)
+        return {
+            "item": "LIVE-6",
+            "pass": bool(rejected and allowed),
+            "detail": f"时间篡改为20:00→拒开仓={rejected}, 09:35对照放行={allowed}",
+            "threshold_source": "V3 §九 用例6（把系统时间改到 09:00（实际 20:00）→ 拒启或拒单）；0.9-12 非交易时段同源",
+        }
+
+    def _check_live_7(self) -> Dict[str, Any]:
+        """用例7：同一 signal_id（同 order_id）三次 → 仅 1 笔委托 + 2 次 dedup 留痕。"""
+        from myquant.live.brokers.qmt_broker import QmtBroker
+        from myquant.models.trade import Order, OrderSide
+
+        broker = QmtBroker(qmt_path="", mode="SIM", initial_capital=1_000_000.0)
+        broker.connect()
+        o = Order(symbol="000001.SZ", side=OrderSide.BUY, quantity=100, price=10.0)
+        r1 = broker.submit_order(o)
+        r2 = broker.submit_order(o)  # 同 order_id 重发
+        r3 = broker.submit_order(o)
+        dedup = int(broker._stats.get("dedup_skipped", 0))
+        one_order = len(broker.get_orders()) == 1
+        return {
+            "item": "LIVE-7",
+            "pass": bool(one_order and dedup == 2),
+            "detail": f"同 signal_id 三发→订单簿仅1笔={one_order}, dedup 留痕={dedup}次",
+            "threshold_source": "V3 §九 用例7（同一 signal_id 三次→仅 1 笔委托 + dedup 留痕）；qmt 幂等去重（任务43）",
+        }
+
+    def _check_live_13(self) -> Dict[str, Any]:
+        """用例13：注入 CRITICAL → webhook 实测送达（本地 HTTP 端口真实 POST；MTTA 引用 P0-8 5min）。"""
+        import http.server
+        import threading
+        import time
+
+        received: list = []
+
+        class _HookHandler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                length = int(self.headers.get("Content-Length", 0))
+                received.append(self.rfile.read(length))
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, *args: Any) -> None:
+                return
+
+        srv = http.server.HTTPServer(("127.0.0.1", 0), _HookHandler)
+        port = srv.server_address[1]
+        thread = threading.Thread(target=srv.serve_forever, daemon=True)
+        thread.start()
+        try:
+            from myquant.monitoring.alerting import (
+                Alert,
+                SeverityLevel,
+                WebhookAlertChannel,
+            )
+
+            ch = WebhookAlertChannel(
+                webhook_url=f"http://127.0.0.1:{port}/hook", retries=1, timeout=3.0,
+            )
+            ch.send(Alert(
+                level=SeverityLevel.CRITICAL,
+                message="[门禁验收] 用例13 告警送达测试（LIVE 门槛）",
+                source="live_safety_gate",
+            ))
+            deadline = time.time() + 15
+            while time.time() < deadline and not received:
+                time.sleep(0.2)
+            delivered = bool(received)
+        finally:
+            srv.shutdown()
+            thread.join(timeout=2)
+        return {
+            "item": "LIVE-13",
+            "pass": bool(delivered),
+            "detail": f"CRITICAL→webhook 本地实测送达={delivered}（MTTA 阈值引用 P0-8 5min）",
+            "threshold_source": "V3 §九 用例13（注入 CRITICAL→email/webhook 实测送达）；P0-8 MTTA≤5min",
+        }
+
+    def _check_live_f6(self) -> Dict[str, Any]:
+        """F-6：审计存储不可用 → 门禁判定照常 + 本地降级缓冲 + 恢复补写 + CRITICAL（不阻断不静默）。"""
+        import logging
+        import tempfile
+
+        from myquant.api.middleware.auth import OperationGuard
+
+        tmp = Path(tempfile.mkdtemp())
+        blocker = tmp / "blocker.txt"
+        blocker.write_text("x", encoding="utf-8")  # 占用路径使 mkdir 失败 → 落盘失败
+        guard = OperationGuard()
+        guard._audit_dir = str(blocker)
+        records: list = []
+        handler = _CaptureHandler(records)
+        logging.getLogger("api.middleware.auth").addHandler(handler)
+        try:
+            guard.audit("test", "op", "F-6故障注入", "denied", None, "审计存储不可用")
+            buffered = len(guard._audit_buffer) == 1
+            critical_logged = any("F-6" in r.getMessage() for r in records)
+            # 恢复：audit_dir 改回可写 → 下一条 audit 触发补写
+            guard._audit_dir = str(tmp)
+            guard.audit("test", "op", "F-6恢复", "denied", None, "存储恢复")
+            flushed = len(guard._audit_buffer) == 0
+            recovered = (tmp / "write_audit.jsonl").exists()
+        finally:
+            logging.getLogger("api.middleware.auth").removeHandler(handler)
+        return {
+            "item": "LIVE-F6",
+            "pass": bool(buffered and critical_logged and flushed and recovered),
+            "detail": (
+                f"故障时缓冲={buffered}, CRITICAL留痕={critical_logged}, "
+                f"恢复后补写={flushed}, 审计文件生成={recovered}"
+            ),
+            "threshold_source": "V3 §九 F-6（审计存储不可用→判定照常+本地降级缓冲+补写+CRITICAL；不得阻断交易不得静默）",
+        }
+
+    def _check_live_r123(self) -> Dict[str, Any]:
+        """R-1/R-2/R-3：止损卖单不被 rate_limit/daily_loss 拦、黑名单可卖出、
+        kill_switch 置位下仍可撤单（硬闸只禁开仓，不禁止退出/撤单）。"""
+        from myquant.live.brokers.paper_broker import PaperBroker
+        from myquant.models.trade import Order, OrderSide, Position
+        from myquant.risk.risk_manager import build_risk_manager_from_config
+        from myquant.risk.rules import RiskContext
+
+        # R-1：rate_limit 达上限 + daily_loss 突破 → SELL 止损卖单仍通过（只拦 BUY）
+        rm = build_risk_manager_from_config(
+            {"max_daily_loss_pct": 0.01, "max_orders_per_day": 5}, {},
+            enable_trading_hours=False,
+        )
+        ctx = RiskContext(
+            cash=1_000_000.0, total_assets=950_000.0, initial_capital=1_000_000.0,
+            day_start_assets=1_000_000.0,  # 日亏 5% > 1% 上限
+            current_price={"000001.SZ": 10.0},
+            extra={"prev_close": {"000001.SZ": 10.0}},
+            order_count_today=5,
+        )
+        sell = Order(symbol="000001.SZ", side=OrderSide.SELL, quantity=100, price=10.0)
+        r1_ok = bool(rm.check_order(sell, ctx).passed)
+        # R-2：黑名单标的仍可卖出
+        rm2 = build_risk_manager_from_config(
+            {"blacklist": {"symbols": ["000001.SZ"]}}, {}, enable_trading_hours=False,
+        )
+        r2_ok = bool(rm2.check_order(sell, ctx).passed)
+        # R-3：kill_switch 置位 → 撤单仍可执行（cancel_order 不经提交薄闸）
+        import tempfile
+
+        b = PaperBroker(initial_capital=1_000_000.0)
+        b.connect()
+        b.positions["000001.SZ"] = Position(
+            symbol="000001.SZ", quantity=100, avg_cost=9.0, market_price=10.0,
+        )
+        placed = b.submit_order(
+            Order(symbol="000001.SZ", side=OrderSide.SELL, quantity=100, price=10.0)
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            flag = Path(tmp) / "kill_switch.flag"
+            flag.write_text("1", encoding="utf-8")
+            b.set_kill_switch_flag_path(str(flag))
+            r3_ok = b.cancel_order(placed.order_id)
+        return {
+            "item": "LIVE-R123",
+            "pass": bool(r1_ok and r2_ok and r3_ok),
+            "detail": (
+                f"止损卖单过 rate_limit/daily_loss={r1_ok}, 黑名单可卖={r2_ok}, "
+                f"kill_switch 下撤单可用={r3_ok}"
+            ),
+            "threshold_source": "V3 §九 R-1（止损卖单必须成交，前置可行价格）/R-2（黑名单可卖）/R-3（Kill Switch 仍可撤单可卖）",
         }
 
     # ── 运行入口 ────────────────────────────────────────────
@@ -1410,6 +1656,13 @@ class LiveSafetyGateRunner:
             "0.8-F1": self._check_08_f1,
             "0.8-F2": self._check_08_f2,
             "0.8-F5": self._check_08_f5,
+            "LIVE-1": self._check_live_1,
+            "LIVE-3": self._check_live_3,
+            "LIVE-6": self._check_live_6,
+            "LIVE-7": self._check_live_7,
+            "LIVE-13": self._check_live_13,
+            "LIVE-F6": self._check_live_f6,
+            "LIVE-R123": self._check_live_r123,
         }
 
         items: List[Dict[str, Any]] = []

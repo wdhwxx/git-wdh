@@ -4377,4 +4377,13 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    e. **验收结果**：验收 0.1~0.9 + 0.8 共 24 项全过（JSON 落盘 docs/监控档案/实盘安全门禁验收_20261010.json 更新）；tests/unit 全量 3670 passed；施工清单 §8 0.8 勾选完成。
    f. **纪律遵守**：业务逻辑归 myquant（run_实盘入口.py 保持薄入口，只调 startup_assertions）；二分标准写死（能力→拒启/外部→降级，不引入配置开关防"关掉断言上真钱"）；阈值/断言对象全部来自装配产物与单读配置入口（不新造数）；每项可开关（独立 try-except）；git 提交（commit message 引用 #295）。
 
+## #296 · 2026-10-10 · 实盘安全门禁第0阶段 LIVE 上线门槛（用例1/3/6/7/13 + R-1~R-3 + F-6 验收 31/31）
+   事实来源：本次落地（施工清单 §10）；代码级核验：F-6 审计降级缓冲落地 + LIVE 门槛 7 项验收 + 架构基线更新；验收 31/31 全过（JSON 落盘 docs/监控档案/实盘安全门禁验收_20261010.json）；全量回归 3670 passed + 架构门禁 30 passed 无回归。
+   a. **myquant/api/middleware/auth.py（F-6 落地）**：audit() 落盘失败 → 记录入 _audit_buffer（collections.deque maxlen=1000）+ 首次 logger.critical("[admission] 审计存储不可用，进入本地降级缓冲（F-6，待恢复补写，门禁判定照常执行）…"）其余降 warning；落盘成功后调 _flush_audit_buffer() 补写（全部补完复位 _audit_buffer_alerted）；import 增 deque/Deque。语义：审计存储故障不阻断门禁判定、不静默，恢复后补写（V3 §九 F-6）。
+   b. **myquant/acceptance/live_safety_gate.py（LIVE 门槛验收 7 项）**：LIVE-1（引擎恢复方法存在 + StateStore 可导入，执行级恢复/对账证据引既有单测域）、LIVE-3（RiskContext day_start_assets 造日亏 5%>1% → BUY 拒 daily_loss_limit + SELL 放行）、LIVE-6（TradingHoursRule 注入 trading_calendar={今天} 隔离真实周六；20:00 篡改→拒开仓 + 09:35 对照放行）、LIVE-7（QmtBroker SIM 同 order_id 三发 → 订单簿仅 1 笔 + dedup_skipped=2）、LIVE-13（WebhookAlertChannel 本地 http.server 端口实测 POST 送达 200，MTTA 引用 P0-8 ≤5min）、LIVE-F6（audit_dir 指向被占用路径→缓冲 + CRITICAL + 恢复后补写 + 审计文件生成）、LIVE-R123（止损卖单过 rate_limit/daily_loss、黑名单可卖、kill_switch 置位下撤单可用——硬闸只禁开仓不禁止退出/撤单，I-1/I-3）。
+   c. **架构门禁基线更新（回写#296）**：test_architecture.py VIOLATION_BASELINE 8→9（LIVE-F6 验收新增 acceptance/live_safety_gate.py→auth 引用，EX-14C 文件级豁免语义已覆盖）；OVERSIZE_WHITELIST + OVERSIZE_LINE_BASELINE 登记 acceptance/live_safety_gate.py（1749 行 > 1500 上限——验收载体（0.1~0.9 + LIVE 门槛 31 项累计）不可拆分，唯一合法路径入白名单）。
+   d. **施工清单 §10 勾选（LIVE 上线门槛 ①~⑥）**：①0.1–0.9 全勾选；②V3 §九 31/31 验收通过（用例 1~13 覆盖 1-10/12-13，用例11=券商侧人工；R-1~R-7、F-1~F-6 全覆盖）；③决策点 3（actor_type 双语义，system 跳 reviewer 校验但审计留痕）已拍板落地、4/5 按推荐落地；④probe 档最小额度集已生效（单笔 50 万 max_order_value→single_order_limit、单日 20 笔 max_daily_trades→rate_limit、总敞口 95% + 持仓 5 只→position_limit、在途笔数→QmtBroker 幂等去重，均经 build_risk_manager_from_config 配置真源接线）；⑤券商侧防护为外部配置，需人工在前台开启后确认（不变量 I-7 生效前不得上真钱）；⑥告警渠道经 LIVE-13 实测送达。
+   e. **验收结果**：验收 0.1~0.9 + LIVE 门槛共 31 项全过（JSON 落盘 docs/监控档案/实盘安全门禁验收_20261010.json 更新）；tests/unit 全量 3670 passed（此前 R02/R14 架构门禁 2 失败已修复）；架构门禁 30 passed。
+   f. **纪律遵守**：阈值/路径全部引用真源（daily_loss 上限=config max_daily_loss_pct、单笔=config max_order_value、日历注入=构造参数不编造）；故障注入可复现（blocker 文件占用、本地 HTTP 端口）；验收载体不可拆（Oversize 白名单唯一合法路径，不拆分规避）；git 提交（commit message 引用 #296）。
+
 

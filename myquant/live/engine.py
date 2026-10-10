@@ -3040,13 +3040,12 @@ def startup_assertions(
             f"[startup_assertions] 告警管理器不可用（外部依赖降级，不拒启）: {e}"
         )
 
-    # ⑥ 系统时钟可用（F-5；外部依赖 → 降级 CRITICAL，不拒启）
+    # ⑥ 系统时钟可用（F-5：V3 §九 9.3 明确"时钟源不可达 → 拒绝 live 启动，允许 paper"；
+    #     时间被篡改/离线会触发错误交易判定，属能力缺失而非可降级外部依赖）
     try:
         datetime.now()
     except Exception as e:  # noqa: BLE001
-        logger.critical(
-            f"[startup_assertions] 系统时钟不可用（F-5 外部依赖降级，不拒启）: {e}"
-        )
+        problems.append(f"系统时钟不可用（F-5：拒绝 live 启动，允许 paper）: {e}")
 
     # ⑦ 应急链旁路可用（0.3 产物；能力缺失——弱断言：工厂模块可导入 + 一键平仓脚本存在）
     try:

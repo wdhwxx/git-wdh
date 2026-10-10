@@ -142,15 +142,57 @@
     {
       "item": "0.8-F5",
       "pass": true,
-      "detail": "时钟不可用 → 拒启项=False（应无）, CRITICAL 降级日志=True",
-      "threshold_source": "V3 §十.5 F-5（外部依赖时钟异常→降级+CRITICAL，不拒启）"
+      "detail": "时钟不可达 → 拒启项=True（V3 9.3：拒绝 live 启动，允许 paper；不得默认放行）",
+      "threshold_source": "V3 §九 9.3 F-5（时钟源不可达 → 拒绝 live 启动，允许 paper，不可默认放行）"
+    },
+    {
+      "item": "LIVE-1",
+      "pass": true,
+      "detail": "引擎恢复方法存在=True, StateStore 可导入=True（执行级恢复/对账证据见 tests/unit/test_restore_broker_state.py 等）",
+      "threshold_source": "V3 §九 用例1（杀引擎→快照可恢复+未成交单对账）；恢复时限引用 P0-2"
+    },
+    {
+      "item": "LIVE-3",
+      "pass": true,
+      "detail": "日亏突破→BUY拒=True（rule=daily_loss_limit）, SELL放行=True",
+      "threshold_source": "V3 §九 用例3（手动改 max_daily_loss_pct 到已突破→风控拒绝开仓，不是警告）"
+    },
+    {
+      "item": "LIVE-6",
+      "pass": true,
+      "detail": "时间篡改为20:00→拒开仓=True, 09:35对照放行=True",
+      "threshold_source": "V3 §九 用例6（把系统时间改到 09:00（实际 20:00）→ 拒启或拒单）；0.9-12 非交易时段同源"
+    },
+    {
+      "item": "LIVE-7",
+      "pass": true,
+      "detail": "同 signal_id 三发→订单簿仅1笔=True, dedup 留痕=2次",
+      "threshold_source": "V3 §九 用例7（同一 signal_id 三次→仅 1 笔委托 + dedup 留痕）；qmt 幂等去重（任务43）"
+    },
+    {
+      "item": "LIVE-13",
+      "pass": true,
+      "detail": "CRITICAL→webhook 本地实测送达=True（MTTA 阈值引用 P0-8 5min）",
+      "threshold_source": "V3 §九 用例13（注入 CRITICAL→email/webhook 实测送达）；P0-8 MTTA≤5min"
+    },
+    {
+      "item": "LIVE-F6",
+      "pass": true,
+      "detail": "故障时缓冲=True, CRITICAL留痕=True, 恢复后补写=True, 审计文件生成=True",
+      "threshold_source": "V3 §九 F-6（审计存储不可用→判定照常+本地降级缓冲+补写+CRITICAL；不得阻断交易不得静默）"
+    },
+    {
+      "item": "LIVE-R123",
+      "pass": true,
+      "detail": "止损卖单过 rate_limit/daily_loss=True, 黑名单可卖=True, kill_switch 下撤单可用=True",
+      "threshold_source": "V3 §九 R-1（止损卖单必须成交，前置可行价格）/R-2（黑名单可卖）/R-3（Kill Switch 仍可撤单可卖）"
     }
   ],
   "summary": {
-    "passed": 24,
+    "passed": 31,
     "failed": 0,
-    "total": 24
+    "total": 31
   },
-  "generated_at": "2026-10-10T21:01:47+0800",
+  "generated_at": "2026-10-10T21:16:07+0800",
   "caveats": []
 }
