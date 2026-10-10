@@ -105,7 +105,7 @@ MYQUANT = PROJECT_ROOT / "myquant"
 
 # ═══════════════════════════ 1) 层定义 ═══════════════════════════
 MODULE_LAYER: dict[str, str] = {
-    "myquant.core": "L0", "myquant.utils": "L0", "myquant.database": "L0",
+    "myquant.core": "L0", "myquant.utils": "L0", "myquant.database": "L0", "myquant.leakage_gate": "L0",
     "myquant.data_access": "L1",
     "myquant.models": "L2", "myquant.indicators": "L2",
     "myquant.engine": "L2E",

@@ -96,7 +96,7 @@ select = ["E4", "E7", "E9", "F", "I"]
 
 # ===== pytest配置（防未来函数测试专用标记）=====
 [tool.pytest.ini_options]
-testpaths = ["tests/unit", "tests/benchmarks"]
+testpaths = ["tests/unit", "tests/leakage_gate", "tests/benchmarks"]
 markers = [
     "lookahead: 防未来函数校验测试（强制通过）",
     "slow: 慢速测试（全量回测，默认跳过）",

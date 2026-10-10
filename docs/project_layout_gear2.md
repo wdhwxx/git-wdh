@@ -817,6 +817,10 @@ Pythonwdhmm/
 
 │   │   └── database.py               # 数据库fixture：临时数据库、初始化schema
 
+│   ├── leakage_gate/                # ✨【回写#273】防泄漏门禁测试（与模块同批提交，解零覆盖红线；pyproject testpaths 已加本目录）：test_gate_governance.py（开关/台账/违规落 audit_log）；后续 test_contract.py/test_registry_contract.py/test_consumption_gate.py/test_gate_red_on_injected_leak.py 依次落地（M0-10~13）
+
+│   │   └── test_gate_governance.py  # ✨【回写#273】门禁中心治理测试（M0-11 核心）：GateConfig 开关（enabled 阻断/disabled 仅审计）、Violation 台账结构、违规落 audit_log（临时库验证）、检查注册冲突/异常 fail-closed
+
 │   └── benchmarks/                   # 性能基准测试目录（marker控制开关，默认不跑）
 
 │       ├── __init__.py
@@ -913,6 +917,14 @@ Pythonwdhmm/
     │   ├── market_data.py            # Tick、Bar、Snapshot、MarketEvent；内置pydantic字段值域校验，原始数据先parse本模型
 
     │   └── backtest.py               # BacktestConfig、BacktestResult绩效容器；✨【回写#137】mark_complete 终态保护：status==failed 时抛 RuntimeError，禁止失败态被覆盖为 completed
+
+    │
+
+    ├── leakage_gate/                 # ✨【回写#273】防泄漏门禁中心（L4 治理层落点，模块分层登记 L0，test_architecture.py MODULE_LAYER）：gate.py 门禁中心最小壳（GateConfig 开关/Violation/LeakageGateError/register_gate_check 注册/assert_all_gates_pass 出口断言）；后续 contract.py/consumption.py/static_scan.py/cross_sectional.py/sanity.py/report.py/exemption.py 依次挂入（v3.0 §5.4/§6.2）
+
+    │   ├── __init__.py               # ✨【回写#273】泄漏门禁包导出（GateConfig/Violation/LeakageGateError/register_gate_check/assert_all_gates_pass/get_config/set_config）
+
+    │   ├── gate.py                   # ✨【回写#273】门禁中心最小壳：GateConfig(enabled 开关/audit_violations)/Violation 违规记录/LeakageGateError/register_gate_check 检查注册（后续门禁模块挂入）/assert_all_gates_pass（enabled 违规→落 audit_log+抛错阻断；disabled 仅审计警告档）；依赖 core.audit_log（L0 合法，BASE-7 哈希链）
 
     │
 
@@ -4133,3 +4145,11 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    c. **7 个策略文件**：补齐契约元数据（对齐 config/strategy_registry.yaml；grid 消费列含最高价/最低价 ATR、multi_factor 含流通股本；均不含阻断列每股收益）。
    d. **蓝图 strategies/ 段目录树更新**：registry.py/base.py 注释追加 M0-04 说明。
    e. **纪律遵守**：蓝图优先（先更新目录树注释再落代码）；仅改既有文件（零新增文件，零蓝图外文件）；契约仅声明时间语义、不含未来数据（防未来）；全量类型注解 + 防御式校验；git 提交（commit message 引用 #272）。
+## #273 · 2026-10-10 · 防泄漏门禁施工·M0-05 门禁中心最小壳（myquant/leakage_gate/）
+   事实来源：本次落地（进入 M0-05，依赖 DEC-01/02 已拍板）；代码级核验：py_compile 3 文件 OK；门禁测试+架构门禁 40 passed/1 skipped；tests/unit 全量 3627 passed/4 skipped（零回归，与 #267/#272 基线一致）。
+   a. **新建 myquant/leakage_gate/gate.py + __init__.py**：门禁中心最小壳——GateConfig frozen dataclass（enabled/audit_violations 默认 True）；Violation 6 字段台账（gate/rule_id/severity/message/strategy_id/decision_time）；LeakageGateError 携带 violations；register_gate_check 注册钩子（重复注册/空名 ValueError）；assert_all_gates_pass 唯一出口断言（enabled 违规→落 audit_log+抛 LeakageGateError 阻断出口、disabled 仅审计警告档不阻断）；检查函数异常 fail-closed 记"阻断"级 gate-error 违规（防线自身故障不放行）；审计写失败仅 error 不阻断主流程；依赖 core.audit_log（L0 合法，BASE-7 哈希链）。
+   b. **新建 tests/leakage_gate/test_gate_governance.py**（M0-11 核心，9 用例）：GateConfig 开关（默认 enabled/无违规通过/enabled 抛错/disabled 仅审计/audit 关闭）、Violation 台账结构（frozen 不可改写）、注册冲突/空名、检查异常 fail-closed、违规落 audit_log（临时库 AuditLogStore(db_path)+monkeypatch 验证 kind=leakage_gate/action=violation/seq=1）。
+   c. **test_architecture.py MODULE_LAYER 登记**："myquant.leakage_gate": "L0"（与 core/utils/database 同 L0；M0-14 核心随模块同批落地，违规跨层注入验证留 M0-14 补）。
+   d. **pyproject.toml testpaths 扩展**：加 tests/leakage_gate（新测试目录须被 pytest 收集，否则写了不跑；与 DEC-05 精神一致）。
+   e. **蓝图目录树登记**：myquant/ 段 leakage_gate/ 子树（__init__+gate.py）+ tests/ 段 leakage_gate/ 子树（test_gate_governance.py），均带 ✨【回写#273】。
+   f. **纪律遵守**：蓝图优先（先登记目录树再建文件）；零蓝图外新增文件；门禁中心纯治理壳零业务代码触碰；防御式 fail-closed；严格防未来（违规只记录已发生校验结果，审计 created_ts 由 AuditLogStore 取当前时点）；git 提交（commit message 引用 #273）。
