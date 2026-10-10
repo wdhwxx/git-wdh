@@ -232,6 +232,31 @@ def _append_audit(violations: List[Violation]) -> None:
         logger.error(f"门禁违规落审计失败（不阻断主流程）: {e}")
 
 
+def collect_gate_stats(strategy_id: str, decision_time: str) -> Dict[str, Dict[str, int]]:
+    """
+    门禁统计（M3-01 报告数据源）：执行全部检查，返回按门禁分组的 severity 计数。
+
+    不抛错、不落审计（供 leakage_report 汇总用）；检查自身异常仍按 fail-closed
+    计入该门禁的 "blocked"（gate-error）。
+
+    Args:
+        strategy_id: 策略契约主键（name）。
+        decision_time: 决策时点（T日，YYYY-MM-DD）。
+
+    Returns:
+        Dict[str, Dict[str, int]]: {gate: {blocked, warning, total}}。
+    """
+    stats: Dict[str, Dict[str, int]] = {}
+    for v in _collect_violations(strategy_id, decision_time):
+        entry = stats.setdefault(v.gate, {"blocked": 0, "warning": 0, "total": 0})
+        entry["total"] += 1
+        if v.severity == "阻断":
+            entry["blocked"] += 1
+        elif v.severity == "警告":
+            entry["warning"] += 1
+    return stats
+
+
 def assert_all_gates_pass(strategy_id: str, decision_time: str) -> None:
     """
     门禁中心出口断言（唯一出口强制，v3.0 §5.4）。
@@ -250,6 +275,11 @@ def assert_all_gates_pass(strategy_id: str, decision_time: str) -> None:
         LeakageGateError: enabled 且存在违规时抛出。
     """
     violations = _collect_violations(strategy_id, decision_time)
+    if not violations:
+        return
+    # M3-02：未过期豁免压制对应违规；过期豁免不压制 → 违规保留 → 门禁自动拦截
+    from myquant.leakage_gate.exemption import suppress_violations
+    violations = suppress_violations(violations)
     if not violations:
         return
     config = get_config()

@@ -89,6 +89,7 @@ BACKTEST_OUTPUT_PATTERNS: Tuple[str, ...] = (
     "report_*.pdf",
     "summary_*.txt",
     "result_*.json",
+    "leakage_report_*.json",  # M3-01：泄漏审计报告随回测产物按期清理
     "回测看板_*.html",
 )
 
@@ -134,9 +135,9 @@ CATEGORY_NAMES: Dict[str, str] = {
 
 # 默认保留的回测期数
 DEFAULT_KEEP: int = 1
-# 期时间戳正则：report_/equity_/trades_/summary_ 前缀 + YYYYMMDD_HHMMSS
+# 期时间戳正则：report_/equity_/trades_/summary_/leakage_report_ 前缀 + YYYYMMDD_HHMMSS
 PERIOD_FILE_PATTERN: re.Pattern = re.compile(
-    r"^(report|equity|trades|summary)_(\d{8}_\d{6})\.[A-Za-z]+$"
+    r"^(report|equity|trades|summary|leakage_report)_(\d{8}_\d{6})\.[A-Za-z]+$"
 )
 # result 文件名：result_<unix秒>.json
 RESULT_FILE_PATTERN: re.Pattern = re.compile(r"^result_(\d+)\.json$")

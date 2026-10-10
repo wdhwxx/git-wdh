@@ -26,6 +26,8 @@ from myquant.leakage_gate import contract  # noqa: F401  # 导入即注册契约
 from myquant.leakage_gate import static_scan  # noqa: F401  # 导入即注册静态扫描（阶段 1-B，M1B-01/02）
 from myquant.leakage_gate import cross_sectional  # noqa: F401  # 导入即注册横截面 as-of 校验（阶段 1-B，M1B-04）
 from myquant.leakage_gate import sanity  # noqa: F401  # 导入即注册特征白名单门禁（阶段 2，M2-04）
+from myquant.leakage_gate import report  # noqa: F401  # 泄漏审计报告产物（阶段 3，M3-01）
+from myquant.leakage_gate import exemption  # noqa: F401  # 豁免流（阶段 3，M3-02）
 from myquant.leakage_gate.gate import (
     GateConfig,
     LeakageGateError,
