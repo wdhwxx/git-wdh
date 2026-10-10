@@ -180,3 +180,10 @@ performance:
     enabled: true                 # 是否启用内存自动降级
     warning_pct: 70.0             # 告警阈值（系统内存百分比，超过后引擎降一级+并行度减半）
     critical_pct: 85.0            # 严重阈值（超过后强制 event 引擎 + 串行）
+
+# ========== 防泄漏门禁（M0-16，v3.0 §5.4）==========
+# 出口强制：无契约/引用阻断列的策略在引擎创建前被拦
+# （BacktestScheduler.create_engine / create_live_engine 挂 assert_all_gates_pass）
+leakage_gate:
+  enabled: true                     # 门禁总开关（默认 true；false=仅审计不阻断，生产禁止关闭）
+  audit_violations: true            # 违规是否落 audit_log 哈希链（默认 true）

@@ -777,6 +777,21 @@ def run_live_trading(args: argparse.Namespace) -> int:
         print(f"[错误] 运行模式参数冲突: {e}")
         return 1
 
+    # ── 1.3 出口强制消费：防泄漏门禁配置（v3.0 §5.4，M0-18）──
+    # 代码真消费配置：leakage_gate.enabled 直接驱动 create_live_engine 出口断言阻断
+    # （无契约/引用阻断列策略在实盘装配前被拦）；配置段缺失时保持模块级默认阻断。
+    from myquant.leakage_gate import GateConfig as _LG_GateConfig
+    from myquant.leakage_gate import set_config as _lg_set_config
+
+    _lg_cfg = dict(config.get("leakage_gate", {}) or {})
+    if _lg_cfg:
+        _lg_set_config(_LG_GateConfig(
+            enabled=bool(_lg_cfg.get("enabled", True)),
+            audit_violations=bool(_lg_cfg.get("audit_violations", True)),
+        ))
+        print(f"  [门禁] leakage_gate.enabled 已消费: {_lg_cfg.get('enabled', True)}"
+              f"（出口断言将阻断未登记策略）")
+
     # ── 1.4 运行模式一致性校验 + 实盘安全门（切割接口）──
     from myquant.live.run_mode import (
         RunMode,

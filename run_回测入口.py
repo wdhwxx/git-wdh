@@ -318,6 +318,23 @@ def run_backtest(args: argparse.Namespace) -> int:
         logger.info("lookahead_guard.strict_mode 已消费: %s（违规将立即抛异常，否则记录至 assert_pass 统一校验）", guard.strict)
     logger.info(f"防未来函数校验器已重置: {guard} (enabled={guard.enabled}, strict={guard.strict})")
 
+    # ── M0-18 出口强制消费：防泄漏门禁配置（v3.0 §5.4，与 lookahead_guard 同模式）──
+    # 代码真消费配置：leakage_gate.enabled 直接驱动出口断言阻断（无契约/引用阻断列策略
+    # 在 create_engine 被拦）；配置段缺失时保持模块级默认（enabled=True 生产阻断）。
+    from myquant.leakage_gate import GateConfig as _LG_GateConfig
+    from myquant.leakage_gate import set_config as _lg_set_config
+
+    _lg_cfg = config_dict.get("leakage_gate", {}) or {}
+    if _lg_cfg:
+        _lg_set_config(_LG_GateConfig(
+            enabled=bool(_lg_cfg.get("enabled", True)),
+            audit_violations=bool(_lg_cfg.get("audit_violations", True)),
+        ))
+        logger.info(
+            "leakage_gate.enabled 已消费: %s / audit_violations: %s（出口断言将阻断未登记策略）",
+            _lg_cfg.get("enabled", True), _lg_cfg.get("audit_violations", True),
+        )
+
     # ── 8. 创建回测引擎（三模式调度，从DataProvider加载数据）──
     try:
         from myquant.backtest.engine import BacktestScheduler

@@ -74,18 +74,53 @@ class TestConfigTemplateIntegrity:
             "risk_params.example.yaml 不应存在（BUG-09 已删除），若重新引入需恢复消费"
         )
 
+    @pytest.mark.skipif(
+        not (CONFIG_DIR / "live_config.yaml").exists(),
+        reason="生产真实配置 live_config.yaml 未入库（.gitignore 忽略），CI 环境跳过；本地存在时即红",
+    )
     def test_live_config_structure(self) -> None:
-        """live_config 关键段完整"""
-        live = _load_yaml("live_config.example.yaml")
+        """live_config 真实配置关键段完整（M0-17：guard 断言从 .example 改为真实配置，改真实配置即红）"""
+        live = _load_yaml("live_config.yaml")
         for section in [
             "live", "broker", "execution", "market_data", "stock_pool",
             "strategy", "position", "risk_control", "lookahead_guard",
-            "state_store", "scheduler",
+            "state_store", "scheduler", "leakage_gate",
         ]:
             assert section in live, f"live_config 缺少 {section} 段"
         assert live["lookahead_guard"]["enabled"] is True, "防未来函数必须开启"
         assert live["lookahead_guard"]["strict_mode"] is True, "防未来严格模式必须开启"
+        assert live["leakage_gate"]["enabled"] is True, "防泄漏门禁必须开启（M0-16 整合）"
+        assert live["leakage_gate"]["audit_violations"] is True, "防泄漏门禁违规必须落审计"
         assert "name" in live["strategy"]
+
+    # ═══════════════════════════════════════════════
+    #  M0-16 配置整合断言（leakage_gate 段 + adjust_strict）
+    # ═══════════════════════════════════════════════
+
+    @pytest.mark.skipif(
+        not (CONFIG_DIR / "backtest_config.yaml").exists() or not (CONFIG_DIR / "backtest_kunpeng.yaml").exists(),
+        reason="生产真实回测配置未入库（.gitignore 忽略），CI 环境跳过；本地存在时即红",
+    )
+    def test_backtest_real_config_adjust_strict(self) -> None:
+        """M0-16：真实回测配置 adjust=hfq 必须显式 adjust_strict: true（消除静默降级 raw 口径不一致）"""
+        for name in ["backtest_config.yaml", "backtest_kunpeng.yaml"]:
+            cfg = _load_yaml(name)
+            assert cfg["data"]["adjust"] == "hfq", f"{name} adjust 应为 hfq"
+            assert cfg["data"]["adjust_strict"] is True, f"{name} 缺 adjust_strict: true（M0-16）"
+            assert cfg["leakage_gate"]["enabled"] is True, f"{name} 缺 leakage_gate 段（M0-16）"
+            assert cfg["leakage_gate"]["audit_violations"] is True, f"{name} leakage_gate.audit_violations 应为 true"
+
+    def test_backtest_example_leakage_gate(self) -> None:
+        """M0-16：backtest_config.example.yaml 含 leakage_gate 段（入库模板与真实配置一致）"""
+        cfg = _load_yaml("backtest_config.example.yaml")
+        assert cfg["leakage_gate"]["enabled"] is True
+        assert cfg["leakage_gate"]["audit_violations"] is True
+
+    def test_live_example_leakage_gate(self) -> None:
+        """M0-16：live_config.example.yaml 含 leakage_gate 段（入库模板与真实配置一致）"""
+        cfg = _load_yaml("live_config.example.yaml")
+        assert cfg["leakage_gate"]["enabled"] is True
+        assert cfg["leakage_gate"]["audit_violations"] is True
 
     def test_strategy_params_structure(self) -> None:
         """strategy_params 全部策略块 + 顶层键存在"""

@@ -369,9 +369,9 @@ Pythonwdhmm/
 
 ├── config/                           # 结构化配置文件目录（模板文件入库，真实yaml不提交）
 
-│   ├── backtest_config.example.yaml  # 回测参数模板：初始资金、手续费、滑点、时间范围等；✨【V5】新增engine.mode（event/vectorized/mixed三模式选择）+ performance段（workers/chunk_size/memory_pool/预取开关），由BatchBacktest与run_批量回测.py读取；✨【回写#174】增 benchmark_required（KP-P2-04）；✨【回写#178】type 默认 preset_filtered/three_factor 标预留（KP-P1-08）
+│   ├── backtest_config.example.yaml  # 回测参数模板：初始资金、手续费、滑点、时间范围等；✨【V5】新增engine.mode（event/vectorized/mixed三模式选择）+ performance段（workers/chunk_size/memory_pool/预取开关），由BatchBacktest与run_批量回测.py读取；✨【回写#174】增 benchmark_required（KP-P2-04）；✨【回写#178】type 默认 preset_filtered/three_factor 标预留（KP-P1-08）；✨【回写#278】增 leakage_gate 段（M0-16 配置整合，enabled/audit_violations 均 true，出口强制声明）
 
-│   ├── live_config.example.yaml     # 实盘参数模板：券商连接、风控阈值、订阅合约等；✨【回写#144】增 compliance 报备段（enabled+filing六字段，口径待律师确认）；✨【回写#178】broker.mode 默认 SIM 与 trade_mode 一致（KP-P1-08）
+│   ├── live_config.example.yaml     # 实盘参数模板：券商连接、风控阈值、订阅合约等；✨【回写#144】增 compliance 报备段（enabled+filing六字段，口径待律师确认）；✨【回写#178】broker.mode 默认 SIM 与 trade_mode 一致（KP-P1-08）；✨【回写#278】增 leakage_gate 段（M0-16 配置整合，实盘出口强制声明）
 │   ├── live_admission.example.yaml # ✨【回写#186】KP-M04(T-30) 写操作准入示例配置（admission: enabled=false 默认仅审计留痕/require_reviewer/reviewer/audit_dir）
 
 │   ├── strategy_params.example.yaml # 策略参数模板：全部7策略参数块（ma_cross/rsrs/grid/momentum/mean_reversion/multi_factor/kunpeng）
@@ -426,7 +426,7 @@ Pythonwdhmm/
 
 │   └── workflows/
 
-│       └── ci.yml                    # ✨【V5·P3】CI流水线（重写为7-job）：lint → test（全量tests/u；✨【回写#157】lint 增 BLE001 专项护栏（KP-P1-07：新增裸 except 阻断）nit，gui extras 已装、offscreen 跑 GUI 测试）→ consistency-check（三模式一致性）→ backtest-smoke（回测冒烟）→ docker-build（构建镜像）→ live-config-check（实盘配置检查）→ data-clean（数据清洗单元测试）；任一job失败即阻断合并；✨【回写#166】live-config-check 增 example vs 生产键级 diff + docker-build 镜像打 git sha tag（KP-P5-07）；✨【回写#170】增 security-scan job（KP-M03：pip-audit 依赖漏洞 + gitleaks 密钥扫描）
+│       └── ci.yml                    # ✨【V5·P3】CI流水线（重写为7-job）：lint → test（全量tests/u；✨【回写#157】lint 增 BLE001 专项护栏（KP-P1-07：新增裸 except 阻断）nit，gui extras 已装、offscreen 跑 GUI 测试）→ consistency-check（三模式一致性）→ backtest-smoke（回测冒烟）→ docker-build（构建镜像）→ live-config-check（实盘配置检查）→ data-clean（数据清洗单元测试）；任一job失败即阻断合并；✨【回写#166】live-config-check 增 example vs 生产键级 diff + docker-build 镜像打 git sha tag（KP-P5-07）；✨【回写#170】增 security-scan job（KP-M03：pip-audit 依赖漏洞 + gitleaks 密钥扫描）；✨【回写#278】增 leakage-gate-check job（M0-18：防泄漏门禁台账校验——代码真消费配置 + 测试断言配置，参照 run_回测入口.py:312-318 真消费模式；强制项缺失即红）
 
 │
 
@@ -4190,3 +4190,10 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    a. **新建 tests/leakage_gate/test_registry_contract.py**（M0-10 注册强制路径缺口，6 用例）：全部已注册策略契约元数据齐全（_CONTRACT_REQUIRED_FIELDS 7 字段非空，遍历注册表）、注册表主键=策略类 name（DEC-01）、_validate_contract_metadata 缺字段直接抛 AttributeError（错误消息含类名，首版断言用 name 已修正）、register_strategy 缺契约注册抛 AttributeError 且不写入注册表、部分契约（仅填 decision_time）仍被拒（完整性=7 字段全有）、注册表 name 集合 == config/strategy_registry.yaml 真源 name 集合（M0-03/M0-04 对齐）。
    b. **任务清单 M0-10 状态回写 ✅**（test_contract.py 已于 #274 落地，注册强制路径本批补齐；M0-10 全部完成）。
    c. **纪律遵守**：蓝图优先（先登记目录树再建文件）；零蓝图外新增文件；测试仅校验已注册类与已落盘注册表（防未来）；git 提交（commit message 引用 #277）。
+## #278 · 2026-10-10 · 防泄漏门禁施工·M0-16/17/18 配置整合 + 配置断言 + CI 台账 job
+   事实来源：本次落地（M0-16/17/18，依赖 M0-08/09 出口强制已提交）；代码级核验：5 份配置 yaml 解析 + leakage_gate 段/adjust_strict 断言通过；py_compile 入口 OK；ci.yml yaml.safe_load 通过（10 job）；leakage_gate+配置检查+架构门禁 99 passed/1 skipped；tests/unit 全量 3630 passed/4 skipped（零回归，基线 #267~#277 3627 + M0-17 新增 3 用例）。
+   a. **M0-16 配置整合**：5 份配置（backtest_config/backtest_kunpeng/backtest_config.example/live_config/live_config.example）统一追加 leakage_gate 段（enabled: true + audit_violations: true，出口强制声明）；两份真实回测配置（adjust: hfq 在 backtest_config.yaml:3274 / backtest_kunpeng.yaml:3250）追加 adjust_strict: true（v3.0 §5.3：复权因子缺失禁止静默降级 raw）。真实配置按 config/ 段"真实yaml不提交"约定不入库，example 入库。
+   b. **M0-17 配置断言**：tests/unit/test_config_live_check.py guard 断言从 .example 改为真实配置（test_live_config_structure 读 live_config.yaml + leakage_gate 段断言）+ 新增 3 用例（真实回测配置 adjust_strict/leakage_gate、example 两份 leakage_gate 段）——"改真实配置即红"；真实配置被 .gitignore 忽略、CI 环境缺失 → skipif 条件跳过（本地存在时即红，CI 由 example 断言 + leakage-gate-check job 强制）。
+   c. **M0-18 代码真消费配置 + CI job**：run_回测入口.py（lookahead_guard 消费后）与 run_实盘入口.py（apply_cli_overrides 后）消费 config leakage_gate 段 → set_config(GateConfig(enabled=..., audit_violations=...))（与 lookahead_guard 同模式，参照 run_回测入口.py:312-318；消费放入口避免撑大 live/engine.py R-24 白名单文件）；ci.yml 新增第 8 job leakage-gate-check（needs lint+test）：pytest leakage_gate 全量 + test_config_live_check + test_architecture + 强制项校验 python（入库配置 leakage_gate 段 true、注册表 7 策略齐全、入口真消费接线存在——强制项缺失即红）。
+   d. **蓝图目录树登记**：ci.yml 条目追加 leakage-gate-check（M0-18）；config 段 backtest_config.example.yaml/live_config.example.yaml 条目追加 leakage_gate 段备注。
+   e. **纪律遵守**：蓝图优先；真实配置改动不入库（按 config/ 段既有约定）；消费接线放入口（防死配置纪律，与 lookahead_guard 同模式）；防未来（配置仅声明当前意图，断言只校验已落盘配置）；git 提交（commit message 引用 #278）。

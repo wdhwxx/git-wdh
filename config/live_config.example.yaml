@@ -244,3 +244,9 @@ compliance:
     software_version: ""                # 软件版本
     filing_status: ""                   # 备案状态：approved=已备案 / pending=待报备 / rejected=被驳回
 
+# ========== 防泄漏门禁（M0-16，v3.0 §5.4）==========
+# 出口强制：无契约/引用阻断列的策略在实盘引擎装配前被拦（create_live_engine 挂 assert_all_gates_pass）
+leakage_gate:
+  enabled: true                     # 门禁总开关（默认 true；false=仅审计不阻断，生产禁止关闭）
+  audit_violations: true            # 违规是否落 audit_log 哈希链（默认 true）
+
