@@ -4574,4 +4574,10 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    d. **验收结果**：py_compile 通过；全套回归 **3757 passed/4 skipped**；基线对拍 rsrs×mixed 通过（EXIT=0，净值零变化）。
    e. **纪律遵守**：蓝图目录树先行登记；三引擎统一接线（event/mixed 逐 bar 切片 + vectorized 全量逃生口）；causality.* 真实取值替换占位（fail-closed 契约：不再恒 False）；git 提交（commit message 引用 #311）。**P0-07 完成**：因果切片从约定变成结构——策略通过 context.get_data() 拿不到未来 bar，vectorized 全量路径显式声明并披露。
 
+## #312 · 2026-10-11 · P0-02 方案 B：R11 链路状态显式记录（台账无阻断列，误报风险=0）
+   事实来源：本次落地（R-22 调研 + leakage_gate 测试全绿）；代码级核验：consumption.py/sanity.py/static_scan.py 三链路代码就位；台账 config/data_time_semantics.yaml 全部列 severity=通过（无阻断列）；tests/leakage_gate/ 127 passed 含 R11 红队用例。
+   a. **config/data_time_semantics.yaml（改动，末尾追加 R11 链路状态注释块）**：显式记录三链路就位（consumption 消费侧列门禁 + sanity feature_whitelist 特征白名单 + static_scan AST 扫描）；当前无 severity=阻断 列 → R11 不触发阻断，误报风险=0；后续新增穿越风险列重标 severity=阻断 即自动报红。
+   b. **验收结果**：tests/leakage_gate/ 127 passed（含 R11/RL-13/feature_whitelist 红队用例）；全套回归 3757 passed（#311 基线）；现有入口正常启动（无 R11 误报阻断）。
+   c. **纪律遵守**：蓝图目录树先行登记（config/ 改动）；方案 B（告警走独立通道，不产 Violation——当前无阻断列自然不触发）；git 提交（commit message 引用 #312）。**P0-02 完成**：R11 与 feature_whitelist 链路代码就位、测试覆盖完整、台账状态显式可见。
+
 

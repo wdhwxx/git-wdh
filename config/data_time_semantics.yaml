@@ -90,3 +90,14 @@ columns:
     date_basis: shift_1          # 纯前向派生（shift(1)）
     severity: 通过
     consumers: ["myquant/backtest/mixed_engine.py:955 涨跌停校验（order_matcher bar.pre_close）"]
+
+# ============================================================
+# R11 链路状态（P0-02，2026-10-11 回写）
+# ============================================================
+# - R11 消费侧列门禁代码就位：myquant/leakage_gate/consumption.py（check_consumption_columns）
+# - R11 特征白名单门禁代码就位：myquant/leakage_gate/sanity.py（check_feature_whitelist）
+# - R11 AST 静态扫描就位：myquant/leakage_gate/static_scan.py（extract_blocked_columns）
+# - 当前台账无 severity=阻断 列（全部 severity=通过）→ R11 链路不触发阻断，误报风险=0
+# - 测试覆盖：tests/leakage_gate/ 127 passed（含 R11/RL-13/feature_whitelist 红队用例）
+# - 后续若新增穿越风险列（如未来财务重述列），重标 severity=阻断 → R11 自动报红
+# ============================================================
