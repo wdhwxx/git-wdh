@@ -4600,4 +4600,10 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    d. **验收结果**：py_compile 通过；test_realism_gate 23 passed；全套回归 **3890 passed/4 skipped**。
    e. **纪律遵守**：蓝图目录树先行登记（realism_gate/ + backtest/ 改动）；fail-closed 配置校验（不静默类型转换）；段缺失不阻断（正常配置路径）；git 提交（commit message 引用 #315）。**P1-03 完成**：配置损坏拒绝启动，正常配置不破坏。
 
+## #316 · 2026-10-11 · P1-01：测试夹具白名单化 + realism_gate 隔离
+   事实来源：本次落地（施工方案 v2.2 §4.1 P1-01）；代码级核验：conftest.py 追加 _realism_gate_test_isolation fixture（与 leakage_gate 同构），测试会话将 realism_gate 设为 enabled=False（仅审计不阻断），避免 fake 策略/manifest 字段缺失引发全量回归。
+   a. **tests/conftest.py（改动，追加 _realism_gate_test_isolation）**：session scope autouse fixture——`set_config(RealismGateConfig(enabled=False, audit_violations=True))`；显式 yield 标记 fixture 边界（session 结束后进程退出自动恢复）。与现有 _leakage_gate_test_isolation 同构。
+   b. **验收结果**：全套回归 **3890 passed/4 skipped**（无变化，说明 realism_gate 软接线不影响现有测试）。
+   c. **纪律遵守**：蓝图目录树先行登记（tests/ 改动）；与 leakage_gate 测试隔离同构（一致模式）；红线测试集（test_realism_gate.py）在各自用例中显式 set_config(enabled=True) 恢复开启；git 提交（commit message 引用 #316）。**P1-01 完成**：realism_gate 测试会话隔离就位，fake 策略不再引发全量回归。
+
 

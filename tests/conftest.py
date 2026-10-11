@@ -85,6 +85,28 @@ def _leakage_gate_test_isolation() -> None:
 
 
 # ═══════════════════════════════════════════════════════════════
+#  真实性门禁出口强制 · 测试隔离（P1-01）
+# ═══════════════════════════════════════════════════════════════
+# 与 leakage_gate 同构：测试会话将 realism_gate 设为 enabled=False
+# （仅审计不阻断），避免 fake 策略/manifest 字段缺失引发全量回归。
+# 红线测试集（tests/unit/test_realism_gate.py 等）在各自 fixture 中
+# 显式 set_config(RealismGateConfig(enabled=True)) 恢复开启。
+
+@pytest.fixture(scope="session", autouse=True)
+def _realism_gate_test_isolation() -> None:
+    """测试会话将真实性门禁出口断言设为仅审计（enabled=False）。
+
+    说明：生产出口默认 enabled=True（违规抛 RealismGateError 阻断引擎创建）；
+    测试环境经本 fixture 关闭阻断，与 leakage_gate 测试隔离同构。
+    """
+    from myquant.realism_gate import RealismGateConfig, set_config
+
+    set_config(RealismGateConfig(enabled=False, audit_violations=True))
+    yield
+    # session 结束后无需显式恢复（进程退出）；显式 yield 标记 fixture 边界
+
+
+# ═══════════════════════════════════════════════════════════════
 #  统一中文列 OHLCV 构造工厂（#38 中文列规范）
 # ═══════════════════════════════════════════════════════════════
 
