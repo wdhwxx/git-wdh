@@ -4621,4 +4621,11 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    d. **验收结果**：py_compile 通过；R-24 薄化冻结通过（行数未增）；全套回归 **3890 passed/4 skipped**。
    e. **纪律遵守**：蓝图目录树先行登记（tests/ + backtest/ + acceptance/ 改动）；R-24 薄化冻结只减不增（不加注释行）；默认值与原 .to_dict().get() 一致（行为零变化）；git 提交（commit message 引用 #318）。**P0-03 第二刀完成**：消费点从 extra dict 迁移到显式字段。
 
+## #319 · 2026-10-11 · P0-03 第三刀：板块涨跌停映射表
+   事实来源：本次落地（施工方案 v2.2 §4.1 P0-03）；代码级核验：price_limit_pct_for_symbol() 按代码前缀返回板块幅度（主板10%/创业板科创板20%/北交所30%），7 项测试全绿。
+   a. **myquant/models/backtest.py（改动，新增模块级函数）**：`price_limit_pct_for_symbol(symbol)`——60xxxx/00xxxx→10%；30xxxx/68xxxx→20%；8xxxxx/4xxxxx→30%；其他默认 10%。ST 股 5% 需名称判断，不在本函数范围。
+   b. **tests/unit/test_backtest.py（改动，追加 TestPriceLimitByBoard 7 项）**：沪市主板/深市主板/创业板/科创板/北交所8/北交所4/未知默认，逐一断言。
+   c. **验收结果**：py_compile 通过；板块映射 7 passed；全套回归 **3897 passed/4 skipped**（+7 新增）。
+   d. **纪律遵守**：蓝图目录树先行登记（models/ + tests/ 改动）；函数纯查询无副作用；分层合法（models 层）；git 提交（commit message 引用 #319）。**P0-03 第三刀完成**：板块涨跌停映射表就位，后续刀接入撮合器。
+
 

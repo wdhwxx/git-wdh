@@ -781,3 +781,42 @@ class TestBacktestResult:
             extra={"custom_key": "custom_value"},
         )
         assert result.extra["custom_key"] == "custom_value"
+
+
+class TestPriceLimitByBoard:
+    """P0-03：板块涨跌停映射表（主板10%/创业板科创板20%/北交所30%）。"""
+
+    def test_main_board_sh(self):
+        """沪市主板 60xxxx → 10%。"""
+        from myquant.models.backtest import price_limit_pct_for_symbol
+        assert price_limit_pct_for_symbol("600519.SH") == 0.10
+
+    def test_main_board_sz(self):
+        """深市主板 00xxxx → 10%。"""
+        from myquant.models.backtest import price_limit_pct_for_symbol
+        assert price_limit_pct_for_symbol("000001.SZ") == 0.10
+
+    def test_chinext(self):
+        """创业板 30xxxx → 20%。"""
+        from myquant.models.backtest import price_limit_pct_for_symbol
+        assert price_limit_pct_for_symbol("300750.SZ") == 0.20
+
+    def test_star(self):
+        """科创板 68xxxx → 20%。"""
+        from myquant.models.backtest import price_limit_pct_for_symbol
+        assert price_limit_pct_for_symbol("688981.SH") == 0.20
+
+    def test_bse_8(self):
+        """北交所 8xxxxx → 30%。"""
+        from myquant.models.backtest import price_limit_pct_for_symbol
+        assert price_limit_pct_for_symbol("830799.BJ") == 0.30
+
+    def test_bse_4(self):
+        """北交所 4xxxxx → 30%。"""
+        from myquant.models.backtest import price_limit_pct_for_symbol
+        assert price_limit_pct_for_symbol("430047.BJ") == 0.30
+
+    def test_unknown_defaults_10pct(self):
+        """未知代码 → 默认 10%。"""
+        from myquant.models.backtest import price_limit_pct_for_symbol
+        assert price_limit_pct_for_symbol("999999.XX") == 0.10
