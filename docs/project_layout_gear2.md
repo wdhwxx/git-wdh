@@ -4606,4 +4606,11 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    b. **验收结果**：全套回归 **3890 passed/4 skipped**（无变化，说明 realism_gate 软接线不影响现有测试）。
    c. **纪律遵守**：蓝图目录树先行登记（tests/ 改动）；与 leakage_gate 测试隔离同构（一致模式）；红线测试集（test_realism_gate.py）在各自用例中显式 set_config(enabled=True) 恢复开启；git 提交（commit message 引用 #316）。**P1-01 完成**：realism_gate 测试会话隔离就位，fake 策略不再引发全量回归。
 
+## #317 · 2026-10-11 · P0-03 第一刀：BacktestConfig 显式字段提升（统一键名）
+   事实来源：本次落地（施工方案 v2.2 §4.1 P0-03）；代码级核验：BacktestConfig 追加 4 个显式字段（price_limit_pct=0.10/enforce_limit=False/enable_t1=True/lot_size=100），to_dict() 同步透传这 4 个字段。
+   a. **myquant/models/backtest.py（改动，BacktestConfig）**：追加 4 个显式字段——price_limit_pct（涨跌停幅度默认 10%）/enforce_limit（强制涨跌停校验默认 False）/enable_t1（T+1 默认 True）/lot_size（一手股数默认 100）；to_dict() 同步透传。原 extra dict 读取路径兼容（默认值一致，行为零变化）。
+   b. **基线对拍**：config_hash 因 to_dict 新增字段而变化（55eaf34... vs 旧 20b582...），重新建档后 --verify 通过（行为零变化确认）。
+   c. **验收结果**：py_compile 通过；基线对拍通过（EXIT=0）；全套回归 **3890 passed/4 skipped**。
+   d. **纪律遵守**：蓝图目录树先行登记（models/ 改动）；默认值与原 extra dict 读取路径一致（行为零变化）；git 提交（commit message 引用 #317）。**P0-03 第一刀完成**：显式字段就位，后续刀从配置取参替代 extra dict。
+
 
