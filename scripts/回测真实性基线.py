@@ -44,6 +44,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--engine", default=None, choices=["auto", "event", "mixed", "vectorized"],
                         help="引擎模式（默认 auto 按策略能力解析）")
     parser.add_argument("--out", default=None, help="基线输出目录（默认 outputs/realism_baseline）")
+    parser.add_argument("--symbols", default=None,
+                        help="标的列表覆盖（逗号分隔，如 600519.SH,000858.SZ；默认用配置文件股票池）")
     parser.add_argument("--verify", action="store_true", help="重跑对拍模式：与已存档基线比较")
     parser.add_argument("--list", action="store_true", help="列出注册策略与引擎能力后退出")
     return parser.parse_args()
@@ -123,6 +125,7 @@ def _main() -> int:
 
     # 收集目标（策略 × 引擎）
     targets = []
+    symbols_list = [s.strip() for s in args.symbols.split(",") if s.strip()] if args.symbols else None
     if args.strategy:
         targets.append((args.strategy, args.engine))
     else:
@@ -145,7 +148,7 @@ def _main() -> int:
             try:
                 passed, report, path = archiver.verify(
                     strategy_name=name, engine_mode=engine_mode or "auto",
-                    broker_factory=broker_factory,
+                    symbols=symbols_list, broker_factory=broker_factory,
                 )
             except FileNotFoundError as e:
                 print(f"[WARN] {e}")
@@ -166,7 +169,7 @@ def _main() -> int:
         try:
             path = archiver.archive(
                 strategy_name=name, engine_mode=engine_mode or "auto",
-                broker_factory=broker_factory,
+                symbols=symbols_list, broker_factory=broker_factory,
             )
             print(f"[建档] {name}/{engine_mode} → {path}")
         except Exception as e:

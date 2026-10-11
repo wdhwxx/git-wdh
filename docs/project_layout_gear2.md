@@ -4413,4 +4413,13 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    e. **验收结果**：单测 21/21 通过；架构门禁 30 passed 无回归；真实建档 rsrs×mixed → outputs/realism_baseline/rsrs_mixed_{config_hash}.json（equity 2056846 点、trades 6695 笔、final_equity 0.92577，净值/成交/指标与 R-19 实测一致）；重跑对拍通过（同配置重跑 → [对拍] rsrs/mixed: 通过，退出码 0）；**门禁反证**：trade_id 未剔除时同配置重跑判红（6695/6695 条 trade_id 全不同），剔除后通过——实证"能变红 + 不误伤"两条验收判据。
    f. **纪律遵守**：先更新蓝图目录树登记再建文件（治理规则 1.1）；业务逻辑归 myquant（薄入口零业务）；broker 工厂装配在入口层（分层 R-02 合规，装配责任在调用方）；阈值引用 v2.2 §4.8 常量（EQUITY_MAX_ABS_DIFF=0.005 / TRADE_COUNT_DIFF_RATIO=0.05）；outputs/realism_baseline 产物被 .gitignore 排除不入库（同 R-19 惯例）；git 提交（commit message 引用 #298）。
 
+## #299 · 2026-10-11 · P0-00 子步骤 C：配置迁移施工 + 基准数据补全（v2.2 §4.8）
+   事实来源：本次落地（v2.2 §4.8 + 任务清单 P0-00 卡 + 决策记录 P0-00-C 部分）；代码级核验：5 份配置 YAML 解析通过、realism_gate 段 enabled:false 落位、基准数据实测加载、建档/对拍闭环真实运行；验收判据实测满足。
+   a. **基准数据补全（回写#299）**：datasets/processed/000300.SH.parquet（6005 行，2002-01-04 ~ 2026-10-09，akshare stock_zh_index_daily(sh000300) 拉取，中文列扁平格式与既有 processed 一致）；回测区间（2024-01-01~2026-09-16）内 5326 行覆盖；get_bars 实测返回 657 行 DatetimeIndex（收盘价 3386.352→4480.268）；mixed_engine._calc_benchmark_equity 路径基准净值末值 1.323037（**非恒 1.0**，消除建档产物"基准恒 1.0"边界噪声）；index 无复权因子 → event 路径 adjust=hfq 降级为不复权 raw（已知边界告警，指数无复权因子属预期）。
+   b. **重建 mixed 基线（回写#299）**：基准补全使旧档 equity_curve 的 benchmark_equity 指纹过期 → 删除旧档重建 rsrs_mixed_{config_hash}.json（config_hash 不变，20b582…，equity 2056846 点/6695 笔/final_equity 0.92577）→ 重跑对拍**通过**（退出码 0）。
+   c. **event 路径建档实证（回写#299）**：event 全股票池建档 **40+ 分钟未完成**（CPU 2422s，事件驱动逐 bar 撮合性能不可行）→ 判定为已知边界 → 薄入口新增 **--symbols 参数**（argparse + 胶水透传，业务逻辑零写入）收敛标的集 → 5 只有数据标的（000001.SZ/000002.SZ/000006.SZ/600519.SH/600036.SH）建档 rsrs×event 成功（equity 3271 点/**0 交易**/final_equity 1.0，与 R-19 event 0 交易待查一致）→ 重跑对拍**通过**。
+   d. **配置迁移 5 份（回写#299）**：v2.2"7 份配置"更正为实 5 份（决策记录 P0-00-C 已记录，另 2 份无出处）；5 份文件在 leakage_gate 段后补 `realism_gate:` 段（enabled:false / audit_violations:true / checks×4 子开关预留，live 场景 sample_pool:false）：backtest_config.yaml:3333、backtest_kunpeng.yaml:3309、live_config.yaml:3422、backtest_config.example.yaml:193、live_config.example.yaml:255；5 份 YAML 解析全部通过。
+   e. **验收结果**：基准数据加载（get_bars 657 行/净值 1.323 非恒 1）✅；mixed 重建 + 对拍通过 ✅；event 小标的集建档 + 对拍通过 ✅；5 份配置 YAML 解析 ✅；单测 51 passed（test_baseline_archive 21 + test_architecture 30）无回归 ✅；enabled:false 下引擎装配链无副作用（realism_gate 消费代码在 P0-01 才接线，本卡只补段）。
+   f. **纪律遵守**：数据补全走 akshare 真源（禁杜撰，file:line 全核验）；基准数据文件属 datasets/processed 既有数据目录（蓝图已登记，无需新增目录树登记）；配置段落点逐文件核对（行号以实测为准，决策记录原行号 3326/3302/3414/187/249 漂移为 3333/3309/3422/193/255 因上批回写插入）；薄入口 --symbols 改动回写 #299（文件已登记 #298，本次为文件内参数扩展）；outputs/realism_baseline 产物 .gitignore 排除不入库；git 提交（commit message 引用 #299）。
+
 

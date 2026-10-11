@@ -187,3 +187,14 @@ performance:
 leakage_gate:
   enabled: true                     # 门禁总开关（默认 true；false=仅审计不阻断，生产禁止关闭）
   audit_violations: true            # 违规是否落 audit_log 哈希链（默认 true）
+
+# ========== 回测真实性门禁（P0-00 子步骤 C，v2.2 §4.2/§4.5）==========
+# 示例模板与生产同步；段缺失 = fail-closed，必须存在且显式声明。
+realism_gate:
+  enabled: false                # 起步阶段仅审计；P0-01 验收后切 true（CI 断言恒 true）
+  audit_violations: true        # 违规落 audit_log 哈希链 + realism_gate_blocked_*.json
+  checks:                        # 各检查子开关（预留，P0-01 接线时按需启用）
+    market_rules: true          # 涨跌停/停牌/T+1 真实性（P0-03 关联）
+    cost_model: true            # 费用/滑点真实生效（P0-05 关联）
+    data_pit: true              # 数据质量/快照/复权（P1-12/P1-13 关联）
+    sample_pool: true           # 样本口径（P0-06 关联）
