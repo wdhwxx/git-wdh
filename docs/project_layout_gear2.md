@@ -781,7 +781,7 @@ Pythonwdhmm/
 │   │   ├── test_live_bar_dedup.py    # ✨【回写#139】日线bar去重测试（KP-P3-02：bar_date_to_epoch往返/解析失败0.0/make_bar时间戳确定性且还原日期/引擎同根bar二次推送丢弃且不达撮合/不同日期正常/不同标的同日不误删，7项）✅已完成
     │   ├── test_sim_partial_fill_cap.py # ✨【回写#179】sim_broker 参与率限成交测试（KP-P2-03：默认全量不变/参与率限到 volume*rate/不超限/零成交保留订单/vectorized 负现金计数源码断言，5项）✅已完成
     │   ├── test_adjust_strict.py      # ✨【回写#180】复权因子缺失不再静默降级测试（KP-P2-09：strict raise/降级 attrs raw/生效 attrs hfq/扫描器读 yaml adjust/结果 meta 落盘源码断言，5项）✅已完成
-    │   ├── test_architecture.py       # ✨【回写#255/#256】架构分层门禁（v4.3 基线锁定：R-01 环基线0/3、R-02 跨层违规基线35、R-05/R-09/R-11/R-13/R-14/R-16/R-19(零覆盖冻结49)/R-20/R-21/R-22/R-23(入口冻结)/R-24(薄化冻结)；P0_MUST_FIX 已清空）✅已完成
+    │   ├── test_architecture.py       # ✨【回写#255/#256】架构分层门禁（v4.3 基线锁定：R-01 环基线0/3、R-02 跨层违规基线35、R-05/R-09/R-11/R-13/R-14/R-16/R-19(零覆盖冻结49)/R-20/R-21/R-22/R-23(入口冻结)/R-24(薄化冻结)/R-25(包登记判红，回写#300)；P0_MUST_FIX 已清空）✅已完成
 
 │   │   ├── test_signal_idempotency.py # ✨【回写#43】幂等去重测试（Signal确定性ID/to_order映射/引擎去重/分钟线粒度/start重置/QMT端按订单ID去重/统计双计修复验证，19项）✅已完成
 │   │   ├── test_guard_mounting.py    # ✨【回写#140】防未来铁律1/2/4挂载测试（KP-P2-08：indicators_recorded>0/钩子因果口径/T+1指标桩抛错/T+1信号桩引擎标记失败/止损UPDATE早于CHECK抛错/数据访问未来抛错/无guard注入退化为无操作，10项）✅已完成
@@ -4421,5 +4421,13 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    d. **配置迁移 5 份（回写#299）**：v2.2"7 份配置"更正为实 5 份（决策记录 P0-00-C 已记录，另 2 份无出处）；5 份文件在 leakage_gate 段后补 `realism_gate:` 段（enabled:false / audit_violations:true / checks×4 子开关预留，live 场景 sample_pool:false）：backtest_config.yaml:3333、backtest_kunpeng.yaml:3309、live_config.yaml:3422、backtest_config.example.yaml:193、live_config.example.yaml:255；5 份 YAML 解析全部通过。
    e. **验收结果**：基准数据加载（get_bars 657 行/净值 1.323 非恒 1）✅；mixed 重建 + 对拍通过 ✅；event 小标的集建档 + 对拍通过 ✅；5 份配置 YAML 解析 ✅；单测 51 passed（test_baseline_archive 21 + test_architecture 30）无回归 ✅；enabled:false 下引擎装配链无副作用（realism_gate 消费代码在 P0-01 才接线，本卡只补段）。
    f. **纪律遵守**：数据补全走 akshare 真源（禁杜撰，file:line 全核验）；基准数据文件属 datasets/processed 既有数据目录（蓝图已登记，无需新增目录树登记）；配置段落点逐文件核对（行号以实测为准，决策记录原行号 3326/3302/3414/187/249 漂移为 3333/3309/3422/193/255 因上批回写插入）；薄入口 --symbols 改动回写 #299（文件已登记 #298，本次为文件内参数扩展）；outputs/realism_baseline 产物 .gitignore 排除不入库；git 提交（commit message 引用 #299）。
+
+## #300 · 2026-10-11 · P0-00 子步骤 D：治理升级——_layer_of_module 未登记包判红（R-25 元门禁）
+   事实来源：本次落地（施工任务清单 P0-00 卡 D 子步 + §行249/250）；代码级核验：真实库 20 个顶层包与 MODULE_LAYER 20 项登记实测一致，R-25 双测试在真实库通过，隔离探针反证未登记包/幽灵登记均准确判红；验收判据"未登记包判红测试通过"实测满足。
+   a. **盲区定位（回写#300）**：`_layer_of_module`（test_architecture.py §3）对未登记顶层包返回 None，下游 R-02 跨层引用 / R-11 原始数据 / R-16 装配器集中 / R-22 同层互引对 None 一律 `continue` 跳过——新增未登记 `myquant/<pkg>/` 包会整体游离于分层门禁之外（既不当分层源、也不当分层目标，彻底失明）。
+   b. **R-25 包登记元门禁（tests/unit/test_architecture.py 追加，回写#300）**：新增 `TestR25RegisteredPackage` 两测试——`test_every_package_registered`（扫描 myquant/ 下含 `__init__.py` 的一级目录，每个包必须在 MODULE_LAYER 登记，未登记即红）；`test_no_ghost_registration`（反向：MODULE_LAYER 登记了但文件目录不存在的"幽灵登记"即红）。**不改 `_layer_of_module` 既有语义**（避免影响全量门禁），以元门禁从源头封堵；docstring 补 v5.0 段。
+   c. **MODULE_LAYER 补齐核查（回写#300）**：实测 myquant 真实包 20 个（acceptance/allocation/api/backtest/core/database/data_access/engine/execution/gui/indicators/leakage_gate/live/ml/models/monitoring/risk/strategies/utils/web，均含 `__init__.py`）与 MODULE_LAYER 20 项 key **完全一致——无漏登记，无需补齐**（`__pycache__` 无 `__init__.py` 天然排除）。
+   d. **验收结果**：py_compile 通过；门禁 **32 passed/1 skipped**（原 30 + R-25 两测试；R-05 multi_factor_strategy 白名单 1 项按设计 skip）；反证隔离探针（落 agent workspace 不污染项目）：临时未登记包 `zztest` 被准确红拦、幽灵登记被红拦（19 项）——"能变红 + 不误伤"双判据实证；无新增跨层违规、无 Oversize；测试计数 3310→3312（R-20 只增不降合规）。
+   e. **纪律遵守**：零蓝图外新文件（仅既有 test_architecture.py 追加测试类 + docstring v5.0 段）；纯静态门禁未触碰 myquant 业务代码；门禁代码遵守 py文件代码规则（全量类型注解 + Google docstring + 防御式 `_registered_top_pkgs`）；本卡即 P0-01 登记 `myquant.realism_gate`(L0) 的前置门禁；git 提交（commit message 引用 #300）。
 
 

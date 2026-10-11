@@ -88,6 +88,14 @@ S-3 R-19 更名 TestR19ZeroReference（诚实命名：引用级判定，非执�
           零覆盖存量 49 个引用级业务模块（2026-10-08 冻结，新增零覆盖即红，回写#256）。
 运行状态：已在 conda_wdh 环境真实运行（门禁 30 passed/1 skipped：G3 新增 R-17/R-18/R-08
           三条 + R-16 强化后，R-05 白名单 1 项按设计 skip；#266 前为 26 passed/1 skipped）。
+
+v5.0（P0-00 子步骤 D，回写#300）：新增 R-25 包登记元门禁——
+  R-25  未登记包判红：myquant/ 下真实包（含 __init__.py 的一级目录）每个必须在
+        MODULE_LAYER 登记，未登记即红；反向校验登记表不得藏幽灵包（登记了但目录不存在）。
+        封堵 `_layer_of_module` 对未登记包返回 None → 下游 R-02/R-11/R-16/R-22 一律
+        continue 跳过导致"新包整体游离于分层门禁之外"的治理盲区；不改 _layer_of_module
+        既有语义。基线 = 2026-10-11 实测 20 个顶层包全部登记（无未登记、无幽灵）。
+        这是 P0-01 realism_gate 新增 `myquant.realism_gate`(L0) 登记的前置门禁。
 """
 from __future__ import annotations
 
@@ -1005,3 +1013,48 @@ class TestR24OversizeFreeze:
             if lines > baseline:
                 over.append(f"{rel}: {lines} > 基线 {baseline}")
         assert not over, "白名单内超大文件行数上涨（薄化冻结，只减不增）：\n" + "\n".join(over)
+
+
+class TestR25RegisteredPackage:
+    """R-25：myquant 每个顶层包必须登记 MODULE_LAYER（P0-00 子步骤 D，回写#300）。
+
+    治理盲区（施工任务清单 P0-00 卡："`_layer_of_module` None → 判红"）：
+    `_layer_of_module`（本文件 §3）对未登记的顶层包返回 None，而下游 R-02 跨层引用、
+    R-11 原始数据、R-16 装配器集中、R-22 同层互引对 `None` 一律 `continue` 跳过——
+    新增一个未登记的 `myquant/<pkg>/` 包，其全部文件既不当分层源、也不当分层目标，
+    会整体游离于分层门禁之外（彻底失明）。
+
+    本规则作为元门禁从源头封堵，不改 `_layer_of_module` 既有语义（避免影响全量门禁）：
+      test_every_package_registered：扫描 myquant/ 下真实包（含 __init__.py 的一级
+        目录），每个包必须在 MODULE_LAYER 登记；未登记即红。
+      test_no_ghost_registration：反向校验——MODULE_LAYER 登记了但文件系统已不存在的
+        "幽灵登记"同样判红（保证登记表不藏失真项，P0-01 登记 realism_gate 前置可信）。
+    基线 = 2026-10-11 实测 20 个顶层包全部登记（_layer_of_module 不返回 None）。
+    """
+
+    @staticmethod
+    def _registered_top_pkgs() -> set[str]:
+        """从 MODULE_LAYER 提取已登记的 myquant 顶层包名（去掉 myquant. 前缀）。"""
+        return {k.split(".", 1)[1] for k in MODULE_LAYER if k.startswith("myquant.")}
+
+    def test_every_package_registered(self):
+        actual = {
+            p.name
+            for p in MYQUANT.iterdir()
+            if p.is_dir() and (p / "__init__.py").is_file()
+        }
+        unregistered = sorted(actual - self._registered_top_pkgs())
+        assert not unregistered, (
+            "myquant 顶层包未登记 MODULE_LAYER（分层门禁将对其整体失明，须先登记层位）：\n"
+            + "\n".join(f"  myquant.{p}/" for p in unregistered)
+        )
+
+    def test_no_ghost_registration(self):
+        ghosts = sorted(
+            pkg for pkg in self._registered_top_pkgs()
+            if not (MYQUANT / pkg).is_dir()
+        )
+        assert not ghosts, (
+            "MODULE_LAYER 登记了但文件系统不存在的幽灵包（登记表失真，须删除该登记）：\n"
+            + "\n".join(f"  myquant.{pkg}/" for pkg in ghosts)
+        )
