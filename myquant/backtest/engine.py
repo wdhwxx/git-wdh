@@ -45,6 +45,10 @@ from typing import Any, Callable, ClassVar, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
+from myquant.backtest.assembly import (  # re-export register_broker_factory（外部调用方经 engine 导入，P0-00A 迁至 assembly.py）
+    get_broker_factory,
+    register_broker_factory,
+)
 from myquant.backtest.data_loader import DataProviderBase
 from myquant.backtest.metrics import MetricsCalculator
 from myquant.backtest.mixed_engine import MixedBacktestEngine
@@ -64,34 +68,10 @@ from myquant.strategies.base import Signal, SignalType, StrategyBase, StrategyCo
 
 logger = get_logger(__name__)
 
-# ── 撮合执行器工厂注册表（G1 EX-09A）──────────────────────────
-# BacktestEngine 不再顶层 import execution 层（L3→L4 反向），撮合执行器
-# （SimBroker 等）由合法层（scripts/tests/入口/批量回测装配方）经
-# register_broker_factory 装配，或构造时传 broker_factory 参数。
-# 未装配时 on_init 显式报错（不静默降级）。防未来：工厂只消费已传入 config，
-# 不引用任何未来数据。
-_broker_factory: Optional[Callable[[BacktestConfig], Any]] = None
-
-
-def register_broker_factory(
-    factory: Optional[Callable[[BacktestConfig], Any]],
-) -> None:
-    """注册全局撮合执行器工厂（装配层注入，进程内生效）。
-
-    Args:
-        factory: 工厂函数，签名 factory(config: BacktestConfig) -> broker
-            （如 SimBroker 实例）；传 None 清除注册（回退为仅实例级注入）。
-
-    Raises:
-        TypeError: factory 不可调用时抛出。
-    """
-    global _broker_factory
-    if factory is not None and not callable(factory):
-        raise TypeError(f"broker_factory 必须可调用，收到: {type(factory).__name__}")
-    _broker_factory = factory
-    logger.info(
-        "[backtest] 撮合执行器工厂%s", "已装配" if factory is not None else "已清除"
-    )
+# 撮合执行器工厂注册表（G1 EX-09A）已迁至 myquant.backtest.assembly
+# （_broker_factory 全局 + register_broker_factory + get_broker_factory；P0-00A 第一刀）。
+# 本模块顶部 re-export register_broker_factory 保持外部调用方零改动；
+# _resolve_broker 经 get_broker_factory() 读实时全局（避免 from backtest import 包级边成环）。
 
 
 class BacktestEngine(BaseEngine):
@@ -261,7 +241,7 @@ class BacktestEngine(BaseEngine):
         Raises:
             ValueError: 实例级与全局均未装配工厂，或工厂返回 None 时抛出。
         """
-        factory = self._broker_factory or _broker_factory
+        factory = self._broker_factory or get_broker_factory()
         if factory is None:
             raise ValueError(
                 "BacktestEngine 需要撮合执行器工厂：请经 register_broker_factory() "

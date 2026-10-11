@@ -622,6 +622,8 @@ Pythonwdhmm/
 
     │   │   ├── test_baseline_archive.py # ✨【回写#298】基线净值档案模块测试（P0-00 子步骤 B，R-19 新模块必配测试）：config_hash 稳定性/规范化（同配置同哈希、运行元数据剔除、params 排序）；equity/trades 指纹敏感性（单点篡改即变）；build/write/load 往返（format_version/strategy/engine/config_hash 字段齐全）；verify_reproducible（相同结果 True、净值篡改超 0.5% False、成交笔数差超 5% False）✅已完成
 
+    │   │   ├── test_assembly.py        # ✨【回写#301】backtest/assembly.py 撮合执行器工厂注册表测试（P0-00 子步骤 A 第一刀，R-19 新模块必配）：默认未注册 None / 注册读取 / None 清除 / 非 callable 抛 TypeError；_resolve_broker 未装配 ValueError、全局工厂产物、实例级优先全局、工厂返回 None 报错；engine re-export register_broker_factory 同一性（外部调用方零改动）✅已完成
+
     │   │   ├── test_signal_decay.py # ✨【回写#233】C-4 信号衰减监控测试：信号后收益滚动 IC/信号密度下降/连续无效信号占比计算；衰减超阈 P1/P2 预警（显式注入阈值演示，配置 None 不告警不编造）；衰减曲线数据可输出；防未来（只消费已发生信号-收益对）；防御校验✅已完成
 
     │   │   ├── test_attribution.py # ✨【回写#234】C-5 归因分析测试：策略/因子/标的/时段四维归因计算；实盘-回测归因对比差异；日报归因摘要结构；backtest/metrics.py 归因侧函数；防未来；防御校验✅已完成
@@ -1173,6 +1175,8 @@ Pythonwdhmm/
     │   ├── survivorship_bias.py      # ✨【回写#91】F-04 幸存者偏差评估器：audit_data_coverage（数据覆盖审计：DB/processed标的数、最后交易日分布、停牌近似池、退市覆盖声明）、estimate_survivorship_discount（偏差折价估计：区间等权收益对比「存续池 vs 存续池∪停牌近似池」，输出折价系数+披露口径，停牌风险下界）、build_point_in_time_pool（逐期存续池构建：as_of 时点最后交易日过滤，防未来=只用该时点已可得数据）；DB 只读查询+纯函数，供批量报告口径声明注入
 
     │   ├── baseline_archive.py       # ✨【回写#298】基线净值档案业务模块（P0-00 子步骤 B，v2.2 §4.8）：BaselineArchiver——compute_config_hash（BacktestConfig 规范化 sha256，剔除运行时间戳/run_id）/compute_equity_hash（净值序列逐点 sha256）/compute_trades_fingerprint（成交明细业务字段 sha256）/build_baseline（strategy×engine×config_hash 档案 payload）/write/load/verify_reproducible（同配置重跑对拍：净值 max abs diff ≤0.5% 且成交笔数差 ≤5%，超阈即回归信号）；event 路径 broker 工厂装配（SimBroker 与 engine.py 自测 Demo 同构）；供 scripts/回测真实性基线.py 薄入口调用；L 层纯业务不反向 import
+
+    │   ├── assembly.py              # ✨【回写#301】回测引擎装配模块（P0-00 子步骤 A 第一刀，v2.2 §5.0 (a)1）：撮合执行器工厂注册表——`_broker_factory` 模块级全局 + `register_broker_factory(factory)`（自 engine.py 67-94 行原样迁入，G1 EX-09A 注入点）；BacktestEngine._resolve_broker 改读本模块实时全局（实例级 > 注册表）；engine.py re-export `register_broker_factory` 保持 6 处外部调用方零改动；纯 L3 装配胶水，不反向 import engine，无业务逻辑
 
 
 
@@ -4429,5 +4433,14 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    c. **MODULE_LAYER 补齐核查（回写#300）**：实测 myquant 真实包 20 个（acceptance/allocation/api/backtest/core/database/data_access/engine/execution/gui/indicators/leakage_gate/live/ml/models/monitoring/risk/strategies/utils/web，均含 `__init__.py`）与 MODULE_LAYER 20 项 key **完全一致——无漏登记，无需补齐**（`__pycache__` 无 `__init__.py` 天然排除）。
    d. **验收结果**：py_compile 通过；门禁 **32 passed/1 skipped**（原 30 + R-25 两测试；R-05 multi_factor_strategy 白名单 1 项按设计 skip）；反证隔离探针（落 agent workspace 不污染项目）：临时未登记包 `zztest` 被准确红拦、幽灵登记被红拦（19 项）——"能变红 + 不误伤"双判据实证；无新增跨层违规、无 Oversize；测试计数 3310→3312（R-20 只增不降合规）。
    e. **纪律遵守**：零蓝图外新文件（仅既有 test_architecture.py 追加测试类 + docstring v5.0 段）；纯静态门禁未触碰 myquant 业务代码；门禁代码遵守 py文件代码规则（全量类型注解 + Google docstring + 防御式 `_registered_top_pkgs`）；本卡即 P0-01 登记 `myquant.realism_gate`(L0) 的前置门禁；git 提交（commit message 引用 #300）。
+
+## #301 · 2026-10-11 · P0-00 子步骤 A 第一刀：broker 工厂注册表抽至 assembly.py（v2.2 §5.0 (a)1）
+   事实来源：本次落地（施工方案 v2.2 §5.0 子步骤 A 提取清单 (a)1 + 前置调研决策记录行492/524）；代码级核验：engine.py 模块级注册表原样迁入 assembly.py，engine re-export 保持 6 处外部调用方零改动，基线对拍 rsrs×mixed 通过（行为零变化）。
+   a. **行数基线（门禁口径 utf-8-sig + splitlines，回写#301）**：engine.py 1305（目标≤1250，超55）/ mixed_engine.py 1500（目标≤1420，超80）/ vectorized_engine.py 1202（目标≤1140，超62）。三引擎均超 G4 重算目标，须逐步提取至 assembly.py。
+   b. **myquant/backtest/assembly.py（新建，回写#301，58 行→71 行）**：撮合执行器工厂注册表——`_broker_factory` 模块级全局 + `register_broker_factory(factory)`（自 engine.py:67-94 原样迁入，G1 EX-09A 注入点）+ `get_broker_factory()`（实时读全局，避免 `from backtest import assembly` 产生包级导入边成环）；纯 L3 装配胶水，仅依赖 models.backtest(L2)+core.logger(L0)，**不反向 import engine**。
+   c. **engine.py（改动，1305→1283 行，净减 22 行）**：删除原模块级注册表（注释块+`_broker_factory`+`register_broker_factory` 函数）；顶部 `from myquant.backtest.assembly import register_broker_factory, get_broker_factory`（re-export register_broker_factory 保持 batch_backtest/baseline_archive/param_optimizer/scripts×2/tests.conftest 共 6 处外部调用方零改动）；`_resolve_broker` 改 `factory = self._broker_factory or get_broker_factory()`（实例级 > 全局注册表语义不变）。
+   d. **tests/unit/test_assembly.py（新建，9 项）**：默认未注册 None / 注册读取同一性 / None 清除 / 非 callable 抛 TypeError；_resolve_broker 未装配 ValueError、全局工厂产物返回、实例级优先全局、工厂返回 None 报错；engine re-export register_broker_factory 同一性断言。
+   e. **验收结果**：py_compile 两文件通过；架构门禁 33 passed/1 skipped（R-01a/b 真环基线 0 保持——初版 `from backtest import assembly` 曾闭合 backtest/__init__→batch_backtest→engine 环，改 get_broker_factory() 子模块导入后消除；R-19 新模块 assembly.py 经测试 import 收录，零覆盖基线 35 不变）；backtest 回归 136 passed/1 skipped（test_backtest/engines_v5/baseline_archive/guard_mounting/lookahead_wiring）；**基线对拍 rsrs×mixed 通过（EXIT=0，行为零变化）**。
+   f. **纪律遵守**：蓝图目录树先行登记（backtest/assembly.py + tests/unit/test_assembly.py）；业务逻辑归 myquant/backtest/assembly.py（装配胶水）；engine.py re-export 保持外部调用方零改动；纯搬移行为零变化，以基线对拍验证；R-19 新模块必配测试（test_assembly.py）；agent workspace 探针不污染项目；git 提交（commit message 引用 #301）。
 
 
