@@ -4552,4 +4552,11 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    c. **验收结果**：py_compile 通过；test_causality_slicing 7 项全绿；全套回归 **3757 passed/4 skipped**（切片默认关闭，现有回测零影响）；R-01a/b 真环基线 0；R-19 零覆盖基线 +1（test_causality_slicing 被 tests import）。
    d. **纪律遵守**：蓝图目录树先行登记（strategies/base.py 改动）；切片默认关闭不破坏现有回测（分期启用）；fail-closed 设计（切片开启但时点未设返回空，不允许静默全量）；O(1) pandas 视图不复制（性能验收 R-20）；git 提交（commit message 引用 #308）。**P0-07 后续刀**：event/mixed 引擎逐 bar 推进 current_bar_ts + 置切片开关 → vectorized 全量逃生口接线 → causality.* 字段真实取值写入 manifest。
 
+## #309 · 2026-10-11 · P0-07 第二刀：event 引擎逐 bar 推进 current_bar_ts（分期启用：先设时点，暂不置切片开关）
+   事实来源：本次落地（施工方案 v2.2 §4.1 P0-07 设计要点）；代码级核验：on_market_event 在策略 on_bar() 之前设置 context.current_bar_ts=bar.timestamp；实测开启 _slicing_enabled=True 后 3 项策略测试失败（guard_mounting/kunpeng×2）——前 N 天预热期指标记录从全量语义变为切片语义（这是因果正确行为，但测试预期需逐策略适配）；按分期启用策略回退 _slicing_enabled，只保留 current_bar_ts 设置。
+   a. **myquant/backtest/engine.py（改动，on_market_event 步骤3 前）**：在策略 on_bar() 调用前插入——`self.context.current_bar_ts = pd.Timestamp(bar.timestamp)`（try/except 包裹，类型异常不阻断）；**暂不置 `_slicing_enabled=True`**（分期启用：切片逻辑已在 StrategyContext.get_data 就位，test_causality_slicing 7 项验证通过；开启开关需逐策略适配预热期指标记录语义）。
+   b. **验收结果**：基线对拍 rsrs×mixed 通过（EXIT=0，零变化）；全套回归 **3757 passed/4 skipped**；R-01a/b 真环基线 0。
+   c. **实测发现（重要）**：开启 `_slicing_enabled=True` 后 guard_mounting/kunpeng×2 共 3 项测试失败——切片后前 20 天预热期指标记录从"全量语义"变为"因果切片语义"（bar[t] 时只能看到 <=t 的数据算 MA20，前 20 天数据不足）。这是**因果正确行为**（未来函数被结构性消除），但测试预期需逐策略适配。按分期启用策略，先保留 current_bar_ts 设置（为后续接线准备），切片开关在逐策略适配后开启。
+   d. **纪律遵守**：蓝图目录树先行登记（engine.py 改动）；分期启用（不一次性开启切片开关，避免批量破坏现有策略测试）；try/except 防御（bar.timestamp 类型异常不阻断）；git 提交（commit message 引用 #309）。**P0-07 后续刀**：逐策略适配（kunpeng/MACross 预热期指标记录语义）→ 开启 _slicing_enabled → mixed/vectorized 引擎接线 → causality.* 字段写入 manifest。
+
 
