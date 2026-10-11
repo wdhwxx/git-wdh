@@ -1108,7 +1108,12 @@ class BacktestScheduler:
             manifest.set_field("fee_base_includes_slippage", False)
             manifest.set_field("fee_dilution_basis", "per_order")
             manifest.set_field("adjust_effective_by_symbol", {})
-            manifest.set_field("adjust_degraded_symbols", [])
+            # P0-04：从 provider 获取真实复权降级集合（延迟导入避免跨层硬依赖）
+            try:
+                from myquant.data_access.provider import get_adjust_degraded_symbols
+                manifest.set_field("adjust_degraded_symbols", get_adjust_degraded_symbols())
+            except Exception:
+                manifest.set_field("adjust_degraded_symbols", [])
             manifest.set_field("quality.nan_price_rows", 0)
             manifest.set_field("quality.ohlc_violation_rows", 0)
             manifest.set_field("quality.coverage_rate", 1.0)

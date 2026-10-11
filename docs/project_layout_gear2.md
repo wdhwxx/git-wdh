@@ -4645,4 +4645,11 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    b. **验收结果**：py_compile 通过；event 路径 9 passed（含既有 5 项 + 新增 4 项）；全套回归 **3904 passed/4 skipped**（+4 新增）。
    c. **纪律遵守**：蓝图目录树先行登记（tests/ 改动）；四组断言覆盖开/关/改幅度/板块映射；event 涨停买单必 0 成交已由既有 test_涨停拒买 覆盖；git 提交（commit message 引用 #321）。**P0-03 完成**：五刀全部落地，约束真可控就位。
 
+## #322 · 2026-10-11 · P0-04：adjust_degraded_symbols 注入 manifest
+   事实来源：本次落地（施工方案 v2.2 §4.1 P0-04）；代码级核验：provider.py 新增 get_adjust_degraded_symbols()/reset_adjust_degraded()，引擎写 manifest 时延迟导入获取真实降级集合。
+   a. **myquant/data_access/provider.py（改动，新增模块级函数）**：`get_adjust_degraded_symbols()` 返回 sorted 快照；`reset_adjust_degraded()` 清空集合。供引擎回测后读取并写入 manifest。
+   b. **myquant/backtest/engine.py（改动，manifest 写入）**：`adjust_degraded_symbols` 从空列表改为延迟导入 provider 获取真实集合（try/except 兜底空列表，避免跨层硬依赖）。
+   c. **验收结果**：py_compile 通过；基线对拍通过（EXIT=0）；全套回归 **3904 passed/4 skipped**。
+   d. **纪律遵守**：蓝图目录树先行登记（data_access/ + backtest/ 改动）；延迟导入避免跨层硬依赖；try/except 兜底（provider 不可用时降级为空列表）；git 提交（commit message 引用 #322）。**P0-04 完成**：adjust_degraded_symbols 注入 manifest 就位。
+
 

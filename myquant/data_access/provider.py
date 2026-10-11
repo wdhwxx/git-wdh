@@ -54,6 +54,20 @@ logger = get_logger("data_access.provider")
 _adjust_degraded_symbols: Set[str] = set()
 
 
+def get_adjust_degraded_symbols() -> List[str]:
+    """返回复权降级标的清单快照（P0-04：注入 manifest.adjust_degraded_symbols）。
+
+    每次回测前应调用 reset_adjust_degraded() 清空本集合，回测后由引擎读取
+    并写入 RealismManifest.adjust_degraded_symbols。
+    """
+    return sorted(_adjust_degraded_symbols)
+
+
+def reset_adjust_degraded() -> None:
+    """清空复权降级集合（每次回测开始前调用，避免跨回测累积）。"""
+    _adjust_degraded_symbols.clear()
+
+
 #: 英文列名 → 中文列名映射（引擎内部统一使用中文表头）
 #: processed 导出脚本已将表头改为全中文；此处对来自数据库/旧英文表头的数据统一兜底转中文
 EN_TO_CN_COLUMN_MAP: Dict[str, str] = {
