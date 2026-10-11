@@ -120,6 +120,11 @@ class BacktestConfig:
     risk_free_rate: float = 0.02
     params: Dict[str, Any] = field(default_factory=dict)
     extra: Dict[str, Any] = field(default_factory=dict)
+    # ── P0-03 约束真可控：提升为显式字段（统一键名，默认 fail-closed）──
+    price_limit_pct: float = 0.10       # 涨跌停幅度（主板 10% 默认）
+    enforce_limit: bool = False         # 是否强制涨跌停校验（event 路径开启）
+    enable_t1: bool = True              # T+1 持仓冻结
+    lot_size: int = 100                 # A 股一手股数
 
     def validate(self) -> List[str]:
         errors: List[str] = []
@@ -150,6 +155,11 @@ class BacktestConfig:
             "benchmark": self.benchmark,
             "risk_free_rate": self.risk_free_rate,
             "params": self.params,
+            # P0-03 显式字段透传（统一键名）
+            "price_limit_pct": self.price_limit_pct,
+            "enforce_limit": self.enforce_limit,
+            "enable_t1": self.enable_t1,
+            "lot_size": self.lot_size,
         }
 
     def __repr__(self) -> str:
