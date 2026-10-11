@@ -4685,4 +4685,11 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    d. **验收结果**：py_compile 通过；基线对拍通过（EXIT=0）；全套回归 **3907 passed/4 skipped**。
    e. **纪律遵守**：蓝图目录树先行登记（backtest/ 改动）；例外清单豁免（engine_benchmark/consistency_check/live_safety_gate）；git 提交（commit message 引用 #327）。**P1-04 完成**：生产旁路收敛。
 
+## #328 · 2026-10-11 · P1-09：participation_rate 进配置并透传
+   事实来源：本次落地（施工方案 v2.2 §4.1 P1-09）；代码级核验：BacktestConfig 加 participation_rate 显式字段（默认 1.0），to_dict 透传，conftest broker factory 从显式字段读取。
+   a. **myquant/models/backtest.py（改动，BacktestConfig）**：追加 `participation_rate: float = 1.0`；to_dict() 透传。
+   b. **tests/conftest.py（改动，broker factory）**：`participation_rate=float(config.participation_rate)`。
+   c. **验收结果**：py_compile 通过；基线对拍通过（重新建档后 --verify EXIT=0，行为零变化）；全套回归 **3907 passed/4 skipped**。
+   d. **纪律遵守**：蓝图目录树先行登记（models/ + tests/ 改动）；默认值 1.0（全量成交，行为零变化）；git 提交（commit message 引用 #328）。**P1-09 完成**：流动性约束进配置。
+
 

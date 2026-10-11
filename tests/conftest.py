@@ -45,6 +45,7 @@ def backtest_broker_factory(config: Any) -> Any:
         slippage_model=config.slippage,
         price_limit_pct=float(config.price_limit_pct),
         enforce_limit=bool(config.enforce_limit),
+        participation_rate=float(config.participation_rate),
         is_suspended=None,
     )
 

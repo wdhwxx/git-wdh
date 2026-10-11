@@ -128,6 +128,8 @@ class BacktestConfig:
     enforce_limit: bool = False         # 是否强制涨跌停校验（event 路径开启）
     enable_t1: bool = True              # T+1 持仓冻结
     lot_size: int = 100                 # A 股一手股数
+    # ── P1-09 流动性约束：参与率进配置 ──
+    participation_rate: float = 1.0     # 成交量参与率（1.0=全量成交，0<rate<1 限时）
 
     def validate(self) -> List[str]:
         errors: List[str] = []
@@ -163,6 +165,8 @@ class BacktestConfig:
             "enforce_limit": self.enforce_limit,
             "enable_t1": self.enable_t1,
             "lot_size": self.lot_size,
+            # P1-09 流动性约束透传
+            "participation_rate": self.participation_rate,
         }
 
     def __repr__(self) -> str:
