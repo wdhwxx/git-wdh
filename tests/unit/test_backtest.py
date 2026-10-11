@@ -844,3 +844,29 @@ class TestSuspendedLookup:
         assert lookup("600519.SH") is True
         assert lookup("000001.SZ") is True
         assert lookup("300750.SZ") is False
+
+
+class TestSlippageFailClosed:
+    """P0-05：SlippageModel 未知 type 显式报错（消灭静默零滑点）。"""
+
+    def test_unknown_type_raises(self):
+        """未知 type → ValueError（不静默返回 0）。"""
+        from myquant.models.backtest import SlippageModel
+        m = SlippageModel(type="not_a_real_type")
+        try:
+            m.calc(price=100.0)
+            assert False, "应抛 ValueError"
+        except ValueError as e:
+            assert "未知值" in str(e)
+
+    def test_fixed_bps_works(self):
+        """fixed_bps 正常工作。"""
+        from myquant.models.backtest import SlippageModel
+        m = SlippageModel(type="fixed_bps", fixed_bps=2.0)
+        assert abs(m.calc(100.0) - 0.02) < 1e-9
+
+    def test_none_zero_cost(self):
+        """none → 0（显式零滑点，合法）。"""
+        from myquant.models.backtest import SlippageModel
+        m = SlippageModel(type="none")
+        assert m.calc(100.0) == 0.0

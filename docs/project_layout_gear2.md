@@ -4652,4 +4652,11 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    c. **验收结果**：py_compile 通过；基线对拍通过（EXIT=0）；全套回归 **3904 passed/4 skipped**。
    d. **纪律遵守**：蓝图目录树先行登记（data_access/ + backtest/ 改动）；延迟导入避免跨层硬依赖；try/except 兜底（provider 不可用时降级为空列表）；git 提交（commit message 引用 #322）。**P0-04 完成**：adjust_degraded_symbols 注入 manifest 就位。
 
+## #323 · 2026-10-11 · P0-05：消灭静默零滑点通道（SlippageModel 未知 type 抛错）
+   事实来源：本次落地（施工方案 v2.2 §4.1 P0-05）；代码级核验：SlippageModel.calc() 未知 type 从静默 return 0.0 改为 raise ValueError。
+   a. **myquant/models/backtest.py（改动，SlippageModel.calc）**：未知 type → `raise ValueError(f"SlippageModel.type 未知值: ...")`（合法值: fixed_bps/volume_based/none）。消灭静默零滑点通道。
+   b. **tests/unit/test_backtest.py（改动，追加 TestSlippageFailClosed 3 项）**：未知 type 抛错/fixed_bps 正常/none 显式零滑点合法。
+   c. **验收结果**：py_compile 通过；基线对拍通过（EXIT=0）；全套回归 **3907 passed/4 skipped**（+3 新增）。
+   d. **纪律遵守**：蓝图目录树先行登记（models/ + tests/ 改动）；none=0 是显式合法零滑点（非静默）；未知值 fail-closed；git 提交（commit message 引用 #323）。**P0-05 完成**：静默零成本通道消灭。
+
 

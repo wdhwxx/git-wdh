@@ -84,7 +84,10 @@ class SlippageModel:
                 return price * self.fixed_bps / 10000.0
             impact = self.volume_impact * (order_size / volume)
             return price * impact
-        return 0.0
+        # P0-05：未知 type 显式报错（消灭静默零滑点通道）
+        raise ValueError(
+            f"SlippageModel.type 未知值: {self.type!r}（合法值: fixed_bps/volume_based/none）"
+        )
 
 
 @dataclass
