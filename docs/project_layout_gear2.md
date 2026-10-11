@@ -976,6 +976,8 @@ Pythonwdhmm/
 
     │   ├── manifest.py               # ✨【回写#305】RealismManifest 数据契约核心（~310 行）：异常体系（RealismGateError/ManifestIncompleteError）+ RealismViolation（无 severity）+ CRITICAL_FIELDS 52 项 + ALLOW_NONE_FIELDS（participation_cap/survivorship.discount 允许 null）+ ENUM_DOMAINS 取值域校验 + build()（完整性校验+status 推导 ok/degraded）+ manifest_signature()（剔除 run_id/时间戳 sha256）+ to_dict/from_dict 序列化 + seal/is_sealed
 
+    │   ├── gate.py                   # ✨【回写#306】门禁中心出口断言（~230 行）：RealismGateConfig（enabled 默认 False 分期启用期 / audit_violations）+ register_realism_check 注册钩子 + assert_realism_pass 唯一出口（§4.3 时序：build 完整性 fail-closed → 执行检查 → critical 违规 enabled=True 落 audit_log+抛 RealismGateError；enabled=False audit 档不阻断 → 通过 seal）+ 检查器异常 fail-closed 记 gate-error 违规；依赖 core.audit_log（L0 合法，BASE-7 哈希链）
+
     │
 
     ├── database/                     # 数据库抽象层：统一持久化接口
@@ -4498,5 +4500,19 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    d. **tests/unit/test_architecture.py（改动）**：MODULE_LAYER 第 116 行追加 `"myquant.realism_gate": "L0"`；R-25 正向（myquant 下含 __init__.py 的一级目录必须登记）+ 反向（登记表不得藏幽灵包）均通过。
    e. **验收结果**：py_compile 通过；test_realism_manifest 17 项 + test_architecture 49 项全绿；全套回归 3731 passed/4 skipped（1 项 test_push_latency_flat 为预存 flaky 性能测试，单独重跑通过，与本次改动无关）；R-01a/b 真环基线 0；R-19 零覆盖基线 +1（realism_gate.manifest 被 tests import）。
    f. **纪律遵守**：蓝图目录树先行登记（realism_gate/ 包）；L0 只依赖 myquant.core（R-02/R-16）；无 severity 字段（v2.2 红线）；critical 缺失 fail-closed（不允许空值通过）；git 提交（commit message 引用 #305）。**P0-01 后续刀**：gate.py（register_realism_check/assert_realism_pass 出口断言）→ checks/ 四子模块 → report.py 落盘 → 引擎接线（create_engine 两阶段握手）。
+
+## #306 · 2026-10-11 · P0-01 第二刀：gate.py 出口断言（RealismGateConfig + register_realism_check + assert_realism_pass 唯一出口）
+   事实来源：本次落地（施工方案 v2.2 §4.3 出口断言语义 + §4.4 两阶段握手）；代码级核验：gate.py 仅依赖 myquant.core.audit_log（L0 合法）+ manifest.py（同包 L0），未 import backtest/execution/data_access（R-02/R-16）。
+   a. **myquant/realism_gate/gate.py（新建，~230 行）**：门禁中心出口断言——
+      - `RealismGateConfig` frozen dataclass（enabled 默认 **False**——v2.2 分期启用期起步；audit_violations 默认 True）
+      - `register_realism_check(name, fn)` 注册钩子（fn 签名 `(manifest: RealismManifest) -> List[RealismViolation]`；空名/重复注册 ValueError）
+      - `reset_realism_checks()` 测试隔离
+      - `assert_realism_pass(manifest)` 唯一出口（§4.3 时序）：①先 build() 完整性校验（缺 critical → ManifestIncompleteError fail-closed）→ ②执行已注册检查汇总违规 → ③合并 build 阶段枚举违规 → 过滤 critical → ④无 critical 违规 → seal(manifest) 通过；有 critical：enabled=True 落 audit_log + 抛 RealismGateError（携带 violations+manifest 快照）；enabled=False 仅 audit_log 警告档不阻断
+      - `_collect_violations` 检查函数自身异常 fail-closed（记 `{name}.gate_error` critical 违规，不静默跳过）
+      - `_append_audit` 落 AuditLogStore（kind=realism_gate, action=violation）；写失败 error 不阻断主流程
+   b. **tests/unit/test_realism_gate.py（新建，12 项）**：R-19 收录 + 配置默认值（enabled=False）+ 注册防御（空名/重复）+ 端到端（完整 manifest seal 通过 / critical 违规 enabled=True 抛 RealismGateError / critical 违规 enabled=False audit 档不抛 / 缺 critical 字段 ManifestIncompleteError / 检查器异常 fail-closed 记 gate-error / build 阶段枚举违规计入 critical）。
+   c. **myquant/realism_gate/__init__.py（改动）**：追加 re-export RealismGateConfig/assert_realism_pass/register_realism_check/reset_realism_checks/get_config/set_config。
+   d. **验收结果**：py_compile 通过；test_realism_gate 12 项 + test_realism_manifest 17 项 + test_architecture 49 项全绿；全套回归 3744 passed/4 skipped（1 项 test_push_latency_flat 预存 flaky，单独重跑通过）；R-01a/b 真环基线 0；R-19 零覆盖基线 +1（realism_gate.gate 被 tests import）。
+   e. **纪律遵守**：蓝图目录树先行登记（realism_gate/gate.py）；L0 只依赖 myquant.core.audit_log + manifest（R-02/R-16）；无 severity 字段（v2.2 红线）；enabled 默认 False 起步（分期启用，配置缺失即红由后续 P1-03 fail-closed-on-misconfiguration 覆盖）；检查器异常 fail-closed（防线自身故障不放行）；git 提交（commit message 引用 #306）。**P0-01 后续刀**：checks/ 四子模块（market_rules/cost_model/data_pit/sample_pool）→ report.py 落盘 → 引擎接线（create_engine 两阶段握手）。
 
 

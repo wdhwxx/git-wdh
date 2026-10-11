@@ -8,7 +8,8 @@ realism_gate - 回测真实性门禁（L0 治理层，与 leakage_gate 同构同
 
 组件（P0-01 逐步落地）：
   - manifest.py   RealismManifest 数据契约（字段、取值域、完整性校验、签名、序列化）
-  - gate.py       门禁中心：配置、清单聚合、出口断言、审计落链、阻断产物落盘（后续刀）
+  - gate.py       门禁中心：RealismGateConfig、register_realism_check 注册、
+                   assert_realism_pass 唯一出口断言、审计落链
   - invariants.py  结果侧真实性不变量 RI-1~RI-6（P1-15，后续刀）
   - checks/       各真实性维度检查器（market_rules/cost_model/data_pit/sample_pool，后续刀）
   - report.py     RealismManifest 落盘（results.json + 阻断产物 + 报告页 + audit_log，后续刀）
@@ -23,6 +24,14 @@ realism_gate - 回测真实性门禁（L0 治理层，与 leakage_gate 同构同
 myquant.data_access（R-02/R-16 跨层红线）。运行时事实由 L3/L4 以数据契约注入。
 """
 
+from myquant.realism_gate.gate import (
+    RealismGateConfig,
+    assert_realism_pass,
+    get_config,
+    register_realism_check,
+    reset_realism_checks,
+    set_config,
+)
 from myquant.realism_gate.manifest import (
     CRITICAL_FIELDS,
     ENUM_DOMAINS,
@@ -38,6 +47,12 @@ __all__ = [
     "RealismViolation",
     "RealismGateError",
     "ManifestIncompleteError",
+    "RealismGateConfig",
+    "assert_realism_pass",
+    "register_realism_check",
+    "reset_realism_checks",
+    "get_config",
+    "set_config",
     "CRITICAL_FIELDS",
     "WARNING_FIELDS",
     "ENUM_DOMAINS",
