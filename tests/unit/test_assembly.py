@@ -107,3 +107,10 @@ def test_mixed_selftest_module_importable():
     from myquant.backtest.mixed_selftest import _make_ohlcv, run_mixed_selftest
     assert callable(run_mixed_selftest)
     assert callable(_make_ohlcv)
+
+
+def test_vectorized_selftest_module_importable():
+    """vectorized_selftest.py 可导入（R-19 零覆盖收录；P0-00A 第三刀抽离的自测模块）。"""
+    from myquant.backtest.vectorized_selftest import _DummyVectorStrategy, run_vectorized_selftest
+    assert callable(run_vectorized_selftest)
+    assert callable(_DummyVectorStrategy)

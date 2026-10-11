@@ -1180,6 +1180,8 @@ Pythonwdhmm/
 
     │   ├── mixed_selftest.py       # ✨【回写#302】mixed_engine 自测模块（P0-00 子步骤 A 第二刀，v2.2 §5.0 (a)4）：自 mixed_engine.py:1137-1495 整体迁入——`_MixedTargetStrategy`（target 模式固定目标持仓，验证 T+1 时序）+ `_MixedSignalStrategy`（on_bar 信号模式 buy_at/sell_at）+ `_make_ohlcv`（合成行情工具）+ `run_mixed_selftest`（原 `_run_self_test`，7 组校验：目标模式 T+1/mixed-vs-vectorized 逐点一致/止损触发/STOP_LIMIT 条件单/on_bar 信号/多标的/防御式非法参数）；mixed_engine.py 仅留薄 `__main__` 入口调用本模块
 
+    │   ├── vectorized_selftest.py  # ✨【回写#303】vectorized_engine 自测模块（P0-00 子步骤 A 第三刀，v2.2 §5.0 (a)4）：自 vectorized_engine.py:888-1202 整体迁入——`_FixedTargetStrategy`（固定目标持仓序列，精确控制 T+1 成交时点）+ `_DummyVectorStrategy`（双均线向量化策略）+ `run_vectorized_selftest`（原 `_run_self_test`，11 组校验：基本运行/T+1 持仓时序/成交价=开盘价/费用滑点/期末净值/多标的聚合/无交易恒1/非法capital_mode防御/未实现接口报错/空数据failed/手算净值一致/买卖闭环FIFO盈亏）；vectorized_engine.py 仅留薄 `__main__` 入口调用本模块
+
 
 
     │
@@ -4453,5 +4455,14 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    d. **tests/unit/test_assembly.py（追加 1 项 + fixture 修复）**：新增 `test_mixed_selftest_module_importable`（`from myquant.backtest.mixed_selftest import _make_ohlcv, run_mixed_selftest`，R-19 收录零覆盖基线）；修复 `_reset_factory` autouse fixture——原 teardown 硬设 `_broker_factory=None` 会清掉 conftest.py session 级注册的 broker factory，导致后续 event 引擎测试无工厂而 15 项失败；改为保存/恢复原值（`saved=...; yield; restore=saved`）。
    e. **验收结果**：py_compile 两文件通过；全套回归 **178 passed/2 skipped**（test_assembly/test_architecture/test_backtest/test_backtest_engines_v5/test_baseline_archive/test_guard_mounting/test_lookahead_wiring）；R-01a/b 真环基线 0 保持；R-19 零覆盖基线 35 不变（mixed_selftest 经测试 import 收录）；**基线对拍 rsrs×mixed 通过（EXIT=0，行为零变化）**。
    f. **纪律遵守**：蓝图目录树先行登记（backtest/mixed_selftest.py）；纯搬移行为零变化，以基线对拍验证；自测代码归 myquant/backtest/mixed_selftest.py（业务运行时不 import）；mixed_engine.py 仅留薄 __main__ 入口（脚本薄入口纪律）；agent workspace 截断脚本/计数脚本不污染项目；git 提交（commit message 引用 #302）。
+
+## #303 · 2026-10-11 · P0-00 子步骤 A 第三刀：vectorized_engine 自测块抽离至 vectorized_selftest.py（v2.2 §5.0 (a)4）
+   事实来源：本次落地（施工方案 v2.2 §5.0 (a)4 + 前置调研决策记录行510-511"模块级自测类，可迁 tests/"）；代码级核验：vectorized_engine.py:888-1202 自测块整体迁至 vectorized_selftest.py，外部无引用（test_backtest_engines_v5.py 独立构造合成数据，不 import vectorized_engine 的自测符号）；基线对拍 rsrs×mixed 通过（行为零变化）。
+   a. **行数变化（门禁口径 utf-8-sig + splitlines）**：vectorized_engine.py 1202→**894**（净减 308 行，达标 ≤1140，余量 246）；engine.py 1285（仍超 35）/ mixed_engine.py 1139（达标）；新建 vectorized_selftest.py ~280 行。**三引擎至此两达标（mixed/vectorized），仅剩 engine.py 超 35 行**。
+   b. **myquant/backtest/vectorized_selftest.py（新建，回写#303）**：自 vectorized_engine.py:888-1202 整体迁入——`_FixedTargetStrategy`（固定目标持仓序列，精确控制 T+1 成交时点）+ `_DummyVectorStrategy`（双均线向量化策略 fast/slow 满仓/空仓切换）+ `run_vectorized_selftest`（原 `_run_self_test`，11 组校验：基本运行/T+1 持仓时序/成交价=开盘价/费用滑点/期末净值/多标的聚合/无交易恒1/非法capital_mode防御/未实现接口报错/空数据failed/手算净值一致/买卖闭环FIFO盈亏）；含 `if __name__ == "__main__"` 自测入口。
+   c. **vectorized_engine.py（改动，1202→894）**：删除 888-1202 自测块（_FixedTargetStrategy/_DummyVectorStrategy/_run_self_test/__main__）；留薄 `if __name__ == "__main__": from myquant.backtest.vectorized_selftest import run_vectorized_selftest; raise SystemExit(run_vectorized_selftest())`；顶部 import 经 Grep 核查全部仍被业务段（122-887 行）使用（Any/Dict/List/Optional/Tuple/StrategyBase/StrategyContext/OrderSide/OrderType/EquityPoint/TradeRecord 均引用），无残留未使用 import。
+   d. **tests/unit/test_assembly.py（追加 1 项）**：新增 `test_vectorized_selftest_module_importable`（`from myquant.backtest.vectorized_selftest import _DummyVectorStrategy, run_vectorized_selftest`，R-19 收录零覆盖基线）。
+   e. **验收结果**：py_compile 两文件通过；全套回归 **179 passed/2 skipped**（test_assembly/architecture/backtest/engines_v5/baseline_archive/guard_mounting/lookahead_wiring）；R-01a/b 真环基线 0 保持；R-19 零覆盖基线 35 不变；**基线对拍 rsrs×mixed 通过（EXIT=0，行为零变化）**。
+   f. **纪律遵守**：蓝图目录树先行登记（backtest/vectorized_selftest.py）；纯搬移行为零变化，以基线对拍验证；自测代码归 myquant/backtest/vectorized_selftest.py（业务运行时不 import）；vectorized_engine.py 仅留薄 __main__ 入口（脚本薄入口纪律）；agent workspace 截断脚本/计数脚本不污染项目；git 提交（commit message 引用 #303）。
 
 
