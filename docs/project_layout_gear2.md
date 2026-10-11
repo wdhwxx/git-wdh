@@ -970,6 +970,14 @@ Pythonwdhmm/
 
     │
 
+    ├── realism_gate/                 # ✨【回写#305】回测真实性门禁（与 leakage_gate 同构同层 L0，v2.2 §4.1/§4.2/§4.5/§4.10）：manifest.py 数据契约（RealismManifest 字段/critical 阻断判据/build() 完整性 fail-closed/manifest_signature 跨运行签名/序列化/seal 两阶段握手）；后续 gate.py（register_realism_check/assert_realism_pass 出口断言）/ checks/（market_rules/cost_model/data_pit/sample_pool）/ invariants.py（RI-1~RI-6）/ report.py 依次挂入；无 severity 字段，只保留 critical 布尔（v2.2 §4.3 第三处不同）；L0 只依赖 myquant.core，运行时事实由 L3/L4 数据契约注入（R-02/R-16）
+
+    │   ├── __init__.py               # ✨【回写#305】薄 re-export：RealismManifest/RealismViolation/RealismGateError/ManifestIncompleteError/CRITICAL_FIELDS/WARNING_FIELDS/ENUM_DOMAINS
+
+    │   ├── manifest.py               # ✨【回写#305】RealismManifest 数据契约核心（~310 行）：异常体系（RealismGateError/ManifestIncompleteError）+ RealismViolation（无 severity）+ CRITICAL_FIELDS 52 项 + ALLOW_NONE_FIELDS（participation_cap/survivorship.discount 允许 null）+ ENUM_DOMAINS 取值域校验 + build()（完整性校验+status 推导 ok/degraded）+ manifest_signature()（剔除 run_id/时间戳 sha256）+ to_dict/from_dict 序列化 + seal/is_sealed
+
+    │
+
     ├── database/                     # 数据库抽象层：统一持久化接口
 
     │   ├── __init__.py
@@ -4475,5 +4483,20 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    d. **tests/unit/test_assembly.py（追加 1 项）**：新增 `test_engine_selftest_module_importable`（`from myquant.backtest.engine_selftest import run_engine_selftest`，R-19 收录零覆盖基线）。
    e. **验收结果**：py_compile 两文件通过；全套回归 **180 passed/2 skipped**（test_assembly/architecture/backtest/engines_v5/baseline_archive/guard_mounting/lookahead_wiring）；R-01a/b 真环基线 0 保持；R-19 零覆盖基线 35 不变；**基线对拍 rsrs×mixed 通过（EXIT=0，行为零变化）**。
    f. **纪律遵守**：蓝图目录树先行登记（backtest/engine_selftest.py）；纯搬移行为零变化，以基线对拍验证；自测代码归 myquant/backtest/engine_selftest.py（业务运行时不 import）；engine.py 仅留薄 __main__ 入口（脚本薄入口纪律）；agent workspace 截断脚本/计数脚本不污染项目；git 提交（commit message 引用 #304）。**P0-00 子步骤 A 完成：三引擎行数余量可支撑 P0-03/P0-07/P1-08。**
+
+## #305 · 2026-10-11 · P0-01 第一刀：新建 myquant/realism_gate/ L0 包骨架 + manifest.py 数据契约
+   事实来源：本次落地（施工方案 v2.2 §4.1/§4.2/§4.5/§4.10）；代码级核验：新包仅依赖 myquant.core（L0 合法），未 import backtest/execution/data_access（R-02/R-16 跨层红线）；MODULE_LAYER 登记 "myquant.realism_gate":"L0"，R-25 正向/反向测试均通过。
+   a. **myquant/realism_gate/__init__.py（新建，回写#305）**：薄 re-export RealismManifest / RealismViolation / RealismGateError / ManifestIncompleteError / CRITICAL_FIELDS / WARNING_FIELDS / ENUM_DOMAINS；不 import gate/checks/report（后续刀）。
+   b. **myquant/realism_gate/manifest.py（新建，~310 行）**：RealismManifest 数据契约核心——
+      - 异常体系：RealismGateError（出口断言失败，携带 violations+manifest）/ ManifestIncompleteError（critical 字段缺失 fail-closed，携带 missing 列表）
+      - RealismViolation dataclass（field_path/critical/message/actual_value/decision_time；**无 severity 字段**，v2.2 §4.3 第三处不同）
+      - CRITICAL_FIELDS 清单（52 项，覆盖 §4.2 全部 critical 分组：元信息/因果性/行情规则/流动性/成本/数据/样本池/结果不变量）
+      - ALLOW_NONE_FIELDS（participation_cap/survivorship.discount 允许 null，对应方案 float|null）
+      - ENUM_DOMAINS（pre_close_source/basis/exclusion_basis 等取值域校验）
+      - RealismManifest dataclass：set_field/get_field（点号分组路径）/ update_group / build()（完整性校验+status 推导 ok/degraded）/ manifest_signature()（剔除 run_id/时间戳的 sha256，§4.10 跨运行可比性）/ to_dict/from_dict 序列化 / seal/is_sealed（两阶段握手 §4.4 第⑤步）
+   c. **tests/unit/test_realism_manifest.py（新建，17 项）**：R-19 收录 + 字段注入/完整性失败/完整 build/status 推导（degraded 信号）/枚举校验/签名稳定性（跨 run_id 一致、跨字段变化）/序列化往返/seal/critical 清单覆盖。
+   d. **tests/unit/test_architecture.py（改动）**：MODULE_LAYER 第 116 行追加 `"myquant.realism_gate": "L0"`；R-25 正向（myquant 下含 __init__.py 的一级目录必须登记）+ 反向（登记表不得藏幽灵包）均通过。
+   e. **验收结果**：py_compile 通过；test_realism_manifest 17 项 + test_architecture 49 项全绿；全套回归 3731 passed/4 skipped（1 项 test_push_latency_flat 为预存 flaky 性能测试，单独重跑通过，与本次改动无关）；R-01a/b 真环基线 0；R-19 零覆盖基线 +1（realism_gate.manifest 被 tests import）。
+   f. **纪律遵守**：蓝图目录树先行登记（realism_gate/ 包）；L0 只依赖 myquant.core（R-02/R-16）；无 severity 字段（v2.2 红线）；critical 缺失 fail-closed（不允许空值通过）；git 提交（commit message 引用 #305）。**P0-01 后续刀**：gate.py（register_realism_check/assert_realism_pass 出口断言）→ checks/ 四子模块 → report.py 落盘 → 引擎接线（create_engine 两阶段握手）。
 
 

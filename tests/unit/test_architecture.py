@@ -114,6 +114,7 @@ MYQUANT = PROJECT_ROOT / "myquant"
 # ═══════════════════════════ 1) 层定义 ═══════════════════════════
 MODULE_LAYER: dict[str, str] = {
     "myquant.core": "L0", "myquant.utils": "L0", "myquant.database": "L0", "myquant.leakage_gate": "L0",
+    "myquant.realism_gate": "L0",  # P0-01：回测真实性门禁（与 leakage_gate 同构同层）
     "myquant.data_access": "L1",
     "myquant.models": "L2", "myquant.indicators": "L2",
     "myquant.engine": "L2E",
