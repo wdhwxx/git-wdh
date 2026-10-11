@@ -1,4 +1,4 @@
-# 文件名：myquant/backtest/engine.py
+﻿# 文件名：myquant/backtest/engine.py
 """
 backtest/engine.py - 回测引擎
 ================================
@@ -1142,144 +1142,10 @@ def run_backtest(
     )
 
 
-def _run_self_test() -> int:
-    """运行 engine.py 三模式调度器自测。
-
-    返回:
-        通过的测试项数量。
-    """
-
-    from myquant.strategies.base import Signal, StrategyBase, StrategyContext
-
-    passed = 0
-    failures: List[str] = []
-
-    def check(name: str, cond: bool, detail: str = "") -> None:
-        nonlocal passed
-        if cond:
-            passed += 1
-            print(f"  [PASS] {name}")
-        else:
-            failures.append(f"{name}: {detail}")
-            print(f"  [FAIL] {name}: {detail}")
-
-    print("=" * 60)
-    print("engine.py 三模式调度器自测开始")
-    print("=" * 60)
-
-    # 合成行情
-    n = 40
-    idx = pd.date_range("2024-01-01", periods=n, freq="B")
-    close = 10.0 * 1.02 ** np.arange(n)
-    df = pd.DataFrame(
-        {"开盘价": close * 0.995, "最高价": close * 1.02, "最低价": close * 0.98,
-         "收盘价": close, "成交量": np.full(n, 1e6)},
-        index=idx,
-    )
-    data = {"600519.SH": df}
-    config = BacktestConfig(
-        symbols=["600519.SH"], start_date="2024-01-01",
-        end_date="2024-02-28", initial_capital=1_000_000.0,
-    )
-
-    # 测试策略：仅 event / event+mixed / event+mixed+vectorized
-    class _EventOnlyStrategy(StrategyBase):
-        name = "event_only"
-
-        def generate_signal(self, bar: Bar, context: StrategyContext) -> Signal:
-            return Signal(symbol=bar.symbol, signal_type=SignalType.HOLD)
-
-    class _MixedCapableStrategy(StrategyBase):
-        name = "mixed_capable"
-
-        def generate_mixed_loop(self, bar: Bar, context: StrategyContext,
-                                position: Optional[Any]) -> float:
-            return 1000.0
-
-        def generate_signal(self, bar: Bar, context: StrategyContext) -> Signal:
-            return Signal(symbol=bar.symbol, signal_type=SignalType.HOLD)
-
-    class _VectorCapableStrategy(StrategyBase):
-        name = "vector_capable"
-
-        def generate_mixed_loop(self, bar: Bar, context: StrategyContext,
-                                position: Optional[Any]) -> float:
-            return 1000.0
-
-        def generate_signals_vectorized(self, data_df: pd.DataFrame) -> np.ndarray:
-            return np.zeros(len(data_df)) + 1000.0
-
-        def generate_signal(self, bar: Bar, context: StrategyContext) -> Signal:
-            return Signal(symbol=bar.symbol, signal_type=SignalType.HOLD)
-
-    # 1. 能力探测
-    eo = _EventOnlyStrategy()
-    mc = _MixedCapableStrategy()
-    vc = _VectorCapableStrategy()
-    check("event-only 策略 modes == [event]", BacktestScheduler.detect_modes(eo) == ["event"], f"{BacktestScheduler.detect_modes(eo)}")
-    check("mixed 策略 modes 含 mixed", "mixed" in BacktestScheduler.detect_modes(mc), f"{BacktestScheduler.detect_modes(mc)}")
-    check("vector 策略 modes 含 vectorized", "vectorized" in BacktestScheduler.detect_modes(vc), f"{BacktestScheduler.detect_modes(vc)}")
-
-    # 2. auto 选择
-    s1 = BacktestScheduler(mode="auto")
-    check("auto 选 event", s1.resolve_mode(eo) == "event", f"{s1.resolve_mode(eo)}")
-    s2 = BacktestScheduler(mode="auto")
-    check("auto 选 mixed", s2.resolve_mode(mc) == "mixed", f"{s2.resolve_mode(mc)}")
-    s3 = BacktestScheduler(mode="auto")
-    check("auto 选 vectorized", s3.resolve_mode(vc) == "vectorized", f"{s3.resolve_mode(vc)}")
-
-    # 3. 全流程运行（三种模式都跑通）
-    r1 = run_backtest(config, eo, data=data, mode="auto")
-    check("event 模式回测成功", r1 is not None and r1.is_success and r1.extra.get("engine_mode") == "event", f"status={r1.status}, mode={r1.extra.get('engine_mode')}")
-    r2 = run_backtest(config, mc, data=data, mode="auto")
-    check("mixed 模式回测成功", r2 is not None and r2.is_success and r2.extra.get("engine_mode") == "mixed", f"status={r2.status}, mode={r2.extra.get('engine_mode')}")
-    r3 = run_backtest(config, vc, data=data, mode="auto")
-    check("vectorized 模式回测成功", r3 is not None and r3.is_success and r3.extra.get("engine_mode") == "vectorized", f"status={r3.status}, mode={r3.extra.get('engine_mode')}")
-
-    # 4. 显式模式
-    r4 = run_backtest(config, vc, data=data, mode="vectorized")
-    check("显式 vectorized 模式成功", r4 is not None and r4.is_success, f"status={r4.status}")
-
-    # 5. 显式模式不匹配 → 明确异常
-    try:
-        run_backtest(config, eo, data=data, mode="vectorized")
-        check("显式 vectorized + event-only 策略抛异常", False, "未抛出")
-    except NotImplementedError:
-        check("显式 vectorized + event-only 策略抛异常", True)
-
-    # 6. 非法 mode
-    try:
-        BacktestScheduler(mode="bad")
-        check("非法 mode 抛 ValueError", False, "未抛出")
-    except ValueError:
-        check("非法 mode 抛 ValueError", True)
-
-    print("=" * 60)
-    if failures:
-        print(f"自测结果: {passed} 项通过, {len(failures)} 项失败")
-        for f in failures:
-            print(f"  - {f}")
-        return len(failures)
-    print(f"自测结果: 全部 {passed} 项通过 ✅")
-    print("=" * 60)
-    return 0
 
 
 if __name__ == "__main__":
-    # 自测 Demo：运行全部校验项
-    # G1 EX-09A：main 语境装配撮合执行器工厂（分层违规豁免边界内）
-    from myquant.execution.sim_broker import SimBroker
+    # 自测已迁至 myquant/backtest/engine_selftest.py（P0-00A 第四刀，回写#304）
+    from myquant.backtest.engine_selftest import run_engine_selftest
 
-    def _selftest_broker_factory(config: BacktestConfig) -> Any:
-        _bcfg = config.to_dict()
-        return SimBroker(
-            initial_capital=config.initial_capital,
-            commission_model=config.commission,
-            slippage_model=config.slippage,
-            price_limit_pct=float(_bcfg.get("price_limit_pct", 0.10)),
-            enforce_limit=bool(_bcfg.get("enforce_limit", False)),
-            is_suspended=None,
-        )
-
-    register_broker_factory(_selftest_broker_factory)
-    raise SystemExit(_run_self_test())
+    raise SystemExit(run_engine_selftest())

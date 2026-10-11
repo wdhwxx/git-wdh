@@ -1182,6 +1182,8 @@ Pythonwdhmm/
 
     │   ├── vectorized_selftest.py  # ✨【回写#303】vectorized_engine 自测模块（P0-00 子步骤 A 第三刀，v2.2 §5.0 (a)4）：自 vectorized_engine.py:888-1202 整体迁入——`_FixedTargetStrategy`（固定目标持仓序列，精确控制 T+1 成交时点）+ `_DummyVectorStrategy`（双均线向量化策略）+ `run_vectorized_selftest`（原 `_run_self_test`，11 组校验：基本运行/T+1 持仓时序/成交价=开盘价/费用滑点/期末净值/多标的聚合/无交易恒1/非法capital_mode防御/未实现接口报错/空数据failed/手算净值一致/买卖闭环FIFO盈亏）；vectorized_engine.py 仅留薄 `__main__` 入口调用本模块
 
+    │   ├── engine_selftest.py      # ✨【回写#304】engine.py 三模式调度器自测模块（P0-00 子步骤 A 第四刀，v2.2 §5.0 (a)4）：自 engine.py:1145-1285 整体迁入——`run_engine_selftest`（原 `_run_self_test`，6 组校验：策略能力探测 event/mixed/vectorized modes 识别 / auto 模式选择 / 三模式全流程运行 / 显式模式 / 模式不匹配 NotImplementedError / 非法 mode ValueError）+ `_selftest_broker_factory`（G1 EX-09A main 语境装配 SimBroker 工厂）；engine.py 仅留薄 `__main__` 入口调用本模块
+
 
 
     │
@@ -4464,5 +4466,14 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    d. **tests/unit/test_assembly.py（追加 1 项）**：新增 `test_vectorized_selftest_module_importable`（`from myquant.backtest.vectorized_selftest import _DummyVectorStrategy, run_vectorized_selftest`，R-19 收录零覆盖基线）。
    e. **验收结果**：py_compile 两文件通过；全套回归 **179 passed/2 skipped**（test_assembly/architecture/backtest/engines_v5/baseline_archive/guard_mounting/lookahead_wiring）；R-01a/b 真环基线 0 保持；R-19 零覆盖基线 35 不变；**基线对拍 rsrs×mixed 通过（EXIT=0，行为零变化）**。
    f. **纪律遵守**：蓝图目录树先行登记（backtest/vectorized_selftest.py）；纯搬移行为零变化，以基线对拍验证；自测代码归 myquant/backtest/vectorized_selftest.py（业务运行时不 import）；vectorized_engine.py 仅留薄 __main__ 入口（脚本薄入口纪律）；agent workspace 截断脚本/计数脚本不污染项目；git 提交（commit message 引用 #303）。
+
+## #304 · 2026-10-11 · P0-00 子步骤 A 第四刀（收尾）：engine.py 自测块抽离至 engine_selftest.py——三引擎全部达标
+   事实来源：本次落地（施工方案 v2.2 §5.0 (a)4）；代码级核验：engine.py:1145-1285 自测块整体迁至 engine_selftest.py，外部无引用（_run_self_test 仅被 __main__ 调用）；基线对拍 rsrs×mixed 通过（行为零变化）。**至此 P0-00 子步骤 A 三引擎行数全部达标（G4 重算目标）。**
+   a. **行数变化（门禁口径 utf-8-sig + splitlines）**：engine.py 1285→**1151**（净减 134 行，达标 ≤1250，余量 99）；三引擎最终状态：engine 1151（≤1250 ✅）/ mixed 1139（≤1420 ✅）/ vectorized 894（≤1140 ✅）。
+   b. **myquant/backtest/engine_selftest.py（新建，回写#304）**：自 engine.py:1145-1285 整体迁入——`run_engine_selftest`（原 `_run_self_test`，6 组校验：策略能力探测 event/mixed/vectorized modes 识别 / auto 模式选择 / 三模式全流程运行 / 显式模式 / 模式不匹配 NotImplementedError / 非法 mode ValueError）+ `_selftest_broker_factory`（G1 EX-09A main 语境装配 SimBroker 工厂，仅 __main__ 块内）；含 `if __name__ == "__main__"` 自测入口。
+   c. **engine.py（改动，1285→1151）**：删除 1145-1285 自测块（_run_self_test/_selftest_broker_factory/__main__ 装配）；留薄 `if __name__ == "__main__": from myquant.backtest.engine_selftest import run_engine_selftest; raise SystemExit(run_engine_selftest())`；顶部 import 经 Grep 核查全部仍被业务段（77-1142 行）使用（Any/Callable/ClassVar/Dict/List/Optional/Bar/MarketEvent/OrderSide/PerformanceMetrics 均引用），无残留未使用 import。
+   d. **tests/unit/test_assembly.py（追加 1 项）**：新增 `test_engine_selftest_module_importable`（`from myquant.backtest.engine_selftest import run_engine_selftest`，R-19 收录零覆盖基线）。
+   e. **验收结果**：py_compile 两文件通过；全套回归 **180 passed/2 skipped**（test_assembly/architecture/backtest/engines_v5/baseline_archive/guard_mounting/lookahead_wiring）；R-01a/b 真环基线 0 保持；R-19 零覆盖基线 35 不变；**基线对拍 rsrs×mixed 通过（EXIT=0，行为零变化）**。
+   f. **纪律遵守**：蓝图目录树先行登记（backtest/engine_selftest.py）；纯搬移行为零变化，以基线对拍验证；自测代码归 myquant/backtest/engine_selftest.py（业务运行时不 import）；engine.py 仅留薄 __main__ 入口（脚本薄入口纪律）；agent workspace 截断脚本/计数脚本不污染项目；git 提交（commit message 引用 #304）。**P0-00 子步骤 A 完成：三引擎行数余量可支撑 P0-03/P0-07/P1-08。**
 
 

@@ -114,3 +114,9 @@ def test_vectorized_selftest_module_importable():
     from myquant.backtest.vectorized_selftest import _DummyVectorStrategy, run_vectorized_selftest
     assert callable(run_vectorized_selftest)
     assert callable(_DummyVectorStrategy)
+
+
+def test_engine_selftest_module_importable():
+    """engine_selftest.py 可导入（R-19 零覆盖收录；P0-00A 第四刀抽离的自测模块）。"""
+    from myquant.backtest.engine_selftest import run_engine_selftest
+    assert callable(run_engine_selftest)
