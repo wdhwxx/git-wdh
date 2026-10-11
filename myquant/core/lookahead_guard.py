@@ -452,11 +452,17 @@ class LookaheadGuard:
     # ── 内部：违规处理 ──
 
     def _handle_violation(self, violation: Dict[str, Any]) -> None:
-        """处理违规（严格模式立即抛异常，否则记录；警告档仅记录不抛）"""
+        """处理违规（严格模式立即抛异常，否则记录；警告档仅记录不抛）
+
+        P1-17（v2.2 G7）：strict 模式阻断档违规——抛错**前**先落 audit_log
+        （入口保留可追溯失败产物，非仅 raise）。
+        """
         with self._lock:
             self._violations.append(violation)
 
         if self._strict and violation.get("severity") != "警告":
+            # P1-17：先落审计再抛错（fail-closed 可追溯）
+            _append_audit([violation])
             raise LookaheadError(
                 rule_name=violation.get("rule", ""),
                 details=violation.get("message", ""),

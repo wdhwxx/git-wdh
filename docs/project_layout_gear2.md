@@ -4580,4 +4580,10 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    b. **验收结果**：tests/leakage_gate/ 127 passed（含 R11/RL-13/feature_whitelist 红队用例）；全套回归 3757 passed（#311 基线）；现有入口正常启动（无 R11 误报阻断）。
    c. **纪律遵守**：蓝图目录树先行登记（config/ 改动）；方案 B（告警走独立通道，不产 Violation——当前无阻断列自然不触发）；git 提交（commit message 引用 #312）。**P0-02 完成**：R11 与 feature_whitelist 链路代码就位、测试覆盖完整、台账状态显式可见。
 
+## #313 · 2026-10-11 · P1-17：strict 模式违规落审计（_handle_violation 抛错前先落 audit_log）
+   事实来源：本次落地（施工方案 v2.2 §4.1 P1-17 G7）；代码级核验：_handle_violation 在 strict 模式 raise LookaheadError 前新增 _append_audit([violation]) 调用。
+   a. **myquant/core/lookahead_guard.py（改动，_handle_violation）**：strict 模式阻断档违规——raise 之前先调用 `_append_audit([violation])` 落 audit_log（BASE-7 哈希链 append-only）；写失败记 error 不阻断主流程（复用既有 _append_audit 异常吞噬逻辑）。
+   b. **验收结果**：py_compile 通过；全套回归 **3884 passed/4 skipped**（3757 unit + 127 leakage_gate）。
+   c. **纪律遵守**：蓝图目录树先行登记（core/ 改动）；复用既有 _append_audit（不重复造轮子）；写失败不阻断主流程（防未来：已发生即记录，失败仅 error）；git 提交（commit message 引用 #313）。**P1-17 完成**：strict 模式违规可追溯（抛错前先落审计，入口保留可追溯失败产物）。
+
 
