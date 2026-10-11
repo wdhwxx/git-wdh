@@ -37,7 +37,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import pandas as pd
 
 from myquant.backtest.data_loader import require_ohlcv
-from myquant.backtest.engine import BacktestEngine
+from myquant.backtest.engine import BacktestScheduler
 from myquant.models.backtest import BacktestConfig
 from myquant.strategies.ma_strategy import MACrossStrategy
 from myquant.utils.data_fingerprint import (
@@ -123,7 +123,9 @@ def evaluate_symbol(trial: SymbolTrial) -> Dict[str, Any]:
             initial_capital=trial.initial_capital,
             params=trial.params,
         )
-        engine = BacktestEngine(config=config, strategy=strategy, data=trial.data)
+        # P1-04：走 create_engine（旁路收敛，门禁软接线统一入口）
+        scheduler = BacktestScheduler(mode="auto")
+        engine = scheduler.create_engine(config=config, strategy=strategy, data=trial.data)
         result = engine.run()
         metrics = result.metrics
         base.update(

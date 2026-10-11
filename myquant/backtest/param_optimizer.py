@@ -37,7 +37,7 @@ import numpy as np
 import pandas as pd
 
 from myquant.backtest.data_loader import require_ohlcv
-from myquant.backtest.engine import BacktestEngine, register_broker_factory
+from myquant.backtest.engine import BacktestScheduler, register_broker_factory
 from myquant.models.backtest import BacktestConfig
 from myquant.strategies.base import StrategyBase
 from myquant.strategies.ma_strategy import MACrossStrategy
@@ -237,9 +237,10 @@ def evaluate_params(
             initial_capital=trial.initial_capital,
             params=trial.params,
         )
-        engine = BacktestEngine(
+        # P1-04：走 create_engine（旁路收敛，门禁软接线统一入口）
+        scheduler = BacktestScheduler(mode="auto")
+        engine = scheduler.create_engine(
             config=config, strategy=strategy, data=trial.data,
-            broker_factory=broker_factory,
         )
         result = engine.run()
         metrics = result.metrics

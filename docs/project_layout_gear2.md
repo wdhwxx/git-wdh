@@ -4677,4 +4677,12 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    b. **验收结果**：py_compile 通过；基线对拍通过（EXIT=0）；全套回归 **3907 passed/4 skipped**。
    c. **纪律遵守**：蓝图目录树先行登记（入口脚本改动）；从显式字段取参（P0-03 统一键名）；git 提交（commit message 引用 #326）。**P1-18 完成**：event 模式可启动。
 
+## #327 · 2026-10-11 · P1-04：旁路收敛（生产直构点改走 create_engine）
+   事实来源：本次落地（施工方案 v2.2 §4.1 P1-04）；代码级核验：incremental_backtest.py + param_optimizer.py 从直接 new BacktestEngine 改为 BacktestScheduler.create_engine。
+   a. **myquant/backtest/incremental_backtest.py（改动）**：import 从 BacktestEngine 改为 BacktestScheduler；直构点改为 `scheduler = BacktestScheduler(mode="auto"); engine = scheduler.create_engine(...)`。
+   b. **myquant/backtest/param_optimizer.py（改动）**：同上迁移；移除 broker_factory 直传参数（create_engine 内部统一装配）。
+   c. **例外清单（不改）**：engine_benchmark.py / consistency_check.py / live_safety_gate.py（走轻量审计，P1-04 明确豁免）。
+   d. **验收结果**：py_compile 通过；基线对拍通过（EXIT=0）；全套回归 **3907 passed/4 skipped**。
+   e. **纪律遵守**：蓝图目录树先行登记（backtest/ 改动）；例外清单豁免（engine_benchmark/consistency_check/live_safety_gate）；git 提交（commit message 引用 #327）。**P1-04 完成**：生产旁路收敛。
+
 
