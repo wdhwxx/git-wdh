@@ -1178,6 +1178,8 @@ Pythonwdhmm/
 
     │   ├── assembly.py              # ✨【回写#301】回测引擎装配模块（P0-00 子步骤 A 第一刀，v2.2 §5.0 (a)1）：撮合执行器工厂注册表——`_broker_factory` 模块级全局 + `register_broker_factory(factory)`（自 engine.py 67-94 行原样迁入，G1 EX-09A 注入点）；BacktestEngine._resolve_broker 改读本模块实时全局（实例级 > 注册表）；engine.py re-export `register_broker_factory` 保持 6 处外部调用方零改动；纯 L3 装配胶水，不反向 import engine，无业务逻辑
 
+    │   ├── mixed_selftest.py       # ✨【回写#302】mixed_engine 自测模块（P0-00 子步骤 A 第二刀，v2.2 §5.0 (a)4）：自 mixed_engine.py:1137-1495 整体迁入——`_MixedTargetStrategy`（target 模式固定目标持仓，验证 T+1 时序）+ `_MixedSignalStrategy`（on_bar 信号模式 buy_at/sell_at）+ `_make_ohlcv`（合成行情工具）+ `run_mixed_selftest`（原 `_run_self_test`，7 组校验：目标模式 T+1/mixed-vs-vectorized 逐点一致/止损触发/STOP_LIMIT 条件单/on_bar 信号/多标的/防御式非法参数）；mixed_engine.py 仅留薄 `__main__` 入口调用本模块
+
 
 
     │
@@ -4442,5 +4444,14 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    d. **tests/unit/test_assembly.py（新建，9 项）**：默认未注册 None / 注册读取同一性 / None 清除 / 非 callable 抛 TypeError；_resolve_broker 未装配 ValueError、全局工厂产物返回、实例级优先全局、工厂返回 None 报错；engine re-export register_broker_factory 同一性断言。
    e. **验收结果**：py_compile 两文件通过；架构门禁 33 passed/1 skipped（R-01a/b 真环基线 0 保持——初版 `from backtest import assembly` 曾闭合 backtest/__init__→batch_backtest→engine 环，改 get_broker_factory() 子模块导入后消除；R-19 新模块 assembly.py 经测试 import 收录，零覆盖基线 35 不变）；backtest 回归 136 passed/1 skipped（test_backtest/engines_v5/baseline_archive/guard_mounting/lookahead_wiring）；**基线对拍 rsrs×mixed 通过（EXIT=0，行为零变化）**。
    f. **纪律遵守**：蓝图目录树先行登记（backtest/assembly.py + tests/unit/test_assembly.py）；业务逻辑归 myquant/backtest/assembly.py（装配胶水）；engine.py re-export 保持外部调用方零改动；纯搬移行为零变化，以基线对拍验证；R-19 新模块必配测试（test_assembly.py）；agent workspace 探针不污染项目；git 提交（commit message 引用 #301）。
+
+## #302 · 2026-10-11 · P0-00 子步骤 A 第二刀：mixed_engine 自测块抽离至 mixed_selftest.py（v2.2 §5.0 (a)4）
+   事实来源：本次落地（施工方案 v2.2 §5.0 (a)4 + 前置调研决策记录行510-511"模块级自测类，可迁 tests/"）；代码级核验：mixed_engine.py:1137-1495 自测块整体迁至 mixed_selftest.py，外部无引用（tests/unit/test_backtest_engines_v5.py 与 scripts/验收_回测引擎V5.py 各自有独立 _make_ohlcv，不 import mixed_engine 的）；基线对拍 rsrs×mixed 通过（行为零变化）。
+   a. **行数变化（门禁口径 utf-8-sig + splitlines）**：mixed_engine.py 1500→**1139**（净减 361 行，达标 ≤1420，余量 281）；engine.py 1285（仍超 35）/ vectorized_engine.py 1202（仍超 62）；新建 mixed_selftest.py ~290 行。
+   b. **myquant/backtest/mixed_selftest.py（新建，回写#302）**：自 mixed_engine.py:1137-1495 整体迁入——`_MixedTargetStrategy`（target 模式固定目标持仓，验证 T+1 时序）+ `_MixedSignalStrategy`（on_bar 信号模式 buy_at/sell_at）+ `_make_ohlcv`（合成行情工具）+ `run_mixed_selftest`（原 `_run_self_test`，7 组校验：目标模式 T+1 / mixed-vs-vectorized 逐点一致 / 止损触发 / STOP_LIMIT 条件单 / on_bar 信号 / 多标的 / 防御式非法参数）；含 `if __name__ == "__main__"` 自测入口。
+   c. **mixed_engine.py（改动，1500→1139）**：删除 1133-1500 自测块（_MixedTargetStrategy/_MixedSignalStrategy/_make_ohlcv/_run_self_test/__main__）；留薄 `if __name__ == "__main__": from myquant.backtest.mixed_selftest import run_mixed_selftest; raise SystemExit(run_mixed_selftest())`；顶部 import 经核查全部仍被业务段使用（Any/OrderType/SignalType/Signal/StrategyBase/StrategyContext/Position/MarketEvent/StopLossRule/LookaheadGuard 均在 99-1132 行业务代码中引用），无残留未使用 import。
+   d. **tests/unit/test_assembly.py（追加 1 项 + fixture 修复）**：新增 `test_mixed_selftest_module_importable`（`from myquant.backtest.mixed_selftest import _make_ohlcv, run_mixed_selftest`，R-19 收录零覆盖基线）；修复 `_reset_factory` autouse fixture——原 teardown 硬设 `_broker_factory=None` 会清掉 conftest.py session 级注册的 broker factory，导致后续 event 引擎测试无工厂而 15 项失败；改为保存/恢复原值（`saved=...; yield; restore=saved`）。
+   e. **验收结果**：py_compile 两文件通过；全套回归 **178 passed/2 skipped**（test_assembly/test_architecture/test_backtest/test_backtest_engines_v5/test_baseline_archive/test_guard_mounting/test_lookahead_wiring）；R-01a/b 真环基线 0 保持；R-19 零覆盖基线 35 不变（mixed_selftest 经测试 import 收录）；**基线对拍 rsrs×mixed 通过（EXIT=0，行为零变化）**。
+   f. **纪律遵守**：蓝图目录树先行登记（backtest/mixed_selftest.py）；纯搬移行为零变化，以基线对拍验证；自测代码归 myquant/backtest/mixed_selftest.py（业务运行时不 import）；mixed_engine.py 仅留薄 __main__ 入口（脚本薄入口纪律）；agent workspace 截断脚本/计数脚本不污染项目；git 提交（commit message 引用 #302）。
 
 

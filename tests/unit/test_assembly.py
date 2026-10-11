@@ -20,10 +20,11 @@ from myquant.models.backtest import BacktestConfig
 
 @pytest.fixture(autouse=True)
 def _reset_factory():
-    """每个用例前后复位全局注册表（隔离模块级状态）。"""
+    """每个用例前后复位全局注册表（隔离模块级状态；保存/恢复原值，不污染 conftest session fixture）。"""
+    saved = assembly._broker_factory
     assembly._broker_factory = None
     yield
-    assembly._broker_factory = None
+    assembly._broker_factory = saved
 
 
 def test_default_unregistered_is_none():
@@ -99,3 +100,10 @@ def test_reexport_register_broker_factory_from_engine():
     """engine.py re-export register_broker_factory 与 assembly 同一对象（外部调用方零改动）。"""
     from myquant.backtest import engine as engine_mod
     assert engine_mod.register_broker_factory is assembly.register_broker_factory
+
+
+def test_mixed_selftest_module_importable():
+    """mixed_selftest.py 可导入（R-19 零覆盖收录；P0-00A 第二刀抽离的自测模块）。"""
+    from myquant.backtest.mixed_selftest import _make_ohlcv, run_mixed_selftest
+    assert callable(run_mixed_selftest)
+    assert callable(_make_ohlcv)
