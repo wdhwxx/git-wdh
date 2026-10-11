@@ -1121,10 +1121,13 @@ class BacktestScheduler:
             manifest.set_field("snapshot_id", None)
             manifest.set_field("pool.pit_applied", True)
             manifest.set_field("pool.exclusion_basis", "as_of")
-            manifest.set_field("pool.requested_count", 0)
-            manifest.set_field("pool.admitted_count", 0)
-            manifest.set_field("pool.dropped_count", 0)
-            manifest.set_field("pool.drop_reasons", {})
+            # P0-06：注入真实样本口径（requested/admitted/dropped）
+            _req = len(self.config.symbols)
+            _adm = len(self.data) if isinstance(self.data, dict) else 0
+            manifest.set_field("pool.requested_count", _req)
+            manifest.set_field("pool.admitted_count", _adm)
+            manifest.set_field("pool.dropped_count", max(0, _req - _adm))
+            manifest.set_field("pool.drop_reasons", {} if _req == _adm else {"data_missing": _req - _adm})
             manifest.set_field("survivorship.discount", None)
             manifest.set_field("survivorship.window", "1y")
             manifest.set_field("survivorship.status", "unknown")

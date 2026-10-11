@@ -4659,4 +4659,10 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    c. **验收结果**：py_compile 通过；基线对拍通过（EXIT=0）；全套回归 **3907 passed/4 skipped**（+3 新增）。
    d. **纪律遵守**：蓝图目录树先行登记（models/ + tests/ 改动）；none=0 是显式合法零滑点（非静默）；未知值 fail-closed；git 提交（commit message 引用 #323）。**P0-05 完成**：静默零成本通道消灭。
 
+## #324 · 2026-10-11 · P0-06：pool 剔除量化字段注入 manifest
+   事实来源：本次落地（施工方案 v2.2 §4.1 P0-06）；代码级核验：pool.requested_count/admitted_count/dropped_count/drop_reasons 从空值改为真实计算。
+   a. **myquant/backtest/engine.py（改动，manifest pool 字段）**：requested_count = len(config.symbols)；admitted_count = len(self.data)（实际加载数据）；dropped_count = max(0, requested - admitted)；drop_reasons = {} 或 {"data_missing": N}。
+   b. **验收结果**：py_compile 通过；基线对拍通过（EXIT=0）；全套回归 **3907 passed/4 skipped**。
+   c. **纪律遵守**：蓝图目录树先行登记（backtest/ 改动）；真实值替代空值（行为零变化——只是 manifest 字段从 0 变为实际数字）；git 提交（commit message 引用 #324）。**P0-06 完成**：pool 剔除量化字段落盘。
+
 
