@@ -167,6 +167,14 @@ class StrategyContext:
 
     引擎在调用策略方法时传入，策略通过上下文访问数据、组合、执行器。
     回测/实盘切换时，上下文实现不同，但策略代码零修改。
+
+    P0-07 因果切片（v2.2 §4.1）：
+      - ``current_bar_ts``：当前 bar 时点（引擎逐 bar 推进）；
+        ``get_data`` 返回 ``index <= current_bar_ts`` 的切片视图（O(1) 不复制）。
+      - ``full_sample_declared``：全量逃生口（vectorized 目标持仓生成天然需要全量）；
+        True 时 get_data 返回全量，写入 manifest ``causality.full_sample_declared``（critical）。
+      - ``_slicing_enabled``：切片开关（引擎逐 bar 推进时置 True）；默认 False
+        保持向后兼容（现有策略自行截断，切片不改变其结果）。
     """
     data: Dict[str, pd.DataFrame] = field(default_factory=dict)
     portfolio: Any = None
@@ -174,9 +182,35 @@ class StrategyContext:
     clock: Any = None
     config: Dict[str, Any] = field(default_factory=dict)
     extra: Dict[str, Any] = field(default_factory=dict)
+    # P0-07 因果切片字段
+    current_bar_ts: Optional[pd.Timestamp] = None
+    full_sample_declared: bool = False
+    _slicing_enabled: bool = False
 
     def get_data(self, symbol: str) -> Optional[pd.DataFrame]:
-        return self.data.get(symbol)
+        """返回 symbol 的行情数据视图。
+
+        P0-07 因果切片语义：
+          - ``full_sample_declared=True``：返回全量（vectorized 逃生口）
+          - ``_slicing_enabled=True`` 且 ``current_bar_ts`` 已设置：返回
+            ``index <= current_bar_ts`` 的切片视图（O(1) pandas 视图，不复制）
+          - ``_slicing_enabled=True`` 但 ``current_bar_ts`` 未设置：fail-closed
+            返回空 DataFrame（迫使引擎逐 bar 设置时点，不允许静默全量）
+          - ``_slicing_enabled=False``（默认）：返回全量（向后兼容，现有策略
+            自行截断；切片上线后由引擎置 True）
+        """
+        df = self.data.get(symbol)
+        if df is None:
+            return None
+        if self.full_sample_declared:
+            return df
+        if not self._slicing_enabled:
+            return df
+        if self.current_bar_ts is None:
+            # fail-closed：切片开启但时点未设置 → 返回空（不允许静默全量）
+            return df.iloc[0:0]
+        # pandas 切片视图 O(1)，不触发 Copy-on-Write
+        return df.loc[:self.current_bar_ts]
 
     def get_position(self, symbol: str) -> Optional[Position]:
         if self.portfolio is None:

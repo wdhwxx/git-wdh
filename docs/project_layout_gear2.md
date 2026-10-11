@@ -4541,4 +4541,15 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    e. **验收结果**：py_compile 通过；全套回归 **3750 passed/4 skipped**（含预存 flaky 本次通过）；R-01a/b 真环基线 0；R-19 零覆盖基线更新（新模块均被 tests import 收录）；**基线对拍 rsrs×mixed 通过（EXIT=0，行为零变化）**。
    f. **纪律遵守**：蓝图目录树先行登记（realism_gate/checks/ + report.py）；L0 只依赖 core.audit_log + manifest + checks 同包（R-02/R-16）；软接线不阻断现有回测（enabled=false 起步，符合 v2.2 分期启用策略）；全字段采集（引擎实例真实生效值）在 P0-03/P0-05/P1 阶段补齐；git 提交（commit message 引用 #307）。**P0-01 本体完成**：manifest+gate+checks×4+report+引擎接线全通；后续 P0-03 行情规则真实生效值采集 / P0-05 费用真实生效值 / P0-07 因果切片 / P1-15 结果不变量。
 
+## #308 · 2026-10-11 · P0-07 第一刀：StrategyContext 因果切片逻辑（get_data 切片视图 + fail-closed + 全量逃生口）
+   事实来源：本次落地（施工方案 v2.2 §4.1 P0-07 设计要点 + P0-07 卡）；代码级核验：切片默认关闭（_slicing_enabled=False），现有策略行为零变化（全套 3757 passed）；切片开启后结构性证明 iloc[-1] 取不到未来 bar。
+   a. **myquant/strategies/base.py（改动，StrategyContext dataclass）**：新增三字段——`current_bar_ts: Optional[pd.Timestamp]`（引擎逐 bar 推进）/ `full_sample_declared: bool`（vectorized 全量逃生口）/ `_slicing_enabled: bool = False`（切片开关，默认关闭向后兼容）；重写 `get_data(symbol)`：
+      - full_sample_declared=True → 返回全量（vectorized 逃生口）
+      - _slicing_enabled=False（默认）→ 返回全量（现有策略自行截断，零变化）
+      - _slicing_enabled=True + current_bar_ts 已设 → `df.loc[:current_bar_ts]` 切片视图（O(1) pandas 视图不复制）
+      - _slicing_enabled=True + current_bar_ts 未设 → fail-closed 返回 `df.iloc[0:0]` 空（迫使引擎逐 bar 设置时点）
+   b. **tests/unit/test_causality_slicing.py（新建，7 项）**：R-19 收录 + 向后兼容（默认全量/缺失 symbol 返回 None）+ 切片开启（bar2 切片 3 行/iloc[-1] 取不到未来/首 bar 1 行）+ fail-closed（时点未设返回空）+ 全量逃生口（full_sample_declared 忽略切片时点返回全量）。
+   c. **验收结果**：py_compile 通过；test_causality_slicing 7 项全绿；全套回归 **3757 passed/4 skipped**（切片默认关闭，现有回测零影响）；R-01a/b 真环基线 0；R-19 零覆盖基线 +1（test_causality_slicing 被 tests import）。
+   d. **纪律遵守**：蓝图目录树先行登记（strategies/base.py 改动）；切片默认关闭不破坏现有回测（分期启用）；fail-closed 设计（切片开启但时点未设返回空，不允许静默全量）；O(1) pandas 视图不复制（性能验收 R-20）；git 提交（commit message 引用 #308）。**P0-07 后续刀**：event/mixed 引擎逐 bar 推进 current_bar_ts + 置切片开关 → vectorized 全量逃生口接线 → causality.* 字段真实取值写入 manifest。
+
 
