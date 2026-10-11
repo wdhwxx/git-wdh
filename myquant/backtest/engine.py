@@ -1130,10 +1130,14 @@ class BacktestScheduler:
             manifest.set_field("invariants.equity_identity", {})
             manifest.set_field("invariants.cash_non_negative", {})
             manifest.set_field("invariants.t1_consistency", {})
+            # ── P0-07 因果切片三字段真实取值（替换占位 False）──
+            # event/mixed：逐 bar 切片开启，current_bar_ts 逐 bar 推进
+            # vectorized：全量逃生口（full_sample_declared=True），不逐 bar 切片
+            _is_vectorized = (mode == "vectorized")
             manifest.update_group("causality", {
-                "context_sliced": False,
-                "current_bar_ts_enforced": False,
-                "full_sample_declared": False,
+                "context_sliced": not _is_vectorized,
+                "current_bar_ts_enforced": not _is_vectorized,
+                "full_sample_declared": _is_vectorized,
                 "guard_injected": True,
             })
             assert_realism_pass(manifest)

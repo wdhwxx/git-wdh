@@ -732,6 +732,13 @@ class MixedBacktestEngine:
         """事件信号模式（兼容）：on_bar -> List[Signal]（与 event 引擎一致）。"""
         if self.strategy is None or self.context is None:
             return
+        # ── P0-07 因果切片：逐 bar 推进 context.current_bar_ts + 开启切片 ──
+        # Bar.timestamp 是秒级 Unix float（time.time()），必须用 unit='s'
+        try:
+            self.context.current_bar_ts = pd.Timestamp(bar.timestamp, unit='s')
+            self.context._slicing_enabled = True
+        except Exception:
+            pass
         signals = self.strategy.on_bar(bar, self.context)
         if not signals:
             return

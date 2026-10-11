@@ -4566,4 +4566,12 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    c. **实测结论**：切片开启后现有策略行为零变化——因为 MACrossStrategy/kunpeng 已自行截断（`context.get_data()` 返回切片视图后策略再按 bar.timestamp 二次截断，幂等）；rsrs 策略对拍通过证明合法策略净值不变。切片现在结构性生效：策略通过 `context.get_data()` 拿不到未来 bar。
    d. **纪律遵守**：蓝图目录树先行登记；unit='s' 修复（时间戳单位正确性是因果切片的前提）；git 提交（commit message 引用 #310）。**P0-07 后续刀**：mixed/vectorized 引擎逐 bar 接线 → causality.* 三字段真实取值写入 manifest。
 
+## #311 · 2026-10-11 · P0-07 第四刀：mixed/vectorized 引擎接线 + causality.* 三字段真实取值写入 manifest
+   事实来源：本次落地（施工方案 v2.2 §4.1 P0-07 设计要点）；代码级核验：三引擎全部接线——event（#310）+ mixed（_execute_signals 策略调用前推进 current_bar_ts + 置切片开关）+ vectorized（context.full_sample_declared=True 全量逃生口）；manifest causality.* 三字段从占位 False 改为按引擎模式动态注入真实取值。
+   a. **myquant/backtest/mixed_engine.py（改动，_execute_signals）**：策略 on_bar 调用前插入 `context.current_bar_ts = pd.Timestamp(bar.timestamp, unit='s')` + `context._slicing_enabled = True`（try/except 防御）。
+   b. **myquant/backtest/vectorized_engine.py（改动，context 创建后）**：`context.full_sample_declared = True`——vectorized 目标持仓生成天然需要全量数据，走全量逃生口（写入 manifest causality.full_sample_declared，报告页披露）。
+   c. **myquant/backtest/engine.py（改动，manifest causality 分组）**：`update_group("causality", {...})` 从占位 False 改为按 resolved mode 动态注入——event/mixed：context_sliced=True / current_bar_ts_enforced=True / full_sample_declared=False；vectorized：context_sliced=False / current_bar_ts_enforced=False / full_sample_declared=True。
+   d. **验收结果**：py_compile 通过；全套回归 **3757 passed/4 skipped**；基线对拍 rsrs×mixed 通过（EXIT=0，净值零变化）。
+   e. **纪律遵守**：蓝图目录树先行登记；三引擎统一接线（event/mixed 逐 bar 切片 + vectorized 全量逃生口）；causality.* 真实取值替换占位（fail-closed 契约：不再恒 False）；git 提交（commit message 引用 #311）。**P0-07 完成**：因果切片从约定变成结构——策略通过 context.get_data() 拿不到未来 bar，vectorized 全量路径显式声明并披露。
+
 

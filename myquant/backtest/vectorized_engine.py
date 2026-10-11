@@ -269,6 +269,10 @@ class VectorizedBacktestEngine:
             config=self.config.to_dict(),
             extra={"engine_mode": "vectorized"},
         )
+        # ── P0-07 因果切片：vectorized 全量逃生口 ──
+        # 目标持仓生成天然需要全量数据，走 full_sample_declared=True
+        # （写入 manifest causality.full_sample_declared，在报告页披露）
+        context.full_sample_declared = True
         self.strategy.on_init(context)
 
         self._initialized = True
