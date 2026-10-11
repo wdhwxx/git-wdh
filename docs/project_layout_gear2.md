@@ -4592,4 +4592,12 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    b. **验收结果**：test_ledger_truth_source 5 passed（含红队用例）；全套回归 **3885 passed/4 skipped**（3884 + 1 红队）。
    c. **纪律遵守**：蓝图目录树先行登记（tests/ 改动）；方案 B（P0-02 无阻断列，降级为 contract R09 真实命中——策略未登记必报红）；真实台账+真实注册表路径（不 monkeypatch 台账）；git 提交（commit message 引用 #314）。**P1-02 完成**：真实出口红队用例就位（正向路径全通过 + 反向路径必抛错）。
 
+## #315 · 2026-10-11 · P1-03：fail-closed on misconfiguration（RealismGateConfig.from_dict 严格类型校验）
+   事实来源：本次落地（施工方案 v2.2 §4.1 P1-03）；代码级核验：from_dict 严格类型校验，enabled/audit_violations 非 bool 类型 → 抛 RealismGateError（不静默 bool() 转换）；段缺失传空 dict 用默认值（enabled=False, audit=True）。
+   a. **myquant/realism_gate/gate.py（改动，RealismGateConfig.from_dict）**：新增 `from_dict(rg_cfg)` 类方法——严格类型校验：enabled/audit_violations 非 bool 类型 → 抛 RealismGateError（携带 RealismViolation 明细）；段缺失（空 dict）→ 默认值（enabled=False, audit=True）；修复 bool("false")=True 隐患。
+   b. **myquant/backtest/engine.py（改动，create_engine 接线）**：`set_config(RealismGateConfig.from_dict(rg_cfg))` 替代原 `bool()` 转换。
+   c. **tests/unit/test_realism_gate.py（改动，追加 TestMisconfigurationFailClosed 5 项）**：enabled="false"（字符串）→ 抛错；enabled=1（int）→ 抛错；audit_violations="yes"（字符串）→ 抛错；空 dict → 默认值；正确 bool → 正常构造。
+   d. **验收结果**：py_compile 通过；test_realism_gate 23 passed；全套回归 **3890 passed/4 skipped**。
+   e. **纪律遵守**：蓝图目录树先行登记（realism_gate/ + backtest/ 改动）；fail-closed 配置校验（不静默类型转换）；段缺失不阻断（正常配置路径）；git 提交（commit message 引用 #315）。**P1-03 完成**：配置损坏拒绝启动，正常配置不破坏。
+
 

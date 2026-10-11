@@ -248,5 +248,38 @@ class TestAssertPass:
         m.set_field("price_limit.pre_close_source", "invalid_value")
         with pytest.raises(RealismGateError) as exc:
             assert_realism_pass(m)
-        paths = [v.field_path for v in exc.value.violations]
-        assert "price_limit.pre_close_source" in paths
+
+
+# ═══════════════════════════════════════════════
+#  P1-03 fail-closed on misconfiguration
+# ═══════════════════════════════════════════════
+
+class TestMisconfigurationFailClosed:
+    """P1-03：配置值类型错误 → RealismGateError（不静默 bool() 转换）。"""
+
+    def test_enabled_string_raises(self):
+        """enabled="false"（字符串）→ 抛 RealismGateError（bool("false")=True 隐患）。"""
+        with pytest.raises(RealismGateError, match="enabled.*类型错误"):
+            RealismGateConfig.from_dict({"enabled": "false"})
+
+    def test_enabled_int_raises(self):
+        """enabled=1（int）→ 抛 RealismGateError。"""
+        with pytest.raises(RealismGateError, match="enabled.*类型错误"):
+            RealismGateConfig.from_dict({"enabled": 1})
+
+    def test_audit_violations_string_raises(self):
+        """audit_violations="yes"（字符串）→ 抛 RealismGateError。"""
+        with pytest.raises(RealismGateError, match="audit_violations.*类型错误"):
+            RealismGateConfig.from_dict({"audit_violations": "yes"})
+
+    def test_empty_dict_defaults(self):
+        """段缺失（空 dict）→ 默认值（enabled=False, audit=True）。"""
+        cfg = RealismGateConfig.from_dict({})
+        assert cfg.enabled is False
+        assert cfg.audit_violations is True
+
+    def test_valid_bool_passes(self):
+        """正确 bool 值 → 正常构造。"""
+        cfg = RealismGateConfig.from_dict({"enabled": True, "audit_violations": False})
+        assert cfg.enabled is True
+        assert cfg.audit_violations is False

@@ -1076,10 +1076,8 @@ class BacktestScheduler:
 
             cfg_dict = config.to_dict() if hasattr(config, "to_dict") else {}
             rg_cfg = cfg_dict.get("realism_gate", {}) or {}
-            set_config(RealismGateConfig(
-                enabled=bool(rg_cfg.get("enabled", False)),
-                audit_violations=bool(rg_cfg.get("audit_violations", True)),
-            ))
+            # P1-03：严格类型校验（配置损坏 fail-closed，不静默 bool() 转换）
+            set_config(RealismGateConfig.from_dict(rg_cfg))
 
             manifest = RealismManifest()
             manifest.set_field("run_id", f"run_{id(config) & 0xFFFFFFFF:08x}")

@@ -63,6 +63,45 @@ class RealismGateConfig:
     enabled: bool = False
     audit_violations: bool = True
 
+    @classmethod
+    def from_dict(cls, rg_cfg: Dict[str, object]) -> "RealismGateConfig":
+        """从 YAML 配置段构造（P1-03 fail-closed on misconfiguration）。
+
+        严格类型校验：配置值类型错误（如 enabled="not_a_bool"）→ 抛
+        RealismGateError，不静默 bool() 转换（bool("false")=True 是隐患）。
+
+        Args:
+            rg_cfg: YAML 中 realism_gate 段（dict；段缺失传 {}）。
+
+        Raises:
+            RealismGateError: 配置值类型错误时（misconfiguration fail-closed）。
+        """
+        enabled_raw = rg_cfg.get("enabled", False)
+        if not isinstance(enabled_raw, bool):
+            raise RealismGateError(
+                f"realism_gate.enabled 类型错误: 期望 bool, 实际 {type(enabled_raw).__name__}"
+                f"（值={enabled_raw!r}）——配置损坏拒绝启动（P1-03 fail-closed）",
+                violations=[RealismViolation(
+                    field_path="realism_gate.enabled",
+                    critical=True,
+                    message=f"类型错误: 期望 bool, 实际 {type(enabled_raw).__name__}",
+                    actual_value=enabled_raw,
+                )],
+            )
+        audit_raw = rg_cfg.get("audit_violations", True)
+        if not isinstance(audit_raw, bool):
+            raise RealismGateError(
+                f"realism_gate.audit_violations 类型错误: 期望 bool, 实际 "
+                f"{type(audit_raw).__name__}（值={audit_raw!r}）——配置损坏拒绝启动",
+                violations=[RealismViolation(
+                    field_path="realism_gate.audit_violations",
+                    critical=True,
+                    message=f"类型错误: 期望 bool, 实际 {type(audit_raw).__name__}",
+                    actual_value=audit_raw,
+                )],
+            )
+        return cls(enabled=enabled_raw, audit_violations=audit_raw)
+
 
 _CONFIG: RealismGateConfig = RealismGateConfig()
 
