@@ -193,7 +193,7 @@ RAW_SCAN_LAYERS = {"L1", "L3", "L5"}
 RAW_ALLOWLIST = {"myquant/data_access/financial_sync_service.py"}
 
 # ═══════════════════════════ 2b) 入口白名单冻结（R-23，G0 收尾回写#256） ═══════════════════════════
-# 相对项目根；scripts/ 41 个（含 故障演练/灾备演练 子目录）+ 根目录 12 个 .py + 一键部署.bat。
+# 相对项目根；scripts/ 42 个（含 故障演练/灾备演练 子目录）+ 根目录 12 个 .py + 一键部署.bat。
 # 新增入口必须：先更新蓝图目录树（docs/project_layout_gear2.md）+ 本白名单，否则门禁红。
 ENTRY_ALLOWLIST: set[str] = {
     # scripts/（相对项目根，含子目录）
@@ -213,6 +213,7 @@ ENTRY_ALLOWLIST: set[str] = {
     "scripts/验收_B包保钱包.py", "scripts/验收_C包保Alpha.py", "scripts/验收_D包自治.py",
     "scripts/验收_回测引擎V5.py", "scripts/验收_监控M1保命.py",
     "scripts/验收_实盘安全门禁.py",  # 回写#287：实盘安全门禁验收薄入口（委托 myquant/acceptance/live_safety_gate.py）
+    "scripts/回测真实性基线.py",  # 回写#298：回测真实性基线建档/校验薄入口（委托 myquant/backtest/baseline_archive.py）
     # 根目录入口（.py + .bat）
     "run_GUI入口.py", "run_全量清洗GUI.py", "run_回测入口.py", "run_回测配置GUI.py",
     "run_实盘入口.py", "run_批量回测.py", "run_数据下载GUI.py", "run_清理GUI.py",

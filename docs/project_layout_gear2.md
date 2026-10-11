@@ -472,6 +472,8 @@ Pythonwdhmm/
 
 │   ├── 验收_实盘安全门禁.py         # ✨【回写#287】实盘安全门禁第0阶段验收薄入口：argparse（--out 默认 docs/监控档案/实盘安全门禁验收_<日期>.json + --mode + --select）+ _REPO_ROOT 探测 + sys.path 注入 + 调 myquant/acceptance/live_safety_gate.py（LiveSafetyGateRunner：0.1~0.9 + LIVE 门槛用例逐项断言），控制台逐项 PASS/FAIL + JSON 报告；业务逻辑零写入脚本
 
+│   ├── 回测真实性基线.py            # ✨【回写#298】回测真实性基线薄入口（P0-00 子步骤 B，v2.2 §4.8）：argparse（--config/--strategy/--engine/--out/--verify）+ _REPO_ROOT 探测 + sys.path 注入 + 调 myquant/backtest/baseline_archive.py（BaselineArchiver：策略×其支持引擎×当前配置基线建档 → outputs/realism_baseline/{strategy}_{engine}_{config_hash}.json；--verify 重跑对拍）；业务逻辑零写入脚本
+
 │   ├── 故障演练/季频故障演练.py      # ✨【回写#248】D-6 混沌工程与故障演练薄入口：argparse（--select FI-01…FI-07 + --out + --db + --list）+ _REPO_ROOT 探测 + sys.path 注入 + 调 myquant/monitoring/chaos_drill.py（复用 P0-8 FI-01~07 用例库，逐用例注入→MTTx 计时→TP/FP/FN 分类→复盘报告 JSON），季度演练落盘；业务逻辑零写入脚本；✨【回写#254】默认 --out 改项目根绝对路径（根治 scripts/ 子目录启动落 scripts/docs/ 分叉）+ 修复摘要键错用（summary['detected']→'cases_detected'，#248 存量 KeyError）
 
 │   ├── 灾备演练/年度灾备演练.py # ✨【回写#250】D-8 元监控与灾备薄入口：argparse（--out）+ _REPO_ROOT 探测 + sys.path 注入 + 调 myquant/monitoring/disaster_drill.py（SQLite 备份恢复/RabbitMQ 持久化恢复/告警通道切换/FI-07 临界网络不误判），控制台逐项 PASS/FAIL + JSON 报告；业务逻辑零写入脚本；✨【回写#254】默认 --out 改项目根绝对路径（根治 scripts/ 子目录启动落 scripts/docs/ 分叉）
@@ -617,6 +619,8 @@ Pythonwdhmm/
     │   │   ├── test_b_acceptance.py # ✨【回写#230】B-10 B 包验收测试（13 项）：九项检查逐项断言/隔离环境重建跨 run 去重/阈值真源引用/防未来时间戳/异常如实记录不吞✅已完成
 
     │   │   ├── test_live_safety_gate.py # ✨【回写#287】实盘安全门禁第0阶段验收测试：验收项逐项断言/隔离环境重建跨 run 去重/报告 JSON 可序列化字段齐全/异常不吞✅已完成
+
+    │   │   ├── test_baseline_archive.py # ✨【回写#298】基线净值档案模块测试（P0-00 子步骤 B，R-19 新模块必配测试）：config_hash 稳定性/规范化（同配置同哈希、运行元数据剔除、params 排序）；equity/trades 指纹敏感性（单点篡改即变）；build/write/load 往返（format_version/strategy/engine/config_hash 字段齐全）；verify_reproducible（相同结果 True、净值篡改超 0.5% False、成交笔数差超 5% False）✅已完成
 
     │   │   ├── test_signal_decay.py # ✨【回写#233】C-4 信号衰减监控测试：信号后收益滚动 IC/信号密度下降/连续无效信号占比计算；衰减超阈 P1/P2 预警（显式注入阈值演示，配置 None 不告警不编造）；衰减曲线数据可输出；防未来（只消费已发生信号-收益对）；防御校验✅已完成
 
@@ -1167,6 +1171,8 @@ Pythonwdhmm/
     │   └── dashboard_injector.py     # ✨【2026-09-13】看板数据注入器核心逻辑：§DATA区块精确定位+JS数据块构建+HTML注入+注入后验证；# 已废弃（未落盘），见回写记录·2026-09-14（磁盘无此文件，功能由 dashboard_serializer.render_dashboard 承担）
 
     │   ├── survivorship_bias.py      # ✨【回写#91】F-04 幸存者偏差评估器：audit_data_coverage（数据覆盖审计：DB/processed标的数、最后交易日分布、停牌近似池、退市覆盖声明）、estimate_survivorship_discount（偏差折价估计：区间等权收益对比「存续池 vs 存续池∪停牌近似池」，输出折价系数+披露口径，停牌风险下界）、build_point_in_time_pool（逐期存续池构建：as_of 时点最后交易日过滤，防未来=只用该时点已可得数据）；DB 只读查询+纯函数，供批量报告口径声明注入
+
+    │   ├── baseline_archive.py       # ✨【回写#298】基线净值档案业务模块（P0-00 子步骤 B，v2.2 §4.8）：BaselineArchiver——compute_config_hash（BacktestConfig 规范化 sha256，剔除运行时间戳/run_id）/compute_equity_hash（净值序列逐点 sha256）/compute_trades_fingerprint（成交明细业务字段 sha256）/build_baseline（strategy×engine×config_hash 档案 payload）/write/load/verify_reproducible（同配置重跑对拍：净值 max abs diff ≤0.5% 且成交笔数差 ≤5%，超阈即回归信号）；event 路径 broker 工厂装配（SimBroker 与 engine.py 自测 Demo 同构）；供 scripts/回测真实性基线.py 薄入口调用；L 层纯业务不反向 import
 
 
 
@@ -4397,5 +4403,14 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    d. **蓝图目录树登记（回写#297）**：myquant/live/ 段新增 kill_switch_signal.py、tests/unit 段新增 test_kill_switch_signal.py，均带 ✨【回写#297】。
    e. **验收结果**：tests/unit/test_kill_switch_signal.py 10/10 通过；架构门禁无新增违规（新模块纯 stdlib 无跨层 import，行数 < OVERSIZE_LIMIT）；全量回归无回归。
    f. **纪律遵守**：业务逻辑归 myquant（kill_switch_signal.py 为 live/ 段业务模块）；新建文件先登记蓝图目录树再建；阈值/路径引用真源（kill_switch.flag 与 0.9 同源、超时引用 P0-8，不新造数）；防御式（原子写、异常降级按未置位处理不误判）；git 提交（commit message 引用 #297）。
+
+## #298 · 2026-10-11 · P0-00 子步骤 B：基线净值档案施工（v2.2 §4.8，M0 首张施工卡）
+   事实来源：本次落地（v2.2 §4.8 + 任务清单 P0-00 卡）；代码级核验：BaselineArchiver 建档/对拍闭环真实运行（rsrs×mixed 建档 + 重跑对拍通过）；验收判据全部实测满足。
+   a. **myquant/backtest/baseline_archive.py（新建，回写#298）**：基线净值档案业务模块——compute_config_hash（BacktestConfig.to_dict 规范化 sha256，运行元数据天然不入 to_dict）、compute_equity_hash（equity_curve 逐点 6 业务字段序列 sha256）、compute_trades_fingerprint（成交明细 14 业务字段序列 sha256，**剔除 trade_id**：uuid4 运行期随机主键 models/trade.py:485，R-19 实测 6695 笔全部不同，与 run_id 同类不稳定字段）、build_baseline（format_version/strategy/engine/config_hash/equity_curve_hash/trades_fingerprint/metrics/summary，运行元数据不入档）、write/load、verify_reproducible（对拍判据：config_hash+equity_hash+trades_fingerprint 位级一致 且 净值最终值 max abs diff ≤0.5% 且 成交笔数差 ≤5% 且 净值点数一致）；run_backtest_once 复用官方装配链（ConfigLoader→build_backtest_config→create_strategy→HistoricalDataProvider→lookahead_guard.reset→leakage_gate 配置注入→BacktestScheduler.create_engine→run→guard.assert_pass）；broker_factory 装配责任在调用方（入口脚本），本模块零 L4 反向 import（分层 R-02 合规）；L 层纯业务。
+   b. **scripts/回测真实性基线.py（新建，回写#298）**：薄入口——argparse（--config/--strategy/--engine/--out/--verify/--list）+ _PROJECT_ROOT 探测 + sys.path 注入 + 委托 BaselineArchiver；SimBroker 工厂装配在入口（与 engine.py 自测 Demo 同构，event 路径 G1 EX-09A 需要）；退出码 0=通过/2=判红或失败；业务逻辑零写入脚本。
+   c. **tests/unit/test_baseline_archive.py（新建，21 项）**：config_hash 稳定性/64hex/params 敏感性；净值指纹单点篡改即变；成交指纹单点篡改即变 + trade_id 随机不影响指纹；baseline 字段齐全/无运行元数据；write/load 往返/JSON 合法/缺文件抛错；verify_reproducible 相同通过/净值篡改判红/成交笔数差超阈判红/最终净值差超阈判红/阈值暴露；防御式（无 to_dict 抛 AttributeError、缺 config_hash 抛 KeyError）✅已完成
+   d. **架构门禁更新（回写#298）**：test_architecture.py ENTRY_ALLOWLIST 登记 scripts/回测真实性基线.py（scripts/ 41→42 个注释同步）；无新增跨层违规（broker 装配在 scripts/ 入口，R-02 只查 myquant/）；无新增 Oversize。
+   e. **验收结果**：单测 21/21 通过；架构门禁 30 passed 无回归；真实建档 rsrs×mixed → outputs/realism_baseline/rsrs_mixed_{config_hash}.json（equity 2056846 点、trades 6695 笔、final_equity 0.92577，净值/成交/指标与 R-19 实测一致）；重跑对拍通过（同配置重跑 → [对拍] rsrs/mixed: 通过，退出码 0）；**门禁反证**：trade_id 未剔除时同配置重跑判红（6695/6695 条 trade_id 全不同），剔除后通过——实证"能变红 + 不误伤"两条验收判据。
+   f. **纪律遵守**：先更新蓝图目录树登记再建文件（治理规则 1.1）；业务逻辑归 myquant（薄入口零业务）；broker 工厂装配在入口层（分层 R-02 合规，装配责任在调用方）；阈值引用 v2.2 §4.8 常量（EQUITY_MAX_ABS_DIFF=0.005 / TRADE_COUNT_DIFF_RATIO=0.05）；outputs/realism_baseline 产物被 .gitignore 排除不入库（同 R-19 惯例）；git 提交（commit message 引用 #298）。
 
 
