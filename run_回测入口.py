@@ -336,6 +336,21 @@ def run_backtest(args: argparse.Namespace) -> int:
         )
 
     # ── 8. 创建回测引擎（三模式调度，从DataProvider加载数据）──
+    # P1-18：注册 broker factory（event 路径需要，否则 event 模式必崩）
+    from myquant.backtest.engine import register_broker_factory
+    from myquant.execution.sim_broker import SimBroker
+
+    def _broker_factory(config):
+        return SimBroker(
+            initial_capital=config.initial_capital,
+            commission_model=config.commission,
+            slippage_model=config.slippage,
+            price_limit_pct=float(config.price_limit_pct),
+            enforce_limit=bool(config.enforce_limit),
+            is_suspended=None,
+        )
+
+    register_broker_factory(_broker_factory)
     try:
         from myquant.backtest.engine import BacktestScheduler
         scheduler = BacktestScheduler(mode=engine_mode)

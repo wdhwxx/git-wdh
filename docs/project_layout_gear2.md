@@ -4671,4 +4671,10 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    b. **验收结果**：py_compile 通过；基线对拍通过（EXIT=0，enabled=False 行为不变）；全套回归 **3907 passed/4 skipped**。
    c. **纪律遵守**：蓝图目录树先行登记（backtest/ 改动）；enabled=False 向后兼容（当前配置默认）；enabled=True 时硬阻断（P1-05 验收：违规 → 非零退出）；git 提交（commit message 引用 #325）。**P1-05/P1-06 完成**：门禁异常不再被吞。
 
+## #326 · 2026-10-11 · P1-18：run_回测入口注册 broker factory
+   事实来源：本次落地（施工方案 v2.2 §4.1 P1-18）；代码级核验：run_回测入口.py 在 create_engine 前注册 broker factory（event 路径必需，否则 event 模式必崩）。
+   a. **run_回测入口.py（改动，注册 broker factory）**：create_engine 前调用 `register_broker_factory(_broker_factory)`——装配 SimBroker（从 BacktestConfig 显式字段取 price_limit_pct/enforce_limit）。
+   b. **验收结果**：py_compile 通过；基线对拍通过（EXIT=0）；全套回归 **3907 passed/4 skipped**。
+   c. **纪律遵守**：蓝图目录树先行登记（入口脚本改动）；从显式字段取参（P0-03 统一键名）；git 提交（commit message 引用 #326）。**P1-18 完成**：event 模式可启动。
+
 
