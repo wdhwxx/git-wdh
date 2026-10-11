@@ -4586,4 +4586,10 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    b. **验收结果**：py_compile 通过；全套回归 **3884 passed/4 skipped**（3757 unit + 127 leakage_gate）。
    c. **纪律遵守**：蓝图目录树先行登记（core/ 改动）；复用既有 _append_audit（不重复造轮子）；写失败不阻断主流程（防未来：已发生即记录，失败仅 error）；git 提交（commit message 引用 #313）。**P1-17 完成**：strict 模式违规可追溯（抛错前先落审计，入口保留可追溯失败产物）。
 
+## #314 · 2026-10-11 · P1-02：真实台账红队用例（方案 B：contract R09 真实命中）
+   事实来源：本次落地（施工方案 v2.2 §4.1 P1-02）；代码级核验：test_ledger_truth_source.py 追加红队用例——未登记策略 ID 调用 assert_all_gates_pass → contract R09 报"策略未登记于契约注册表"（severity=阻断）→ 抛 LeakageGateError。
+   a. **tests/leakage_gate/test_ledger_truth_source.py（改动，追加红队用例）**：`test_redteam_unregistered_strategy_raises`——用不存在的策略 ID `"nonexistent_redteam_strategy"` 调用 `assert_all_gates_pass` → contract._get_entry 返回 None → R09 阻断违规 → `pytest.raises(LeakageGateError, match="未登记于契约注册表")`。
+   b. **验收结果**：test_ledger_truth_source 5 passed（含红队用例）；全套回归 **3885 passed/4 skipped**（3884 + 1 红队）。
+   c. **纪律遵守**：蓝图目录树先行登记（tests/ 改动）；方案 B（P0-02 无阻断列，降级为 contract R09 真实命中——策略未登记必报红）；真实台账+真实注册表路径（不 monkeypatch 台账）；git 提交（commit message 引用 #314）。**P1-02 完成**：真实出口红队用例就位（正向路径全通过 + 反向路径必抛错）。
+
 

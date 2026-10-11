@@ -103,3 +103,20 @@ def test_inject_eps_passes_after_fix(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda _sid: 'def generate_signal(df):\n    eps = df["每股收益"]\n    return eps',
     )
     assert_all_gates_pass(strategy_id="rsrs", decision_time=_DECISION_TIME)
+
+
+# ═══════════════════════════════════════════════
+#  P1-02 红队用例：真实出口断言抛错（方案 B：contract/static_scan 真实命中）
+# ═══════════════════════════════════════════════
+
+def test_redteam_unregistered_strategy_raises() -> None:
+    """红队：未登记于契约注册表的策略 ID → contract R09 阻断 → 抛 LeakageGateError。
+
+    P1-02 方案 B（P0-02 无阻断列，降级为 contract 真实命中）：
+    真实台账 + 真实注册表下，注入不存在的策略 ID → contract._get_entry 返回 None
+    → R09 报"策略未登记于契约注册表"（severity=阻断）→ assert_all_gates_pass 抛错。
+    """
+    contract_ensure_registered()
+    consumption_ensure_registered()
+    with pytest.raises(LeakageGateError, match="未登记于契约注册表"):
+        assert_all_gates_pass(strategy_id="nonexistent_redteam_strategy", decision_time=_DECISION_TIME)
