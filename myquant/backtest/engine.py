@@ -1148,7 +1148,12 @@ class BacktestScheduler:
             })
             assert_realism_pass(manifest)
             self._realism_manifest = manifest
-        except Exception as rg_e:  # noqa: BLE001 软接线：不阻断现有回测
+        except Exception as rg_e:  # noqa: BLE001
+            # P1-05：enabled=True 时不吞门禁异常（违规 → 传播导致非零退出）；
+            # enabled=False 时保持软接线（仅审计不阻断）。
+            _rg_cfg = RealismGateConfig.from_dict(cfg_dict.get("realism_gate", {}) or {})
+            if _rg_cfg.enabled:
+                raise
             logger.debug(f"真实性门禁软接线（不阻断）: {type(rg_e).__name__}: {rg_e}")
             self._realism_manifest = None
 

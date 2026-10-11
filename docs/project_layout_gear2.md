@@ -4665,4 +4665,10 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    b. **验收结果**：py_compile 通过；基线对拍通过（EXIT=0）；全套回归 **3907 passed/4 skipped**。
    c. **纪律遵守**：蓝图目录树先行登记（backtest/ 改动）；真实值替代空值（行为零变化——只是 manifest 字段从 0 变为实际数字）；git 提交（commit message 引用 #324）。**P0-06 完成**：pool 剔除量化字段落盘。
 
+## #325 · 2026-10-11 · P1-05/P1-06：门禁异常不吞（enabled=True 时传播）
+   事实来源：本次落地（施工方案 v2.2 §4.1 P1-05/P1-06）；代码级核验：create_engine 门禁 try/except 里，enabled=True 时 re-raise（不吞），enabled=False 时保持软接线。
+   a. **myquant/backtest/engine.py（改动，门禁异常处理）**：except 块内检查 `RealismGateConfig.from_dict(rg_cfg).enabled`——True 时 `raise`（传播导致非零退出）；False 时保持 debug 日志 + 软接线。
+   b. **验收结果**：py_compile 通过；基线对拍通过（EXIT=0，enabled=False 行为不变）；全套回归 **3907 passed/4 skipped**。
+   c. **纪律遵守**：蓝图目录树先行登记（backtest/ 改动）；enabled=False 向后兼容（当前配置默认）；enabled=True 时硬阻断（P1-05 验收：违规 → 非零退出）；git 提交（commit message 引用 #325）。**P1-05/P1-06 完成**：门禁异常不再被吞。
+
 
