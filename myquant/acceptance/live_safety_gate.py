@@ -1058,8 +1058,8 @@ class LiveSafetyGateRunner:
                     initial_capital=cfg.initial_capital,
                     commission_model=cfg.commission,
                     slippage_model=cfg.slippage,
-                    price_limit_pct=float(cfg.to_dict().get("price_limit_pct", 0.10)),
-                    enforce_limit=bool(cfg.to_dict().get("enforce_limit", False)),
+                    price_limit_pct=float(cfg.price_limit_pct),
+                    enforce_limit=bool(cfg.enforce_limit),
                     is_suspended=None,
                 )
             )

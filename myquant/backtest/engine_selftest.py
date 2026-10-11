@@ -162,13 +162,12 @@ if __name__ == "__main__":
     from myquant.execution.sim_broker import SimBroker
 
     def _selftest_broker_factory(config: BacktestConfig) -> Any:
-        _bcfg = config.to_dict()
         return SimBroker(
             initial_capital=config.initial_capital,
             commission_model=config.commission,
             slippage_model=config.slippage,
-            price_limit_pct=float(_bcfg.get("price_limit_pct", 0.10)),
-            enforce_limit=bool(_bcfg.get("enforce_limit", False)),
+            price_limit_pct=float(config.price_limit_pct),
+            enforce_limit=bool(config.enforce_limit),
             is_suspended=None,
         )
 

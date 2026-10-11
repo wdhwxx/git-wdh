@@ -35,16 +35,16 @@ def backtest_broker_factory(config: Any) -> Any:
 
     测试会话与进程池子进程（ParamOptimizer/BatchBacktester 并行评估）共用；
     tests 层引用 SimBroker 属合法装配（不在 myquant 分层违规扫描内）。
+    P0-03：从 BacktestConfig 显式字段取参（替代 .to_dict().get()）。
     """
     from myquant.execution.sim_broker import SimBroker
 
-    _bcfg = config.to_dict()
     return SimBroker(
         initial_capital=config.initial_capital,
         commission_model=config.commission,
         slippage_model=config.slippage,
-        price_limit_pct=float(_bcfg.get("price_limit_pct", 0.10)),
-        enforce_limit=bool(_bcfg.get("enforce_limit", False)),
+        price_limit_pct=float(config.price_limit_pct),
+        enforce_limit=bool(config.enforce_limit),
         is_suspended=None,
     )
 

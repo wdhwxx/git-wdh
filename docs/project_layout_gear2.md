@@ -4613,4 +4613,12 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    c. **验收结果**：py_compile 通过；基线对拍通过（EXIT=0）；全套回归 **3890 passed/4 skipped**。
    d. **纪律遵守**：蓝图目录树先行登记（models/ 改动）；默认值与原 extra dict 读取路径一致（行为零变化）；git 提交（commit message 引用 #317）。**P0-03 第一刀完成**：显式字段就位，后续刀从配置取参替代 extra dict。
 
+## #318 · 2026-10-11 · P0-03 第二刀：消费点迁移（.to_dict().get() → 显式字段直读）
+   事实来源：本次落地（施工方案 v2.2 §4.1 P0-03）；代码级核验：3 处 broker 工厂装配点从 `config.to_dict().get("price_limit_pct", 0.10)` 改为 `config.price_limit_pct` 直读。
+   a. **tests/conftest.py（改动，backtest_broker_factory）**：`_bcfg = config.to_dict()` 删除，改为 `price_limit_pct=float(config.price_limit_pct)` / `enforce_limit=bool(config.enforce_limit)`。
+   b. **myquant/backtest/engine_selftest.py（改动，_selftest_broker_factory）**：同上迁移。
+   c. **myquant/acceptance/live_safety_gate.py（改动，lambda 装配）**：同上迁移。R-24 薄化冻结：不加注释行，保持行数 1749 不变。
+   d. **验收结果**：py_compile 通过；R-24 薄化冻结通过（行数未增）；全套回归 **3890 passed/4 skipped**。
+   e. **纪律遵守**：蓝图目录树先行登记（tests/ + backtest/ + acceptance/ 改动）；R-24 薄化冻结只减不增（不加注释行）；默认值与原 .to_dict().get() 一致（行为零变化）；git 提交（commit message 引用 #318）。**P0-03 第二刀完成**：消费点从 extra dict 迁移到显式字段。
+
 
