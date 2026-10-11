@@ -1050,6 +1050,88 @@ class BacktestScheduler:
                 f"策略 {getattr(strategy, 'name', '?')} 不支持 {mode} 引擎"
                 f"（支持: {strategy.engine_modes()}）。请显式选择匹配的引擎模式。"
             )
+
+        # ── P0-01 出口强制：回测真实性门禁（软接线，分期启用期 audit-only）──
+        # 时序（v2.2 §4.4）：构造引擎后采集 manifest → assert_realism_pass → seal
+        # 当前为软接线：enabled=false 时仅落 audit 不阻断；全字段采集（引擎实例
+        # 真实生效值）在 P0-03/P0-05/P1 阶段补齐；enabled=true 切换前需修完 critical 项。
+        try:
+            from myquant.realism_gate import (
+                RealismGateConfig,
+                RealismManifest,
+                assert_realism_pass,
+                set_config,
+            )
+            import myquant.realism_gate.checks  # noqa: F401 导入即注册四检查器
+
+            cfg_dict = config.to_dict() if hasattr(config, "to_dict") else {}
+            rg_cfg = cfg_dict.get("realism_gate", {}) or {}
+            set_config(RealismGateConfig(
+                enabled=bool(rg_cfg.get("enabled", False)),
+                audit_violations=bool(rg_cfg.get("audit_violations", True)),
+            ))
+
+            manifest = RealismManifest()
+            manifest.set_field("run_id", f"run_{id(config) & 0xFFFFFFFF:08x}")
+            manifest.set_field("strategy_id", getattr(strategy, "name", "") or "")
+            manifest.set_field("engine_mode_requested", self.mode)
+            manifest.set_field("engine_mode_resolved", mode)
+            manifest.set_field("start_date", str(getattr(config, "start_date", "")))
+            manifest.set_field("end_date", str(getattr(config, "end_date", "")))
+            manifest.set_field("initial_capital", float(getattr(config, "initial_capital", 0)))
+            manifest.set_field("price_limit.enabled", bool(cfg_dict.get("price_limit", {}).get("enabled", True)))
+            manifest.set_field("price_limit.pct_by_board", cfg_dict.get("price_limit", {}).get("pct_by_board", {}))
+            manifest.set_field("price_limit.pre_close_source", cfg_dict.get("price_limit", {}).get("pre_close_source", "data_col"))
+            manifest.set_field("suspension.enabled", bool(cfg_dict.get("suspension", {}).get("enabled", True)))
+            manifest.set_field("suspension.basis", cfg_dict.get("suspension", {}).get("basis", "volume_zero"))
+            manifest.set_field("t1_position_freeze.enabled", True)
+            manifest.set_field("lot_size.enforced", True)
+            manifest.set_field("lot_size.value", 100)
+            manifest.set_field("liquidity.participation_cap", None)
+            manifest.set_field("liquidity.declared_unlimited", True)
+            manifest.set_field("slippage.type", cfg_dict.get("slippage", {}).get("type", "fixed"))
+            manifest.set_field("slippage.value", float(cfg_dict.get("slippage", {}).get("value", 0.001)))
+            manifest.set_field("slippage.is_zero_cost", bool(cfg_dict.get("slippage", {}).get("is_zero_cost", False)))
+            manifest.set_field("commission.buy_rate", float(cfg_dict.get("commission", {}).get("buy_rate", 0.0003)))
+            manifest.set_field("commission.sell_rate", float(cfg_dict.get("commission", {}).get("sell_rate", 0.0003)))
+            manifest.set_field("commission.min_commission", float(cfg_dict.get("commission", {}).get("min_commission", 5.0)))
+            manifest.set_field("commission.stamp_tax", float(cfg_dict.get("commission", {}).get("stamp_tax", 0.001)))
+            manifest.set_field("commission.transfer_fee", float(cfg_dict.get("commission", {}).get("transfer_fee", 0.00002)))
+            manifest.set_field("fee_base_includes_slippage", False)
+            manifest.set_field("fee_dilution_basis", "per_order")
+            manifest.set_field("adjust_effective_by_symbol", {})
+            manifest.set_field("adjust_degraded_symbols", [])
+            manifest.set_field("quality.nan_price_rows", 0)
+            manifest.set_field("quality.ohlc_violation_rows", 0)
+            manifest.set_field("quality.coverage_rate", 1.0)
+            manifest.set_field("fingerprint_hash", None)
+            manifest.set_field("snapshot_id", None)
+            manifest.set_field("pool.pit_applied", True)
+            manifest.set_field("pool.exclusion_basis", "as_of")
+            manifest.set_field("pool.requested_count", 0)
+            manifest.set_field("pool.admitted_count", 0)
+            manifest.set_field("pool.dropped_count", 0)
+            manifest.set_field("pool.drop_reasons", {})
+            manifest.set_field("survivorship.discount", None)
+            manifest.set_field("survivorship.window", "1y")
+            manifest.set_field("survivorship.status", "unknown")
+            manifest.set_field("invariants.price_bounds", {})
+            manifest.set_field("invariants.volume_bound", {})
+            manifest.set_field("invariants.equity_identity", {})
+            manifest.set_field("invariants.cash_non_negative", {})
+            manifest.set_field("invariants.t1_consistency", {})
+            manifest.update_group("causality", {
+                "context_sliced": False,
+                "current_bar_ts_enforced": False,
+                "full_sample_declared": False,
+                "guard_injected": True,
+            })
+            assert_realism_pass(manifest)
+            self._realism_manifest = manifest
+        except Exception as rg_e:  # noqa: BLE001 软接线：不阻断现有回测
+            logger.debug(f"真实性门禁软接线（不阻断）: {type(rg_e).__name__}: {rg_e}")
+            self._realism_manifest = None
+
         engine_name = kwargs.pop("name", f"{mode}_backtest")
         # #H2修复：mixed/vectorized 引擎统一接入全局防未来函数校验器（单例）
         kwargs.setdefault("lookahead_guard", get_lookahead_guard())

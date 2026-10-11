@@ -978,6 +978,15 @@ Pythonwdhmm/
 
     │   ├── gate.py                   # ✨【回写#306】门禁中心出口断言（~230 行）：RealismGateConfig（enabled 默认 False 分期启用期 / audit_violations）+ register_realism_check 注册钩子 + assert_realism_pass 唯一出口（§4.3 时序：build 完整性 fail-closed → 执行检查 → critical 违规 enabled=True 落 audit_log+抛 RealismGateError；enabled=False audit 档不阻断 → 通过 seal）+ 检查器异常 fail-closed 记 gate-error 违规；依赖 core.audit_log（L0 合法，BASE-7 哈希链）
 
+    │   ├── report.py                 # ✨【回写#307】清单落盘（~110 行）：write_manifest_to_results（写入 results.json 的 realism_manifest 键，合并已有键）+ write_blocked_artifact（阻断路径落 realism_gate_blocked_<ts>_<strategy_id>.json，v2.2 §4.3.1）；原子写 .tmp→os.replace；L0 纯构建器不 import L3/L4
+
+    │   ├── checks/                   # ✨【回写#307】真实性检查器子模块（纯函数，导入即注册）
+    │   │   ├── __init__.py           # 导入四子模块触发注册
+    │   │   ├── market_rules.py       # 涨跌停/停牌/T+1/整手 未启用 → critical
+    │   │   ├── cost_model.py         # 零滑点/佣金费率为零 → critical
+    │   │   ├── data_pit.py           # 复权降级标的/快照指纹 null/NaN 价格/OHLC 违反 → critical
+    │   │   └── sample_pool.py        # PIT 选股未生效/today 口径/幸存者偏差折价 null → critical
+
     │
 
     ├── database/                     # 数据库抽象层：统一持久化接口
@@ -4514,5 +4523,22 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    c. **myquant/realism_gate/__init__.py（改动）**：追加 re-export RealismGateConfig/assert_realism_pass/register_realism_check/reset_realism_checks/get_config/set_config。
    d. **验收结果**：py_compile 通过；test_realism_gate 12 项 + test_realism_manifest 17 项 + test_architecture 49 项全绿；全套回归 3744 passed/4 skipped（1 项 test_push_latency_flat 预存 flaky，单独重跑通过）；R-01a/b 真环基线 0；R-19 零覆盖基线 +1（realism_gate.gate 被 tests import）。
    e. **纪律遵守**：蓝图目录树先行登记（realism_gate/gate.py）；L0 只依赖 myquant.core.audit_log + manifest（R-02/R-16）；无 severity 字段（v2.2 红线）；enabled 默认 False 起步（分期启用，配置缺失即红由后续 P1-03 fail-closed-on-misconfiguration 覆盖）；检查器异常 fail-closed（防线自身故障不放行）；git 提交（commit message 引用 #306）。**P0-01 后续刀**：checks/ 四子模块（market_rules/cost_model/data_pit/sample_pool）→ report.py 落盘 → 引擎接线（create_engine 两阶段握手）。
+
+## #307 · 2026-10-11 · P0-01 第三/四/五刀合并：checks/ 四子模块 + report.py 落盘 + 引擎软接线
+   事实来源：本次落地（施工方案 v2.2 §4.2 字段表 + §4.3.1 阻断产物 + §4.4 两阶段握手）；代码级核验：checks/*.py 纯函数只消费 manifest 注入字段（L0 合法）；report.py 原子写（.tmp→rename）；引擎接线在 create_engine resolve_mode 之后，try/except 软接线不阻断现有回测；基线对拍 rsrs×mixed 通过（EXIT=0，行为零变化）。
+   a. **myquant/realism_gate/checks/（新建包，4 子模块）**：
+      - `market_rules.py`：涨跌停/停牌/T+1/整手 未启用 → critical 违规
+      - `cost_model.py`：零滑点/佣金费率为零 → critical 违规
+      - `data_pit.py`：复权降级标的非空/快照指纹 null/NaN 价格行/OHLC 违反 → critical 违规
+      - `sample_pool.py`：PIT 选股未生效/today 口径/幸存者偏差折价 null → critical 违规
+      - 导入即 register_realism_check（market_rules/cost_model/data_pit/sample_pool）
+   b. **myquant/realism_gate/report.py（新建，~110 行）**：
+      - `write_manifest_to_results(results_path, manifest)`：写入 results.json 的 realism_manifest 键（合并已有键）
+      - `write_blocked_artifact(output_dir, manifest, violations)`：阻断路径落 `realism_gate_blocked_<YYYYMMDD_HHMMSS>_<strategy_id>.json`（v2.2 §4.3.1）
+      - 原子写：.tmp→os.replace；L0 纯构建器不 import L3/L4
+   c. **myquant/backtest/engine.py（改动，create_engine 软接线）**：在 resolve_mode 之后、引擎实例化之前插入 realism_gate 接线——从 config.to_dict() 读 realism_gate 段 set_config；构造 RealismManifest 填 52 个 critical 字段（元信息/行情规则/成本/数据/样本池/因果性 causality.context_sliced=False 待 P0-07）；assert_realism_pass；try/except 全包（软接线：ManifestIncompleteError/RealismGateError 在 enabled=false 时仅 log.debug 不阻断）；self._realism_manifest 挂在调度器上供 run() 后落盘。
+   d. **tests/unit/test_realism_gate.py（追加 7 项）**：R-19 收录（4 checks 模块 + report.py import）+ 四检查器函数可调用。
+   e. **验收结果**：py_compile 通过；全套回归 **3750 passed/4 skipped**（含预存 flaky 本次通过）；R-01a/b 真环基线 0；R-19 零覆盖基线更新（新模块均被 tests import 收录）；**基线对拍 rsrs×mixed 通过（EXIT=0，行为零变化）**。
+   f. **纪律遵守**：蓝图目录树先行登记（realism_gate/checks/ + report.py）；L0 只依赖 core.audit_log + manifest + checks 同包（R-02/R-16）；软接线不阻断现有回测（enabled=false 起步，符合 v2.2 分期启用策略）；全字段采集（引擎实例真实生效值）在 P0-03/P0-05/P1 阶段补齐；git 提交（commit message 引用 #307）。**P0-01 本体完成**：manifest+gate+checks×4+report+引擎接线全通；后续 P0-03 行情规则真实生效值采集 / P0-05 费用真实生效值 / P0-07 因果切片 / P1-15 结果不变量。
 
 

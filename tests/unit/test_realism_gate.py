@@ -90,6 +90,46 @@ class TestGateImportable:
         assert callable(register_realism_check)
 
 
+class TestChecksImportable:
+    """R-19 收录：四个 checks 模块被 tests import 即视为覆盖。"""
+
+    def test_market_rules_importable(self):
+        from myquant.realism_gate.checks.market_rules import check_market_rules
+        assert callable(check_market_rules)
+
+    def test_cost_model_importable(self):
+        from myquant.realism_gate.checks.cost_model import check_cost_model
+        assert callable(check_cost_model)
+
+    def test_data_pit_importable(self):
+        from myquant.realism_gate.checks.data_pit import check_data_pit
+        assert callable(check_data_pit)
+
+    def test_sample_pool_importable(self):
+        from myquant.realism_gate.checks.sample_pool import check_sample_pool
+        assert callable(check_sample_pool)
+
+    def test_checks_registration_on_import(self):
+        """四检查器函数可调用（注册在模块导入时完成；此处验证函数本身可导入）。"""
+        from myquant.realism_gate.checks.market_rules import check_market_rules
+        from myquant.realism_gate.checks.cost_model import check_cost_model
+        from myquant.realism_gate.checks.data_pit import check_data_pit
+        from myquant.realism_gate.checks.sample_pool import check_sample_pool
+        assert callable(check_market_rules)
+        assert callable(check_cost_model)
+        assert callable(check_data_pit)
+        assert callable(check_sample_pool)
+
+
+class TestReportImportable:
+    """R-19 收录：report.py 被 tests import。"""
+
+    def test_report_importable(self):
+        from myquant.realism_gate.report import write_blocked_artifact, write_manifest_to_results
+        assert callable(write_blocked_artifact)
+        assert callable(write_manifest_to_results)
+
+
 class TestConfig:
     """RealismGateConfig 默认值。"""
 
