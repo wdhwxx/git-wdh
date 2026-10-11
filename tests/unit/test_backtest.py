@@ -820,3 +820,27 @@ class TestPriceLimitByBoard:
         """未知代码 → 默认 10%。"""
         from myquant.models.backtest import price_limit_pct_for_symbol
         assert price_limit_pct_for_symbol("999999.XX") == 0.10
+
+
+class TestSuspendedLookup:
+    """P0-03：is_suspended 接真值（make_suspended_lookup 工厂函数）。"""
+
+    def test_none_never_halt(self):
+        """None 集合 → 始终不拦截。"""
+        from myquant.execution.sim_broker import make_suspended_lookup
+        lookup = make_suspended_lookup(None)
+        assert lookup("600519.SH") is False
+
+    def test_empty_set_never_halt(self):
+        """空集合 → 始终不拦截。"""
+        from myquant.execution.sim_broker import make_suspended_lookup
+        lookup = make_suspended_lookup(set())
+        assert lookup("600519.SH") is False
+
+    def test_halted_symbol_returns_true(self):
+        """停牌集合内的股票 → 返回 True。"""
+        from myquant.execution.sim_broker import make_suspended_lookup
+        lookup = make_suspended_lookup({"600519.SH", "000001.SZ"})
+        assert lookup("600519.SH") is True
+        assert lookup("000001.SZ") is True
+        assert lookup("300750.SZ") is False

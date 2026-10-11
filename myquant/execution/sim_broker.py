@@ -532,3 +532,23 @@ class SimBroker(ExecutionInterface):
             f"trades={len(self.trades)}, "
             f"equity={self.equity:.4f})"
         )
+
+
+def make_suspended_lookup(suspended_symbols: Optional[set] = None) -> Callable[[str], bool]:
+    """构造停牌判断函数（P0-03 is_suspended 接真值）。
+
+    根据传入的停牌股票集合返回一个闭包，供 SimBroker(is_suspended=...) 使用。
+    空集合/None → 始终返回 False（不拦截任何股票，向后兼容）。
+
+    Args:
+        suspended_symbols: 停牌股票代码集合（如 {"600519.SH"}）；None/空集 = 不拦截。
+
+    Returns:
+        Callable[[str], bool]：输入 symbol，返回是否停牌。
+    """
+    halted = frozenset(suspended_symbols or set())
+
+    def _lookup(symbol: str) -> bool:
+        return symbol in halted
+
+    return _lookup

@@ -4628,4 +4628,11 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    c. **验收结果**：py_compile 通过；板块映射 7 passed；全套回归 **3897 passed/4 skipped**（+7 新增）。
    d. **纪律遵守**：蓝图目录树先行登记（models/ + tests/ 改动）；函数纯查询无副作用；分层合法（models 层）；git 提交（commit message 引用 #319）。**P0-03 第三刀完成**：板块涨跌停映射表就位，后续刀接入撮合器。
 
+## #320 · 2026-10-11 · P0-03 第四刀：is_suspended 接真值（make_suspended_lookup 工厂）
+   事实来源：本次落地（施工方案 v2.2 §4.1 P0-03）；代码级核验：make_suspended_lookup() 返回闭包，根据停牌股票集合判断；空集合/None → 不拦截（向后兼容）。
+   a. **myquant/execution/sim_broker.py（改动，新增模块级工厂函数）**：`make_suspended_lookup(suspended_symbols)`——输入停牌股票集合，返回 `Callable[[str], bool]`；空集合/None → 始终 False（不拦截）。接口就位，后续可注入真实停牌数据。
+   b. **tests/unit/test_backtest.py（改动，追加 TestSuspendedLookup 3 项）**：None 不拦截/空集不拦截/停牌集合内股票返回 True。
+   c. **验收结果**：py_compile 通过；停牌判断 3 passed；全套回归 **3900 passed/4 skipped**（+3 新增）。
+   d. **纪律遵守**：蓝图目录树先行登记（execution/ + tests/ 改动）；空集合默认不拦截（行为零变化）；闭包纯函数无副作用；git 提交（commit message 引用 #320）。**P0-03 第四刀完成**：is_suspended 接口就位，真实停牌数据后续注入。
+
 
