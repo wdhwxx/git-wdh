@@ -395,7 +395,8 @@ class VectorizedBacktestEngine:
         self.result.extra["capital_mode"] = self.capital_mode
         self.result.extra["per_symbol_initial"] = sub_initial
         # #H2修复：回测结束统一校验防未来函数（P0-01：通过才标记 completed；失败已 mark_failed）
-        if self._run_lookahead_assert():
+        # P1-15：结果侧真实性不变量校验（RI-4 现金非负 / RI-6 持仓非负）
+        if self._run_lookahead_assert() and self._run_realism_invariants():
             self.result.mark_complete()
 
         # KP-P2-03：可用现金不足被缩 notional 的日次写入结果
@@ -788,6 +789,76 @@ class VectorizedBacktestEngine:
                 if hasattr(self.result, "mark_failed"):
                     self.result.mark_failed(f"防未来函数校验未通过: {exc}")
             return False
+
+    def _run_realism_invariants(self) -> bool:
+        """P1-15：结果侧真实性不变量校验（v2.2 §4.9）。
+
+        遍历 per-symbol 逐 bar cash/position，跑 RI-4（现金非负）/ RI-6（持仓非负）。
+        RI-1/2/3/5 需 trades 当日行情与组合 equity 明细映射，留后续 P1 卡（本卡先
+        交付最关键、绝不误报的现金透支 / 持仓穿透两道防线）。
+
+        Returns:
+            True 表示通过，可 mark_complete；
+            False 表示违规，已 mark_failed，调用方不得再 mark_complete。
+        """
+        try:
+            from myquant.realism_gate.invariants import (
+                BarState,
+                check_result_invariants,
+            )
+        except ImportError:
+            # realism_gate 未就绪，软接线放行（不阻断现有回测）
+            logger.debug("realism_gate.invariants 未就绪，跳过 P1-15 校验")
+            return True
+
+        bar_states: List[BarState] = []
+        for sr in self._symbol_results:
+            for i in range(len(sr.dates)):
+                bar_states.append(BarState(
+                    symbol=sr.symbol,
+                    bar_date=sr.dates[i],
+                    cash=float(sr.cash[i]),
+                    position=float(sr.position[i]),
+                    close=0.0,  # RI-3 暂不接线（无逐 bar close）
+                ))
+
+        if not bar_states:
+            return True
+
+        try:
+            violations = check_result_invariants(
+                trades=[],
+                bar_states=bar_states,
+                initial_capital=float(self.config.initial_capital),
+            )
+        except ValueError as exc:
+            # 输入参数错误，软接线放行
+            logger.warning("P1-15 invariants 输入参数错误，跳过: %s", exc)
+            return True
+
+        # 只关心 RI-4 / RI-6（RI-1/2/5 trades 空不触发；RI-3 close=0 自动跳过）
+        active = (
+            "invariants.cash_non_negative",
+            "invariants.position_non_negative",
+        )
+        real = [v for v in violations if v.field_path in active]
+
+        if real:
+            msg = "; ".join(v.message for v in real[:5])
+            logger.error("❌ P1-15 结果侧不变量未通过: %s", msg)
+            if self.result is not None and hasattr(self.result, "mark_failed"):
+                self.result.extra["realism_invariants_failed"] = True
+                self.result.extra["realism_invariants_violations"] = [
+                    {"field": v.field_path, "message": v.message}
+                    for v in real[:10]
+                ]
+                self.result.mark_failed(f"realism_invariants_failed: {msg}")
+            return False
+
+        logger.info("✅ P1-15 结果侧不变量校验通过（RI-4/RI-6）")
+        if self.result is not None:
+            self.result.extra["realism_invariants_passed"] = True
+        return True
 
     def _run_light_guard_check(self) -> bool:
         """P1-03：第二道防未来防线（轻量）——沿已处理时间线逐 bar 推进时钟，
