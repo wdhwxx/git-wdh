@@ -157,6 +157,9 @@ def make_ohlcv_df(
         "最高价": _broadcast(highs, [c * 1.015 for c in closes]),
         "最低价": _broadcast(lows, [c * 0.985 for c in closes]),
         "收盘价": list(closes),
+        # P1-10：统一测试数据源派生前收盘价列（vectorized 已切 data_col 模式，
+        # 缺该列即 fail-closed）；首行无前驱置 NaN，与生产 provider 派生口径一致。
+        "前收盘价": ([float("nan")] + list(closes[:-1])) if n else [],
         "成交量": _broadcast(volumes, [100000.0] * n),
     }
     # 成交额列始终保留（close*volume 推导；n=0 时为空列表）

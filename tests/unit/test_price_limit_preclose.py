@@ -219,7 +219,11 @@ class TestEnginesLimitUpBlock:
         assert len(buy_fills) == 0, f"涨停开盘买单应 0 成交，实际 {len(buy_fills)} 笔"
 
     def test_vectorized引擎_涨停买单0成交(self) -> None:
-        df = _make_limitup_df()  # 无前收盘价列 → 引擎兜底派生
+        # P1-10：vectorized 切 data_col 模式（缺前收盘价列即 fail-closed），
+        # 此处直接提供真实前收盘价列（[NaN,10.0,10.0]）验证涨停拦截；
+        # 引擎兜底派生行为由 mixed 路径与 provider 派生测试覆盖。
+        df = _make_limitup_df()
+        df["pre_close"] = [np.nan, 10.0, 10.0]
         engine = VectorizedBacktestEngine(
             config=_make_config(),
             strategy=_TargetVecStrategy(self.TARGETS),

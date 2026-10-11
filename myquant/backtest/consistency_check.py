@@ -782,6 +782,9 @@ def make_demo_data(
                 "high": closes * 1.01,
                 "low": closes * 0.99,
                 "close": closes,
+                # P1-10：演示数据对齐生产链路（provider 派生前收盘价列）；
+                # vectorized 已切 data_col 模式，缺该列即 fail-closed。
+                "pre_close": np.concatenate([[np.nan], closes[:-1]]),
                 "volume": 100_000.0 * (1.0 + 0.5 * rng.random(n_bars)),
                 "amount": closes * 100_000.0,
             },

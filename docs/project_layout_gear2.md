@@ -4692,4 +4692,12 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    c. **验收结果**：py_compile 通过；基线对拍通过（重新建档后 --verify EXIT=0，行为零变化）；全套回归 **3907 passed/4 skipped**。
    d. **纪律遵守**：蓝图目录树先行登记（models/ + tests/ 改动）；默认值 1.0（全量成交，行为零变化）；git 提交（commit message 引用 #328）。**P1-09 完成**：流动性约束进配置。
 
+## #329 · 2026-10-11 · P1-10：vectorized 两处实质缺陷修复（前收盘价 data_col + 缩量重算费用）
+   事实来源：本次落地（施工方案 v2.2 §5.2 P1-10、§5.5 映射表）；代码级核验：vectorized_engine.py 两处缺陷修复，测试夹具对齐 data_col 模式；manifest 标志字段 `price_limit.pre_close_source` 由 `shift_approx`→`data_col`（§5.5 登记）。
+   a. **myquant/backtest/vectorized_engine.py（改动·缺陷①，L466~475）**：前收盘价换源 data_col——原判断 `if "pre_close" in df.columns`（英文列名）与读取 `df["前收盘价"]`（中文列）不一致，导致真实前收盘价被静默跳过、永远走 `closes.shift(1)` 近似；改为判断中文列名“前收盘价”，**缺失即 fail-closed 抛 ValueError**（数据层 provider.py:513/672、mixed_engine.py:946 已兜底派生，与 order_matcher“pre_close 缺失不可空转”哲学一致），不再静默 shift 近似。
+   b. **myquant/backtest/vectorized_engine.py（改动·缺陷②，L581~601 负现金缩量循环）**：缩量后 `notional[i]` 已按 scale 缩小，但 `fees` 仍是缩量前按全额量算出的费用（佣金/印花税/滑点/过户费全虚高）；改为按缩量后的 quantity/notional/price 调 `calc_fee_vectorized` 单 bar 重算 fees 各分量并原地回写（VectorizedFeeResult 为 frozen dataclass，total_cost 是派生 property 自动重算），再写 cashflow[i] 并覆盖 cash[i:]/position[i:]，修正“费用虚高、现金支出高估、净值压低”。
+   c. **测试夹具对齐 data_col 模式（4 文件）**：tests/conftest.py `make_ohlcv_df` 统一派生前收盘价列（首行 NaN，对齐 provider 口径）；tests/unit/test_backtest_engines_v5.py 三夹具（_make_ohlcv/_make_downtrend/停牌日内联 df）补 pre_close；tests/unit/test_price_limit_preclose.py vectorized 涨停测试直接注入 `[NaN,10.0,10.0]` 前收盘价（mixed 路径仍验证兜底派生，保持原设计）；myquant/backtest/consistency_check.py `make_demo_data` 补 pre_close（演示数据对齐生产链路）。
+   d. **验收结果**：py_compile 通过；vectorized 相关 **29 passed**；全套回归 **3935 passed/4 skipped/0 failed**（基线 3907，新增为 fail-closed 修正后纳入用例）；mixed 基线对拍 `rsrs_mixed_28e30d22…` --verify **EXIT=0**（P1-10 只动 vectorized，mixed 行为零变化）。
+   e. **纪律遵守**：蓝图目录树先行登记（backtest/ + tests/ 改动）；未新增文件、未在蓝图外建文件；fail-closed 仅在引擎层，生产链路 df 必含“前收盘价”列（provider 派生）不触发；git 提交（commit message 引用 #329）。**P1-10 完成**：vectorized 前收盘价 data_col 换源 + 缩量费用重算。
+
 

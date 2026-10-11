@@ -463,11 +463,16 @@ class VectorizedBacktestEngine:
         lows = df["最低价"].to_numpy(dtype=np.float64)
         closes = df["收盘价"].to_numpy(dtype=np.float64)
         volumes = df["成交量"].to_numpy(dtype=np.float64)
-        # 昨收价（用于撮合层涨跌停校验）：优先用数据列，否则前一日收盘近似
-        if "pre_close" in df.columns:
-            pre_closes = df["前收盘价"].to_numpy(dtype=np.float64)
-        else:
-            pre_closes = np.concatenate([[np.nan], closes[:-1]])
+        # 昨收价（用于撮合层涨跌停校验）：真实前收盘价列（P1-10 换源 data_col）。
+        # 数据层 provider.py:513/672 与 mixed_engine.py:946 已兜底派生“前收盘价”列，
+        # 引擎层不再静默用前一日收盘近似（shift_approx）；列缺失即 fail-closed 抛错，
+        # 与 order_matcher“pre_close 缺失不可空转（数据层需派生）”哲学一致。
+        if "前收盘价" not in df.columns:
+            raise ValueError(
+                f"标的 {symbol} 缺少真实前收盘价列“前收盘价”（P1-10 fail-closed）："
+                f"数据层须经 provider/mixed 派生该列，引擎禁止静默用 shift 近似"
+            )
+        pre_closes = df["前收盘价"].to_numpy(dtype=np.float64)
         n = len(df)
 
         # 策略目标持仓（T 日收盘决定，长度须为 n）
@@ -583,6 +588,21 @@ class VectorizedBacktestEngine:
                 exec_shares[i] = float(exec_shares[i]) * scale
                 signed_fill[i] = capped * (1.0 if exec_shares[i] > 0 else -1.0)
                 notional[i] = capped * float(fill_price_safe[i])
+                # P1-10 缺陷②：notional 已按 scale 缩量，但 fees 仍是缩量前按全额量算出的费用
+                # （佣金/印花税/滑点/过户费全部虚高），导致当日现金支出被高估、净值被压低。
+                # 按缩量后的 quantity/notional/price 重算当日费用并原地回写 fees 各分量；
+                # total_cost 是 commission+stamp_tax+transfer_fee+slippage 的派生 property，自动重算。
+                refees = self.fee_calculator.calc_fee_vectorized(
+                    side=np.array([sides[i]]),
+                    notional=np.array([notional[i]]),
+                    price=np.array([fill_price_safe[i]]),
+                    quantity=np.array([fill_qty[i]]),
+                    volume=np.array([volumes[i]]),
+                )
+                fees.commission[i] = float(refees.commission[0])
+                fees.stamp_tax[i] = float(refees.stamp_tax[0])
+                fees.transfer_fee[i] = float(refees.transfer_fee[0])
+                fees.slippage[i] = float(refees.slippage[0])
                 cashflow[i] = -notional[i] - float(fees.total_cost[i])
                 position[i:] = np.cumsum(signed_fill[i:])
                 cash[i:] = sub_initial + np.cumsum(cashflow[i:])

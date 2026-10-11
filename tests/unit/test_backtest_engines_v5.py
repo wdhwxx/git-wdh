@@ -51,6 +51,8 @@ def _make_ohlcv(n: int, base: float = 10.0, drift: float = 0.02) -> pd.DataFrame
             "high": close * 1.02,
             "low": close * 0.98,
             "close": close,
+            # P1-10：模拟生产链路 provider 派生的前收盘价列（引擎 data_col 模式要求上游提供）
+            "pre_close": np.concatenate([[np.nan], close[:-1]]),
             "volume": np.full(n, 1_000_000.0),
         },
         index=idx,
@@ -72,6 +74,8 @@ def _make_downtrend(n: int) -> pd.DataFrame:
             "high": high,
             "low": low,
             "close": closes,
+            # P1-10：模拟生产链路 provider 派生的前收盘价列（引擎 data_col 模式要求上游提供）
+            "pre_close": np.concatenate([[np.nan], closes[:-1]]),
             "volume": np.full(n, 1_000_000.0),
         },
         index=idx,
@@ -618,6 +622,8 @@ class TestP010GhostPosition:
                 "high": closes * 1.02,
                 "low": closes * 0.98,
                 "close": closes,
+                # P1-10：模拟生产链路 provider 派生的前收盘价列
+                "pre_close": np.concatenate([[np.nan], closes[:-1]]),
                 "volume": vol,
             },
             index=idx,
