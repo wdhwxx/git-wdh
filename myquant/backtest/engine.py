@@ -481,13 +481,13 @@ class BacktestEngine(BaseEngine):
         # ── 步骤2：更新组合市场价（用当前bar收盘价）──
         # SimBroker.on_bar已经更新了市场价，这里无需重复
 
-        # ── P0-07 因果切片：逐 bar 推进 context.current_bar_ts（结构性保证策略看不到未来）──
-        # 分期启用：先设置 current_bar_ts，暂不置 _slicing_enabled=True
-        # （开启后前 N 天预热期指标记录会变化，需逐策略适配；切片逻辑见
-        # StrategyContext.get_data，test_causality_slicing 7 项已验证）
+        # ── P0-07 因果切片：逐 bar 推进 context.current_bar_ts + 开启切片 ──
+        # bar[t] 时 context.get_data() 只返回 <=t 的数据视图（结构性消除未来函数）
+        # 注意：Bar.timestamp 是秒级 Unix float（time.time()），必须用 unit='s'
         if self.context is not None:
             try:
-                self.context.current_bar_ts = pd.Timestamp(bar.timestamp)
+                self.context.current_bar_ts = pd.Timestamp(bar.timestamp, unit='s')
+                self.context._slicing_enabled = True
             except Exception:
                 pass  # bar.timestamp 类型异常时不阻断（向后兼容）
 

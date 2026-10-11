@@ -4559,4 +4559,11 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    c. **实测发现（重要）**：开启 `_slicing_enabled=True` 后 guard_mounting/kunpeng×2 共 3 项测试失败——切片后前 20 天预热期指标记录从"全量语义"变为"因果切片语义"（bar[t] 时只能看到 <=t 的数据算 MA20，前 20 天数据不足）。这是**因果正确行为**（未来函数被结构性消除），但测试预期需逐策略适配。按分期启用策略，先保留 current_bar_ts 设置（为后续接线准备），切片开关在逐策略适配后开启。
    d. **纪律遵守**：蓝图目录树先行登记（engine.py 改动）；分期启用（不一次性开启切片开关，避免批量破坏现有策略测试）；try/except 防御（bar.timestamp 类型异常不阻断）；git 提交（commit message 引用 #309）。**P0-07 后续刀**：逐策略适配（kunpeng/MACross 预热期指标记录语义）→ 开启 _slicing_enabled → mixed/vectorized 引擎接线 → causality.* 字段写入 manifest。
 
+## #310 · 2026-10-11 · P0-07 第三刀：开启 _slicing_enabled=True + unit='s' 修复（切片结构性生效）
+   事实来源：本次落地（施工方案 v2.2 §4.1 P0-07）；代码级核验：开启切片开关后 3 项测试失败——根因是 `pd.Timestamp(bar.timestamp)` 把秒级 Unix float 当作纳秒级解释，导致 current_bar_ts=1970 年、切片视图为空；修复为 `pd.Timestamp(bar.timestamp, unit='s')` 后全部通过。
+   a. **myquant/backtest/engine.py（改动，on_market_event 切片推进）**：`self.context.current_bar_ts = pd.Timestamp(bar.timestamp, unit='s')` + `self.context._slicing_enabled = True`。**关键 bug 修复**：Bar.timestamp 是秒级 Unix float（time.time()），`pd.Timestamp(float)` 默认按纳秒解释会变成 1970 年，切片视图 `df.loc[:1970]` 返回空 DataFrame——这是之前 3 项测试失败的根因。修复后切片视图正确返回 <= 当前 bar 的数据。
+   b. **验收结果**：test_kunpeng_strategy + test_guard_mounting 74 项全绿；全套回归 **3757 passed/4 skipped**；基线对拍 rsrs×mixed 通过（EXIT=0，净值零变化）。
+   c. **实测结论**：切片开启后现有策略行为零变化——因为 MACrossStrategy/kunpeng 已自行截断（`context.get_data()` 返回切片视图后策略再按 bar.timestamp 二次截断，幂等）；rsrs 策略对拍通过证明合法策略净值不变。切片现在结构性生效：策略通过 `context.get_data()` 拿不到未来 bar。
+   d. **纪律遵守**：蓝图目录树先行登记；unit='s' 修复（时间戳单位正确性是因果切片的前提）；git 提交（commit message 引用 #310）。**P0-07 后续刀**：mixed/vectorized 引擎逐 bar 接线 → causality.* 三字段真实取值写入 manifest。
+
 
