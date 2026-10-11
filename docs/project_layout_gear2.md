@@ -4708,4 +4708,11 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    d. **验收结果**：py_compile 通过；反红+引擎冒烟 **39 passed**（15 invariants + 24 vectorized）；全套回归 **3935 passed/4 skipped/0 failed**（与 P1-10 基线一致，零回归）；mixed 基线对拍 `rsrs_mixed_28e30d22…` --verify **EXIT=0**（P1-15 只动 vectorized 收尾，mixed 行为零变化）。
    e. **纪律遵守**：蓝图目录树先行登记（realism_gate/invariants.py 在 L973 已规划；tests/realism_gate/ 目录本回写首次登记）；L0 纯函数不 import backtest（R-02/R-16）；软接线不阻断现有回测（invariants 未就绪放行）；RI-1/2/3/5 的 trades 当日行情与组合 equity 明细映射留后续 P1 卡（本卡先交付最关键、绝不误报的 RI-4 现金透支 / RI-6 持仓穿透两道防线）；git 提交（commit message 引用 #330）。**P1-15 完成（首刀）**：invariants.py 本体 + vectorized 接线（RI-4/RI-6 生效）；mixed/event 引擎接线 + RI-1/2/3/5 全量激活留后续。
 
+## #331 · 2026-10-11 · P1-15 次刀：RI-1/2/5 全量激活 + mixed 引擎接线
+   事实来源：本次落地（施工方案 v2.2 §4.9 P1-15 次刀）；代码级核验：vectorized 与 mixed 均从 self.data[symbol] OHLCV DataFrame 按 trade_date 反查当日 low/high/volume，timestamp→日期字符串与 df.index 对齐；participation_cap 取 config.participation_rate（P1-09 已进配置）。
+   a. **myquant/backtest/vectorized_engine.py（改动，_run_realism_invariants 升级）**：trades 注入——遍历 result.trades，按 (symbol, trade_date) 从 self.data OHLCV DataFrame 反查当日最低价/最高价/成交量，构造 invariants.TradeRecord 传入（slippage_amount=abs(slippage)*price）；participation_cap=config.participation_rate；active 列表扩展为 RI-1/2/4/5/6（RI-3 因 close=0 仍自动跳过）。查不到当日行/timestamp 转换失败时防御式跳过该 trade，不报错。
+   b. **myquant/backtest/mixed_engine.py（改动，收尾接线 + 新方法）**：L1107 改为 `if self._run_lookahead_assert() and self._run_realism_invariants(): mark_complete()`；新增 `_run_realism_invariants()` 方法——从 recorder.get_trades() 取 trades，按 (symbol, trade_date) 从 self.data 反查当日行情（与 vectorized 同构），传 bar_states=[]（mixed 事件驱动无逐 bar cash/position 序列），active 只跑 RI-1/2（RI-4/5/6 需逐 bar 明细留后续）。
+   c. **验收结果**：py_compile 通过；反红+引擎冒烟 **39 passed**；全套回归 **3935 passed/4 skipped/0 failed**（与 #330 基线一致，零回归）；mixed 基线对拍 `rsrs_mixed_28e30d22…` --verify **EXIT=0**（trades 注入为校验层，不改变回测行为）。
+   d. **纪律遵守**：蓝图目录树先行登记（backtest/ 两引擎改动）；软接线不阻断（查不到当日行防御式跳过）；event 引擎无独立文件（Glob 无果），其接线留待 R-19 event 0 交易排查后；RI-3 组合级 equity 恒等式需逐 bar close 明细，仍留后续；git 提交（commit message 引用 #331）。**P1-15 完成（次刀）**：vectorized RI-1/2/4/5/6 + mixed RI-1/2 激活；RI-3 + event 引擎 + mixed RI-4/5/6 留后续。
+
 

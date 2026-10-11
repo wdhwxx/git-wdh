@@ -793,9 +793,9 @@ class VectorizedBacktestEngine:
     def _run_realism_invariants(self) -> bool:
         """P1-15：结果侧真实性不变量校验（v2.2 §4.9）。
 
-        遍历 per-symbol 逐 bar cash/position，跑 RI-4（现金非负）/ RI-6（持仓非负）。
-        RI-1/2/3/5 需 trades 当日行情与组合 equity 明细映射，留后续 P1 卡（本卡先
-        交付最关键、绝不误报的现金透支 / 持仓穿透两道防线）。
+        遍历 per-symbol 逐 bar cash/position（RI-4/RI-6）+ 逐笔 trade 当日行情
+        反查（RI-1 价界 / RI-2 量界 / RI-5 T+1）。RI-3 组合级 equity 恒等式需逐 bar
+        close 明细，留后续 P1 卡。
 
         Returns:
             True 表示通过，可 mark_complete；
@@ -804,6 +804,7 @@ class VectorizedBacktestEngine:
         try:
             from myquant.realism_gate.invariants import (
                 BarState,
+                TradeRecord,
                 check_result_invariants,
             )
         except ImportError:
@@ -811,6 +812,7 @@ class VectorizedBacktestEngine:
             logger.debug("realism_gate.invariants 未就绪，跳过 P1-15 校验")
             return True
 
+        # 1. bar_states（RI-4 现金非负 / RI-6 持仓非负）
         bar_states: List[BarState] = []
         for sr in self._symbol_results:
             for i in range(len(sr.dates)):
@@ -822,23 +824,63 @@ class VectorizedBacktestEngine:
                     close=0.0,  # RI-3 暂不接线（无逐 bar close）
                 ))
 
-        if not bar_states:
+        # 2. trades 注入当日行情（RI-1 价界 / RI-2 量界 / RI-5 T+1）
+        #    从 self.data[symbol] OHLCV DataFrame 按 trade_date 反查当日 low/high/volume
+        inv_trades: List[TradeRecord] = []
+        for t in self.result.trades:
+            sym = t.symbol
+            df = self.data.get(sym)
+            if df is None:
+                continue
+            # timestamp(float) → 日期字符串（与 df.index 对齐）
+            try:
+                trade_date = pd.Timestamp(t.timestamp, unit="s").strftime("%Y-%m-%d")
+            except (TypeError, ValueError):
+                continue
+            # 在 df.index 反查当日行（查不到则跳过该 trade，防御式不报错）
+            idx_str = df.index.astype(str)
+            if trade_date not in idx_str:
+                continue
+            try:
+                row = df.iloc[idx_str.get_loc(trade_date)]
+                inv_trades.append(TradeRecord(
+                    symbol=sym,
+                    trade_date=trade_date,
+                    side=t.side,
+                    price=float(t.price),
+                    quantity=float(t.quantity),
+                    day_low=float(row["最低价"]),
+                    day_high=float(row["最高价"]),
+                    day_volume=float(row["成交量"]),
+                    slippage_amount=abs(float(t.slippage)) * float(t.price),
+                ))
+            except (KeyError, ValueError, IndexError):
+                continue
+
+        if not bar_states and not inv_trades:
             return True
 
         try:
+            # participation_cap 取 config.participation_rate（P1-09 已进配置，默认 1.0）
             violations = check_result_invariants(
-                trades=[],
+                trades=inv_trades,
                 bar_states=bar_states,
                 initial_capital=float(self.config.initial_capital),
+                participation_cap=float(
+                    getattr(self.config, "participation_rate", 1.0)
+                ),
             )
         except ValueError as exc:
             # 输入参数错误，软接线放行
             logger.warning("P1-15 invariants 输入参数错误，跳过: %s", exc)
             return True
 
-        # 只关心 RI-4 / RI-6（RI-1/2/5 trades 空不触发；RI-3 close=0 自动跳过）
+        # 激活 RI-1/2/4/5/6（RI-3 因 close=0 自动跳过，不在 active 列表）
         active = (
+            "invariants.price_bounds",
+            "invariants.volume_bound",
             "invariants.cash_non_negative",
+            "invariants.t1_consistency",
             "invariants.position_non_negative",
         )
         real = [v for v in violations if v.field_path in active]
@@ -855,7 +897,10 @@ class VectorizedBacktestEngine:
                 self.result.mark_failed(f"realism_invariants_failed: {msg}")
             return False
 
-        logger.info("✅ P1-15 结果侧不变量校验通过（RI-4/RI-6）")
+        logger.info(
+            "✅ P1-15 结果侧不变量校验通过（RI-1/2/4/5/6，trades=%d, bars=%d）",
+            len(inv_trades), len(bar_states),
+        )
         if self.result is not None:
             self.result.extra["realism_invariants_passed"] = True
         return True

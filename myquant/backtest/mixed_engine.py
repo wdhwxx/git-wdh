@@ -1041,6 +1041,99 @@ class MixedBacktestEngine:
                     self.result.mark_failed(f"防未来函数校验未通过: {exc}")
             return False
 
+    def _run_realism_invariants(self) -> bool:
+        """P1-15：结果侧真实性不变量校验（mixed 引擎，v2.2 §4.9）。
+
+        从 recorder.get_trades() 注入当日行情（RI-1 价界 / RI-2 量界）。
+        RI-4/5/6 需逐 bar cash/position 明细（mixed 为事件驱动，self.cash/positions
+        仅当前值无历史序列），留后续 P1 卡。
+
+        Returns:
+            True 表示通过，可 mark_complete；
+            False 表示违规，已 mark_failed，调用方不得再 mark_complete。
+        """
+        try:
+            from myquant.realism_gate.invariants import (
+                TradeRecord,
+                check_result_invariants,
+            )
+        except ImportError:
+            logger.debug("realism_gate.invariants 未就绪，跳过 P1-15 校验")
+            return True
+
+        trades = self.recorder.get_trades() if self.recorder else []
+        inv_trades: list = []
+        for t in trades:
+            sym = t.symbol
+            df = self.data.get(sym)
+            if df is None:
+                continue
+            try:
+                trade_date = pd.Timestamp(t.timestamp, unit="s").strftime("%Y-%m-%d")
+            except (TypeError, ValueError):
+                continue
+            idx_str = df.index.astype(str)
+            if trade_date not in idx_str:
+                continue
+            try:
+                row = df.iloc[idx_str.get_loc(trade_date)]
+                inv_trades.append(TradeRecord(
+                    symbol=sym,
+                    trade_date=trade_date,
+                    side=t.side,
+                    price=float(t.price),
+                    quantity=float(t.quantity),
+                    day_low=float(row["最低价"]),
+                    day_high=float(row["最高价"]),
+                    day_volume=float(row["成交量"]),
+                    slippage_amount=abs(float(t.slippage)) * float(t.price),
+                ))
+            except (KeyError, ValueError, IndexError):
+                continue
+
+        if not inv_trades:
+            return True
+
+        try:
+            violations = check_result_invariants(
+                trades=inv_trades,
+                bar_states=[],  # mixed 无逐 bar cash/position 序列
+                initial_capital=float(self.config.initial_capital),
+                participation_cap=float(
+                    getattr(self.config, "participation_rate", 1.0)
+                ),
+            )
+        except ValueError as exc:
+            logger.warning("P1-15 invariants 输入参数错误，跳过: %s", exc)
+            return True
+
+        # mixed 只跑 RI-1 价界 / RI-2 量界（RI-4/5/6 需逐 bar 明细，留后续）
+        active = (
+            "invariants.price_bounds",
+            "invariants.volume_bound",
+        )
+        real = [v for v in violations if v.field_path in active]
+
+        if real:
+            msg = "; ".join(v.message for v in real[:5])
+            logger.error("❌ P1-15 mixed 结果侧不变量未通过: %s", msg)
+            if self.result is not None and hasattr(self.result, "mark_failed"):
+                self.result.extra["realism_invariants_failed"] = True
+                self.result.extra["realism_invariants_violations"] = [
+                    {"field": v.field_path, "message": v.message}
+                    for v in real[:10]
+                ]
+                self.result.mark_failed(f"realism_invariants_failed: {msg}")
+            return False
+
+        logger.info(
+            "✅ P1-15 mixed 结果侧不变量校验通过（RI-1/2，trades=%d）",
+            len(inv_trades),
+        )
+        if self.result is not None:
+            self.result.extra["realism_invariants_passed"] = True
+        return True
+
     def _run_light_guard_check(self) -> bool:
         """P1-03：第二道防未来防线（轻量）——沿时间线逐 bar 推进时钟，
         检测时间线倒退（乱序数据）；收尾 assert_pass。"""
@@ -1104,7 +1197,8 @@ class MixedBacktestEngine:
         self.result.extra["signal_mode"] = self._signal_mode
         self.result.extra["stop_loss_pct"] = self.stop_loss_pct
         # P0-01修复：先防未来校验，通过才标记 completed；失败已 mark_failed，不得覆盖
-        if self._run_lookahead_assert():
+        # P1-15：结果侧真实性不变量校验（RI-1 价界 / RI-2 量界）
+        if self._run_lookahead_assert() and self._run_realism_invariants():
             self.result.mark_complete()
 
         self._stopped = True
