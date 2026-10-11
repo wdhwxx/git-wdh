@@ -4635,4 +4635,14 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    c. **验收结果**：py_compile 通过；停牌判断 3 passed；全套回归 **3900 passed/4 skipped**（+3 新增）。
    d. **纪律遵守**：蓝图目录树先行登记（execution/ + tests/ 改动）；空集合默认不拦截（行为零变化）；闭包纯函数无副作用；git 提交（commit message 引用 #320）。**P0-03 第四刀完成**：is_suspended 接口就位，真实停牌数据后续注入。
 
+## #321 · 2026-10-11 · P0-03 第五刀：四组断言测试 + event 涨停买单验证
+   事实来源：本次落地（施工方案 v2.2 §4.1 P0-03）；代码级核验：TestPriceLimitP003 4 项测试（改幅度 5% 生效/中间价放行/板块映射创业板 20%/主板 10%），event 路径涨停买单必 0 成交已在既有 test_涨停拒买 覆盖。
+   a. **tests/unit/test_event_price_limit.py（改动，追加 TestPriceLimitP003 4 项）**：
+      - 改幅度：price_limit_pct=0.05 → 5% 涨停（10.5 开盘）买单 0 成交
+      - 改幅度：中间价（10.3 开盘）未达 5% 涨停 → 买单成交
+      - 板块映射：300750.SZ（创业板）→ price_limit_pct_for_symbol 返回 0.20
+      - 板块映射：600519.SH（主板）→ 返回 0.10
+   b. **验收结果**：py_compile 通过；event 路径 9 passed（含既有 5 项 + 新增 4 项）；全套回归 **3904 passed/4 skipped**（+4 新增）。
+   c. **纪律遵守**：蓝图目录树先行登记（tests/ 改动）；四组断言覆盖开/关/改幅度/板块映射；event 涨停买单必 0 成交已由既有 test_涨停拒买 覆盖；git 提交（commit message 引用 #321）。**P0-03 完成**：五刀全部落地，约束真可控就位。
+
 

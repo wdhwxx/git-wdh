@@ -100,3 +100,35 @@ class TestEventPriceLimit:
         broker.submit_order(_buy_order())
         trades = broker.on_bar(_make_bar(open_=11.0, close=11.0))
         assert len(trades) == 1
+
+
+class TestPriceLimitP003:
+    """P0-03 第五刀：四组断言之"改幅度"与"板块映射"。"""
+
+    def test_改幅度_5pct生效(self) -> None:
+        """price_limit_pct=0.05 → 5% 幅度：昨收10 → 涨停10.5 → 10.5 开盘买单拒。"""
+        broker = SimBroker(enforce_limit=True, price_limit_pct=0.05)
+        broker.on_bar(_make_bar(open_=10.0, close=10.0))  # 建立昨收
+        broker.submit_order(_buy_order())
+        trades = broker.on_bar(_make_bar(open_=10.5, close=10.5))  # 5% 涨停
+        assert len(trades) == 0, f"5% 涨停买单应 0 成交，实际 {len(trades)} 笔"
+
+    def test_改幅度_5pct_中间价放行(self) -> None:
+        """price_limit_pct=0.05 → 5% 幅度：昨收10 → 10.3 开盘（未达5%涨停）→ 买单成交。"""
+        broker = SimBroker(enforce_limit=True, price_limit_pct=0.05)
+        broker.on_bar(_make_bar(open_=10.0, close=10.0))
+        broker.submit_order(_buy_order())
+        trades = broker.on_bar(_make_bar(open_=10.3, close=10.3))  # 未达 5% 涨停
+        assert len(trades) == 1
+
+    def test_板块映射_创业板20pct(self) -> None:
+        """板块映射：30xxxx 创业板 → 20% 幅度（price_limit_pct_for_symbol 返回 0.20）。"""
+        from myquant.models.backtest import price_limit_pct_for_symbol
+        # 创业板股票代码 → 应返回 0.20
+        assert price_limit_pct_for_symbol("300750.SZ") == 0.20
+        assert price_limit_pct_for_symbol("300001.SZ") == 0.20
+
+    def test_板块映射_主板10pct(self) -> None:
+        """板块映射：60xxxx 沪市主板 → 10% 幅度。"""
+        from myquant.models.backtest import price_limit_pct_for_symbol
+        assert price_limit_pct_for_symbol("600519.SH") == 0.10
