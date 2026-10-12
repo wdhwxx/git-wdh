@@ -316,6 +316,9 @@ class MixedBacktestEngine:
                     symbol=self.config.benchmark,
                     start_date=self.config.start_date or None,
                     end_date=self.config.end_date or None,
+                    # 基准（指数）无复权因子概念，一律 raw 加载（#350 基准数据治理，
+                    # 与 engine.py 同构；hfq 触发虚假降级 → data_pit 误判）
+                    adjust="raw",
                 )
 
         self._initialized = True

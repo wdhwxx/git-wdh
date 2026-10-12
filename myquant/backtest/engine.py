@@ -536,6 +536,13 @@ class BacktestEngine(BaseEngine):
                     symbol=self.config.benchmark,
                     start_date=self.config.start_date or None,
                     end_date=self.config.end_date or None,
+                    # 基准（指数，如 000300.SH）无复权因子概念——复权因子只适用于
+                    # 个股除权除息事件；指数价格编制已连续（成分股分红除权自动处理），
+                    # 应用 hfq 反而触发虚假降级（000300.SH 0 因子事件 → 降级 raw →
+                    # data_pit 判 critical → enabled=true 生产回测全断）。#350 基准
+                    # 数据治理：基准一律按 raw 加载（指数语义，market_rules 等判据
+                    # 不受影响——基准不参与撮合/交易真实性）。
+                    adjust="raw",
                 )
                 if not self._benchmark_data.empty:
                     logger.info(

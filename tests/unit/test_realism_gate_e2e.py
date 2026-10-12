@@ -283,7 +283,11 @@ class _FakeProvider:
         return {s: df for s in symbols}
 
     def get_bars(
-        self, symbol: str, start_date: object = None, end_date: object = None
+        self,
+        symbol: str,
+        start_date: object = None,
+        end_date: object = None,
+        adjust: object = None,
     ) -> pd.DataFrame:
         return self.load_multiple([symbol])[symbol]
 
@@ -373,3 +377,59 @@ def test_from_data_provider_compliant_manifest(
             assert path in fields, f"缺 {path}"
     # 无降级 → data_pit 不判 critical → 阻断产物不落盘
     assert _find_blocked_files(tmp_path, "compliant_probe") == []
+
+
+# ═══════════════════════════════════════════════════════════════
+#  #350：基准数据治理——指数（000300.SH）无复权因子概念，基准加载
+#  显式 adjust="raw"（hfq 触发虚假降级 → data_pit 误判 → enabled=true
+#  生产回测全断；#349 真实验收暴露的拦路项）
+# ═══════════════════════════════════════════════════════════════
+
+class _RecordingProvider(_FakeProvider):
+    """#350 基准加载探针：记录 provider.get_bars 的 adjust 参数。"""
+
+    def __init__(self) -> None:
+        self.bars_calls: List[dict] = []
+
+    def get_bars(
+        self,
+        symbol: str,
+        start_date: object = None,
+        end_date: object = None,
+        adjust: object = None,
+    ) -> pd.DataFrame:
+        self.bars_calls.append({"symbol": symbol, "adjust": adjust})
+        return super().get_bars(symbol, start_date=start_date, end_date=end_date)
+
+
+def test_benchmark_loads_raw_from_provider() -> None:
+    """#350 基准数据治理：from_data_provider 直构路径基准加载显式 adjust="raw"。
+
+    指数（000300.SH）无复权因子事件（quant.db adjust_factor 表 0 行）——复权
+    因子只适用于个股除权除息；provider 默认 adjust=hfq 时指数降级 raw 并记入
+    adjust_degraded_symbols → data_pit 判 critical → enabled=true 每次生产回测
+    全断（#349 真实验收暴露）。基准不参与撮合/交易真实性，按指数语义 raw 加载。
+    """
+    strategy = _CompliantStrategy()
+    prov = _RecordingProvider()
+    cfg = BacktestConfig(
+        strategy_name=strategy.name,
+        symbols=[SYMBOL],
+        benchmark="000300.SH",
+        start_date="2024-01-01",
+        end_date="2024-01-20",
+        frequency="1d",
+        initial_capital=1_000_000.0,
+        realism_gate={"enabled": True, "audit_violations": False},
+    )
+    from myquant.backtest.engine import BacktestEngine
+
+    engine = BacktestEngine.from_data_provider(data_provider=prov, config=cfg, strategy=strategy)
+    engine.run()
+
+    bench_calls = [c for c in prov.bars_calls if c["symbol"] == "000300.SH"]
+    assert bench_calls, "基准应经 provider.get_bars 加载"
+    assert bench_calls[0]["adjust"] == "raw", (
+        f"基准（指数）应按 raw 加载，实际 {bench_calls[0]['adjust']!r}（hfq 触发虚假降级）"
+    )
+    assert engine.result.is_success
