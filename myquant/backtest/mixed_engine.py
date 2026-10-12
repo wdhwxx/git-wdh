@@ -427,6 +427,11 @@ class MixedBacktestEngine:
         self._running = False
         # P0-08 子项②：run 结束后按实际置位刷新 causality 组（真实采集）
         self._refresh_causality_manifest()
+        # P0-01 端到端（#345）：清单快照挂载到 result（随 results.json 落盘）
+        # getattr 防御：直构引擎（不经 create_engine）无 _realism_manifest
+        _rg_m = getattr(self, "_realism_manifest", None)
+        if _rg_m is not None:
+            self.result.realism_manifest = _rg_m.to_dict()
         logger.info("=" * 60)
         logger.info("混合回测主循环结束")
         logger.info("=" * 60)
@@ -490,6 +495,13 @@ class MixedBacktestEngine:
             assert_realism_pass(_m)
         except Exception as exc:  # noqa: BLE001
             if get_config().enabled:
+                # P0-01 端到端（#345）：阻断路径产物落盘（§4.3.1）——被门禁拦下
+                # 时无 result 对象，独立落 outputs/realism_gate_blocked_*.json 后 re-raise；
+                # 仅 RealismGateError 携带 violations（配置损坏类异常直接传播，不产阻断产物）
+                _v = getattr(exc, "violations", None)
+                if _v is not None:
+                    from myquant.realism_gate.report import write_blocked_artifact
+                    write_blocked_artifact("outputs", _m, _v)
                 raise
             logger.debug("真实性门禁 run 后刷新失败（软接线不阻断）: %s", exc)
 

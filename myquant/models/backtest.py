@@ -130,6 +130,10 @@ class BacktestConfig:
     lot_size: int = 100                 # A 股一手股数
     # ── P1-09 流动性约束：参与率进配置 ──
     participation_rate: float = 1.0     # 成交量参与率（1.0=全量成交，0<rate<1 限时）
+    # ── P0-01 端到端（#345）：真实性门禁配置透传（enabled/audit_violations）──
+    # create_engine 从 config.to_dict()["realism_gate"] 读取（YAML/API/测试均可配）；
+    # 缺省 {} → enabled=False（软接线审计档，分期启用期不误伤既有回测）
+    realism_gate: Dict[str, Any] = field(default_factory=dict)
 
     def validate(self) -> List[str]:
         errors: List[str] = []
@@ -167,6 +171,8 @@ class BacktestConfig:
             "lot_size": self.lot_size,
             # P1-09 流动性约束透传
             "participation_rate": self.participation_rate,
+            # P0-01 端到端（#345）：真实性门禁配置透传
+            "realism_gate": self.realism_gate,
         }
 
     def __repr__(self) -> str:
@@ -483,6 +489,10 @@ class BacktestResult:
     finished_at: float = 0.0
     status: str = "pending"  # pending | running | completed | failed
     error_message: str = ""
+
+    # P0-01 端到端（#345）：真实性门禁清单快照（seal 后挂载，随 results.json 落盘；
+    # None = 未经门禁/未构建 manifest——旁路直构引擎无 manifest）
+    realism_manifest: Optional[Dict[str, Any]] = None
 
     # 扩展
     extra: Dict[str, Any] = field(default_factory=dict)

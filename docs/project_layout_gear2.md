@@ -766,6 +766,8 @@ Pythonwdhmm/
 
 │   │   ├── test_slicing_failopen_guard.py # ✨【回写#338】因果切片 fail-open 加固反红测试（P0-08 子项④用例⑫：engine/mixed 置位失败显式降级——保持未封门 + 哨兵计数 + 写 context_sliced=false）
 
+│   │   ├── test_realism_gate_e2e.py # ✨【回写#345】P0-01 端到端验收测试（3 项：阻断路径 blocked 产物落盘 / 正常路径 results.json 完整清单 / 审计档 enabled=false 清单仍落盘；真实 create_engine+run 链路 + 违规探针策略触发 causality 判据）
+
 │   │   ├── test_engine_benchmark.py  # ✨【V5·P3】三模式性能基准测试（吞吐/耗时阈值断言，15项）
 
 │   │   ├── test_live_guard_failover.py # ✨【回写#31】实盘保障组件故障注入（审计H2降级：事件总线断连/订阅失败/挂载失败/风控异常拒单/调度失败/巡检异常/快照失败/全组件关闭，10项）✅已完成
@@ -4835,5 +4837,15 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    e. **tests/unit/test_checks_causality.py（+5 项）**：判据门控（入口形态 assessed=False + context_sliced=False → 空违规）；enabled=True 入口完整 manifest → 通过并 seal（不误伤 create_engine）；握手⑤三态（enabled=True+未 seal → run 抛 RealismGateError；seal 后 → 放行；enabled=False+未 seal → 审计档放行）。helper 更新：`_make_manifest`/`_make_full_manifest` 加 `assessed_at_run_end=True`（运行期形态）、新增 `_make_entry_manifest`（入口形态）；`test_realism_gate.py`/`test_realism_manifest.py` 的 `_fill_minimal` 补新 CRITICAL_FIELD。
    f. **验收结果**：py_compile 通过；targeted **93 passed**（六文件字母序，含 checks_causality 19 项）+ 引擎 targeted **46 passed**（backtest_engines_v5/causality_slicing/failopen_guard）；全量回归待后台跑（基线 3995 passed）。
    g. **纪律遵守**：L0 纯函数门控（checks/causality 只消费 manifest 字段）；入口断言 enabled 门控与 gate 语义一致（enabled=False 审计不阻断）；live 引擎无 manifest 构建（grep 零命中）——第⑤步只覆盖回测三引擎，live create_live_engine 接线遗留（方案 §4.4 例外清单）；git 提交（commit message 引用 #344）。**P0-01 判据落地完成**：causality.* 真实采集 → run 收尾阻断闭环（已验）+ 入口不误伤（本刀）+ 握手第⑤步（本刀）三环齐。后续 P0-03/P0-05/P0-07/P1-15 真实生效值采集逐步补齐其余检查器。
+
+## #345 · 2026-10-12 · P0-01 端到端验收：阻断产物 + results.json 清单落盘闭环
+   事实来源：本次落地（施工方案 v2.2 §4.3.1 阻断产物 L78-92 + §4.7 正常路径清单落盘 + P0-01 卡验收判据 L61）。**现状核验（端到端缺口）**：report.py 的 `write_blocked_artifact` / `write_manifest_to_results` **零调用点**——阻断时 RealismGateError 抛出后无人落 blocked 产物；results.json 也无清单写入通路；且 BacktestConfig 不透传 realism_gate 配置（create_engine 读 cfg_dict.get("realism_gate") 恒 {} → enabled 恒 False，生产无法配置阻断档）。**本刀把 P0-01 卡验收判据的两条（阻断路径 blocked_*.json + results.json 含完整清单）跑通真实回测闭环**。
+   a. **myquant/models/backtest.py（改动）**：BacktestConfig 新增 `realism_gate: Dict` 字段 + to_dict 透传（YAML/API/测试均可配置 enabled；缺省 {} = 审计档）；BacktestResult 新增 `realism_manifest: Optional[Dict]` 字段（清单快照挂载点）。
+   b. **myquant/backtest/config_builder.py（改动）**：BacktestConfig 构建透传 YAML 顶层 `realism_gate` 段（修复 YAML 配置断链——此前模板段被忽略）。
+   c. **三引擎 _refresh_causality_manifest catch（改动）**：enabled=True 且 RealismGateError（携带 violations）→ 先 `write_blocked_artifact("outputs", manifest, violations)`（§4.3.1 独立落盘）再 re-raise；配置损坏类异常（无 violations）直接传播不产阻断产物。
+   d. **三引擎 run 收尾（改动）**：`_refresh` 后清单快照挂载 `result.realism_manifest = manifest.to_dict()`（getattr 防御直构引擎无 manifest）；enabled=False 审计档同样挂载（"清单仍落盘"判据）。
+   e. **tests/unit/test_realism_gate_e2e.py（新建，3 项，R-19）**：真实 create_engine + run 链路——**判据 1 阻断路径**（enabled=True + 违规探针策略篡改 _slicing_enabled 读全量 → accessed_future + context_sliced=false → run 抛 RealismGateError + outputs/realism_gate_blocked_*.json 落盘：blocked=True、manifest 完整含 assessed_at_run_end=True、violations 含 causality.*）；**判据 2 正常路径**（enabled=True + 合规策略 → run 成功 + result.realism_manifest 完整（CRITICAL_FIELDS 全键）+ write_manifest_to_results 后 results.json 含 realism_manifest 键）；**判据 3 审计档**（enabled=False + 违规策略 → 不阻断 + 清单仍挂载）。autouse fixture 仅注册 causality 检查器（其余 4 检查器把入口诚实保守值判 critical 属 P0-03/P0-05 真实采集对齐范围，teardown 恢复全量注册）。
+   f. **验收结果**：py_compile 通过；targeted **120 passed**（8 文件字母序，含 e2e 3 项）；全量回归待后台跑（基线 4000 passed）。
+   g. **纪律遵守**：report.py L0 纯构建器不改（接线在三引擎 L3 层）；blocked 产物输出 "outputs/"（§4.3.1 文档语义）；测试隔离（monkeypatch.chdir(tmp_path) 阻断产物落临时目录 + autouse fixture 恢复检查器注册表）；**遗留登记**：其余 4 检查器（market_rules/cost_model/data_pit/sample_pool）入口误判（lot_size.enforced=False、survivorship.discount=None、pool.exclusion_basis="today" 等诚实保守值判 critical）待 P0-03/P0-05/P0-07/P1-15 真实生效值采集对齐；live 引擎无 manifest 构建（方案 §4.4 例外清单）；git 提交（commit message 引用 #345）。**P0-01 端到端验收完成**：阻断路径产物 + results.json 完整清单 + enabled:false 清单仍落盘三条判据全部真实回测闭环。
 
 

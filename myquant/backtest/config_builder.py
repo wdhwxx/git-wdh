@@ -190,6 +190,8 @@ def build_backtest_config(
         benchmark=bt_cfg.get("benchmark", "000300.SH"),
         risk_free_rate=metrics_cfg.get("risk_free_rate", 0.02),
         params=strategy_cfg.get("params", {}),
+        # P0-01 端到端（#345）：真实性门禁配置透传（YAML 顶层段；缺省 {} = 审计档）
+        realism_gate=config_dict.get("realism_gate", {}) or {},
     )
 
     # 配置校验
