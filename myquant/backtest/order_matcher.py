@@ -257,6 +257,7 @@ class OrderMatcher:
         price_limit_pct: float = 0.10,
         enable_price_limit: bool = True,
         price_limit_pct_by_symbol: Optional[Dict[str, float]] = None,
+        lot_size: int = 0,
     ):
         """初始化撮合器。
 
@@ -270,6 +271,9 @@ class OrderMatcher:
             price_limit_pct_by_symbol: 按标的的涨跌停幅度映射（P0-03 板块映射，
                 {symbol: pct}）；命中时优先于 price_limit_pct（标量 match 路径生效；
                 向量化 match_vectorized 无 symbol 数组，仍用 price_limit_pct 单值）。
+            lot_size: 整手股数（P0-03 续卡 #348：>0 时**买入**按 lot_size 向下取整，
+                不足一手不成交——A股整手约束；卖出不限制（零股可卖）；0 = 不限制
+                （向后兼容，未装配整手约束的调用方行为不变）。
         """
         self.enable_partial_fill = bool(enable_partial_fill)
         self.price_limit_pct = float(price_limit_pct)
@@ -277,11 +281,13 @@ class OrderMatcher:
         self.price_limit_pct_by_symbol: Optional[Dict[str, float]] = (
             dict(price_limit_pct_by_symbol) if price_limit_pct_by_symbol else None
         )
+        self.lot_size: int = int(lot_size)
         logger.debug(
-            "OrderMatcher 初始化: partial_fill=%s, price_limit=%s(±%.0f%%), by_symbol=%s",
+            "OrderMatcher 初始化: partial_fill=%s, price_limit=%s(±%.0f%%), by_symbol=%s, lot=%s",
             self.enable_partial_fill, self.enable_price_limit,
             self.price_limit_pct * 100,
             len(self.price_limit_pct_by_symbol) if self.price_limit_pct_by_symbol else 0,
+            self.lot_size,
         )
 
     # ─────────────────────────────────────────
@@ -348,6 +354,10 @@ class OrderMatcher:
         qty = float(order.remaining_qty)
         if self.enable_partial_fill and max_fill_qty is not None:
             qty = min(qty, float(max_fill_qty))
+        # P0-03 续卡（#348）：整手执行——买入按 lot_size 向下取整（不足一手不成交，
+        # A股整手约束）；卖出不限制（零股可卖）。lot_size=0 时不限制（向后兼容）。
+        if side == OrderSide.BUY and self.lot_size > 0:
+            qty = float(int(qty // self.lot_size) * self.lot_size)
         if qty <= 0:
             return None
 
@@ -638,7 +648,14 @@ class OrderMatcher:
                 )
 
         filled_mask = ~np.isnan(fill_price)
-        fill_qtys = np.where(filled_mask, arrays["quantities"], 0.0)
+        # P0-03 续卡（#348）：整手执行——买入按 lot_size 向下取整（不足一手不成交）；
+        # 卖出不限制（零股可卖）。lot_size=0 时不限制（向后兼容）。
+        if self.lot_size > 0:
+            buy_lots = np.floor(arrays["quantities"] / self.lot_size) * self.lot_size
+            qty_capped = np.where(is_buy, buy_lots, arrays["quantities"])
+            fill_qtys = np.where(filled_mask, qty_capped, 0.0)
+        else:
+            fill_qtys = np.where(filled_mask, arrays["quantities"], 0.0)
 
         return VectorizedFillResult(
             fill_prices=fill_price,

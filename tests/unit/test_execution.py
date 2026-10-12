@@ -362,6 +362,53 @@ class TestSimBroker:
 
 
 # ═══════════════════════════════════════════
+#  TestSimBrokerLotSizeEnforcement - 整手执行（P0-03 续卡 #348）
+# ═══════════════════════════════════════════
+
+class TestSimBrokerLotSizeEnforcement:
+    """SimBroker 按 lot_size 限制零股买入（买入整手截断/卖出不限/默认兼容）。"""
+
+    def test_buy_truncated_to_lot(self):
+        """lot_size=100 买单 150 股 → 成交 100（向下取整）。"""
+        broker = SimBroker(initial_capital=1_000_000.0, lot_size=100)
+        broker.connect()
+        order = _make_order(side=OrderSide.BUY, quantity=150, price=10.0)
+        broker.submit_order(order)
+        trades = broker.on_bar(_make_bar(close=10.0))
+        assert len(trades) == 1
+        assert trades[0].quantity == 100
+
+    def test_buy_below_one_lot_not_filled(self):
+        """lot_size=100 买单 50 股（不足一手）→ 不成交。"""
+        broker = SimBroker(initial_capital=1_000_000.0, lot_size=100)
+        broker.connect()
+        order = _make_order(side=OrderSide.BUY, quantity=50, price=10.0)
+        broker.submit_order(order)
+        trades = broker.on_bar(_make_bar(close=10.0))
+        assert len(trades) == 0
+
+    def test_sell_not_truncated(self):
+        """lot_size=100 卖单 150 股 → 成交 150（卖出不限制，零股可卖）。"""
+        broker = SimBroker(initial_capital=1_000_000.0, lot_size=100)
+        broker.connect()
+        order = _make_order(side=OrderSide.SELL, quantity=150, price=10.0)
+        broker.submit_order(order)
+        trades = broker.on_bar(_make_bar(close=10.0))
+        assert len(trades) == 1
+        assert trades[0].quantity == 150
+
+    def test_default_lot_zero_backward_compatible(self):
+        """lot_size=0（未装配整手约束）买单 50 股 → 成交 50（向后兼容）。"""
+        broker = SimBroker(initial_capital=1_000_000.0)
+        broker.connect()
+        order = _make_order(side=OrderSide.BUY, quantity=50, price=10.0)
+        broker.submit_order(order)
+        trades = broker.on_bar(_make_bar(close=10.0))
+        assert len(trades) == 1
+        assert trades[0].quantity == 50
+
+
+# ═══════════════════════════════════════════
 #  TestOrderStateMachine - 订单状态机
 # ═══════════════════════════════════════════
 

@@ -47,6 +47,7 @@ def backtest_broker_factory(config: Any) -> Any:
         enforce_limit=bool(config.enforce_limit),
         participation_rate=float(config.participation_rate),
         is_suspended=None,
+        lot_size=int(getattr(config, "lot_size", 0)),
     )
 
 

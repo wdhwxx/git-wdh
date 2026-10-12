@@ -1260,9 +1260,12 @@ class BacktestScheduler:
             # t1/lot/liquidity/slippage 从 config 构造事实读（broker 在 run 时 on_init 才装配，
             # create_engine 处仅有 config 事实；run 后由 _refresh_causality_manifest 按 broker 实测刷新）
             manifest.set_field("t1_position_freeze.enabled", bool(getattr(config, "enable_t1", True)))
-            # 撮合层（SimBroker）无整手执行逻辑（grep 无 lot_size 消费）→ 可买零股，诚实 False
-            manifest.set_field("lot_size.enforced", False)
-            manifest.set_field("lot_size.value", None)
+            # P0-03 续卡（#348）：撮合层整手执行已接线（OrderMatcher/SimBroker
+            # 均按 lot_size 限制买入零股）→ lot_size>0 时整手约束真实生效，诚实报
+            # True；0（未装配整手约束）报 False（#346 起接线前的诚实 False 已成历史）。
+            _cfg_lot = int(getattr(config, "lot_size", 100))
+            manifest.set_field("lot_size.enforced", _cfg_lot > 0)
+            manifest.set_field("lot_size.value", _cfg_lot)
             _liquidity_cap = float(getattr(config, "participation_rate", 1.0))
             manifest.set_field("liquidity.participation_cap", _liquidity_cap)
             # 参与率 1.0 = 全量参与（不限制），须显式声明（1.0 恒由 config 默认，诚实披露）

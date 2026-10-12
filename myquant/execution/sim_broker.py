@@ -72,6 +72,7 @@ class SimBroker(ExecutionInterface):
         enforce_limit: bool = False,
         is_suspended: Optional[Callable[[str], bool]] = None,
         enable_t1: bool = True,
+        lot_size: int = 0,
     ):
         """
         初始化模拟券商
@@ -83,6 +84,9 @@ class SimBroker(ExecutionInterface):
             enable_partial_fill: 是否启用部分成交（默认全量成交，简化回测）
             participation_rate: 成交量参与率（0<rate<1 时按 bar.volume*rate 限成交，剩余走 partial_fill；默认 1.0 全量成交）
             enable_t1: 是否启用 T+1 持仓冻结（A股标准，当日买入不可当日卖出；P1-08）
+            lot_size: 整手股数（P0-03 续卡 #348：>0 时**买入**按 lot_size 向下取整，
+                不足一手不成交——A股整手约束；卖出不限制（零股可卖）；0 = 不限制
+                （向后兼容，未装配整手约束的调用方行为不变）。
         """
         super().__init__(name="sim_broker")
         self.initial_capital = float(initial_capital)
@@ -101,6 +105,7 @@ class SimBroker(ExecutionInterface):
         self._prev_close: Dict[str, float] = {}        # KP-P2-02: 昨收基准（上一bar收盘）
         self.enable_t1 = bool(enable_t1)                # P1-08: T+1 持仓冻结开关
         self._t1_holdings: Dict[str, float] = {}       # P1-08: 当日已成交买入冻结（当日买入不可卖）
+        self.lot_size: int = int(lot_size)              # P0-03 续卡 #348: 整手约束
         self.state_machine = OrderStateMachine()
         self._market_prices: Dict[str, float] = {}  # 最新市场价
         logger.info(
@@ -360,8 +365,12 @@ class SimBroker(ExecutionInterface):
             fill_qty = max(int(fill_qty), 0)
         else:
             fill_qty = order.remaining_qty
+        # P0-03 续卡（#348）：整手执行——买入按 lot_size 向下取整（不足一手不成交，
+        # A股整手约束）；卖出不限制（零股可卖）。lot_size=0 时不限制（向后兼容）。
+        if order.side == OrderSide.BUY and self.lot_size > 0:
+            fill_qty = float(int(fill_qty // self.lot_size) * self.lot_size)
         if fill_qty <= 0:
-            return None  # 参与率限制下无可成交数量，保留订单待后续 bar
+            return None  # 参与率限制/整手截断下无可成交数量，保留订单待后续 bar
 
         # P1-08: T+1 持仓冻结（卖出时可用量 = 持仓 - 当日买入冻结）
         if order.side == OrderSide.SELL and self.enable_t1:

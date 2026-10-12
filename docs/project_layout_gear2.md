@@ -4869,4 +4869,15 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    g. **验收结果**：py_compile 通过；config_builder + price_limit_preclose **30 passed**；扩展 targeted **150 passed**（10 文件字母序）；全量回归待后台跑（基线 4003 passed）。
    h. **纪律遵守**：OrderMatcher 新参数默认 None（既有构造/测试零破坏）；板块映射接线仅在 config 默认幅度时生效（显式配置优先）；event/vectorized 板块映射局限留痕（SimBroker 单值 / 向量化无 symbol 数组，蓝图登记）；git 提交（commit message 引用 #347）。**P0-03 卡本体收尾完成**（任务清单状态 ⚠️ 部分完成 → ✅ 完成）：三处断链（config_builder 赋值 / 键名统一 / 板块映射接生产调用）全部落地，卡验收判据（开/关/改幅度/板块映射 + event 涨停买单 0 成交）达成。
 
+## #348 · 2026-10-12 · P0-03 续卡：撮合层整手执行接线（lot_size.enforced 恢复判据）
+   事实来源：#347 遗留登记（撮合层整手执行接线是"可买零股与实盘不符"风险根治 + enabled=true 全量开启后唯一仍豁免的真实风险项；#346 曾因撮合层无整手执行逻辑豁免 lot_size 判据）。**本轮接线完成 → manifest.lot_size.enforced 真实报 True → market_rules 判据恢复强制**。
+   a. **myquant/backtest/order_matcher.py（改动）**：构造新增 `lot_size: int = 0`（0=不限制，向后兼容）；**match 标量**：BUY 且 lot_size>0 → `floor(qty/lot)*lot` 向下取整（不足一手不成交）；**match_vectorized**：is_buy 行按 lot 截断、is_sell 行原量（卖出不限制，零股可卖）。
+   b. **myquant/execution/sim_broker.py（改动）**：构造新增 `lot_size: int = 0`（同上兼容语义）；`_match_order` 成交数量段 BUY 且 lot_size>0 → floor 截断（参与率限制之后、T+1 冻结之前）。
+   c. **引擎装配**：mixed_engine / vectorized_engine 的 OrderMatcher 装配传 `lot_size=self.lot_size`（#347 create_engine 已透传 config.lot_size → 引擎 self.lot_size 真实）；**broker 工厂**（tests/conftest.py + scripts/生成回测报告.py + scripts/验收_回测引擎V5.py + scripts/回测真实性基线.py 共 4 处）SimBroker 装配传 `lot_size=int(getattr(cfg, "lot_size", 0))`（event 路径整手接线）。
+   d. **manifest 真实采集（myquant/backtest/engine.py）**：`lot_size.enforced` ← `config.lot_size > 0`（接线后整手约束真实生效，诚实报 True；0=未装配报 False）；`lot_size.value` ← config.lot_size（替代 #337 起恒 None）。
+   e. **判据恢复（myquant/realism_gate/checks/market_rules.py）**：恢复 `lot_size.enforced 必须 True` 判据（#346 豁免理由已失效——撮合层整手执行已接线）；docstring 同步。
+   f. **测试**：test_execution.py +4（SimBroker 整手：买单 150→100 / 买单 50 不成交 / 卖单 150 原量 / lot_size=0 向后兼容）；test_price_limit_preclose.py +5（OrderMatcher 标量截断×4 + 向量化买入截断卖出原量）；test_manifest_truthfulness.py TestLotSize 断言同步（enforced False/None → True/100，#337 语义更新）。
+   g. **验收结果**：py_compile 通过；受影响 4 文件 **104 passed**（含 e2e 全量注册下 lot_size 判据恢复不误伤）；扩展 targeted **225 passed**（11 文件字母序）；全量回归待后台跑（基线 4010 passed）。
+   h. **纪律遵守**：lot_size 新参数默认 0（既有构造/测试零破坏，仅装配方显式启用）；整手语义 A股写实（买入整手截断、卖出零股可卖）；撮合路径标量/向量化数学等价；git 提交（commit message 引用 #348）。**P0-03 续卡完成**：可买零股风险根治，market_rules 四判据全部恢复强制（price_limit/suspension/t1/lot_size），enabled=true 全量开启的检查器判据前置全部就绪。
+
 

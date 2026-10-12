@@ -8,7 +8,8 @@ tests/unit/test_manifest_truthfulness.py - manifest 真实性反红测试（P0-0
     scheduler 无 self.data/self.config 属性 + engine.context 在 run 前未创建）
   - 7 组硬编码乐观值改真实实例读取：
     * t1_position_freeze.enabled ← config.enable_t1（真实配置，默认 True）
-    * lot_size.enforced/value ← False/None（撮合层无整手执行，读不到写 None 而非 True）
+    * lot_size.enforced/value ← True/config.lot_size（#348 撮合层整手执行接线完成；
+      #337 接线前为 False/None——撮合层无整手执行，读不到写 None 而非 True）
     * liquidity.participation_cap/declared_unlimited ← config.participation_rate（1.0 显式声明）
     * pool.exclusion_basis ← "today"（P0-06 真实口径，非 as_of 谎报）
     * survivorship.* 保留 None/"unknown"（已正确，登记待接线）
@@ -62,12 +63,12 @@ class TestT1PositionFreeze:
 
 
 class TestLotSize:
-    """撮合层无整手执行 → enforced=False、value=None（读不到写 None 而非 True）。"""
+    """撮合层整手执行（#348 接线完成）→ enforced=True、value=config.lot_size。"""
 
-    def test_missing_reports_none_not_true(self):
+    def test_enforced_true_after_wiring(self):
         m = _build_manifest()
-        assert m.get_field("lot_size.enforced") is False
-        assert m.get_field("lot_size.value") is None
+        assert m.get_field("lot_size.enforced") is True
+        assert m.get_field("lot_size.value") == 100
 
 
 class TestLiquidity:

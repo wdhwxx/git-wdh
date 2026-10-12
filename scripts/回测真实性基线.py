@@ -94,6 +94,7 @@ def _build_broker_factory():
             price_limit_pct=float(_bcfg.get("price_limit_pct", 0.10)),
             enforce_limit=bool(_bcfg.get("enforce_limit", False)),
             is_suspended=None,
+            lot_size=int(getattr(config, "lot_size", 0)),
         )
 
     return _factory

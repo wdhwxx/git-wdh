@@ -189,6 +189,7 @@ class VectorizedBacktestEngine:
         self.matcher: OrderMatcher = matcher or OrderMatcher(
             price_limit_pct=float(getattr(self.config, "price_limit_pct", 0.10)),
             enable_price_limit=True,
+            lot_size=self.lot_size,
         )
         self.metrics_calc: MetricsCalculator = MetricsCalculator(
             risk_free_rate=self.config.risk_free_rate

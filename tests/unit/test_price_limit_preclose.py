@@ -295,6 +295,62 @@ class TestPerSymbolBoardMapping:
 
 
 # ═══════════════════════════════════════════════
+#  P0-03 续卡（#348）：OrderMatcher 整手执行
+# ═══════════════════════════════════════════════
+
+class TestOrderMatcherLotSizeEnforcement:
+    """OrderMatcher 按 lot_size 限制零股买入（买入整手截断/卖出不限/默认兼容）。
+
+    match 标量：lot_size>0 且 BUY → floor 截断，不足一手不成交；SELL 不截断。
+    match_vectorized：is_buy 行截断、is_sell 行原量；lot_size=0 时不限制。
+    """
+
+    def test_scalar_buy_truncated_to_lot(self) -> None:
+        matcher = OrderMatcher(lot_size=100)
+        order = _make_order(OrderSide.BUY, qty=150)
+        fill = matcher.match(order, _make_bar(10.0, pre_close=10.0))
+        assert fill is not None
+        assert fill.quantity == 100
+
+    def test_scalar_buy_below_one_lot_not_filled(self) -> None:
+        matcher = OrderMatcher(lot_size=100)
+        order = _make_order(OrderSide.BUY, qty=50)
+        # 不足一手 → qty=0 → 不成交
+        assert matcher.match(order, _make_bar(10.0, pre_close=10.0)) is None
+
+    def test_scalar_sell_not_truncated(self) -> None:
+        matcher = OrderMatcher(lot_size=100)
+        order = _make_order(OrderSide.SELL, qty=150)
+        fill = matcher.match(order, _make_bar(10.0, pre_close=10.0))
+        assert fill is not None
+        assert fill.quantity == 150
+
+    def test_scalar_default_lot_zero_backward_compatible(self) -> None:
+        matcher = OrderMatcher()
+        order = _make_order(OrderSide.BUY, qty=50)
+        fill = matcher.match(order, _make_bar(10.0, pre_close=10.0))
+        assert fill is not None
+        assert fill.quantity == 50
+
+    def test_vectorized_buy_truncated_sell_not(self) -> None:
+        matcher = OrderMatcher(lot_size=100)
+        result = matcher.match_vectorized(
+            sides=np.array([OrderSide.BUY.value, OrderSide.BUY.value, OrderSide.SELL.value], dtype=object),
+            order_types=np.array(["MARKET", "MARKET", "MARKET"], dtype=object),
+            limit_prices=np.full(3, np.nan),
+            stop_prices=np.full(3, np.nan),
+            opens=np.full(3, 10.0),
+            highs=np.full(3, 10.0),
+            lows=np.full(3, 10.0),
+            quantities=np.array([150.0, 50.0, 150.0]),
+            pre_closes=np.full(3, 10.0),
+            volumes=np.full(3, 1e6),
+        )
+        # 买入 150 → 100；买入 50（不足一手）→ 0；卖出 150 → 150
+        assert list(result.fill_quantities) == [100.0, 0.0, 150.0]
+
+
+# ═══════════════════════════════════════════════
 #  5. provider.get_bars 前收盘价兜底派生
 # ═══════════════════════════════════════════════
 

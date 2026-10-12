@@ -185,6 +185,7 @@ class MixedBacktestEngine:
             price_limit_pct=_matcher_cfg_price_pct,
             enable_price_limit=True,
             price_limit_pct_by_symbol=_matcher_by_symbol,
+            lot_size=self.lot_size,
         )
         self.recorder: Optional[TradeRecorder] = None
         self.metrics_calc: Optional[MetricsCalculator] = None

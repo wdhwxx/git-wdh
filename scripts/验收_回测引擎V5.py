@@ -63,6 +63,7 @@ register_broker_factory(
         price_limit_pct=float(cfg.to_dict().get("price_limit_pct", 0.10)),
         enforce_limit=bool(cfg.to_dict().get("enforce_limit", False)),
         is_suspended=None,
+        lot_size=int(getattr(cfg, "lot_size", 0)),
     )
 )
 
