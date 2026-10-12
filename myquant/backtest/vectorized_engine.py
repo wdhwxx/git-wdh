@@ -191,6 +191,9 @@ class VectorizedBacktestEngine:
         self.result: Optional[BacktestResult] = None
         self._symbol_results: List[SymbolResult] = []
         self._initialized = False
+        # 策略上下文（on_init 创建；__init__ 先占位 None，与 event/mixed 引擎对齐，
+        # 供 _refresh_causality_manifest 等 run 前路径防御访问）
+        self.context: Optional[StrategyContext] = None
 
         # #H2修复：防未来函数校验器（默认开启，规则4强制）
         self._lookahead_guard: Optional[LookaheadGuard] = (
@@ -452,6 +455,24 @@ class VectorizedBacktestEngine:
                 "guard_injected": self.context.extra.get("lookahead_guard") is not None,
                 "context_data_scoped": False,
             })
+            # ── P0-08 子项③：run 后从真实实例刷新 t1/slippage（broker 在 on_init 装配，
+            # create_engine 处仅有 config 构造事实；无 broker 的引擎保留 config 值）──
+            _broker = getattr(self, "broker", None)
+            if _broker is not None:
+                _broker_t1 = getattr(_broker, "enable_t1", None)
+                if _broker_t1 is not None:
+                    _m.set_field("t1_position_freeze.enabled", bool(_broker_t1))
+                _broker_slip = getattr(_broker, "slippage_model", None)
+                if _broker_slip is not None:
+                    _bs_type = str(getattr(_broker_slip, "type", "fixed_bps"))
+                    _bs_value = float(getattr(_broker_slip, "fixed_bps", 0.0))
+                    if _bs_type == "none":
+                        _bs_value = 0.0  # type="none" 实际滑点恒 0
+                    _m.update_group("slippage", {
+                        "type": _bs_type,
+                        "value": _bs_value,
+                        "is_zero_cost": bool(_bs_type == "none" or _bs_value == 0.0),
+                    })
             assert_realism_pass(_m)
         except Exception as exc:  # noqa: BLE001
             if get_config().enabled:

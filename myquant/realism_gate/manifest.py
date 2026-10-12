@@ -165,10 +165,13 @@ WARNING_FIELDS: List[str] = [
     "engine_consistency.pairs",
 ]
 
-# 方案 §4.2 取值域标注 float|null 的字段：允许 None（不视为缺失）
+# 方案 §4.2 取值域标注 null 允许的字段：None 不视为缺失（build 通过，状态语义由 _derive_status/§4.5 处理）
 ALLOW_NONE_FIELDS: set = {
     "liquidity.participation_cap",       # float|null
     "survivorship.discount",             # float|null
+    "lot_size.value",                    # P0-08 子项③：撮合层（SimBroker）无整手执行单位 → None（S-11 读不到写 None，禁止写 True）
+    "fingerprint_hash",                  # str|null：null 即 unverified（方案 §4.2 L474）
+    "snapshot_id",                       # str|null：null 即 unverified（方案 §4.2 L474）
 }
 
 # 取值域枚举（build 时校验）
@@ -250,7 +253,8 @@ class RealismManifest:
         校验通过后按 §4.5 阻断矩阵推导 status：
           - 无任何 degraded/unverified 信号 → ok
           - 有 adjust_degraded_symbols 非空 / pool.exclusion_basis=="today" → degraded
-          - fingerprint_hash/snapshot_id 为 None → unverified（若 critical 已强制非 None，此分支不触发）
+          - fingerprint_hash/snapshot_id 为 None → unverified（P0-08 子项③起
+            这两字段允许 None（方案 §4.2 str|null），build 不视为缺失，状态推导走 unverified）
           - enabled=False 且配置段缺失 → disabled
 
         Returns:

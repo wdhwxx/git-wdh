@@ -884,6 +884,24 @@ class BacktestEngine(BaseEngine):
                 "guard_injected": self.context.extra.get("lookahead_guard") is not None,
                 "context_data_scoped": False,
             })
+            # ── P0-08 子项③：run 后从真实实例刷新 t1/slippage（broker 在 on_init 装配，
+            # create_engine 处仅有 config 构造事实；无 broker 的引擎保留 config 值）──
+            _broker = getattr(self, "broker", None)
+            if _broker is not None:
+                _broker_t1 = getattr(_broker, "enable_t1", None)
+                if _broker_t1 is not None:
+                    _m.set_field("t1_position_freeze.enabled", bool(_broker_t1))
+                _broker_slip = getattr(_broker, "slippage_model", None)
+                if _broker_slip is not None:
+                    _bs_type = str(getattr(_broker_slip, "type", "fixed_bps"))
+                    _bs_value = float(getattr(_broker_slip, "fixed_bps", 0.0))
+                    if _bs_type == "none":
+                        _bs_value = 0.0  # type="none" 实际滑点恒 0
+                    _m.update_group("slippage", {
+                        "type": _bs_type,
+                        "value": _bs_value,
+                        "is_zero_cost": bool(_bs_type == "none" or _bs_value == 0.0),
+                    })
             assert_realism_pass(_m)
         except Exception as exc:  # noqa: BLE001
             if get_config().enabled:
@@ -1170,14 +1188,29 @@ class BacktestScheduler:
             manifest.set_field("price_limit.pre_close_source", cfg_dict.get("price_limit", {}).get("pre_close_source", "data_col"))
             manifest.set_field("suspension.enabled", bool(cfg_dict.get("suspension", {}).get("enabled", True)))
             manifest.set_field("suspension.basis", cfg_dict.get("suspension", {}).get("basis", "volume_zero"))
-            manifest.set_field("t1_position_freeze.enabled", True)
-            manifest.set_field("lot_size.enforced", True)
-            manifest.set_field("lot_size.value", 100)
-            manifest.set_field("liquidity.participation_cap", None)
-            manifest.set_field("liquidity.declared_unlimited", True)
-            manifest.set_field("slippage.type", cfg_dict.get("slippage", {}).get("type", "fixed"))
-            manifest.set_field("slippage.value", float(cfg_dict.get("slippage", {}).get("value", 0.001)))
-            manifest.set_field("slippage.is_zero_cost", bool(cfg_dict.get("slippage", {}).get("is_zero_cost", False)))
+            # ── P0-08 子项③（止血 B）：7 组硬编码乐观值改真实实例读取（S-11）──
+            # t1/lot/liquidity/slippage 从 config 构造事实读（broker 在 run 时 on_init 才装配，
+            # create_engine 处仅有 config 事实；run 后由 _refresh_causality_manifest 按 broker 实测刷新）
+            manifest.set_field("t1_position_freeze.enabled", bool(getattr(config, "enable_t1", True)))
+            # 撮合层（SimBroker）无整手执行逻辑（grep 无 lot_size 消费）→ 可买零股，诚实 False
+            manifest.set_field("lot_size.enforced", False)
+            manifest.set_field("lot_size.value", None)
+            _liquidity_cap = float(getattr(config, "participation_rate", 1.0))
+            manifest.set_field("liquidity.participation_cap", _liquidity_cap)
+            # 参与率 1.0 = 全量参与（不限制），须显式声明（1.0 恒由 config 默认，诚实披露）
+            manifest.set_field("liquidity.declared_unlimited", _liquidity_cap >= 1.0)
+            # 滑点从 config.slippage（SlippageModel 真实实例）读，替换 YAML cfg_dict（YAML 被忽略）
+            _slippage_model = getattr(config, "slippage", None)
+            _slip_type = str(getattr(_slippage_model, "type", "fixed_bps"))
+            _slip_value = float(getattr(_slippage_model, "fixed_bps", 0.0))
+            if _slip_type == "none":
+                _slip_value = 0.0  # type="none" 实际滑点恒 0（calc 返回 0），报真实生效值
+            manifest.set_field("slippage.type", _slip_type)
+            manifest.set_field("slippage.value", _slip_value)
+            manifest.set_field(
+                "slippage.is_zero_cost",
+                bool(_slip_type == "none" or _slip_value == 0.0),
+            )
             manifest.set_field("commission.buy_rate", float(cfg_dict.get("commission", {}).get("buy_rate", 0.0003)))
             manifest.set_field("commission.sell_rate", float(cfg_dict.get("commission", {}).get("sell_rate", 0.0003)))
             manifest.set_field("commission.min_commission", float(cfg_dict.get("commission", {}).get("min_commission", 5.0)))
@@ -1198,10 +1231,11 @@ class BacktestScheduler:
             manifest.set_field("fingerprint_hash", None)
             manifest.set_field("snapshot_id", None)
             manifest.set_field("pool.pit_applied", True)
-            manifest.set_field("pool.exclusion_basis", "as_of")
+            # P0-08 子项③：排除口径真实为 today（P0-06 只接量化字段，as_of 为乐观谎报）
+            manifest.set_field("pool.exclusion_basis", "today")
             # P0-06：注入真实样本口径（requested/admitted/dropped）
-            _req = len(self.config.symbols)
-            _adm = len(self.data) if isinstance(self.data, dict) else 0
+            _req = len(config.symbols)
+            _adm = len(data) if isinstance(data, dict) else 0
             manifest.set_field("pool.requested_count", _req)
             manifest.set_field("pool.admitted_count", _adm)
             manifest.set_field("pool.dropped_count", max(0, _req - _adm))
@@ -1214,15 +1248,17 @@ class BacktestScheduler:
             manifest.set_field("invariants.equity_identity", {})
             manifest.set_field("invariants.cash_non_negative", {})
             manifest.set_field("invariants.t1_consistency", {})
-            # ── P0-08 子项②：causality 组真实采集（替换静态反推）──
-            # guard_injected / full_sample_declared 为引擎构造事实（引擎已创建，可实测）；
-            # context_sliced / current_bar_ts_enforced 为 run 前真实态（引擎尚未置位，
-            # 诚实 False），由引擎 run() 结束后按实际置位刷新（_refresh_causality_manifest）。
+            # ── P0-08 子项②：causality 组 run 前写构造事实 ──
+            # 引擎 context 在 on_init（run 时）才创建，create_engine 处不可实测；
+            # run 结束后由 _refresh_causality_manifest 从 context 实测刷新。
+            # context_sliced / current_bar_ts_enforced：run 前未置位，诚实 False；
+            # full_sample_declared：构造参数事实（vectorized 恒传 True，其余引擎默认 False）；
+            # guard_injected：enable_lookahead_guard=True 时引擎必自建/注入 guard（构造事实）。
             manifest.update_group("causality", {
-                "context_sliced": bool(engine.context._slicing_enabled),
-                "current_bar_ts_enforced": engine.context.current_bar_ts is not None,
-                "full_sample_declared": bool(engine.context.full_sample_declared),
-                "guard_injected": engine.context.extra.get("lookahead_guard") is not None,
+                "context_sliced": False,
+                "current_bar_ts_enforced": False,
+                "full_sample_declared": mode == ENGINE_MODE_VECTORIZED,
+                "guard_injected": bool(kwargs.get("enable_lookahead_guard", True)),
                 # [P0-08 前置登记] context.data value 直取封死状态：当前未封死（诚实 False），
                 # 由 P0-08⑧ 窗口隔离（on_bar 保留 keys 枚举、封死 value 直取）改真实取值
                 "context_data_scoped": False,

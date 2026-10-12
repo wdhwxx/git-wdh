@@ -760,6 +760,10 @@ Pythonwdhmm/
 
 │   │   ├── test_backtest_engines_v5.py # ✨【V5·P1】三引擎基准正确性测试（向量化vs事件vs混合结果一致，31项）
 
+│   │   ├── test_causality_slicing.py # ✨【P0-07 建档，回写#334/#336 补充】因果切片访问器测试（三态/逃生口/on_init 阶段全量锚点 TestOnInitStageFullAccess/逃生口不可自设）
+
+│   │   ├── test_manifest_truthfulness.py # ✨【回写#337】manifest 真实性反红测试（P0-08 子项③用例⑪：create_engine manifest 真实构建 + 7 组硬编码乐观值改真实读取）
+
 │   │   ├── test_engine_benchmark.py  # ✨【V5·P3】三模式性能基准测试（吞吐/耗时阈值断言，15项）
 
 │   │   ├── test_live_guard_failover.py # ✨【回写#31】实盘保障组件故障注入（审计H2降级：事件总线断连/订阅失败/挂载失败/风控异常拒单/调度失败/巡检异常/快照失败/全组件关闭，10项）✅已完成
@@ -4760,5 +4764,15 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    e. **tests/unit/test_causality_slicing.py（改动）**：`test_full_sample_declared_returns_all` 改构造参数注入（`StrategyContext(_full_sample_declared=True)`）；新增 `test_full_sample_declared_is_engine_construct_param`（赋值抛 AttributeError，验收②反红基础）。
    f. **验收结果**：py_compile 通过；targeted 184 passed/2 skipped（causality/realism_gate/backtest/architecture）；全量回归 **3954 passed/4 skipped/2 failed**（较上轮 +1＝新增构造参数不可自设测试；2 failed 仍为既有配置本地红：`test_live_config_structure`、`test_backtest_real_config_adjust_strict`，与本次无关）。**子项②完成**：causality.* 真实采集，删除 mode 反推与 guard_injected 硬编码。
    g. **纪律遵守**：蓝图目录树先行确认（五个文件均既有登记，无新增树行）；不改继承结构（mixed/vectorized 独立类各实现刷新方法）；manifest 诚实取值（run 前不假装已切片）；git 提交（commit message 引用 #336）。
+
+## #337 · 2026-10-12 · P0-08 子项③止血 B：manifest 7 组硬编码乐观值改真实读取 + manifest 构建洞修复
+   事实来源：本次落地（施工方案 v2.2 §5.4.1 子项③/S-11 + P0-08 卡子项③；对照表 L726-734）；代码级核验：BacktestConfig 实有 enable_t1/lot_size/participation_rate/slippage 模型实例；SimBroker 无整手执行（grep 无 lot_size 消费）；P1-15 invariants 落 result.extra（manifest 逐字段回填归子项⑥）；方案 §4.2 L474 fingerprint/snapshot 标注 str|null。
+   a. **myquant/backtest/engine.py（改动，create_engine manifest 块）**：**7 组硬编码乐观值改真实读取**——`t1_position_freeze.enabled` ← `config.enable_t1`；`lot_size.enforced=False`/`value=None`（撮合层无整手，可买零股，S-11 读不到写 None 禁写 True）；`liquidity.participation_cap` ← `config.participation_rate`、`declared_unlimited` ← `rate>=1.0`；`pool.exclusion_basis` `as_of`→`today`（P0-06 真实口径，方向性修正）；`slippage.type/value/is_zero_cost` ← `config.slippage`（SlippageModel 真实实例，type="none" 时 value 报实际生效 0.0）；`survivorship.*` 保留（已正确）；`invariants.*` 保留 {}（判定时机归子项⑥）。
+   b. **myquant/backtest/engine.py（附带修复：manifest 此前恒软接线得 None）**：原 `self.data`/`self.config`（scheduler 无此属性）+ `engine.context.*`（context 在 on_init 才创建，run 前恒 None）致 try 必抛 → 恒软接线 manifest=None（enabled=False 掩盖，**门禁从未真正工作**）。修复：`self.xxx` → 局部 `config`/`data`；causality 组 run 前改**构造事实**（context_sliced/current_bar_ts_enforced=False 诚实、full_sample_declared ← mode==vectorized 构造参数事实、guard_injected ← enable_lookahead_guard），run 后由 _refresh_causality_manifest 从 context 实测刷新。
+   c. **myquant/realism_gate/manifest.py（改动）**：`lot_size.value`/`fingerprint_hash`/`snapshot_id` 纳入 ALLOW_NONE_FIELDS（方案 §4.2 str|null 语义：lot_size 撮合层无整手 → None；fingerprint/snapshot None → unverified 而非 fail-closed 缺失）；build() docstring 同步。
+   d. **三引擎 _refresh_causality_manifest（engine/mixed/vectorized，改动）**：run 后从真实实例刷新 t1/slippage（broker 在 on_init 装配——`enable_t1`/`slippage_model` 实测；无 broker 引擎保留 config 值；type="none" 时 value 报 0.0）。
+   e. **tests/unit/test_manifest_truthfulness.py（新建，11 项，用例⑪反红）**：manifest 真实构建成功（修复前置）+ t1/lot/liquidity/pool/slippage/survivorship/invariants 逐组报真实值；`lot_size.enforced=False`、`value=None`（非 True）；`exclusion_basis=="today"`（非 as_of）；`participation_rate=0.1` → cap=0.1/unlimited=False；SlippageModel(type="none") → is_zero_cost=True/value=0.0。
+   f. **验收结果**：py_compile 通过；targeted 208 passed/2 skipped（truthfulness 11 项 + realism_gate/manifest + causality_slicing + backtest 系列 + architecture）；全量回归结果见提交后终验。**子项③完成**：manifest 真实构建 + 7 组真实读取；门禁首次真正工作（此前恒软接线 None）。
+   g. **纪律遵守**：蓝图目录树先行登记（tests/unit/test_manifest_truthfulness.py 新增行 + 补 test_causality_slicing.py 缺失树行）；对照表逐行可核；manifest 诚实取值（读不到写 None 禁写 True）；git 提交（commit message 引用 #337）。
 
 
