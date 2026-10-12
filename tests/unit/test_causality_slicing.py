@@ -122,3 +122,77 @@ class TestOnInitStageFullAccess:
         df = ctx.get_data("600519.SH")
         assert len(df) == 5  # 全量可访问，未被切片
         assert df.index[0] == pd.Timestamp("2024-01-01")
+
+
+class TestReusedContextNoLeftover:
+    """用例⑪（P0-08 子项⑦ / R-25 处置）：复用同一 context 跨两次 run 不残留。
+
+    残留缺陷（R-25 核验）：mixed 引擎官方支持重复 run，但 context 切片状态
+    （_slicing_enabled / current_bar_ts / 访问账目）不在重置清单 → 上次 run 末
+    bar 时点残留。子项⑦在 run() 起点复位三态 → 本测试验证复位生效。
+    """
+
+    def test_reused_context_no_slicing_state_leftover(self) -> None:
+        from typing import List, Optional
+
+        from myquant.backtest.mixed_engine import MixedBacktestEngine
+        from myquant.models.backtest import BacktestConfig
+        from myquant.models.market_data import Bar
+        from myquant.strategies.base import StrategyBase
+
+        class _ReuseProbe(StrategyBase):
+            """复用探针：on_init 读一次全量（触发未封门记账），on_bar 空信号。"""
+
+            name = "reuse_probe"
+
+            def on_init(self, context: StrategyContext) -> None:
+                df = context.get_data("000001.SZ")
+                self.init_len: Optional[int] = (
+                    len(df) if df is not None else -1
+                )
+
+            def on_bar(self, bar: Bar, context: StrategyContext) -> List[object]:
+                return []
+
+            def generate_signal(self, bar: Bar, context: StrategyContext) -> object:
+                return None
+
+        idx = pd.date_range("2024-01-01", periods=10, freq="B")
+        df10 = pd.DataFrame(
+            {
+                "open": 10.0,
+                "high": 11.0,
+                "low": 9.0,
+                "close": [10.0 + 0.1 * i for i in range(10)],
+                "pre_close": [10.0] + [10.0 + 0.1 * i for i in range(9)],
+                "volume": 1_000_000.0,
+            },
+            index=idx,
+        )
+        config = BacktestConfig(
+            start_date="2024-01-01",
+            end_date="2024-01-20",
+            symbols=["000001.SZ"],
+            initial_capital=1_000_000.0,
+            participation_rate=1.0,
+        )
+        probe = _ReuseProbe()
+        engine = MixedBacktestEngine(
+            config=config, strategy=probe, data={"000001.SZ": df10}
+        )
+
+        r1 = engine.run()
+        assert r1 is not None and r1.is_success
+        # 第一次 run 末：切片已置位 + 时点推进到末 bar；on_init 全量访问已记账
+        assert engine.context._slicing_enabled is True
+        assert engine.context.current_bar_ts is not None
+        assert engine.context.current_bar_ts == idx[-1]
+        assert "000001.SZ" in engine.context.accessed_max_dates
+
+        # 第二次 run：run 起点复位（旧时点/账目清空）→ on_bar 循环重新置位
+        r2 = engine.run()
+        assert r2 is not None and r2.is_success
+        assert engine.context._slicing_enabled is True  # 主循环重新置位
+        assert engine.context.current_bar_ts == idx[-1]  # 推进到本次末 bar
+        # 访问账目已复位清空（on_bar 已封门不记账；若复位缺失，第一次的账目会残留）
+        assert engine.context.accessed_max_dates == {}

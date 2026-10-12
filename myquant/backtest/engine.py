@@ -829,6 +829,14 @@ class BacktestEngine(BaseEngine):
         返回:
             BacktestResult: 回测结果
         """
+        # ── P0-08 子项⑦：run 起点复位切片状态（R-25 处置，验收用例⑪）──
+        # 复用同一 context 跨两次 run 时不残留上次 run 的切片时点/访问账目：
+        # on_init 阶段仍可全量（R-26 冻结契约），on_bar 循环由引擎重新置位。
+        if self.context is not None:
+            self.context._slicing_enabled = False
+            self.context.current_bar_ts = None
+            self.context.accessed_max_dates.clear()
+
         if not self._initialized:
             self.on_init()
 

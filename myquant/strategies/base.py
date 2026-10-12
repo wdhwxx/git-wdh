@@ -176,6 +176,15 @@ class StrategyContext:
         True 时 get_data 返回全量，写入 manifest ``causality.full_sample_declared``（critical）。
       - ``_slicing_enabled``：切片开关（引擎逐 bar 推进时置 True）；默认 False
         保持向后兼容（现有策略自行截断，切片不改变其结果）。
+
+    P0-08 阶段契约（子项⑦，v2.2 §5.4.1 子项⑦ + NF-06，R-26 冻结）：
+      - ``on_init`` 阶段**不启用切片**（``_slicing_enabled=False``、
+        ``current_bar_ts=None``）：供策略全量初始化（如 ma_strategy 预计算），
+        ``get_data`` 返回全量。
+      - 切片仅在 ``on_bar`` 循环内生效：引擎逐 bar 前置置位
+        （``current_bar_ts`` + ``_slicing_enabled=True``）。
+      - run 起点复位切片状态（R-25 处置）：复用同一 context 跨两次 run
+        不残留上次 run 的时点/账目（验收用例⑪）。
     """
     data: Dict[str, pd.DataFrame] = field(default_factory=dict)
     portfolio: Any = None

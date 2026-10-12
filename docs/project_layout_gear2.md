@@ -4802,4 +4802,13 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    e. **验收结果**：py_compile 通过；targeted 240 passed/1 skipped（checks_causality 14 + causality_slicing + manifest_truthfulness + slicing_failopen + realism_gate/manifest + kunpeng + backtest + engines_v5）；全量回归 **3986 passed/4 skipped/0 failed**（+6 = 本卡 6 项）。**子项⑥完成**：访问器层记账落地（未封门/全量声明路径）+ 真拦截判据（P1-07②）+ 静态声明交叉校验（用例⑭）；记账范围与方案 L739 逐条一致（已封门不记账）。
    f. **纪律遵守**：L0 分层（base.py 纯 pandas + collect 纯返回，checks 只 import gate/manifest）；已封门路径零记账开销；新字段增量兼容（不进 CRITICAL_FIELDS）；git 提交（commit message 引用 #340）。**遗留**：accessed_max_dates 的 run 起点复位归子项⑦（R-25 处置同批）。
 
+## #341 · 2026-10-12 · P0-08 子项⑦：run 起点复位切片状态（R-25 处置 + 用例⑪验收）
+   事实来源：本次落地（施工方案 v2.2 §5.4.1 子项⑦，L740 + P0-08 卡验收用例⑪ + 前置调研第 11 部分 R-25 处置结论：mixed/event 均无切片复位点，context 复用残留上次 run 末 bar 时点，破坏 on_init 可全量契约）；现状核验：mixed_engine.py run()（L350，重置段 L375-383 不含 context 切片态）、engine.py run()（L823，无重置段）、TestOnInitStageFullAccess（#334 R-26 冻结）。
+   a. **myquant/backtest/engine.py（改动，run() 起点 on_init 之前）**：`context._slicing_enabled=False`、`context.current_bar_ts=None`、`context.accessed_max_dates.clear()`（防御 None）。复用第二次 run（_initialized=True 跳过 on_init）从残留态复位；on_init 阶段保持可全量（R-26 契约），on_bar 循环由引擎重新置位。
+   b. **myquant/backtest/mixed_engine.py（改动，run() 起点 on_init 之前）**：同三行复位（mixed 官方支持重复 run，重置段 L375-383 补齐 context 切片态）。
+   c. **myquant/strategies/base.py（改动，StrategyContext 类 docstring）**：新增 "P0-08 阶段契约" 段——on_init 不启用切片（全量初始化）；切片仅在 on_bar 循环内生效（引擎逐 bar 前置置位）；run 起点复位（R-25 处置，用例⑪）。
+   d. **tests/unit/test_causality_slicing.py（+1 项，用例⑪）**：同一 mixed 引擎+context 跨两次 run——第一 run 末置位/时点推进/on_init 全量记账残留；第二 run 后置位正常 + `accessed_max_dates=={}`（复位清空生效；若复位缺失则第一次的账目残留，断言红）。探针继承 StrategyBase（EVENT 模式，on_init 读全量触发记账）。
+   e. **验收结果**：py_compile 通过；targeted 250 passed/1 skipped；全量回归 **3987 passed/4 skipped/0 failed**（+1 = 本卡用例⑪）。**子项⑦完成**：R-25 处置落地（两引擎 run 起点复位）+ 阶段契约 docstring 冻结（on_init 全量/on_bar 切片/run 起点复位）。vectorized 不在此范围（逃生口 full_sample_declared=True 无残留，R-25 ⑤）。
+   f. **纪律遵守**：复位点位于 on_init 之前（不破坏首次 on_init 建 context）；防御 None（首次 run context 尚不存在）；git 提交（commit message 引用 #341）。**遗留**：⑧窗口隔离（on_bar 封死 context.data value 直取，S-13）下一步。
+
 
