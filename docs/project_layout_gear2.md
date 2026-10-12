@@ -4891,4 +4891,28 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    g. **验收暴露的生产影响（留痕）**：enabled=true 全量开启后，真实数据回测因 **000300.SH 基准无 hfq 复权因子**（provider 降级 raw）→ data_pit critical → **每次生产回测均阻断**——这是 fail-closed 的正确行为（数据真实性问题暴露）；**数据治理前置项**：000300.SH 补复权因子 或 基准加载降级不计入交易标的判据（P1-15 关联，待评审）。**from_data_provider 的 pool.admitted_count 在 create 时不可知记 0**（数据 run 时加载；sample_pool 判据不依赖，attach docstring 已注明）。**R-14 架构登记**：engine.py 增至 1524 行（attach 模块级函数 + 门禁收尾）超 1500 → 加入 OVERSIZE_WHITELIST（tests/unit/test_architecture.py，基线 1524，R-24 薄化冻结：只减不增）。
    h. **纪律遵守**：attach 抽方法为纯行为重构（语义与 create_engine 原块逐行一致）；scheduler._realism_manifest 保留兼容；monkeypatch 模拟降级集合用"入口空/收尾非空"精确复现收尾回写链路；git 提交（commit message 引用 #349）。**P0-01 卡 enabled=true 真实验收闭环达成**（唯一未在 YAML 生产路径验证的判据链已全部验证）。
 
+## #350 · 2026-10-13 · 基准数据治理（000300.SH 无复权因子 → 生产回测全断的拦路项）
+
+**背景**：#349 真实验收暴露——enabled=true 下生产回测因 000300.SH 基准降级 raw → data_pit 判 critical → **每次生产回测均阻断**；kunpeng.yaml 无法用于生产回测。用户批准"000300.SH 补 hfq 复权因子，或按 P1-15 评审基准降级豁免判据"。
+
+**根因确认（探查证据）**：000300.SH 是**指数**，**指数无复权因子概念**——复权因子只适用于个股除权除息事件；`database/quant.db` `adjust_factor` 表实测 **000300.SH 0 行 / 000001.SZ 32 行**。此前 provider 对指数也按 `adjust=hfq` 处理 → 无因子 → 降级 raw → 记入 `_adjust_degraded_symbols` → data_pit 判 critical。**"补因子"是概念错误**（指数本来就没有复权因子，编造即杜撰）；正确语义：指数价格编制已连续（成分股分红除权自动处理），**按 raw 加载**。
+
+**修复**（myquant/backtest/engine.py + mixed_engine.py，各 +7/+3 行）：
+- 基准加载显式 `adjust="raw"`（provider.get_bars 支持 adjust 参数，L395；`adjust or self._default_adjust` 语义，传 "raw" 生效）
+- 依据：基准不参与撮合/交易真实性（market_rules/cost_model/causality 判据均不依赖基准复权）；指数 raw 是市场惯例
+- vectorized_engine.py 无基准加载（向量化引擎不加载 benchmark，无需改）
+
+**验证（已做）**：
+- provider 直接验证：`HistoricalDataProvider(default_adjust="hfq").get_bars("000300.SH", adjust="raw")` → 117 根 bar + **降级集合空**（hfq 默认路径复现原问题：降级集合含 000300.SH）✓
+- e2e 新增 `test_benchmark_loads_raw_from_provider`（tests/unit/test_realism_gate_e2e.py，from_data_provider 直构基准加载断言 adjust="raw"；_RecordingProvider 记录 get_bars 参数）——targeted 36 passed ✓
+- R-24 冻结基线：engine.py 1524→1531（基准加载语义注释增量，tests/unit/test_architecture.py）
+
+**待办（明天另一台电脑续）**：
+1. 全量 pytest（engine/mixed/e2e/architecture 改动确认，预计 4022+ passed）
+2. 生产回测完整 RESULT（真实 kunpeng.yaml enabled=true 全链路不再阻断——后台进程昨晚 22:32 起跑，日志持续正常推进；RESULT 行未出 = 未跑完，新机器重跑或缩短时段）
+3. 任务清单 P0-01 卡注记（#350 基准治理后 kunpeng.yaml 可用于生产回测）
+4. 若后续发现 benchmark 降级仍有其他入口（如 load_multiple 含 benchmark），按 P1-15 评审"基准加载降级不计入交易标的判据"备选
+
+**纪律遵守**：只改基准加载路径（基准不属于交易标的，不触碰 hfq 个股语义）；测试与基线更新同步；git 提交（commit message 引用 #350）。
+
 
