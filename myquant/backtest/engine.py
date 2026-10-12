@@ -156,6 +156,8 @@ class BacktestEngine(BaseEngine):
         self.recorder: Optional[TradeRecorder] = None
         self.metrics_calc: Optional[MetricsCalculator] = None
         self.context: Optional[StrategyContext] = None
+        # P0-08 子项④（止血 C）：bar.timestamp 非法导致切片置位失败的哨兵计数
+        self._slicing_failures: int = 0
 
         # 回测结果
         self.result: Optional[BacktestResult] = None
@@ -490,8 +492,19 @@ class BacktestEngine(BaseEngine):
             try:
                 self.context.current_bar_ts = pd.Timestamp(bar.timestamp, unit='s')
                 self.context._slicing_enabled = True
-            except Exception:
-                pass  # bar.timestamp 类型异常时不阻断（向后兼容）
+            except (TypeError, ValueError, OverflowError) as exc:
+                # ── P0-08 子项④（止血 C）：静默 fail-open 改显式降级 ──
+                # bar.timestamp 非法 → 保持未置位（_slicing_enabled=False），
+                # context.get_data() 将返回全量（含未来）——宁可回测变红，不可静默全量：
+                # 记 critical 日志 + 哨兵计数 + 立即写 context_sliced=false
+                # （run 收尾 _refresh_causality_manifest 亦报 false，与子项⑤判据一致）。
+                self._slicing_failures += 1
+                logger.error(
+                    "bar.timestamp 非法，event 因果切片置位失败（保持未封门）: %s", exc,
+                )
+                _m = getattr(self, "_realism_manifest", None)
+                if _m is not None:
+                    _m.update_group("causality", {"context_sliced": False})
 
         # ── 步骤3：调用策略on_bar()（基于当前bar收盘价生成信号）──
         if self.strategy and self.context:

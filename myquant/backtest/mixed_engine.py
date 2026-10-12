@@ -172,6 +172,8 @@ class MixedBacktestEngine:
         self.recorder: Optional[TradeRecorder] = None
         self.metrics_calc: Optional[MetricsCalculator] = None
         self.context: Optional[StrategyContext] = None
+        # P0-08 子项④（止血 C）：bar.timestamp 非法导致切片置位失败的哨兵计数
+        self._slicing_failures: int = 0
 
         # 运行状态
         self.cash: float = float(self.config.initial_capital)
@@ -703,11 +705,18 @@ class MixedBacktestEngine:
             self.context.current_bar_ts = pd.Timestamp(bar.timestamp, unit='s')
             self.context._slicing_enabled = True
         except (TypeError, ValueError, OverflowError) as exc:
-            # 显式降级（不静默）：bar.timestamp 非法时保持未置位并记日志，
-            # 由 P0-08 子项④/⑤（manifest context_sliced=false + checks/causality critical）拦截
+            # ── P0-08 子项④（止血 C）：显式降级（不静默）──
+            # bar.timestamp 非法 → 保持未置位（_slicing_enabled=False），
+            # context.get_data() 将返回全量（含未来）——宁可回测变红，不可静默全量：
+            # 记 critical 日志 + 哨兵计数 + 写 context_sliced=false，
+            # 由子项⑤ checks/causality（manifest context_sliced=false）判 critical 拦截
+            self._slicing_failures += 1
             logger.error(
                 "bar.timestamp 非法，mixed TARGET 切片置位失败（保持未封门）: %s", exc,
             )
+            _m = getattr(self, "_realism_manifest", None)
+            if _m is not None:
+                _m.update_group("causality", {"context_sliced": False})
         position = self.get_position(bar.symbol)
         target = self.strategy.generate_mixed_loop(bar, self.context, position)
         if target is None:
@@ -802,8 +811,19 @@ class MixedBacktestEngine:
         try:
             self.context.current_bar_ts = pd.Timestamp(bar.timestamp, unit='s')
             self.context._slicing_enabled = True
-        except Exception:
-            pass
+        except (TypeError, ValueError, OverflowError) as exc:
+            # ── P0-08 子项④（止血 C）：静默 fail-open 改显式降级 ──
+            # bar.timestamp 非法 → 保持未置位（_slicing_enabled=False），
+            # context.get_data() 将返回全量（含未来）——宁可回测变红，不可静默全量：
+            # 记 critical 日志 + 哨兵计数 + 立即写 context_sliced=false
+            # （run 收尾 _refresh_causality_manifest 亦报 false，与子项⑤判据一致）。
+            self._slicing_failures += 1
+            logger.error(
+                "bar.timestamp 非法，mixed 事件信号切片置位失败（保持未封门）: %s", exc,
+            )
+            _m = getattr(self, "_realism_manifest", None)
+            if _m is not None:
+                _m.update_group("causality", {"context_sliced": False})
         signals = self.strategy.on_bar(bar, self.context)
         if not signals:
             return

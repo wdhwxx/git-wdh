@@ -764,6 +764,8 @@ Pythonwdhmm/
 
 │   │   ├── test_manifest_truthfulness.py # ✨【回写#337】manifest 真实性反红测试（P0-08 子项③用例⑪：create_engine manifest 真实构建 + 7 组硬编码乐观值改真实读取）
 
+│   │   ├── test_slicing_failopen_guard.py # ✨【回写#338】因果切片 fail-open 加固反红测试（P0-08 子项④用例⑫：engine/mixed 置位失败显式降级——保持未封门 + 哨兵计数 + 写 context_sliced=false）
+
 │   │   ├── test_engine_benchmark.py  # ✨【V5·P3】三模式性能基准测试（吞吐/耗时阈值断言，15项）
 
 │   │   ├── test_live_guard_failover.py # ✨【回写#31】实盘保障组件故障注入（审计H2降级：事件总线断连/订阅失败/挂载失败/风控异常拒单/调度失败/巡检异常/快照失败/全组件关闭，10项）✅已完成
@@ -4774,5 +4776,13 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    e. **tests/unit/test_manifest_truthfulness.py（新建，11 项，用例⑪反红）**：manifest 真实构建成功（修复前置）+ t1/lot/liquidity/pool/slippage/survivorship/invariants 逐组报真实值；`lot_size.enforced=False`、`value=None`（非 True）；`exclusion_basis=="today"`（非 as_of）；`participation_rate=0.1` → cap=0.1/unlimited=False；SlippageModel(type="none") → is_zero_cost=True/value=0.0。
    f. **验收结果**：py_compile 通过；targeted 208 passed/2 skipped（truthfulness 11 项 + realism_gate/manifest + causality_slicing + backtest 系列 + architecture）；全量回归结果见提交后终验。**子项③完成**：manifest 真实构建 + 7 组真实读取；门禁首次真正工作（此前恒软接线 None）。
    g. **纪律遵守**：蓝图目录树先行登记（tests/unit/test_manifest_truthfulness.py 新增行 + 补 test_causality_slicing.py 缺失树行）；对照表逐行可核；manifest 诚实取值（读不到写 None 禁写 True）；git 提交（commit message 引用 #337）。
+
+## #338 · 2026-10-12 · P0-08 子项④止血 C：因果切片置位 fail-open 改显式降级（用例⑫）
+   事实来源：本次落地（施工方案 v2.2 §5.4.1 子项④ + P0-08 卡子项④/验收用例⑫，L737-739）；现状核验：engine.py on_market_event 置位段（原 L489-494）与 mixed_engine.py `_execute_signals`（原 L802-806）为裸 `except Exception: pass`（静默 fail-open）；mixed `_execute_target`（#335）已显式降级但只记日志、未写 manifest。
+   a. **myquant/backtest/engine.py（改动，event on_market_event 置位段）**：裸 `except Exception: pass` → `except (TypeError, ValueError, OverflowError) as exc` 显式降级——`_slicing_failures += 1`（哨兵计数）+ `logger.error`（critical 级信号，含异常）+ 立即 `_realism_manifest.update_group("causality", {"context_sliced": False})`。bar.timestamp 非法 → 保持未封门（`_slicing_enabled=False`，get_data 若返回全量将含未来）——宁可回测变红，不可静默全量。
+   b. **myquant/backtest/mixed_engine.py（改动，两处）**：`_execute_signals` 置位段同 event 改法（裸 pass → 显式降级）；`_execute_target`（#335 已显式降级）升级补哨兵计数 + 写 context_sliced=false。两引擎 `__init__` 各加 `self._slicing_failures: int = 0`（实例级，避免 ClassVar 跨测试污染）。
+   c. **tests/unit/test_slicing_failopen_guard.py（新建，4 项，用例⑫反红）**：event on_market_event / mixed `_execute_signals` / mixed `_execute_target` 三路径各以越界 float 1e20（`datetime.fromtimestamp` 与 `pd.Timestamp(unit='s')` 均抛 OverflowError，且 `_bar_date_str` 哨兵 M1A-04 可吞不提前抛）驱动置位失败 → 断言①`_slicing_enabled` 保持 False（不静默放行）②`_slicing_failures==1` ③manifest `context_sliced` 立即 false ④子项⑤ critical 判据输入条件成立（context_sliced=false 且 full_sample_declared=false，⑤落地后由 test_checks_causality 断言实际 critical 违规）；另加不误伤用例（正常 timestamp → 置位成功、计数 0、不写 false）。
+   d. **验收结果**：py_compile 通过；targeted 226 passed/1 skipped（failopen 4 + causality_slicing + manifest_truthfulness + realism_gate/manifest + kunpeng + backtest 系列 + engines_v5）；全量回归 **3972 passed/4 skipped/0 failed**（含上轮 2 个既有配置本地红在新环境 resolve，零失败）。**子项④完成**：三置位路径全部显式降级（记 critical 日志 + 哨兵计数 + 写 context_sliced=false）；⑤（checks/causality）将 context_sliced=false 判 critical 的完整闭环留给下一步。
+   e. **纪律遵守**：蓝图目录树先行登记（tests/unit/test_slicing_failopen_guard.py 新增行）；显式异常类型（禁裸 except/except: pass）；logging 记 critical 级信号（禁 print）；git 提交（commit message 引用 #338）。
 
 
