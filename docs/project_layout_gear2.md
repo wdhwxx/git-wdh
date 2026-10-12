@@ -4945,4 +4945,20 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 
 **纪律遵守**：纯核验 + 测试补强（零业务代码改动——既有实现已满足卡定义，不无谓改动）；git 提交（commit message 引用 #352）。**P1-05 卡维持 ✅（本轮核验留痕）**。
 
+## #353 · 2026-10-13 · P1-06 核验完成（strategy=None 不再跳过门禁）—— M5 里程碑收官
+
+**卡定义**：P1-06（M5 收官卡）"strategy=None 不再跳过门禁：专用轻量门禁或直接拒绝"——卡上已标 ✅（#325：门禁断言不受 strategy 影响）。**开工前核卡状态**（用户指令），核验 #344/#349 后行为是否仍成立：
+
+**核验结论（全部成立，无代码缺口）**：
+- **manifest 采集对 strategy=None 安全**：`_attach_realism_manifest` L132 `getattr(strategy, "name", "") or ""`——None 取 ""，不炸不跳；其余字段全部来自 config/engine_kwargs/engine_mode（与 strategy 无关）
+- **装配/断言/seal 不受 strategy 影响**：create_engine（strategy: Optional）→ 挂 manifest → 入口 assert_realism_pass → seal——strategy=None 全链路照常（mode 显式时 detect_modes(None)→[] 不拦，`BacktestScheduler(mode="event")` + strategy=None 可创建）
+- **run 收尾门禁真工作**：握手⑤（is_sealed）+ 收尾 assert_realism_pass——与 strategy 无关
+- **既有测试覆盖**：`tests/unit/test_manifest_truthfulness.py` L37 `create_engine(config, strategy=None)` + 断言 manifest 构建成功（strategy=None 语境锁装配）
+
+**落地**：`tests/unit/test_realism_gate_e2e.py` 新增 `test_no_strategy_still_blocked_on_violation`（1 项）——**补"阻断语义"缺口**（既有测试只锁"装配成功"，本测试锁"无策略引擎违规同样阻断"）：strategy=None + mode=event 引擎 → 握手⑤放行（sealed）→ run 收尾 data_pit 违规（monkeypatch adjust_degraded_symbols）→ **抛 RealismGateError**（violations 含 adjust_degraded_symbols）。
+
+**验收**：targeted 43 passed（e2e + realism_gate + manifest_truthfulness）；全量 pytest 待跑。
+
+**纪律遵守**：纯核验 + 测试补强（零业务代码改动）；git 提交（commit message 引用 #353）。**P1-06 卡维持 ✅（本轮核验留痕）——M5（P1-04→P1-05→P1-06→P1-18）四卡全部完成，里程碑关闭**。
+
 

@@ -455,3 +455,38 @@ def test_p105_exit_code_paths() -> None:
         assert marker != -1, f"{eng}.py 收尾缺阻断产物落盘（#345）"
         tail = src[marker:marker + 200]
         assert "raise" in tail, f"{eng}.py 收尾 enabled=True 分支须 re-raise（#325/#344 不吞异常）"
+
+
+def test_no_strategy_still_blocked_on_violation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    """P1-06（#353 核验）：strategy=None 不再跳过门禁——无策略引擎违规同样阻断。
+
+    #325 语义：门禁断言不受 strategy 影响——manifest 采集对 strategy=None 安全
+    （strategy_id 取 getattr 默认 ""，不炸不跳）；本测试进一步锁"阻断语义"：
+    strategy=None 引擎（mode 显式 event，detect_modes(None)→[] 不拦）照常装配
+    manifest + seal（握手⑤放行），run 收尾 data_pit 违规（adjust_degraded_symbols
+    非空，#349 回写真实降级集合）→ 同样抛 RealismGateError（门禁真工作）。
+    """
+    monkeypatch.chdir(tmp_path)
+    cfg = BacktestConfig(
+        symbols=[SYMBOL],
+        start_date="2024-01-01",
+        end_date="2024-01-20",
+        frequency="1d",
+        initial_capital=1_000_000.0,
+        realism_gate={"enabled": True, "audit_violations": False},
+    )
+    scheduler = BacktestScheduler(mode="event")
+    engine = scheduler.create_engine(config=cfg, strategy=None, data=_make_data())
+    # 两阶段握手⑤：无策略引擎同样 seal（门禁未被跳过）
+    assert engine._realism_manifest.is_sealed()
+    # 收尾注入 data_pit 违规（monkeypatch 与 test_from_data_provider_blocked_on_degraded 同法）
+    monkeypatch.setattr(
+        "myquant.data_access.provider.get_adjust_degraded_symbols",
+        lambda: ["000300.SH"],
+    )
+    with pytest.raises(RealismGateError) as exc_info:
+        engine.run()
+    field_paths = [v.field_path for v in exc_info.value.violations]
+    assert "adjust_degraded_symbols" in field_paths, field_paths
