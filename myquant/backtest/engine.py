@@ -1171,6 +1171,9 @@ class BacktestScheduler:
                 "current_bar_ts_enforced": not _is_vectorized,
                 "full_sample_declared": _is_vectorized,
                 "guard_injected": True,
+                # [P0-08 前置登记] context.data value 直取封死状态：当前未封死（诚实 False），
+                # 由 P0-08⑧ 窗口隔离（on_bar 保留 keys 枚举、封死 value 直取）改真实取值
+                "context_data_scoped": False,
             })
             assert_realism_pass(manifest)
             self._realism_manifest = manifest

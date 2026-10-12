@@ -986,7 +986,8 @@ Pythonwdhmm/
     │   │   ├── market_rules.py       # 涨跌停/停牌/T+1/整手 未启用 → critical
     │   │   ├── cost_model.py         # 零滑点/佣金费率为零 → critical
     │   │   ├── data_pit.py           # 复权降级标的/快照指纹 null/NaN 价格/OHLC 违反 → critical
-    │   │   └── sample_pool.py        # PIT 选股未生效/today 口径/幸存者偏差折价 null → critical
+    │   │   ├── sample_pool.py        # PIT 选股未生效/today 口径/幸存者偏差折价 null → critical
+    │   │   └── causality.py          # ✨【回写#334·P0-08 前置登记】因果性收口检查（P0-08 子项⑤）：`context_sliced=False` 且未声明全量 → critical；接入子项④ fail-open 降级信号（`bar.timestamp` 异常不得静默放行）；L0，只可引用 L0，运行时事实以数据契约注入（R-02/R-16）；R-19 必配测试（tests/unit/test_checks_causality.py 新增）
 
     │
 
@@ -4716,6 +4717,14 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    c. **验收结果**：py_compile 通过；反红+引擎冒烟 **39 passed**；全套回归 **3935 passed/4 skipped/0 failed**（与 #330 基线一致，零回归）；mixed 基线对拍 `rsrs_mixed_28e30d22…` --verify **EXIT=0**（trades 注入为校验层，不改变回测行为）。
    d. **纪律遵守**：蓝图目录树先行登记（backtest/ 两引擎改动）；软接线不阻断（查不到当日行防御式跳过）；event 引擎无独立文件（Glob 无果），其接线留待 R-19 event 0 交易排查后；RI-3 组合级 equity 恒等式需逐 bar close 明细，仍留后续；git 提交（commit message 引用 #331）。**P1-15 完成（次刀）**：vectorized RI-1/2/4/5/6 + mixed RI-1/2 激活；RI-3 + event 引擎 + mixed RI-4/5/6 留后续。
 
+## #332 · 2026-10-12 · P1-08：T+1 持仓冻结三引擎统一（蓝图回写补录 F-2）
+   事实来源：本次落地（施工方案 v2.2 §5.2 P1-08）；代码级核验：sim_broker（event 引擎订单驱动）T+1 冻结四改动；vectorized/mixed 目标持仓模式 T+1 已由时序保证，无需额外冻结。
+   a. **myquant/execution/sim_broker.py（改动，+39）**：`__init__` 增 enable_t1/_t1_holdings；`_match_order` 卖出截断 available=pos.quantity−frozen；`_apply_trade` 买入累计；`settle_t1()` 日终清空（ca03b9b）。
+   b. **myquant/backtest/engine.py（改动，+4）**：event 引擎 settle_t1 接线（194b7bc 收尾）。
+   c. **vectorized/mixed（不改）**：目标持仓模式 T+1 已由时序保证（单日净变动/逐 bar T+1 时序），强行加截断导致 3 个一致性测试失败，已撤回。
+   d. **验收结果**：sim_broker 相关测试 220 passed 零回归。
+   e. **纪律遵守**：蓝图目录树先行登记（execution/ + backtest/ 改动）；git 提交（commit message 引用 #332）。**P1-08 完成**：T+1 持仓冻结三引擎统一。
+
 ## #333 · 2026-10-12 · P1-07⑥a：cross_sectional 对齐警告档 + 统一信号词 helper + 跨路径一致性测试
    事实来源：本次落地（施工方案 v2.2 §5.4.1 S-4/S-6/S-7；缺陷 C 修正方向①）；代码级核验：出口断言真正消费 severity（只"阻断"档阻断，"警告"档仅提示）；signal_words 统一 R03/R07 信号词；同一 R07 源码经两路径严重级判定一致。
    a. **myquant/leakage_gate/signal_words.py（新建，L0 纯判定，目录树已先行登记）**：`FULL_SAMPLE_RECEIVERS`（panel/full/all_/entire/whole）+ `is_full_sample_receiver()`，R03/R07 共用单一实现（S-6 统一信号词 helper），消除 static_scan/cross_sectional 两处重复。
@@ -4725,5 +4734,14 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    e. **tests/leakage_gate/test_static_scan.py（改动，+4 项）**：`test_signal_words_shared_helper`（S-6 信号词直接覆盖，兼作 R19 引用覆盖）；`test_s7_r07_same_source_consistent_nonblocking`（S-7：同一 R07 源码两路径均判警告档不阻断）；`test_s4_gate_exit_only_blocks_blocking_severity`（出口仅阻断档不抛，R07 警告不阻断引擎创建）；`test_s4_gate_exit_still_blocks_real_blocking`（真实阻断档 R01a 仍被出口拦截）。
    f. **验收结果**：py_compile 通过；tests/leakage_gate/ 全量通过（含 4 新增）；R19 零覆盖引用通过；全套回归 **3952 passed/4 skipped/2 failed**（2 failed 均为既有配置本地红、与本次改动无关：`test_live_config_structure` 生产 live_config 缺 leakage_gate 段、`test_backtest_real_config_adjust_strict` 缺 adjust_strict，见施工现状总清单第七节；本次改动前即红）。**P1-07⑥a 完成**：cross_sectional 对齐 static_scan 警告档不阻断；R07"命名地雷"解除。
    g. **纪律遵守**：蓝图目录树先行登记（signal_words.py 于 myquant/leakage_gate/ 子树）；新模块仅纯命名判定、不 import strategies（R-02 分层合规）；改出口不动各门禁检查返回值（既有测试不受影响）；git 提交（commit message 引用 #333）。
+
+## #334 · 2026-10-12 · P0-08 前置：R-26 结论 + 蓝图登记（F-1）+ context_data_scoped 字段落位
+   事实来源：本次落地（施工方案 v2.2 §4.2/§5.5 P0-08 前置；施工现状总清单 F-1/F-2）；代码级核验：manifest CRITICAL_FIELDS 加 `causality.context_data_scoped` 并注入诚实当前值 False（build() 只需字段在场且非 None，不触发 degraded/阻断）；R-26 检索确认无 on_init 全量专项锚点。
+   a. **R-26（调研完成）**：`test_causality_slicing.py` 覆盖三态与逃生口但无"on_init 阶段可全量"专项锚点 → **结论：契约补齐须"补文档 + 补测试"**；新增 `TestOnInitStageFullAccess`（`_slicing_enabled is False` 期间 get_data 返回全量）冻结 on_init 阶段契约，P0-08⑦ 只补 docstring 即可。
+   b. **蓝图登记（F-1）**：`realism_gate/checks/causality.py`（P0-08 子项⑤ 新增，L0，R-19 必配 tests/unit/test_checks_causality.py）登记入蓝图 realism_gate/checks 子树；P0-08 footprint 其余文件（strategies/base.py、三引擎构造点、live/engine.py:1148）均为既有登记文件，无需新增树行。
+   c. **context_data_scoped 字段（P0-08 前置）**：方案 §4.2 表新增 `causality.context_data_scoped` 行（critical）；manifest.py CRITICAL_FIELDS 新增该字段；engine.py causality 组注入诚实当前值 `False`（context.data value 直取当前未封死，P0-08⑧ 窗口隔离改真实取值）；同步更新 test_realism_gate.py / test_realism_manifest.py 两处 manifest 构建器。
+   d. **蓝图回写补录（F-2）**：补 P1-08 缺失的 #332 回写记录（sim_broker T+1 冻结 + event settle_t1 接线）。
+   e. **验收结果**：py_compile 通过；R-26 锚点 + realism_gate/manifest 测试通过（targeted 48 passed）；全套回归 **3953 passed/4 skipped/2 failed**（较上轮 +1＝新增 on_init 锚点；2 failed 仍为既有配置本地红：`test_live_config_structure` 生产 live_config 缺 leakage_gate 段、`test_backtest_real_config_adjust_strict` 缺 adjust_strict，与本次无关）。**P0-08 前置完成**：R-26 结论落定、蓝图 footprint 登记、context_data_scoped 字段就位。
+   f. **纪律遵守**：蓝图目录树先行登记（causality.py 于 realism_gate/checks/ 子树）；manifest 字段诚实注入（不写 True）；R-26 结论入任务清单（状态改已完成）；git 提交（commit message 引用 #334）。
 
 

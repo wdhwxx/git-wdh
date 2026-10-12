@@ -107,6 +107,7 @@ CRITICAL_FIELDS: List[str] = [
     "causality.current_bar_ts_enforced",
     "causality.full_sample_declared",
     "causality.guard_injected",
+    "causality.context_data_scoped",
     # 行情规则
     "price_limit.enabled",
     "price_limit.pct_by_board",

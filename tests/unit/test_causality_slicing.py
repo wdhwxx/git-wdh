@@ -92,3 +92,20 @@ class TestFullSampleEscape:
         ctx.full_sample_declared = True
         df = ctx.get_data("600519.SH")
         assert len(df) == 5  # 全量，忽略切片时点
+
+
+class TestOnInitStageFullAccess:
+    """R-26 / P0-08⑦：on_init 阶段（引擎尚未开启切片）可全量访问 context.data。
+
+    引擎只在 on_bar 逐 bar 推进时才置 ``_slicing_enabled=True``
+    （backtest/engine.py:492、mixed_engine.py:744）；on_init 阶段保持默认 False，
+    故 get_data 返回全量。该阶段契约是 P0-08 窗口隔离（on_init 放行全量、
+    on_bar 封死 value 直取）的测试冻结——一旦 on_init 也被切片，本测试即红。
+    """
+
+    def test_on_init_stage_returns_full(self, ctx):
+        # on_init 阶段引擎未置切片开关（保持默认 False）
+        assert ctx._slicing_enabled is False
+        df = ctx.get_data("600519.SH")
+        assert len(df) == 5  # 全量可访问，未被切片
+        assert df.index[0] == pd.Timestamp("2024-01-01")
