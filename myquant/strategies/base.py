@@ -172,6 +172,7 @@ class StrategyContext:
       - ``current_bar_ts``：当前 bar 时点（引擎逐 bar 推进）；
         ``get_data`` 返回 ``index <= current_bar_ts`` 的切片视图（O(1) 不复制）。
       - ``full_sample_declared``：全量逃生口（vectorized 目标持仓生成天然需要全量）；
+        **引擎构造参数（P0-08 子项②），策略运行期不可自设**（赋值抛 AttributeError）；
         True 时 get_data 返回全量，写入 manifest ``causality.full_sample_declared``（critical）。
       - ``_slicing_enabled``：切片开关（引擎逐 bar 推进时置 True）；默认 False
         保持向后兼容（现有策略自行截断，切片不改变其结果）。
@@ -184,8 +185,27 @@ class StrategyContext:
     extra: Dict[str, Any] = field(default_factory=dict)
     # P0-07 因果切片字段
     current_bar_ts: Optional[pd.Timestamp] = None
-    full_sample_declared: bool = False
+    # P0-08 子项②：full_sample_declared 改引擎构造参数（策略不可自设）
+    # 对外只读 property；底层字段带下划线，经 __init__ 由引擎注入
+    _full_sample_declared: bool = field(default=False, init=True)
     _slicing_enabled: bool = False
+
+    # ── P0-08 子项②：全量逃生口声明（引擎构造参数，策略不可自设）──
+    @property
+    def full_sample_declared(self) -> bool:
+        """全量逃生口声明（vectorized 专用，引擎构造参数）。
+
+        仅引擎构造时经 ``_full_sample_declared`` 注入（vectorized=True，
+        event/mixed=False）；策略运行期赋值将抛 AttributeError——
+        防止策略自行开启全量逃生口绕过因果切片（P0-08 止血 A）。
+        """
+        return self._full_sample_declared
+
+    @full_sample_declared.setter
+    def full_sample_declared(self, value: bool) -> None:
+        raise AttributeError(
+            "full_sample_declared 为引擎构造参数（P0-08），策略不可自行开启全量逃生口"
+        )
 
     def get_data(self, symbol: str) -> Optional[pd.DataFrame]:
         """返回 symbol 的行情数据视图。

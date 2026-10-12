@@ -4751,4 +4751,14 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    c. **验收结果**：py_compile 通过；mixed/backtest/causality 相关 111 passed/1 skipped；全量回归 **3953 passed/4 skipped/2 failed**（2 failed 仍为既有配置本地红：`test_live_config_structure` 生产 live_config 缺 leakage_gate 段、`test_backtest_real_config_adjust_strict` 缺 adjust_strict，与本次无关；较上轮无新增失败）。**#3 置位完成**：mixed 默认路径接口封门，为子项②/⑤ 铺平。
    d. **纪律遵守**：蓝图目录树先行确认（mixed_engine.py 为既有登记文件，无需新增树行）；异常显式记录不静默（py 规则禁 except: pass）；git 提交（commit message 引用 #335）。
 
+## #336 · 2026-10-12 · P0-08 子项②止血 A：causality.* 真实采集
+   事实来源：本次落地（施工方案 v2.2 §5.4.1 P0-08 子项②；§4.4 时序"构造引擎后采集 manifest → assert → seal"）；代码级核验：`_slicing_enabled`/`extra`/`full_sample_declared` 均为引擎 context 真实属性（构造后可实测）；`seal()` 仅置标志、不阻止 update_group（run 后刷新可行）。
+   a. **myquant/strategies/base.py（改动）**：`full_sample_declared` 由公开字段改**引擎构造参数**——底层 `_full_sample_declared: bool = field(default=False, init=True)` + 只读 property；setter 抛 AttributeError（"策略不可自行开启全量逃生口"，防策略绕过因果切片）。docstring 同步更新。
+   b. **myquant/backtest/vectorized_engine.py（改动）**：构造点改传 `_full_sample_declared=True`（删原 `context.full_sample_declared = True` 赋值）；run() 收尾新增 `_refresh_causality_manifest()`（mark_complete 后按实际置位刷新）。
+   c. **myquant/backtest/engine.py（改动，create_engine 重排）**：**引擎先建 → manifest 后建**（时序对齐 §4.4）；causality 组真实采集——`guard_injected` ← `engine.context.extra.get("lookahead_guard") is not None`（替换硬编码 True）、`full_sample_declared` ← context property（vectorized=True/其余 False）、`context_sliced` ← `_slicing_enabled`、`current_bar_ts_enforced` ← `current_bar_ts is not None`（run 前未置位，诚实 False）；引擎实例挂载 `_realism_manifest` 引用；event run() on_stop 后新增刷新调用。
+   d. **myquant/backtest/mixed_engine.py（改动）**：run() 收尾新增 `_refresh_causality_manifest()`（与 event 同构，独立类各自实现，不碰继承）。
+   e. **tests/unit/test_causality_slicing.py（改动）**：`test_full_sample_declared_returns_all` 改构造参数注入（`StrategyContext(_full_sample_declared=True)`）；新增 `test_full_sample_declared_is_engine_construct_param`（赋值抛 AttributeError，验收②反红基础）。
+   f. **验收结果**：py_compile 通过；targeted 184 passed/2 skipped（causality/realism_gate/backtest/architecture）；全量回归 **3954 passed/4 skipped/2 failed**（较上轮 +1＝新增构造参数不可自设测试；2 failed 仍为既有配置本地红：`test_live_config_structure`、`test_backtest_real_config_adjust_strict`，与本次无关）。**子项②完成**：causality.* 真实采集，删除 mode 反推与 guard_injected 硬编码。
+   g. **纪律遵守**：蓝图目录树先行确认（五个文件均既有登记，无新增树行）；不改继承结构（mixed/vectorized 独立类各实现刷新方法）；manifest 诚实取值（run 前不假装已切片）；git 提交（commit message 引用 #336）。
+
 

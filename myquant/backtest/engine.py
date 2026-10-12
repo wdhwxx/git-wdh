@@ -853,12 +853,42 @@ class BacktestEngine(BaseEngine):
         # 停止
         self.on_stop()
         self._running = False
+        # P0-08 子项②：run 结束后按实际置位刷新 causality 组（真实采集）
+        self._refresh_causality_manifest()
 
         logger.info("=" * 60)
         logger.info("回测主循环结束")
         logger.info("=" * 60)
 
         return self.result
+
+    def _refresh_causality_manifest(self) -> None:
+        """P0-08 子项②：run 结束后按实际置位刷新 causality 组（止血 A 真实采集）。
+
+        替代 create_engine 处的 run 前静态反推：event/mixed 逐 bar 置位后
+        ``_slicing_enabled`` 为 True、``current_bar_ts`` 已推进 → 报真实 True；
+        vectorized 全量逃生口从不置位 → 报 False（由 ``full_sample_declared=True`` 声明）。
+        软接线：enabled=False 时刷新/断言失败仅审计不阻断（P1-05 模式）。
+        """
+        _m = getattr(self, "_realism_manifest", None)
+        if _m is None or self.context is None:
+            return
+        try:
+            from myquant.realism_gate import assert_realism_pass
+            from myquant.realism_gate.gate import get_config
+
+            _m.update_group("causality", {
+                "context_sliced": bool(self.context._slicing_enabled),
+                "current_bar_ts_enforced": self.context.current_bar_ts is not None,
+                "full_sample_declared": bool(self.context.full_sample_declared),
+                "guard_injected": self.context.extra.get("lookahead_guard") is not None,
+                "context_data_scoped": False,
+            })
+            assert_realism_pass(_m)
+        except Exception as exc:  # noqa: BLE001
+            if get_config().enabled:
+                raise
+            logger.debug("真实性门禁 run 后刷新失败（软接线不阻断）: %s", exc)
 
     def _build_unified_bars(self) -> List[Bar]:
         """
@@ -1087,10 +1117,32 @@ class BacktestScheduler:
                 f"（支持: {strategy.engine_modes()}）。请显式选择匹配的引擎模式。"
             )
 
+        engine_name = kwargs.pop("name", f"{mode}_backtest")
+        # #H2修复：mixed/vectorized 引擎统一接入全局防未来函数校验器（单例）
+        kwargs.setdefault("lookahead_guard", get_lookahead_guard())
+        kwargs.setdefault("enable_lookahead_guard", True)
+        if mode == ENGINE_MODE_VECTORIZED:
+            engine: Any = VectorizedBacktestEngine(
+                config=config, strategy=strategy, data=data,
+                data_provider=data_provider, name=engine_name, **kwargs,
+            )
+        elif mode == ENGINE_MODE_MIXED:
+            engine = MixedBacktestEngine(
+                config=config, strategy=strategy, data=data,
+                data_provider=data_provider, name=engine_name, **kwargs,
+            )
+        else:
+            engine = BacktestEngine(
+                config=config, strategy=strategy, data=data,
+                data_provider=data_provider, name=engine_name, **kwargs,
+            )
+
         # ── P0-01 出口强制：回测真实性门禁（软接线，分期启用期 audit-only）──
         # 时序（v2.2 §4.4）：构造引擎后采集 manifest → assert_realism_pass → seal
-        # 当前为软接线：enabled=false 时仅落 audit 不阻断；全字段采集（引擎实例
-        # 真实生效值）在 P0-03/P0-05/P1 阶段补齐；enabled=true 切换前需修完 critical 项。
+        # （manifest 构建置于引擎创建之后，causality 组方能从引擎 context 真实采集——
+        #  P0-08 子项② 止血 A，替换原 mode 反推）
+        # 当前为软接线：enabled=false 时仅落 audit 不阻断；其余字段真实取值
+        # （t1/lot/liquidity/pool/survivorship/invariants/slippage）在 P0-08 子项③补齐。
         try:
             from myquant.realism_gate import (
                 RealismGateConfig,
@@ -1162,15 +1214,15 @@ class BacktestScheduler:
             manifest.set_field("invariants.equity_identity", {})
             manifest.set_field("invariants.cash_non_negative", {})
             manifest.set_field("invariants.t1_consistency", {})
-            # ── P0-07 因果切片三字段真实取值（替换占位 False）──
-            # event/mixed：逐 bar 切片开启，current_bar_ts 逐 bar 推进
-            # vectorized：全量逃生口（full_sample_declared=True），不逐 bar 切片
-            _is_vectorized = (mode == "vectorized")
+            # ── P0-08 子项②：causality 组真实采集（替换静态反推）──
+            # guard_injected / full_sample_declared 为引擎构造事实（引擎已创建，可实测）；
+            # context_sliced / current_bar_ts_enforced 为 run 前真实态（引擎尚未置位，
+            # 诚实 False），由引擎 run() 结束后按实际置位刷新（_refresh_causality_manifest）。
             manifest.update_group("causality", {
-                "context_sliced": not _is_vectorized,
-                "current_bar_ts_enforced": not _is_vectorized,
-                "full_sample_declared": _is_vectorized,
-                "guard_injected": True,
+                "context_sliced": bool(engine.context._slicing_enabled),
+                "current_bar_ts_enforced": engine.context.current_bar_ts is not None,
+                "full_sample_declared": bool(engine.context.full_sample_declared),
+                "guard_injected": engine.context.extra.get("lookahead_guard") is not None,
                 # [P0-08 前置登记] context.data value 直取封死状态：当前未封死（诚实 False），
                 # 由 P0-08⑧ 窗口隔离（on_bar 保留 keys 枚举、封死 value 直取）改真实取值
                 "context_data_scoped": False,
@@ -1186,26 +1238,9 @@ class BacktestScheduler:
             logger.debug(f"真实性门禁软接线（不阻断）: {type(rg_e).__name__}: {rg_e}")
             self._realism_manifest = None
 
-        engine_name = kwargs.pop("name", f"{mode}_backtest")
-        # #H2修复：mixed/vectorized 引擎统一接入全局防未来函数校验器（单例）
-        kwargs.setdefault("lookahead_guard", get_lookahead_guard())
-        kwargs.setdefault("enable_lookahead_guard", True)
-        if mode == ENGINE_MODE_VECTORIZED:
-            engine: Any = VectorizedBacktestEngine(
-                config=config, strategy=strategy, data=data,
-                data_provider=data_provider, name=engine_name, **kwargs,
-            )
-        elif mode == ENGINE_MODE_MIXED:
-            engine = MixedBacktestEngine(
-                config=config, strategy=strategy, data=data,
-                data_provider=data_provider, name=engine_name, **kwargs,
-            )
-        else:
-            engine = BacktestEngine(
-                config=config, strategy=strategy, data=data,
-                data_provider=data_provider, name=engine_name, **kwargs,
-            )
         self.engine = engine
+        # P0-08 子项②：引擎实例挂载 manifest 引用，供 run() 结束后真实采集刷新
+        engine._realism_manifest = self._realism_manifest
         self.selected_mode = mode
         logger.info(
             "调度器选中引擎: mode=%s, engine=%s", mode, type(engine).__name__

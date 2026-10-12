@@ -401,10 +401,40 @@ class MixedBacktestEngine:
         # 停止并生成结果（P0-01：防未来校验已在 on_stop 内、mark_complete 之前执行）
         self.on_stop()
         self._running = False
+        # P0-08 子项②：run 结束后按实际置位刷新 causality 组（真实采集）
+        self._refresh_causality_manifest()
         logger.info("=" * 60)
         logger.info("混合回测主循环结束")
         logger.info("=" * 60)
         return self.result
+
+    def _refresh_causality_manifest(self) -> None:
+        """P0-08 子项②：run 结束后按实际置位刷新 causality 组（止血 A 真实采集）。
+
+        替代 create_engine 处的 run 前静态反推：event/mixed 逐 bar 置位后
+        ``_slicing_enabled`` 为 True、``current_bar_ts`` 已推进 → 报真实 True；
+        vectorized 全量逃生口从不置位 → 报 False（由 ``full_sample_declared=True`` 声明）。
+        软接线：enabled=False 时刷新/断言失败仅审计不阻断（P1-05 模式）。
+        """
+        _m = getattr(self, "_realism_manifest", None)
+        if _m is None or self.context is None:
+            return
+        try:
+            from myquant.realism_gate import assert_realism_pass
+            from myquant.realism_gate.gate import get_config
+
+            _m.update_group("causality", {
+                "context_sliced": bool(self.context._slicing_enabled),
+                "current_bar_ts_enforced": self.context.current_bar_ts is not None,
+                "full_sample_declared": bool(self.context.full_sample_declared),
+                "guard_injected": self.context.extra.get("lookahead_guard") is not None,
+                "context_data_scoped": False,
+            })
+            assert_realism_pass(_m)
+        except Exception as exc:  # noqa: BLE001
+            if get_config().enabled:
+                raise
+            logger.debug("真实性门禁 run 后刷新失败（软接线不阻断）: %s", exc)
 
     # ─────────────────────────────────────────
     # 单 bar 处理（核心逐 bar 循环）

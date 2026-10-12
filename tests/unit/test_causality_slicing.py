@@ -84,14 +84,27 @@ class TestFailClosed:
 
 
 class TestFullSampleEscape:
-    """full_sample_declared=True → 返回全量（vectorized 逃生口）。"""
+    """full_sample_declared=True（引擎构造参数）→ 返回全量（vectorized 逃生口）。"""
 
-    def test_full_sample_declared_returns_all(self, ctx):
-        ctx._slicing_enabled = True
-        ctx.current_bar_ts = pd.Timestamp("2024-01-03")
-        ctx.full_sample_declared = True
-        df = ctx.get_data("600519.SH")
+    def test_full_sample_declared_returns_all(self, sample_df):
+        c = StrategyContext(_full_sample_declared=True)
+        c.data = {"600519.SH": sample_df}
+        c._slicing_enabled = True
+        c.current_bar_ts = pd.Timestamp("2024-01-03")
+        df = c.get_data("600519.SH")
         assert len(df) == 5  # 全量，忽略切片时点
+
+    def test_full_sample_declared_is_engine_construct_param(self, ctx):
+        """P0-08 子项②：全量逃生口为引擎构造参数，策略运行期不可自设。
+
+        反红验收②基础：探针策略写 ``context.full_sample_declared = True``
+        必须无效（抛 AttributeError），防止策略自行开启逃生口绕过因果切片。
+        """
+        assert ctx.full_sample_declared is False
+        with pytest.raises(AttributeError):
+            ctx.full_sample_declared = True
+        # 赋值被拒后状态不变（未开启逃生口）
+        assert ctx.full_sample_declared is False
 
 
 class TestOnInitStageFullAccess:
