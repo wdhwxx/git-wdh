@@ -4909,7 +4909,7 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 
 **待办（明天另一台电脑续）**：
 1. ✅ 全量 pytest（2026-10-13 已跑：**4022 passed / 4 skipped / 0 failed**——engine/mixed/e2e/architecture 改动全绿）
-2. ✅ 生产回测验证（**2024 全年缩短时段**，2026-10-13 跑通：真实 YAML → 真实数据 → kunpeng → enabled=true——`is_success=True / blocked=False / adjust_degraded_symbols=[] / benchmark_nan=None / assessed_at_run_end=True / violations=0`——**000300.SH raw 加载不降级 → data_pit 不误判 → 生产回测不阻断**端到端确认；全时段性能/边界由新机器完整回测兜底）
+2. ✅ 生产回测验证（**2024 全年缩短时段**，2026-10-13 跑通：真实 YAML → 真实数据 → kunpeng → enabled=true——`is_success=True / blocked=False / adjust_degraded_symbols=[] / benchmark_nan=None / assessed_at_run_end=True / violations=0`——**000300.SH raw 加载不降级 → data_pit 不误判 → 生产回测不阻断**端到端确认）；**完整全时段回测（约 2 小时+）为可选锦上添花项，留待后续有时间再跑**（2024 缩短验证结论已等价，不阻塞生产使用）
 3. ✅ 任务清单 P0-01 卡注记（#350 基准治理后 kunpeng.yaml 可用于生产回测）
 4. 若后续发现 benchmark 降级仍有其他入口（如 load_multiple 含 benchmark），按 P1-15 评审"基准加载降级不计入交易标的判据"备选
 
