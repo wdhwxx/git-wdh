@@ -256,6 +256,7 @@ class OrderMatcher:
         enable_partial_fill: bool = False,
         price_limit_pct: float = 0.10,
         enable_price_limit: bool = True,
+        price_limit_pct_by_symbol: Optional[Dict[str, float]] = None,
     ):
         """初始化撮合器。
 
@@ -266,14 +267,21 @@ class OrderMatcher:
                 ST 股 0.05、科创板/创业板 0.20 可由调用方按标的传入。
             enable_price_limit: 是否启用涨跌停校验（默认 True）。
                 停牌校验（volume=0）始终启用。
+            price_limit_pct_by_symbol: 按标的的涨跌停幅度映射（P0-03 板块映射，
+                {symbol: pct}）；命中时优先于 price_limit_pct（标量 match 路径生效；
+                向量化 match_vectorized 无 symbol 数组，仍用 price_limit_pct 单值）。
         """
         self.enable_partial_fill = bool(enable_partial_fill)
         self.price_limit_pct = float(price_limit_pct)
         self.enable_price_limit = bool(enable_price_limit)
+        self.price_limit_pct_by_symbol: Optional[Dict[str, float]] = (
+            dict(price_limit_pct_by_symbol) if price_limit_pct_by_symbol else None
+        )
         logger.debug(
-            "OrderMatcher 初始化: partial_fill=%s, price_limit=%s(±%.0f%%)",
+            "OrderMatcher 初始化: partial_fill=%s, price_limit=%s(±%.0f%%), by_symbol=%s",
             self.enable_partial_fill, self.enable_price_limit,
             self.price_limit_pct * 100,
+            len(self.price_limit_pct_by_symbol) if self.price_limit_pct_by_symbol else 0,
         )
 
     # ─────────────────────────────────────────
@@ -308,7 +316,7 @@ class OrderMatcher:
         side = normalize_side_value(order.side)
 
         # 停牌/涨跌停前置校验（蓝图要求：撮合层处理涨跌停）
-        halt_reason = self._check_halt_and_limit(side, bar)
+        halt_reason = self._check_halt_and_limit(side, bar, symbol=order.symbol)
         if halt_reason is not None:
             logger.debug(
                 "撮合跳过[%s] %s %s: %s",
@@ -358,6 +366,7 @@ class OrderMatcher:
         self,
         side: OrderSide,
         bar: Bar,
+        symbol: Optional[str] = None,
     ) -> Optional[str]:
         """检查停牌与涨跌停限制，返回阻止原因；可交易返回 None。
 
@@ -372,6 +381,8 @@ class OrderMatcher:
         Args:
             side: 订单方向。
             bar: 当前 K 线。
+            symbol: 标的代码（P0-03 板块映射：命中 price_limit_pct_by_symbol
+                时用该标的幅度，否则用全局 price_limit_pct；None 用全局）。
 
         Returns:
             阻止原因字符串；可交易时返回 None。
@@ -389,8 +400,12 @@ class OrderMatcher:
                 raise ValueError(
                     "pre_close 缺失，涨跌停校验不可空转（数据层需派生前收盘价）"
                 )
-            limit_up = bar.pre_close * (1.0 + self.price_limit_pct)
-            limit_down = bar.pre_close * (1.0 - self.price_limit_pct)
+            # P0-03 板块映射（#347）：按标的幅度优先，未映射回退全局
+            pct = self.price_limit_pct
+            if self.price_limit_pct_by_symbol and symbol is not None:
+                pct = self.price_limit_pct_by_symbol.get(symbol, self.price_limit_pct)
+            limit_up = bar.pre_close * (1.0 + pct)
+            limit_down = bar.pre_close * (1.0 - pct)
             if side == OrderSide.BUY and bar.open >= limit_up - _PRICE_EPSILON:
                 return f"涨停开盘({bar.open:.2f}>={limit_up:.2f})"
             if side == OrderSide.SELL and bar.open <= limit_down + _PRICE_EPSILON:

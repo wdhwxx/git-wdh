@@ -168,7 +168,7 @@ sim_broker:
   transfer_fee_rate: 0.00001
   slippage_value: 0.0002
   enable_t1: true
-  enforce_limit_up_down: true
+  enforce_limit: true
 ### 4.2 回测校验清单
 
 - LookaheadGuard.assert_pass () 必须通过

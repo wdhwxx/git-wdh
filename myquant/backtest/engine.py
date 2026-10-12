@@ -1201,15 +1201,21 @@ class BacktestScheduler:
         # #H2修复：mixed/vectorized 引擎统一接入全局防未来函数校验器（单例）
         kwargs.setdefault("lookahead_guard", get_lookahead_guard())
         kwargs.setdefault("enable_lookahead_guard", True)
+        # P0-03 卡本体收尾（#347）：lot_size 透传（config.lot_size 真实生效；
+        # 此前 mixed/vectorized 引擎恒用构造默认，YAML 配置→行为断链）。
+        # event 引擎（SimBroker 撮合）无整手执行逻辑，lot_size 不消费（#346 已登记）。
+        _cfg_lot_size: int = int(getattr(config, "lot_size", 100))
         if mode == ENGINE_MODE_VECTORIZED:
             engine: Any = VectorizedBacktestEngine(
                 config=config, strategy=strategy, data=data,
-                data_provider=data_provider, name=engine_name, **kwargs,
+                data_provider=data_provider, name=engine_name,
+                lot_size=_cfg_lot_size, **kwargs,
             )
         elif mode == ENGINE_MODE_MIXED:
             engine = MixedBacktestEngine(
                 config=config, strategy=strategy, data=data,
-                data_provider=data_provider, name=engine_name, **kwargs,
+                data_provider=data_provider, name=engine_name,
+                lot_size=_cfg_lot_size, **kwargs,
             )
         else:
             engine = BacktestEngine(

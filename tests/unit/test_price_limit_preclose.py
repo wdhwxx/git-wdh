@@ -133,13 +133,18 @@ class _TargetLoopStrategy(StrategyBase):
         return Signal(symbol=bar.symbol, signal_type=SignalType.HOLD)
 
 
-def _make_order(side: OrderSide, qty: int = 100) -> Order:
-    return Order(symbol=SYMBOL, side=side, order_type=OrderType.MARKET, quantity=qty)
+def _make_order(side: OrderSide, qty: int = 100, symbol: str = SYMBOL) -> Order:
+    return Order(symbol=symbol, side=side, order_type=OrderType.MARKET, quantity=qty)
 
 
-def _make_bar(open_px: float, pre_close: float, volume: float = 1e6) -> Bar:
+def _make_bar(
+    open_px: float,
+    pre_close: float,
+    volume: float = 1e6,
+    symbol: str = SYMBOL,
+) -> Bar:
     return Bar(
-        symbol=SYMBOL,
+        symbol=symbol,
         open=open_px,
         high=open_px,
         low=open_px,
@@ -201,7 +206,12 @@ class TestPriceLimitBlock:
 # ═══════════════════════════════════════════════
 
 class TestEnginesLimitUpBlock:
-    """DoD：涨停开盘日 生产双引擎买单成交数均 0（前收盘价缺失时引擎兜底派生）。"""
+    """DoD：涨停开盘日 生产双引擎买单成交数均 0（前收盘价缺失时引擎兜底派生）。
+
+    #347 P0-03 卡本体收尾：mixed/vectorized 引擎 OrderMatcher 装配改为
+    price_limit_pct=config.price_limit_pct + 板块映射（撮合层涨跌停校验恒启用，
+    KP-P2-10 契约不变；enforce_limit 只控制 event 路径 SimBroker）。
+    """
 
     # target[1]=1000 → 于末根(bar2)涨停开盘撮合 → 拦截；涨停日后无后续 bar → 全程 0 买单
     TARGETS: List[float] = [0.0, 1000.0, 1000.0]
@@ -233,6 +243,55 @@ class TestEnginesLimitUpBlock:
         assert result.is_success
         buy_fills = [t for t in result.trades if t.side == OrderSide.BUY.value]
         assert len(buy_fills) == 0, f"涨停开盘买单应 0 成交，实际 {len(buy_fills)} 笔"
+
+
+# ═══════════════════════════════════════════════
+#  P0-03 板块映射（#347）：OrderMatcher per-symbol 幅度
+# ═══════════════════════════════════════════════
+
+class TestPerSymbolBoardMapping:
+    """price_limit_pct_by_symbol 命中时按标的幅度拦截（板块映射接生产调用）。
+
+    创业板 20%：open=11.0（10×1.1）在 20% 幅度内 → 可成交；
+    主板 10% 同 open 涨停 → 买单拦截；创业板 open=12.0（10×1.2）→ 涨停拦截。
+    """
+
+    def test创业板20pct_11元不拦截(self) -> None:
+        matcher = OrderMatcher(
+            enable_price_limit=True,
+            price_limit_pct_by_symbol={"300750.SZ": 0.20},
+        )
+        order = _make_order(OrderSide.BUY, symbol="300750.SZ")
+        # pre_close=10，创业板 20% → 涨停=12.0；open=11.0 未到涨停 → 买单成交
+        assert matcher.match(order, _make_bar(11.0, pre_close=10.0)) is not None
+
+    def test创业板20pct_12元涨停拦截(self) -> None:
+        matcher = OrderMatcher(
+            enable_price_limit=True,
+            price_limit_pct_by_symbol={"300750.SZ": 0.20},
+        )
+        order = _make_order(OrderSide.BUY, symbol="300750.SZ")
+        # open=12.0 ≥ 涨停 12.0 → 买单拦截
+        assert matcher.match(order, _make_bar(12.0, pre_close=10.0)) is None
+
+    def test主板10pct_11元涨停拦截(self) -> None:
+        matcher = OrderMatcher(
+            enable_price_limit=True,
+            price_limit_pct_by_symbol={"600519.SH": 0.10},
+        )
+        order = _make_order(OrderSide.BUY, symbol="600519.SH")
+        # 主板 10% → 涨停=11.0；open=11.0 → 买单拦截
+        assert matcher.match(order, _make_bar(11.0, pre_close=10.0)) is None
+
+    def test未映射symbol回退全局幅度(self) -> None:
+        matcher = OrderMatcher(
+            enable_price_limit=True,
+            price_limit_pct=0.10,
+            price_limit_pct_by_symbol={"300750.SZ": 0.20},
+        )
+        order = _make_order(OrderSide.BUY, symbol="000001.SZ")
+        # 未映射 → 全局 10% → 涨停=11.0；open=11.0 → 拦截
+        assert matcher.match(order, _make_bar(11.0, pre_close=10.0)) is None
 
 
 # ═══════════════════════════════════════════════

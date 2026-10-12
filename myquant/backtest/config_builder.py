@@ -174,10 +174,21 @@ def build_backtest_config(
             type="fixed_bps",
             fixed_bps=slippage_value * 10000,
         )
-    else:
+    elif slippage_mode == "none":
+        # 显式零滑点（诚实披露；realism manifest 报 is_zero_cost=True 由门禁判）
         slippage = SlippageModel(type="none")
+    else:
+        # P0-03 卡本体收尾（#347）：消灭静默零滑点通道——未知 mode 显式报错
+        # （与 P0-05 backtest.py SlippageModel.calc 语义一致，不静默回退 type="none"）
+        raise ValueError(
+            f"slippage_mode 未知值: {slippage_mode!r}"
+            f"（合法值: ratio/none）"
+        )
 
     # ── 构建 BacktestConfig ──
+    # P0-03 卡本体收尾（#347）：从 YAML sim_broker 段读新键给显式字段赋值，
+    # 替换死键 enforce_limit_up_down（代码读 enforce_limit，旧键永不生效）。
+    # 此前恒用类默认（enforce_limit=False/price_limit_pct=0.10）→ 配置→行为断链。
     config = BacktestConfig(
         strategy_name=args.strategy or strategy_cfg.get("name", "default"),
         symbols=symbols,
@@ -190,6 +201,12 @@ def build_backtest_config(
         benchmark=bt_cfg.get("benchmark", "000300.SH"),
         risk_free_rate=metrics_cfg.get("risk_free_rate", 0.02),
         params=strategy_cfg.get("params", {}),
+        # P0-03 约束真可控：sim_broker 段新键（enforce_limit 替换旧键 enforce_limit_up_down）
+        price_limit_pct=float(sim_broker_cfg.get("price_limit_pct", 0.10)),
+        enforce_limit=bool(sim_broker_cfg.get("enforce_limit", False)),
+        enable_t1=bool(sim_broker_cfg.get("enable_t1", True)),
+        lot_size=int(sim_broker_cfg.get("lot_size", 100)),
+        participation_rate=float(sim_broker_cfg.get("participation_rate", 1.0)),
         # P0-01 端到端（#345）：真实性门禁配置透传（YAML 顶层段；缺省 {} = 审计档）
         realism_gate=config_dict.get("realism_gate", {}) or {},
     )

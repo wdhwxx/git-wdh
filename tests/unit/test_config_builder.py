@@ -139,3 +139,44 @@ class TestBuildBacktestConfig:
         config = build_backtest_config(_valid_config(), _args(), tmp_path)
         assert config.commission is not None
         assert config.slippage is not None
+
+
+# ─────────────────────────────────────────────
+# P0-03 卡本体收尾（#347）：config_builder 断链修复
+# ─────────────────────────────────────────────
+class TestP003ConfigWiring:
+    """配置→行为断链修复断言。
+
+    P0-03 卡原文：config_builder 从不给 enforce_limit/price_limit_pct/
+    enable_t1/lot_size 赋值 → 恒类默认；YAML 旧键 enforce_limit_up_down 死键。
+    #347 后：sim_broker 段新键真实透传 + slippage_mode 显式分支（无静默零滑点）。
+    """
+
+    def test_sim_broker_new_keys_flow_to_config(self, tmp_path: Path) -> None:
+        cfg = _valid_config()
+        cfg["sim_broker"].update({
+            "enforce_limit": True,
+            "price_limit_pct": 0.20,
+            "enable_t1": False,
+            "lot_size": 1000,
+            "participation_rate": 0.5,
+        })
+        config = build_backtest_config(cfg, _args(), tmp_path)
+        assert config.enforce_limit is True
+        assert config.price_limit_pct == 0.20
+        assert config.enable_t1 is False
+        assert config.lot_size == 1000
+        assert config.participation_rate == 0.5
+
+    def test_slippage_mode_none_explicit(self, tmp_path: Path) -> None:
+        cfg = _valid_config()
+        cfg["sim_broker"].update({"slippage_mode": "none"})
+        config = build_backtest_config(cfg, _args(), tmp_path)
+        assert config.slippage.type == "none"
+
+    def test_slippage_mode_unknown_raises(self, tmp_path: Path) -> None:
+        """未知 slippage_mode 显式报错（消灭静默零滑点通道，与 P0-05 语义一致）。"""
+        cfg = _valid_config()
+        cfg["sim_broker"].update({"slippage_mode": "mystery"})
+        with pytest.raises(ValueError, match="slippage_mode"):
+            build_backtest_config(cfg, _args(), tmp_path)

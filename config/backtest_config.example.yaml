@@ -99,7 +99,7 @@ sim_broker:
   enable_t1: true                     # A股T+1交易限制（true=当日买入不可卖）
   lot_size: 100                       # 最小交易单位100股（1手）
   price_limit_pct: 0.10               # 涨跌停限制（普通股票10%）
-  enforce_limit_up_down: true         # 涨跌停日是否允许成交（涨停不能买，跌停不能卖）
+  enforce_limit: true         # 涨跌停日是否允许成交（涨停不能买，跌停不能卖）
 
 # ========== 仓位管理（与实盘风控一致）==========
 position:

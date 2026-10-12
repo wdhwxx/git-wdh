@@ -168,7 +168,24 @@ class MixedBacktestEngine:
             commission_model=self.config.commission,
             slippage_model=self.config.slippage,
         )
-        self.matcher: OrderMatcher = matcher or OrderMatcher()
+        # P0-03 卡本体收尾（#347）：OrderMatcher 装配传真实幅度 + 板块映射接生产调用。
+        # 此前无参构造 → 涨跌停幅度写死 10%、板块区分失效（创业板/科创板应 20%）；
+        # 撮合层涨跌停校验恒启用（KP-P2-10 A股写实契约，enable_price_limit=True）；
+        # enforce_limit（YAML 开关）控制 event 路径 SimBroker（sim_broker.py:274）。
+        # 默认幅度（config 未显式改）时按池内标的推断板块幅度；显式配置时全局优先。
+        _matcher_cfg_price_pct = float(getattr(self.config, "price_limit_pct", 0.10))
+        _matcher_by_symbol: Optional[Dict[str, float]] = None
+        if _matcher_cfg_price_pct == 0.10:
+            from myquant.models.backtest import price_limit_pct_for_symbol
+
+            _matcher_by_symbol = {
+                sym: price_limit_pct_for_symbol(sym) for sym in self.config.symbols
+            }
+        self.matcher: OrderMatcher = matcher or OrderMatcher(
+            price_limit_pct=_matcher_cfg_price_pct,
+            enable_price_limit=True,
+            price_limit_pct_by_symbol=_matcher_by_symbol,
+        )
         self.recorder: Optional[TradeRecorder] = None
         self.metrics_calc: Optional[MetricsCalculator] = None
         self.context: Optional[StrategyContext] = None

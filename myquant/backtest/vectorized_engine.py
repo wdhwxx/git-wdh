@@ -182,7 +182,14 @@ class VectorizedBacktestEngine:
             commission_model=self.config.commission,
             slippage_model=self.config.slippage,
         )
-        self.matcher: OrderMatcher = matcher or OrderMatcher()
+        # P0-03 卡本体收尾（#347）：OrderMatcher 装配传真实幅度（此前无参构造 →
+        # 涨跌停幅度写死 10%）；撮合层涨跌停校验恒启用（KP-P2-10 A股写实契约）；
+        # enforce_limit（YAML 开关）控制 event 路径 SimBroker。向量化批量路径无
+        # symbol 数组，用全局幅度（config 真实值）；板块映射在标量路径生效。
+        self.matcher: OrderMatcher = matcher or OrderMatcher(
+            price_limit_pct=float(getattr(self.config, "price_limit_pct", 0.10)),
+            enable_price_limit=True,
+        )
         self.metrics_calc: MetricsCalculator = MetricsCalculator(
             risk_free_rate=self.config.risk_free_rate
         )

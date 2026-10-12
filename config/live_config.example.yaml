@@ -61,7 +61,7 @@ execution:
   enable_t1: true                        # A股T+1交易限制（true=当日买入不可卖）
   lot_size: 100                          # 最小交易单位100股（1手）
   price_limit_pct: 0.10                  # 涨跌停限制（普通股票10%，创业板/科创板20%需单独配置）
-  enforce_limit_up_down: true            # 涨跌停日是否允许成交（涨停不能买，跌停不能卖）
+  enforce_limit: true            # 涨跌停日是否允许成交（涨停不能买，跌停不能卖）
 
 # ========== 实时行情数据源配置（为多行情源预留）==========
 market_data:

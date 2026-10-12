@@ -296,7 +296,7 @@ def build_config_dict(
             "enable_t1": True,
             "lot_size": 100,
             "price_limit_pct": 0.10,
-            "enforce_limit_up_down": True,
+            "enforce_limit": True,
         },
         "position": {
             "max_single_position": max_single_position,
