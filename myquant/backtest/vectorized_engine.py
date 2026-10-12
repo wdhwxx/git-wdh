@@ -267,7 +267,12 @@ class VectorizedBacktestEngine:
         context = StrategyContext(
             data=self.data,
             config=self.config.to_dict(),
-            extra={"engine_mode": "vectorized"},
+            extra={
+                "engine_mode": "vectorized",
+                # P1-07 子项①：统一注入 lookahead_guard（与 event 引擎同构）
+                **({"lookahead_guard": self._lookahead_guard}
+                   if self._lookahead_guard is not None else {}),
+            },
         )
         # ── P0-07 因果切片：vectorized 全量逃生口 ──
         # 目标持仓生成天然需要全量数据，走 full_sample_declared=True

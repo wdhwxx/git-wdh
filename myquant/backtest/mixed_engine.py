@@ -277,7 +277,12 @@ class MixedBacktestEngine:
             portfolio=self,
             executor=self,
             config=self.config.to_dict(),
-            extra={"engine_mode": "mixed"},
+            extra={
+                "engine_mode": "mixed",
+                # P1-07 子项①：统一注入 lookahead_guard（与 event 引擎同构）
+                **({"lookahead_guard": self._lookahead_guard}
+                   if self._lookahead_guard is not None else {}),
+            },
         )
         self.strategy.on_init(self.context)
         logger.info("策略初始化完成: %s", self.strategy.name)
