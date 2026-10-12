@@ -993,7 +993,7 @@ Pythonwdhmm/
     │   │   ├── cost_model.py         # 零滑点/佣金费率为零 → critical
     │   │   ├── data_pit.py           # 复权降级标的/快照指纹 null/NaN 价格/OHLC 违反 → critical
     │   │   ├── sample_pool.py        # PIT 选股未生效/today 口径/幸存者偏差折价 null → critical
-    │   │   └── causality.py          # ✨【回写#334·P0-08 前置登记】因果性收口检查（P0-08 子项⑤）：`context_sliced=False` 且未声明全量 → critical；接入子项④ fail-open 降级信号（`bar.timestamp` 异常不得静默放行）；L0，只可引用 L0，运行时事实以数据契约注入（R-02/R-16）；R-19 必配测试（tests/unit/test_checks_causality.py 新增）
+    │   │   └── causality.py          # ✨【回写#334·P0-08 前置登记，#339 已实现】因果性收口检查（P0-08 子项⑤）：`context_sliced=False` 且未声明全量 → critical；接入子项④ fail-open 降级信号（`bar.timestamp` 异常不得静默放行）；L0，只可引用 L0，运行时事实以数据契约注入（R-02/R-16）；R-19 必配测试（tests/unit/test_checks_causality.py 新增）
 
     │
 
@@ -4784,5 +4784,13 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    c. **tests/unit/test_slicing_failopen_guard.py（新建，4 项，用例⑫反红）**：event on_market_event / mixed `_execute_signals` / mixed `_execute_target` 三路径各以越界 float 1e20（`datetime.fromtimestamp` 与 `pd.Timestamp(unit='s')` 均抛 OverflowError，且 `_bar_date_str` 哨兵 M1A-04 可吞不提前抛）驱动置位失败 → 断言①`_slicing_enabled` 保持 False（不静默放行）②`_slicing_failures==1` ③manifest `context_sliced` 立即 false ④子项⑤ critical 判据输入条件成立（context_sliced=false 且 full_sample_declared=false，⑤落地后由 test_checks_causality 断言实际 critical 违规）；另加不误伤用例（正常 timestamp → 置位成功、计数 0、不写 false）。
    d. **验收结果**：py_compile 通过；targeted 226 passed/1 skipped（failopen 4 + causality_slicing + manifest_truthfulness + realism_gate/manifest + kunpeng + backtest 系列 + engines_v5）；全量回归 **3972 passed/4 skipped/0 failed**（含上轮 2 个既有配置本地红在新环境 resolve，零失败）。**子项④完成**：三置位路径全部显式降级（记 critical 日志 + 哨兵计数 + 写 context_sliced=false）；⑤（checks/causality）将 context_sliced=false 判 critical 的完整闭环留给下一步。
    e. **纪律遵守**：蓝图目录树先行登记（tests/unit/test_slicing_failopen_guard.py 新增行）；显式异常类型（禁裸 except/except: pass）；logging 记 critical 级信号（禁 print）；git 提交（commit message 引用 #338）。
+
+## #339 · 2026-10-12 · P0-08 子项⑤：checks/causality.py 检查器（context_sliced=false 且未声明全量 → critical）
+   事实来源：本次落地（施工方案 v2.2 §5.4.1 子项⑤，L738 + P0-08 卡验收⑫②/⑬）；蓝图 checks/ 目录树行 #334 前置登记；现状核验：`_collect_violations`（gate.py:159）遍历 `_CHECKS` 注册表，检查函数签名 `(manifest) -> List[RealismViolation]`，异常 fail-closed；注册触发链 engine.py:1184 `import myquant.realism_gate.checks`。
+   a. **myquant/realism_gate/checks/causality.py（新建，L0）**：判据 `context_sliced is False` 且未声明全量（`full_sample_declared` 缺省 False）→ 1 条 critical 违规（field_path="causality.context_sliced"）；字段缺失（None）不在此触发（缺失由 manifest.build() fail-closed 管）；`register_realism_check("causality", check_causality)` 导入即注册；只 import gate.register_realism_check + manifest（L0，R-02/R-16）。
+   b. **myquant/realism_gate/checks/__init__.py（改动）**：导入 causality 触发注册（docstring 子模块列表同步）；**myquant/realism_gate/__init__.py（改动）**：导出 check_causality（__all__ 同步，满足方案子项⑤"补导出"）。
+   c. **tests/unit/test_checks_causality.py（新建，8 项，R-19）**：纯函数单测（False+False → critical；True → 无；逃生口 declared=True → 无；缺失 None → 无）；注册集成（`_collect_violations` 含 causality 违规）；**用例⑫②闭环**（#338 引擎场景 fail-open 降级 → `_collect_violations` 判 critical）；**阻断闭环**（CRITICAL_FIELDS 全字段完整 manifest + enabled=True → `assert_realism_pass` 抛 RealismGateError 含 causality 违规）；不误伤闭环（context_sliced=True + enabled=True → 通过封印）。
+   d. **验收结果**：py_compile 通过；targeted 56 passed（checks_causality 8 + realism_gate + manifest_truthfulness + slicing_failopen + causality_slicing）；全量回归 **3980 passed/4 skipped/0 failed**（+8 = 本卡 8 项）。**子项⑤完成**：未封门且未声明全量 → critical 阻断违规，接入 `_collect_violations`；**用例⑫②闭环齐**（①③ 在 #338 断言，② 由本卡检查器产出）。
+   e. **纪律遵守**：蓝图目录树先行确认（causality.py 行 #334 已前置登记，本次补 #339 已实现标注）；L0 分层（只 import gate/manifest）；显式类型注解 + Google docstring；git 提交（commit message 引用 #339）。
 
 

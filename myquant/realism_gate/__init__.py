@@ -11,7 +11,7 @@ realism_gate - 回测真实性门禁（L0 治理层，与 leakage_gate 同构同
   - gate.py       门禁中心：RealismGateConfig、register_realism_check 注册、
                    assert_realism_pass 唯一出口断言、审计落链
   - invariants.py  结果侧真实性不变量 RI-1~RI-6（P1-15，后续刀）
-  - checks/       各真实性维度检查器（market_rules/cost_model/data_pit/sample_pool，后续刀）
+  - checks/       各真实性维度检查器（market_rules/cost_model/data_pit/sample_pool/causality，导入即注册）
   - report.py     RealismManifest 落盘（results.json + 阻断产物 + 报告页 + audit_log，后续刀）
 
 设计红线（v2.2 §4.3 第三处不同）：
@@ -24,6 +24,7 @@ realism_gate - 回测真实性门禁（L0 治理层，与 leakage_gate 同构同
 myquant.data_access（R-02/R-16 跨层红线）。运行时事实由 L3/L4 以数据契约注入。
 """
 
+from myquant.realism_gate.checks.causality import check_causality
 from myquant.realism_gate.gate import (
     RealismGateConfig,
     assert_realism_pass,
@@ -53,6 +54,7 @@ __all__ = [
     "reset_realism_checks",
     "get_config",
     "set_config",
+    "check_causality",
     "CRITICAL_FIELDS",
     "WARNING_FIELDS",
     "ENUM_DOMAINS",
