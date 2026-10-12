@@ -335,6 +335,20 @@ class VectorizedBacktestEngine:
         Returns:
             BacktestResult: 完整回测结果（净值曲线/成交记录/绩效指标）。
         """
+        # ── P0-01 两阶段握手第⑤步（v2.2 §4.4）：run 入口断言 manifest 已封印 ──
+        # create_engine 已 assert_realism_pass + seal；manifest 缺失（旁路直构，
+        # P1-04 收敛前）跳过；已建未封印 → enabled=True 时阻断（禁止绕过出口断言直跑）。
+        _rg_m = getattr(self, "_realism_manifest", None)
+        if _rg_m is not None and not _rg_m.is_sealed():
+            from myquant.realism_gate.gate import RealismGateError, get_config
+            if get_config().enabled:
+                raise RealismGateError(
+                    "真实性门禁两阶段握手第⑤步失败：引擎未封印（manifest 未经 "
+                    "create_engine 出口断言），禁止直接 run",
+                    violations=[],
+                    manifest=_rg_m,
+                )
+
         if not self._initialized:
             self.on_init()
 
@@ -457,6 +471,9 @@ class VectorizedBacktestEngine:
                 # 但策略不经 context.data 取数（generate_signals_vectorized 收 df 参数）——
                 # 诚实 False；逃生口已由 full_sample_declared 声明（critical 字段）
                 "context_data_scoped": False,
+                # P0-01（#344）：运行期真实采集已完成 → causality 判据正式生效
+                # （vectorized 逃生口 full_sample_declared=True，判据不误报）
+                "assessed_at_run_end": True,
             })
             # ── P0-08 子项⑥：访问器层实测记账评估（P1-07② 判据）──
             # accessed_max_date > current_bar_date → 实测读到未来（真拦截）；

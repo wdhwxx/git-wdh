@@ -55,6 +55,8 @@ def _fill_minimal(m: RealismManifest) -> None:
         "context_sliced": False, "current_bar_ts_enforced": False,
         "full_sample_declared": False, "guard_injected": True,
         "context_data_scoped": False,
+        # P0-01（#344）：运行期形态（本 helper 无检查器注册，build 完整性通过即可）
+        "assessed_at_run_end": True,
     })
     m.update_group("price_limit", {"enabled": True, "pct_by_board": {}, "pre_close_source": "data_col"})
     m.update_group("suspension", {"enabled": True, "basis": "volume_zero"})

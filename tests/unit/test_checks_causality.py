@@ -34,7 +34,7 @@ BAD_TIMESTAMP: float = 1e20
 
 
 def _make_manifest(context_sliced: bool) -> RealismManifest:
-    """构造 causality 组最小 manifest（纯函数单测用）。"""
+    """构造 causality 组最小 manifest（纯函数单测用，运行期形态）。"""
     manifest = RealismManifest()
     manifest.update_group(
         "causality",
@@ -43,6 +43,26 @@ def _make_manifest(context_sliced: bool) -> RealismManifest:
             "current_bar_ts_enforced": False,
             "full_sample_declared": False,
             "guard_injected": False,
+            # P0-01（#344）：运行期真实采集已完成 → 判据生效
+            "assessed_at_run_end": True,
+        },
+    )
+    return manifest
+
+
+def _make_entry_manifest() -> RealismManifest:
+    """构造 create_engine 入口形态 causality 组（引擎未运行，诚实占位）。"""
+    manifest = RealismManifest()
+    manifest.update_group(
+        "causality",
+        {
+            "context_sliced": False,
+            "current_bar_ts_enforced": False,
+            "full_sample_declared": False,
+            "guard_injected": False,
+            "context_data_scoped": True,
+            # P0-01（#344）：引擎未运行 → 判据门控关闭（入口不误伤）
+            "assessed_at_run_end": False,
         },
     )
     return manifest
@@ -62,6 +82,9 @@ def _make_full_manifest(context_sliced: bool) -> RealismManifest:
             "causality.context_data_scoped",
         ):
             manifest.set_field(path, False)
+        elif path == "causality.assessed_at_run_end":
+            # P0-01（#344）：运行期形态（阻断闭环判据需生效）
+            manifest.set_field(path, True)
         elif path == "causality.full_sample_declared":
             manifest.set_field(path, False)
         elif path in ("quality.nan_price_rows", "quality.ohlc_violation_rows"):
@@ -294,3 +317,77 @@ def test_engine_refresh_writes_accounting_to_manifest() -> None:
     # 检查器判 critical（接入 _collect_violations 的完整链路）
     all_v = _collect_violations(m)
     assert any(x.field_path == "causality.accessed_future" and x.critical for x in all_v)
+
+
+# ═══════════════════════════════════════════════
+#  P0-01 因果性判据正式生效点（#344）：运行期门控 + 两阶段握手第⑤步
+# ═══════════════════════════════════════════════
+
+def test_entry_manifest_not_judged_before_run() -> None:
+    """P0-01：引擎未运行（入口占位 assessed=False）→ causality 判据不参与判定。"""
+    manifest = _make_entry_manifest()
+    assert check_causality(manifest) == []  # 门控关闭
+
+
+def test_entry_assert_realism_pass_seals_when_enabled() -> None:
+    """P0-01：enabled=True + 入口形态完整 manifest → 通过并 seal（不误伤 create_engine）。"""
+    previous = get_config()
+    try:
+        set_config(RealismGateConfig(enabled=True, audit_violations=False))
+        manifest = _make_full_manifest(context_sliced=False)
+        manifest.update_group("causality", {"assessed_at_run_end": False})  # 入口形态
+        assert_realism_pass(manifest)
+        assert manifest.sealed is True
+    finally:
+        set_config(previous)
+
+
+def test_handshake_step5_run_requires_sealed_when_enabled() -> None:
+    """P0-01 两阶段握手第⑤步：enabled=True + 引擎未封印 → run 入口阻断。"""
+    from myquant.backtest.engine import BacktestEngine
+    from myquant.realism_gate.manifest import RealismGateError
+
+    previous = get_config()
+    try:
+        set_config(RealismGateConfig(enabled=True, audit_violations=False))
+        engine = BacktestEngine(config=None)
+        engine._initialized = True  # 跳过 on_init，直接测入口断言路径
+        engine._realism_manifest = _make_entry_manifest()  # 未 seal
+        with pytest.raises(RealismGateError):
+            engine.run()
+    finally:
+        set_config(previous)
+
+
+def test_handshake_step5_run_passes_when_sealed() -> None:
+    """P0-01 两阶段握手第⑤步：封印后 run 入口放行（enabled=True）。"""
+    from myquant.backtest.engine import BacktestEngine
+
+    previous = get_config()
+    try:
+        set_config(RealismGateConfig(enabled=True, audit_violations=False))
+        engine = BacktestEngine(config=None)
+        engine._initialized = True  # 跳过 on_init（直接测入口断言路径）
+        engine._realism_manifest = _make_entry_manifest()
+        engine._realism_manifest.seal()
+        # 无 data → 入口断言通过后走 fail 路径（不 raise 门禁错误）
+        result = engine.run()
+        assert result.status == "failed"
+    finally:
+        set_config(previous)
+
+
+def test_handshake_step5_run_audit_mode_not_blocked() -> None:
+    """P0-01 两阶段握手第⑤步：enabled=False（审计档）未封印 → 不阻断。"""
+    from myquant.backtest.engine import BacktestEngine
+
+    previous = get_config()
+    try:
+        set_config(RealismGateConfig(enabled=False, audit_violations=False))
+        engine = BacktestEngine(config=None)
+        engine._initialized = True  # 跳过 on_init（直接测入口断言路径）
+        engine._realism_manifest = _make_entry_manifest()  # 未 seal
+        result = engine.run()
+        assert result.status == "failed"  # 入口断言放行（审计档）
+    finally:
+        set_config(previous)

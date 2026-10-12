@@ -4826,4 +4826,14 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    c. **收口结论**：两"不做"否决依据充分且全链路留痕（报告 → 前置调研处置 → 方案固化 → 任务清单固化 → 代码零残留）；P0-08 卡**9 子项全部完成**（①覆盖率审计 / ②止血A #336 / ③止血B #337 / ④止血C #338 / ⑤checks/causality #339 / ⑥访问器记账 #340 / ⑦run 起点复位 #341 / ⑧窗口隔离 #342 / ⑨不做声明 #343）；全量回归 **3995 passed/4 skipped/0 failed**；16 条验收用例（12 原 + ⑪manifest 真实性 / ⑫fail-open / ⑬keys-value 语义 / ⑭记账交叉校验）全部闭环。
    d. **纪律遵守**：纯文档核验（任务清单 P0-08 卡状态更新为 ✅ 完成）；git 提交（commit message 引用 #343）。**P0-08 卡交付**：R07 退役评估前置已解除（S-10 排在本卡交付之后），下一步 P0-01 因果性判据落地。
 
+## #344 · 2026-10-12 · P0-01 因果性判据落地：运行期门控 + 两阶段握手第⑤步（阻断正式生效点）
+   事实来源：本次落地（施工方案 v2.2 §4.4 两阶段握手 L515-530 + P0-01 卡 L53-63 + checks/causality 判据 L738-739）。**现状核验**：三引擎 run 收尾 `_refresh` 已接 `assert_realism_pass`（event engine.py:939 / mixed:474 / vectorized:492）→ 运行期因果性违规已能阻断；但 create_engine 入口 causality 组 `context_sliced=False` 是**诚实占位**（run 前未置位），enabled=True 时 checks/causality 判据（false 且未声明全量 → critical）会**误伤**——引擎未跑即断，回测无法创建；且两阶段握手第⑤步（run/on_init 入口断言 is_sealed()）三引擎均未落地。**本刀把 causality.* 真实采集接到阻断语义的正式生效点**。
+   a. **myquant/realism_gate/manifest.py（改动）**：CRITICAL_FIELDS 新增 `causality.assessed_at_run_end`（运行期真实采集完成标记——入口占位 False 关闭判据；run 收尾 _refresh 置 True 打开判据）。
+   b. **myquant/realism_gate/checks/causality.py（改动）**：`check_causality` 开头**运行期门控**——`assessed_at_run_end` 非真 → 直接返回空（入口静态 manifest 的 context_sliced=False 是诚实占位而非违规，防 enabled=True 误伤 create_engine）；run 收尾（assessed=True）后判据正式生效（三判据语义不变）。
+   c. **三引擎 _refresh_causality_manifest（改动）**：causality update_group 增 `assessed_at_run_end=True`（event engine.py / mixed_engine.py / vectorized_engine.py 同构）；create_engine 入口（engine.py:1291 区）增 `assessed_at_run_end=False`（未运行占位）。
+   d. **三引擎 run() 入口（改动，两阶段握手第⑤步正式落地）**：run 起点（on_init 前）断言——`_realism_manifest` 已建且未 seal → enabled=True 时抛 RealismGateError（violations=[]，manifest 快照）；manifest 缺失（旁路直构，P1-04 收敛前）跳过；enabled=False（审计档）不阻断。event/mixed 置于复位段之后、vectorized 置于 run() 开头。
+   e. **tests/unit/test_checks_causality.py（+5 项）**：判据门控（入口形态 assessed=False + context_sliced=False → 空违规）；enabled=True 入口完整 manifest → 通过并 seal（不误伤 create_engine）；握手⑤三态（enabled=True+未 seal → run 抛 RealismGateError；seal 后 → 放行；enabled=False+未 seal → 审计档放行）。helper 更新：`_make_manifest`/`_make_full_manifest` 加 `assessed_at_run_end=True`（运行期形态）、新增 `_make_entry_manifest`（入口形态）；`test_realism_gate.py`/`test_realism_manifest.py` 的 `_fill_minimal` 补新 CRITICAL_FIELD。
+   f. **验收结果**：py_compile 通过；targeted **93 passed**（六文件字母序，含 checks_causality 19 项）+ 引擎 targeted **46 passed**（backtest_engines_v5/causality_slicing/failopen_guard）；全量回归待后台跑（基线 3995 passed）。
+   g. **纪律遵守**：L0 纯函数门控（checks/causality 只消费 manifest 字段）；入口断言 enabled 门控与 gate 语义一致（enabled=False 审计不阻断）；live 引擎无 manifest 构建（grep 零命中）——第⑤步只覆盖回测三引擎，live create_live_engine 接线遗留（方案 §4.4 例外清单）；git 提交（commit message 引用 #344）。**P0-01 判据落地完成**：causality.* 真实采集 → run 收尾阻断闭环（已验）+ 入口不误伤（本刀）+ 握手第⑤步（本刀）三环齐。后续 P0-03/P0-05/P0-07/P1-15 真实生效值采集逐步补齐其余检查器。
+
 

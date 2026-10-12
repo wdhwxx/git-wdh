@@ -18,8 +18,16 @@ realism_gate/checks/causality.py - 因果切片真实性检查（P0-08 子项⑤
 **未封门**状态下运行——策略 ``get_data()`` 可取到全量（含未来数据）却无任何
 声明 → 回测结果不真实。**宁可阻断，不可静默放行。**
 
+**运行期门控（P0-01 判据正式生效点，#344）**：判据仅对**运行期 manifest**
+生效——引擎 run 收尾 ``_refresh_causality_manifest`` 置
+``causality.assessed_at_run_end=True``（真实采集已完成）才参与判定；
+create_engine 入口占位 ``False``（引擎未运行，``context_sliced=False`` 是诚实
+占位而非违规）→ 判据直接返回空，**防止 enabled=True 时入口误伤**（引擎未跑
+即断，回测无法创建）。
+
 接入子项④（止血 C，#338）fail-open 降级信号：engine/mixed 置位异常时显式写
-``causality.context_sliced=false`` → 本检查将其判为 critical，用例⑫②闭环。
+``causality.context_sliced=false`` → run 收尾（assessed=True）将其判为
+critical，用例⑫②闭环。
 
 L0 纯函数：只消费 manifest 注入的字段值，不 import L3/L4（R-02/R-16）。
 字段缺失（None）不在此触发——缺失由 manifest.build() fail-closed 处理。
@@ -43,6 +51,13 @@ def check_causality(manifest: RealismManifest) -> List[RealismViolation]:
         违规列表（无违规为空列表）。
     """
     violations: List[RealismViolation] = []
+
+    # ── P0-01 运行期门控（#344）：引擎未运行（入口占位）→ 不参与判定 ──
+    # create_engine 入口 causality 组 context_sliced=False 是诚实占位（run 前
+    # 未置位），若判定会在 enabled=True 时误伤——引擎未跑即断，回测无法创建。
+    # 引擎 run 收尾 _refresh_causality_manifest 置 True 后，本判据才正式生效。
+    if not manifest.get_field("causality.assessed_at_run_end", False):
+        return violations
 
     context_sliced = manifest.get_field("causality.context_sliced", None)
     full_sample_declared = manifest.get_field("causality.full_sample_declared", False)

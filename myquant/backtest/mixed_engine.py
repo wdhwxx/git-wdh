@@ -361,6 +361,20 @@ class MixedBacktestEngine:
             self.context.current_bar_ts = None
             self.context.accessed_max_dates.clear()
 
+        # ── P0-01 两阶段握手第⑤步（v2.2 §4.4）：run 入口断言 manifest 已封印 ──
+        # create_engine 已 assert_realism_pass + seal；manifest 缺失（旁路直构，
+        # P1-04 收敛前）跳过；已建未封印 → enabled=True 时阻断（禁止绕过出口断言直跑）。
+        _rg_m = getattr(self, "_realism_manifest", None)
+        if _rg_m is not None and not _rg_m.is_sealed():
+            from myquant.realism_gate.gate import RealismGateError, get_config
+            if get_config().enabled:
+                raise RealismGateError(
+                    "真实性门禁两阶段握手第⑤步失败：引擎未封印（manifest 未经 "
+                    "create_engine 出口断言），禁止直接 run",
+                    violations=[],
+                    manifest=_rg_m,
+                )
+
         if not self._initialized:
             self.on_init()
 
@@ -440,6 +454,8 @@ class MixedBacktestEngine:
                 "guard_injected": self.context.extra.get("lookahead_guard") is not None,
                 # P0-08 子项⑧：DataWindow 窗口隔离构造即生效，on_bar 封死 value 直取（真实）
                 "context_data_scoped": True,
+                # P0-01（#344）：运行期真实采集已完成 → causality 判据正式生效
+                "assessed_at_run_end": True,
             })
             # ── P0-08 子项⑥：访问器层实测记账评估（P1-07② 判据）──
             # accessed_max_date > current_bar_date → 实测读到未来（真拦截）；

@@ -108,6 +108,10 @@ CRITICAL_FIELDS: List[str] = [
     "causality.full_sample_declared",
     "causality.guard_injected",
     "causality.context_data_scoped",
+    # P0-01 因果性判据正式生效点（#344）：运行期真实采集是否已完成——
+    # create_engine 入口占位 False（引擎未运行，causality 判据不参与判定）；
+    # run 收尾 _refresh 置 True → checks/causality 判据才生效（阻断语义）
+    "causality.assessed_at_run_end",
     # 行情规则
     "price_limit.enabled",
     "price_limit.pct_by_board",
