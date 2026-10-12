@@ -4915,4 +4915,19 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 
 **纪律遵守**：只改基准加载路径（基准不属于交易标的，不触碰 hfq 个股语义）；测试与基线更新同步；git 提交（commit message 引用 #350）。
 
+## #351 · 2026-10-13 · P1-04 旁路收敛（9 处直构点全部处置 + REALISM_EXEMPT_ENTRY 白名单固化）
+
+**背景**：P1-04 卡（M5 首卡）"旁路收敛（双保险）"——enabled=true 已全量开启，若回测入口绕过门禁（无 manifest/握手⑤）则真实性保障有洞。此前状态 ⚠️ 部分完成（#327 只收敛 param_optimizer/incremental_backtest 2 处），**2026-10-12 复核**：生成回测报告.py + 3 个 LiveEngine 直构点仍"敞开"，REALISM_EXEMPT_ENTRY 白名单全仓零命中（例外仅存在于注释）。
+
+**盘点结论（9 处直构点现状）**：
+- **已收敛 3 处**：`param_optimizer.py:240` → create_engine（#327）；`incremental_backtest.py:126` → create_engine（#327）；`scripts/生成回测报告.py:229` → **from_data_provider——#349 已收敛门禁语义**（_attach_realism_manifest 挂 manifest + 握手⑤），**不再是旁路**（此前复核信息已过时）
+- **登记豁免 6 处**（非回测真实性判定对象）：`consistency_check.py:420-426`（三引擎对拍工具，本身即门禁对拍）；`engine_benchmark.py:293-299`（性能基准，无真实决策语义）；`live_safety_gate`（验收流程）；`scripts/实时行情驱动.py:280` / `双券商模拟实盘.py:264` / `实盘模拟回测.py:190`（**LiveEngine 实盘引擎**——真实性门禁判定回测结果，实盘天然不在判定域；实盘装配中心 create_live_engine 已存在，脚本直构演示装配 API 属预期）
+
+**落地**：
+- `myquant/realism_gate/gate.py`：`REALISM_EXEMPT_ENTRY`（frozenset 6 条目，不可变）+ `is_realism_exempt_entry(entry)` 查询——例外清单从"注释"固化为"代码"（方案 §4.4 要求）
+- `tests/unit/test_architecture.py`：新增 `TestP104ExemptRegistry`（3 项）——白名单与方案 §4.4 清单一致 / frozenset 不可变 / 查询函数工作（engine_benchmark=True、生成回测报告=**False** 非例外、param_optimizer=False 非例外）——**架构门禁登记**完成
+- **验收**：targeted 94 passed（architecture + realism_gate 相关）；全量 pytest 待跑
+
+**纪律遵守**：白名单登记不改门禁行为（例外引擎本就不在判定域，登记是"说清楚"而非"开后门"）；frozenset 防误改；测试锁定；git 提交（commit message 引用 #351）。**P1-04 卡完成（M5 首卡就位）**。
+
 

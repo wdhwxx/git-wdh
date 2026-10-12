@@ -1065,3 +1065,44 @@ class TestR25RegisteredPackage:
             "MODULE_LAYER 登记了但文件系统不存在的幽灵包（登记表失真，须删除该登记）：\n"
             + "\n".join(f"  myquant.{pkg}/" for pkg in ghosts)
         )
+
+
+class TestP104ExemptRegistry:
+    """P1-04 旁路收敛：REALISM_EXEMPT_ENTRY 例外入口白名单固化（方案 §4.4，回写#351）。
+
+    背景：门禁例外清单此前仅存在于方案/注释（全仓零命中常量），P1-04 卡要求固化为
+    白名单并接受架构门禁登记。登记语义：这些入口直构引擎但**非回测真实性判定对象**
+    （性能基准/对拍工具/实盘引擎），豁免门禁；非例外回测入口必须经门禁
+    （create_engine / from_data_provider，#349 起直构路径已收敛）。
+    白名单为 frozenset（不可变），防误改；查询走 is_realism_exempt_entry。
+    """
+
+    _EXPECTED = {
+        "engine_benchmark",
+        "consistency_check",
+        "live_safety_gate",
+        "scripts/实时行情驱动.py",
+        "scripts/双券商模拟实盘.py",
+        "scripts/实盘模拟回测.py",
+    }
+
+    def test_whitelist_registered(self):
+        from myquant.realism_gate.gate import REALISM_EXEMPT_ENTRY
+
+        assert REALISM_EXEMPT_ENTRY == self._EXPECTED, (
+            "REALISM_EXEMPT_ENTRY 与方案 §4.4 例外清单不一致（新增例外须先评审并同步登记）：\n"
+            f"  实际: {sorted(REALISM_EXEMPT_ENTRY)}"
+        )
+
+    def test_whitelist_immutable(self):
+        from myquant.realism_gate.gate import REALISM_EXEMPT_ENTRY
+
+        assert isinstance(REALISM_EXEMPT_ENTRY, frozenset), "白名单必须不可变（防误改）"
+
+    def test_query_works(self):
+        from myquant.realism_gate.gate import is_realism_exempt_entry
+
+        assert is_realism_exempt_entry("engine_benchmark") is True
+        assert is_realism_exempt_entry("scripts/双券商模拟实盘.py") is True
+        assert is_realism_exempt_entry("scripts/生成回测报告.py") is False  # 非例外（#349 已收敛）
+        assert is_realism_exempt_entry("param_optimizer") is False  # 非例外（#327 已收敛）

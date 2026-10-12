@@ -47,6 +47,45 @@ logger = logging.getLogger("myquant.realism_gate.gate")
 
 
 # ═══════════════════════════════════════════════
+#  例外入口白名单（P1-04 旁路收敛，方案 §4.4 固化，回写#351）
+# ═══════════════════════════════════════════════
+
+REALISM_EXEMPT_ENTRY = frozenset({
+    # ① 性能基准工具：无真实决策语义（BacktestEngine/Mixed/Vectorized 直构跑 run，
+    #    仅测吞吐/耗时，结果非回测真实性判定对象）
+    "engine_benchmark",
+    # ② 一致性对拍工具：三引擎同策略对拍（本身即门禁对拍工具，直构属预期）
+    "consistency_check",
+    # ③ 实盘安全门禁验收流程（live_safety_gate 验收，非回测真实性场景）
+    "live_safety_gate",
+    # ④ 实盘/模拟实盘脚本：LiveEngine 直构为实盘引擎——真实性门禁判定回测结果
+    #    真实性，实盘天然不在判定域（回测旁路收敛只针对回测入口；实盘入口经
+    #    create_live_engine 工厂装配中心统一，脚本直构演示装配 API 属预期）
+    "scripts/实时行情驱动.py",
+    "scripts/双券商模拟实盘.py",
+    "scripts/实盘模拟回测.py",
+})
+"""真实性子门禁例外入口白名单（frozenset，不可变防误改）。
+
+登记语义：这些入口直构引擎但**非回测真实性判定对象**，豁免构造器/run 门禁；
+非例外回测入口（create_engine / from_data_provider / 直构 BacktestEngine 的
+回测脚本）必须经门禁（#349 起 from_data_provider 已收敛门禁语义）。
+"""
+
+
+def is_realism_exempt_entry(entry: str) -> bool:
+    """查询入口是否登记为真实性子门禁例外（P1-04 白名单，方案 §4.4）。
+
+    Args:
+        entry: 入口标识（模块名或 scripts 相对路径，与 REALISM_EXEMPT_ENTRY 对齐）。
+
+    Returns:
+        白名单命中返回 True；否则 False（非例外入口须经门禁）。
+    """
+    return entry in REALISM_EXEMPT_ENTRY
+
+
+# ═══════════════════════════════════════════════
 #  配置
 # ═══════════════════════════════════════════════
 
