@@ -512,6 +512,10 @@ class BacktestEngine(BaseEngine):
         if self._risk_manager is not None:
             self._risk_prev_close[bar.symbol] = float(bar.close)
 
+        # P1-08: T+1 日终结算——清空当日买入冻结（次日起当日买入可卖）
+        if self.broker is not None and hasattr(self.broker, 'settle_t1'):
+            self.broker.settle_t1()
+
         self._event_count += 1
 
     def _execute_signal(self, signal: Signal, bar: Bar) -> None:
