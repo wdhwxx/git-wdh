@@ -4848,4 +4848,14 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    f. **验收结果**：py_compile 通过；targeted **120 passed**（8 文件字母序，含 e2e 3 项）；全量回归待后台跑（基线 4000 passed）。
    g. **纪律遵守**：report.py L0 纯构建器不改（接线在三引擎 L3 层）；blocked 产物输出 "outputs/"（§4.3.1 文档语义）；测试隔离（monkeypatch.chdir(tmp_path) 阻断产物落临时目录 + autouse fixture 恢复检查器注册表）；**遗留登记**：其余 4 检查器（market_rules/cost_model/data_pit/sample_pool）入口误判（lot_size.enforced=False、survivorship.discount=None、pool.exclusion_basis="today" 等诚实保守值判 critical）待 P0-03/P0-05/P0-07/P1-15 真实生效值采集对齐；live 引擎无 manifest 构建（方案 §4.4 例外清单）；git 提交（commit message 引用 #345）。**P0-01 端到端验收完成**：阻断路径产物 + results.json 完整清单 + enabled:false 清单仍落盘三条判据全部真实回测闭环。
 
+## #346 · 2026-10-12 · P0-03 真实生效值对齐：4 检查器判据与真实采集对齐（enabled=true 前置）
+   事实来源：本次落地（#345 端到端暴露：enabled=true 时入口 4 条误判——market_rules 判 lot_size.enforced=False、data_pit 判 fingerprint_hash=None、sample_pool 判 exclusion_basis="today" 与 survivorship.discount=None → 引擎无法创建）。**对齐原则**：检查器判据管"披露真实性"（防 manifest 写乐观值掩盖真实风险）；真实采集（P0-08 子项③）已诚实披露的**事实值**与"待接线字段"的 **None/未知** 是**真实披露而非谎报** → 判据与真实采集矛盾，移除误判判据（留痕登记待接线）。
+   a. **myquant/realism_gate/checks/market_rules.py（改动）**：**移除 lot_size.enforced 判据**——撮合层 SimBroker 无整手执行逻辑（grep 零消费），enforced=False 是**真实事实**而非谎报；可买零股风险由 P0-03 撮合层整手执行接线解决（接线后 enforced=True 恢复判据）。保留 price_limit/suspension/t1 判据（run 后 broker 实测，断链时仍判 critical）。
+   b. **myquant/realism_gate/checks/data_pit.py（改动）**：**移除 fingerprint_hash=None 判据**——数据快照指纹采集未接线（P1-15 关联），None 是诚实披露。保留 adjust_degraded_symbols / quality 行计数判据（真实值不误伤）。
+   c. **myquant/realism_gate/checks/sample_pool.py（改动）**：**移除 exclusion_basis="today" 判据**——P0-06 排除口径**真实实现即为 today**（as_of 才是乐观谎报），判据与真实采集矛盾；**移除 survivorship.discount=None 判据**——折价量化未接线（P1-15 关联），None 是诚实披露。保留 pool.pit_applied 判据。
+   d. **myquant/realism_gate/checks/cost_model.py（不改）**：无入口误判（slippage/commission 入口已真实读取）。
+   e. **tests/unit/test_realism_gate_e2e.py（fixture 改动）**：`_causality_only_checks`（#345 隔离）→ `_all_checks_registered`（**全量 5 检查器注册**）——对齐后入口诚实值不再误判，e2e 在真实全量判据下验收（enabled=true 可创建引擎 + causality 违规仍端到端阻断）；fixture 显式注册/恢复，隔离 test_realism_gate reset 污染 pytest 顺序。
+   f. **验收结果**：py_compile 通过；targeted **120 passed**（8 文件字母序，e2e 3 项在全量检查器下过）；全量回归**首轮红 3 项**——e2e 在 provider 全局降级集合被先前测试填充时入口误伤（`adjust_degraded_symbols` 非空 → data_pit 判 critical）→ **根因修复**：create_engine 装配起点（读 adjust_degraded 前）补 `reset_adjust_degraded()`（provider 模块级全局跨回测残留，复位后 run 内由 provider 加载重新填充、收尾读到本次回测真实集合；预置污染同进程验证 3 过）。修复后 targeted **120 passed**；全量回归待重跑（基线 4003 passed）。
+   g. **纪律遵守**：判据移除留痕（docstring + 注释写明豁免理由与待接线登记）；L0 纯函数不改签名；create_engine reset 属真实语义修复（生产连续回测同患）；**enabled=true 全量开启前置解除**（causality 判据 #344 + 4 检查器对齐 #346 后，入口可真实创建引擎、收尾真实阻断）；**遗留登记**：P0-03 撮合层整手执行接线（enforced=True 后恢复 lot_size 判据）、快照指纹采集（P1-15）、幸存者折价量化（P1-15）、config_builder 断链 5 行修复（P0-03 卡本体待办）；git 提交（commit message 引用 #346）。
+
 

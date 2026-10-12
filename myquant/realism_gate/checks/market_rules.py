@@ -7,7 +7,9 @@ realism_gate/checks/market_rules.py - 行情规则真实性检查（P0-01 第三
   - price_limit.enabled 必须 True（涨跌停未生效 → 回测可在涨停价成交，虚增收益）
   - suspension.enabled 必须 True（停牌未生效 → 已停牌股票仍可交易）
   - t1_position_freeze.enabled 必须 True（T+1 未生效 → 当日买入可当日卖出，A股违规）
-  - lot_size.enforced 必须 True（整手未生效 → 可买零股，与实盘不符）
+  - ~~lot_size.enforced 必须 True~~（#346 真实采集对齐移除：撮合层 SimBroker
+    无整手执行逻辑（grep 零消费）→ ``False`` 是**真实事实**而非谎报；可买零股的
+    风险由 P0-03 撮合层整手执行接线解决，接线后 enforced=True 恢复本判据）
 
 L0 纯函数：只消费 manifest 注入的字段值，不 import L3/L4（R-02/R-16）。
 导入即注册（register_realism_check）。
@@ -59,14 +61,10 @@ def check_market_rules(manifest: RealismManifest) -> List[RealismViolation]:
             actual_value=False,
         ))
 
-    # 整手
-    if not manifest.get_field("lot_size.enforced", False):
-        violations.append(RealismViolation(
-            field_path="lot_size.enforced",
-            critical=True,
-            message="整手约束未启用（可买零股，与实盘不符）",
-            actual_value=False,
-        ))
+    # ── lot_size.enforced 判据（#346 真实采集对齐移除）──
+    # 撮合层（SimBroker）无整手执行逻辑（grep 零消费）→ False 是真实事实而非
+    # 谎报；判据移除避免入口误伤（enabled=True 时引擎无法创建）。可买零股风险
+    # 由 P0-03 撮合层整手执行接线解决；接线后 enforced=True 恢复本判据。
 
     return violations
 

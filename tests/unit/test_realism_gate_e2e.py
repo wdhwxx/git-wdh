@@ -20,7 +20,10 @@ tests/unit/test_realism_gate_e2e.py - P0-01 端到端验收（#345）
 
 事实来源：本次落地；被测：myquant/realism_gate/report.py（write_blocked_artifact /
 write_manifest_to_results 接线）、三引擎 _refresh catch（#345 阻断落盘）、
-BacktestResult.realism_manifest（#345 挂载）、BacktestConfig.realism_gate（#345 透传）。
+BacktestResult.realism_manifest（#345 挂载）、BacktestConfig.realism_gate（#345 透传）、
+4 检查器判据真实采集对齐（#346：lot_size.enforced/survivorship·invariants·
+fingerprint_hash 待接线豁免、exclusion_basis="today" P0-06 真实口径）——
+对齐后本验收在**全量 5 检查器注册**下跑（enabled=true 入口不再误伤，端到端阻断闭环）。
 """
 from __future__ import annotations
 
@@ -42,16 +45,19 @@ SYMBOL: str = "000001.SZ"
 
 
 @pytest.fixture(autouse=True)
-def _causality_only_checks() -> object:
-    """隔离：仅注册 causality 检查器（本卡聚焦 causality 判据端到端阻断）。
+def _all_checks_registered() -> object:
+    """确保 5 检查器全量注册（隔离 test_realism_gate 的 reset 污染 pytest 顺序）。
 
-    其余 4 检查器（market_rules/cost_model/data_pit/sample_pool）当前会把入口
-    诚实保守值（lot_size.enforced=False、survivorship.discount=None、
-    pool.exclusion_basis="today" 等）判为 critical——属 P0-03/P0-05 真实生效值
-    采集对齐范围（P0-01 卡 L63 后续卡），非本卡引入；本卡只验收 causality 判据。
-    teardown 恢复全量注册，避免污染后续测试。
+    #346 真实采集对齐后：4 检查器判据接受入口诚实披露值（lot_size.enforced=False
+    撮合层真实事实 / survivorship·invariants·fingerprint_hash 待接线豁免 /
+    exclusion_basis="today" P0-06 真实口径）→ enabled=true 入口不再误伤，
+    本验收在全量检查器注册下跑（可真实创建引擎 + 端到端阻断闭环）。
     """
     from myquant.realism_gate.checks.causality import check_causality
+    from myquant.realism_gate.checks.cost_model import check_cost_model
+    from myquant.realism_gate.checks.data_pit import check_data_pit
+    from myquant.realism_gate.checks.market_rules import check_market_rules
+    from myquant.realism_gate.checks.sample_pool import check_sample_pool
     from myquant.realism_gate.gate import (
         register_realism_check,
         reset_realism_checks,
@@ -59,20 +65,20 @@ def _causality_only_checks() -> object:
 
     reset_realism_checks()
     register_realism_check("causality", check_causality)
+    register_realism_check("market_rules", check_market_rules)
+    register_realism_check("cost_model", check_cost_model)
+    register_realism_check("data_pit", check_data_pit)
+    register_realism_check("sample_pool", check_sample_pool)
     yield
-    # 恢复全量注册（4 检查器）
+    # 恢复默认全量注册（5 检查器），避免污染后续测试
     reset_realism_checks()
-    import myquant.realism_gate.checks.cost_model as _cm
-    import myquant.realism_gate.checks.data_pit as _dp
-    import myquant.realism_gate.checks.market_rules as _mr
-    import myquant.realism_gate.checks.sample_pool as _sp
-
     from myquant.realism_gate.gate import register_realism_check as _reg
 
-    _reg("market_rules", _mr.check_market_rules)
-    _reg("cost_model", _cm.check_cost_model)
-    _reg("data_pit", _dp.check_data_pit)
-    _reg("sample_pool", _sp.check_sample_pool)
+    _reg("causality", check_causality)
+    _reg("market_rules", check_market_rules)
+    _reg("cost_model", check_cost_model)
+    _reg("data_pit", check_data_pit)
+    _reg("sample_pool", check_sample_pool)
 
 
 def _make_data() -> Dict[str, pd.DataFrame]:

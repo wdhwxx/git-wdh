@@ -1282,8 +1282,15 @@ class BacktestScheduler:
             manifest.set_field("fee_dilution_basis", "per_order")
             manifest.set_field("adjust_effective_by_symbol", {})
             # P0-04：从 provider 获取真实复权降级集合（延迟导入避免跨层硬依赖）
+            # #346 真实生效值对齐：_adjust_degraded_symbols 为模块级全局，跨回测残留
+            # 会污染入口断言（先前回测的降级标的误判本回测）；装配起点清空，
+            # run 内由 provider 加载（L615）重新填充，收尾 _refresh 读到本次回测真实集合。
             try:
-                from myquant.data_access.provider import get_adjust_degraded_symbols
+                from myquant.data_access.provider import (
+                    get_adjust_degraded_symbols,
+                    reset_adjust_degraded,
+                )
+                reset_adjust_degraded()
                 manifest.set_field("adjust_degraded_symbols", get_adjust_degraded_symbols())
             except Exception:
                 manifest.set_field("adjust_degraded_symbols", [])

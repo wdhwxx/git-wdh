@@ -4,9 +4,12 @@ realism_gate/checks/sample_pool.py - 样本池真实性检查（P0-01 第三刀�
 ======================================================================
 
 校验 manifest 中"样本池"分组字段（v2.2 §4.2）：
-  - pool.exclusion_basis == "today" → degraded（用今天口径选股，幸存者偏差）
-  - survivorship.discount 为 null → unverified（幸存者偏差折价未量化）
   - pool.pit_applied 必须 True（PIT 选股未生效 → 用了未来才知道的股票池）
+  - ~~pool.exclusion_basis == "today" → degraded~~（#346 真实采集对齐移除：
+    P0-06 排除口径**真实实现即为 today**（as_of 才是乐观谎报）→ 判据与真实采集
+    矛盾，移除；幸存者偏差风险由样本池口径核验（P0-06）另行治理）
+  - ~~survivorship.discount 为 null → unverified~~（#346 真实采集对齐移除：
+    幸存者偏差折价量化未接线（P1-15 关联）→ None 是诚实披露而非谎报）
 
 L0 纯函数：只消费 manifest 注入的字段值。
 """
@@ -39,25 +42,10 @@ def check_sample_pool(manifest: RealismManifest) -> List[RealismViolation]:
             actual_value=False,
         ))
 
-    # today 口径
-    basis = manifest.get_field("pool.exclusion_basis", "as_of")
-    if basis == "today":
-        violations.append(RealismViolation(
-            field_path="pool.exclusion_basis",
-            critical=True,
-            message="样本池用 today 口径剔除（非 as_of 时点，幸存者偏差）",
-            actual_value=basis,
-        ))
-
-    # 幸存者偏差折价未量化
-    discount = manifest.get_field("survivorship.discount", None)
-    if discount is None:
-        violations.append(RealismViolation(
-            field_path="survivorship.discount",
-            critical=True,
-            message="幸存者偏差折价未量化（null，回测收益可能被高估）",
-            actual_value=None,
-        ))
+    # ── exclusion_basis / survivorship 判据（#346 真实采集对齐移除）──
+    # exclusion_basis：P0-06 排除口径真实实现即为 today（as_of 才是乐观谎报），
+    # 判据与真实采集矛盾 → 移除（幸存者偏差由 P0-06 口径核验另行治理）。
+    # survivorship.discount：折价量化未接线（P1-15 关联），None 是诚实披露 → 移除。
 
     return violations
 
