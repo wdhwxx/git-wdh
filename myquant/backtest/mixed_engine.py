@@ -510,6 +510,11 @@ class MixedBacktestEngine:
                         "value": _bs_value,
                         "is_zero_cost": bool(_bs_type == "none" or _bs_value == 0.0),
                     })
+            # P0-04（#349）：收尾回写真实复权降级集合（provider 意图：回测后由引擎
+            # 读取写入 manifest；assert 前回写 → data_pit 判据真实生效——此前仅入口
+            # 空集且无回写点，判据永不触发，真实降级被隐藏。与 engine.py 同构）。
+            from myquant.data_access.provider import get_adjust_degraded_symbols
+            _m.set_field("adjust_degraded_symbols", get_adjust_degraded_symbols())
             assert_realism_pass(_m)
         except Exception as exc:  # noqa: BLE001
             if get_config().enabled:

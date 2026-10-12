@@ -250,3 +250,126 @@ def test_manifest_attached_when_audit_only(
     assert fields["causality"]["assessed_at_run_end"] is True
     # 审计档下阻断产物不落盘（无违规阻断 → 无 blocked 文件）
     assert _find_blocked_files(tmp_path, "leaky_probe") == []
+
+
+# ═══════════════════════════════════════════════════════════════
+#  #349：from_data_provider 直构路径门禁收敛（真实端到端验收暴露
+#  ——生产入口 scripts/生成回测报告.py 走 from_data_provider，此前无
+#  manifest → 握手⑤跳过、判据完全不生效；本轮收敛到 attach_realism_manifest）
+# ═══════════════════════════════════════════════════════════════
+
+class _FakeProvider:
+    """鸭子类型 DataProvider：返回合成 6 交易日行情（无复权降级）。"""
+
+    def load_multiple(
+        self,
+        symbols: List[str],
+        start_date: object = None,
+        end_date: object = None,
+        period: str = "1d",
+    ) -> Dict[str, pd.DataFrame]:
+        idx = pd.date_range("2024-01-01", periods=6, freq="B")
+        close = [10.0 + 0.1 * i for i in range(6)]
+        df = pd.DataFrame(
+            {
+                "open": 10.0,
+                "high": 11.0,
+                "low": 9.0,
+                "close": close,
+                "volume": 1_000_000.0,
+            },
+            index=idx,
+        )
+        return {s: df for s in symbols}
+
+    def get_bars(
+        self, symbol: str, start_date: object = None, end_date: object = None
+    ) -> pd.DataFrame:
+        return self.load_multiple([symbol])[symbol]
+
+
+def _run_backtest_from_provider(
+    strategy: StrategyBase, enabled: bool
+) -> object:
+    """走生产入口 from_data_provider 直构 + run（#349 门禁收敛验证）。"""
+    cfg = BacktestConfig(
+        strategy_name=strategy.name,
+        symbols=[SYMBOL],
+        start_date="2024-01-01",
+        end_date="2024-01-20",
+        frequency="1d",
+        initial_capital=1_000_000.0,
+        realism_gate={"enabled": enabled, "audit_violations": False},
+    )
+    from myquant.backtest.engine import BacktestEngine
+
+    engine = BacktestEngine.from_data_provider(
+        data_provider=_FakeProvider(),
+        config=cfg,
+        strategy=strategy,
+    )
+    # 握手⑤（#344）：attach 已在直构路径构建 + seal（此前 _realism_manifest 缺失）
+    assert engine._realism_manifest is not None
+    assert engine._realism_manifest.is_sealed()
+    engine.run()
+    return engine
+
+
+def test_from_data_provider_blocked_on_degraded(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    """判据 4（#349 阻断）：from_data_provider + enabled=True，provider 加载后
+    真实复权降级（monkeypatch 降级集合——入口空、收尾非空）→ 收尾回写 →
+    data_pit critical → RealismGateError + blocked 产物（此前直构路径判据完全
+    不生效）。"""
+    monkeypatch.chdir(tmp_path)
+    # 入口 attach 读取一次（空，入口不误伤）；run 收尾 _refresh 再读（非空）→
+    # 收尾回写真实降级集合 → data_pit 判据在收尾 assert 真实生效（判据4闭环）
+    _calls: Dict[str, int] = {"n": 0}
+
+    def _degraded_after_entry() -> List[str]:
+        _calls["n"] += 1
+        return [SYMBOL] if _calls["n"] > 1 else []
+
+    monkeypatch.setattr(
+        "myquant.data_access.provider.get_adjust_degraded_symbols",
+        _degraded_after_entry,
+    )
+    with pytest.raises(RealismGateError) as exc_info:
+        _run_backtest_from_provider(_CompliantStrategy(), enabled=True)
+
+    field_paths = [v.field_path for v in exc_info.value.violations]
+    assert "adjust_degraded_symbols" in field_paths, field_paths
+
+    blocked = _find_blocked_files(tmp_path, "compliant_probe")
+    assert len(blocked) == 1, f"阻断产物未落盘: {blocked}"
+    with open(blocked[0], "r", encoding="utf-8") as f:
+        payload = json.load(f)
+    assert payload["blocked"] is True
+    # 收尾真实采集：assessed_at_run_end=True（causality 判据正式生效点）
+    assert payload["manifest"]["fields"]["causality"]["assessed_at_run_end"] is True
+    # 真实降级集合已回写进 manifest（data_pit 判据依据）
+    assert payload["manifest"]["fields"]["adjust_degraded_symbols"] == [SYMBOL]
+    v_paths = [v["field_path"] for v in payload["violations"]]
+    assert "adjust_degraded_symbols" in v_paths, v_paths
+
+
+def test_from_data_provider_compliant_manifest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    """判据 5（#349 合规）：from_data_provider + enabled=True + 无降级（合成
+    数据）→ run 成功 + realism_manifest 完整挂载（CRITICAL_FIELDS 全覆盖）。"""
+    monkeypatch.chdir(tmp_path)
+    engine = _run_backtest_from_provider(_CompliantStrategy(), enabled=True)
+
+    assert engine.result.is_success
+    assert engine.result.realism_manifest is not None
+    fields = engine.result.realism_manifest["fields"]
+    for path in CRITICAL_FIELDS:
+        group, _, leaf = path.partition(".")
+        if leaf:
+            assert group in fields and leaf in fields[group], f"缺 {path}"
+        else:
+            assert path in fields, f"缺 {path}"
+    # 无降级 → data_pit 不判 critical → 阻断产物不落盘
+    assert _find_blocked_files(tmp_path, "compliant_probe") == []

@@ -74,6 +74,174 @@ logger = get_logger(__name__)
 # _resolve_broker 经 get_broker_factory() 读实时全局（避免 from backtest import 包级边成环）。
 
 
+def _attach_realism_manifest(
+    engine: "BacktestEngine",
+    config: BacktestConfig,
+    strategy: Optional[StrategyBase],
+    engine_mode: str,
+    engine_kwargs: Optional[Dict[str, Any]] = None,
+    data: Optional[Dict[str, pd.DataFrame]] = None,
+) -> Any:
+    """构建并挂载真实性门禁 manifest（P0-01 两阶段握手第①~④步，v2.2 §4.4）。
+
+    构造引擎后采集 manifest → assert_realism_pass（入口断言）→ seal；挂载
+    engine._realism_manifest 供 run() 收尾真实采集刷新（_refresh_causality_manifest）
+    与握手第⑤步校验（#344）。
+
+    P1-05：enabled=True 时门禁异常传播（fail-closed，违规阻断引擎创建）；
+    enabled=False 时软接线（仅审计不阻断，置 engine._realism_manifest=None）。
+
+    #349 真实端到端验收收敛：模块级函数（非 BacktestEngine 方法）→
+    BacktestEngine/MixedBacktestEngine/VectorizedBacktestEngine（独立类，互不继承）
+    的 create_engine 装配统一走本函数，三引擎门禁语义同构；from_data_provider
+    直构路径（生产入口 scripts/生成回测报告.py 等）同样收敛——此前直构无 manifest
+    → 握手⑤跳过、causality 等判据完全不生效（enabled=true 形同虚设）。
+
+    Args:
+        engine: 目标引擎实例（挂载 _realism_manifest 供 run 收尾刷新）。
+        config: 回测配置（manifest 构造事实来源）。
+        strategy: 策略实例（strategy_id 采集）。
+        engine_mode: 引擎模式（full_sample_declared 判定：vectorized 恒 True）。
+        engine_kwargs: 引擎构造 kwargs（enable_lookahead_guard 事实来源）。
+        data: 已加载的 {symbol: DataFrame}（pool.admitted_count 采集；None 时记 0——
+            provider 场景数据在 run 时 on_init 加载，create 时不可知，sample_pool
+            判据不依赖 admitted_count）。
+
+    Returns:
+        构建的 RealismManifest（已 assert + seal）；enabled=False 软接线失败时 None。
+
+    Raises:
+        RealismGateError: enabled=True 且存在 critical 违规（入口阻断）。
+    """
+    from myquant.realism_gate import (
+        RealismGateConfig,
+        RealismManifest,
+        assert_realism_pass,
+        set_config,
+    )
+    import myquant.realism_gate.checks  # noqa: F401 导入即注册检查器
+
+    _kwargs: Dict[str, Any] = engine_kwargs or {}
+    cfg_dict = config.to_dict() if hasattr(config, "to_dict") else {}
+    rg_cfg = cfg_dict.get("realism_gate", {}) or {}
+    # P1-03：严格类型校验（配置损坏 fail-closed，不静默 bool() 转换）
+    set_config(RealismGateConfig.from_dict(rg_cfg))
+    try:
+        manifest = RealismManifest()
+        manifest.set_field("run_id", f"run_{id(config) & 0xFFFFFFFF:08x}")
+        manifest.set_field("strategy_id", getattr(strategy, "name", "") or "")
+        manifest.set_field("engine_mode_requested", engine_mode)
+        manifest.set_field("engine_mode_resolved", engine_mode)
+        manifest.set_field("start_date", str(getattr(config, "start_date", "")))
+        manifest.set_field("end_date", str(getattr(config, "end_date", "")))
+        manifest.set_field("initial_capital", float(getattr(config, "initial_capital", 0)))
+        manifest.set_field("price_limit.enabled", bool(cfg_dict.get("price_limit", {}).get("enabled", True)))
+        manifest.set_field("price_limit.pct_by_board", cfg_dict.get("price_limit", {}).get("pct_by_board", {}))
+        manifest.set_field("price_limit.pre_close_source", cfg_dict.get("price_limit", {}).get("pre_close_source", "data_col"))
+        manifest.set_field("suspension.enabled", bool(cfg_dict.get("suspension", {}).get("enabled", True)))
+        manifest.set_field("suspension.basis", cfg_dict.get("suspension", {}).get("basis", "volume_zero"))
+        # ── P0-08 子项③（止血 B）：7 组硬编码乐观值改真实实例读取（S-11）──
+        # t1/lot/liquidity/slippage 从 config 构造事实读（broker 在 run 时 on_init
+        # 才装配，此处仅有 config 事实；run 后由 _refresh_causality_manifest 刷新）
+        manifest.set_field("t1_position_freeze.enabled", bool(getattr(config, "enable_t1", True)))
+        # P0-03 续卡（#348）：撮合层整手执行已接线（OrderMatcher/SimBroker
+        # 均按 lot_size 限制买入零股）→ lot_size>0 时整手约束真实生效，诚实报
+        # True；0（未装配整手约束）报 False（#346 起接线前的诚实 False 已成历史）。
+        _cfg_lot = int(getattr(config, "lot_size", 100))
+        manifest.set_field("lot_size.enforced", _cfg_lot > 0)
+        manifest.set_field("lot_size.value", _cfg_lot)
+        _liquidity_cap = float(getattr(config, "participation_rate", 1.0))
+        manifest.set_field("liquidity.participation_cap", _liquidity_cap)
+        # 参与率 1.0 = 全量参与（不限制），须显式声明（1.0 恒由 config 默认，诚实披露）
+        manifest.set_field("liquidity.declared_unlimited", _liquidity_cap >= 1.0)
+        # 滑点从 config.slippage（SlippageModel 真实实例）读，替换 YAML cfg_dict（YAML 被忽略）
+        _slippage_model = getattr(config, "slippage", None)
+        _slip_type = str(getattr(_slippage_model, "type", "fixed_bps"))
+        _slip_value = float(getattr(_slippage_model, "fixed_bps", 0.0))
+        if _slip_type == "none":
+            _slip_value = 0.0  # type="none" 实际滑点恒 0（calc 返回 0），报真实生效值
+        manifest.set_field("slippage.type", _slip_type)
+        manifest.set_field("slippage.value", _slip_value)
+        manifest.set_field(
+            "slippage.is_zero_cost",
+            bool(_slip_type == "none" or _slip_value == 0.0),
+        )
+        manifest.set_field("commission.buy_rate", float(cfg_dict.get("commission", {}).get("buy_rate", 0.0003)))
+        manifest.set_field("commission.sell_rate", float(cfg_dict.get("commission", {}).get("sell_rate", 0.0003)))
+        manifest.set_field("commission.min_commission", float(cfg_dict.get("commission", {}).get("min_commission", 5.0)))
+        manifest.set_field("commission.stamp_tax", float(cfg_dict.get("commission", {}).get("stamp_tax", 0.001)))
+        manifest.set_field("commission.transfer_fee", float(cfg_dict.get("commission", {}).get("transfer_fee", 0.00002)))
+        manifest.set_field("fee_base_includes_slippage", False)
+        manifest.set_field("fee_dilution_basis", "per_order")
+        manifest.set_field("adjust_effective_by_symbol", {})
+        # P0-04：从 provider 获取真实复权降级集合（延迟导入避免跨层硬依赖）
+        # #346 真实生效值对齐：_adjust_degraded_symbols 为模块级全局，跨回测残留
+        # 会污染入口断言（先前回测的降级标的误判本回测）；装配起点清空，
+        # run 内由 provider 加载重新填充，收尾 _refresh 读到本次回测真实集合。
+        try:
+            from myquant.data_access.provider import (
+                get_adjust_degraded_symbols,
+                reset_adjust_degraded,
+            )
+            reset_adjust_degraded()
+            manifest.set_field("adjust_degraded_symbols", get_adjust_degraded_symbols())
+        except Exception:
+            manifest.set_field("adjust_degraded_symbols", [])
+        manifest.set_field("quality.nan_price_rows", 0)
+        manifest.set_field("quality.ohlc_violation_rows", 0)
+        manifest.set_field("quality.coverage_rate", 1.0)
+        manifest.set_field("fingerprint_hash", None)
+        manifest.set_field("snapshot_id", None)
+        manifest.set_field("pool.pit_applied", True)
+        # P0-08 子项③：排除口径真实为 today（P0-06 只接量化字段，as_of 为乐观谎报）
+        manifest.set_field("pool.exclusion_basis", "today")
+        # P0-06：注入真实样本口径（requested/admitted/dropped）
+        _req = len(config.symbols)
+        _adm = len(data) if isinstance(data, dict) else 0
+        manifest.set_field("pool.requested_count", _req)
+        manifest.set_field("pool.admitted_count", _adm)
+        manifest.set_field("pool.dropped_count", max(0, _req - _adm))
+        manifest.set_field("pool.drop_reasons", {} if _req == _adm else {"data_missing": _req - _adm})
+        manifest.set_field("survivorship.discount", None)
+        manifest.set_field("survivorship.window", "1y")
+        manifest.set_field("survivorship.status", "unknown")
+        manifest.set_field("invariants.price_bounds", {})
+        manifest.set_field("invariants.volume_bound", {})
+        manifest.set_field("invariants.equity_identity", {})
+        manifest.set_field("invariants.cash_non_negative", {})
+        manifest.set_field("invariants.t1_consistency", {})
+        # ── P0-08 子项②：causality 组 run 前写构造事实 ──
+        # 引擎 context 在 on_init（run 时）才创建，此处不可实测；
+        # run 结束后由 _refresh_causality_manifest 从 context 实测刷新。
+        # context_sliced / current_bar_ts_enforced：run 前未置位，诚实 False；
+        # full_sample_declared：构造参数事实（vectorized 恒传 True，其余引擎默认 False）；
+        # guard_injected：enable_lookahead_guard=True 时引擎必自建/注入 guard（构造事实）。
+        manifest.update_group("causality", {
+            "context_sliced": False,
+            "current_bar_ts_enforced": False,
+            "full_sample_declared": engine_mode == ENGINE_MODE_VECTORIZED,
+            "guard_injected": bool(_kwargs.get("enable_lookahead_guard", True)),
+            # [P0-08⑧ 已落地] context.data value 直取已封死：DataWindow 窗口隔离
+            # （on_bar 保留 keys 枚举、封死 value 直取）构造即生效，on_init 阶段
+            # 按阶段语义放行全量（S-2）；运行期由 _refresh_causality_manifest 写真实值
+            "context_data_scoped": True,
+            # P0-01（#344）：引擎未运行 → causality 判据门控关闭（诚实占位不误伤）；
+            # run 收尾 _refresh 置 True 后判据正式生效
+            "assessed_at_run_end": False,
+        })
+        assert_realism_pass(manifest)
+        engine._realism_manifest = manifest
+    except Exception as rg_e:  # noqa: BLE001
+        # P1-05：enabled=True 时不吞门禁异常（违规 → 传播导致非零退出）；
+        # enabled=False 时保持软接线（仅审计不阻断）。
+        _rg_cfg = RealismGateConfig.from_dict(rg_cfg)
+        if _rg_cfg.enabled:
+            raise
+        logger.debug(f"真实性门禁软接线（不阻断）: {type(rg_e).__name__}: {rg_e}")
+        engine._realism_manifest = None
+    return engine._realism_manifest
+
+
 class BacktestEngine(BaseEngine):
     """
     事件驱动回测引擎
@@ -222,11 +390,44 @@ class BacktestEngine(BaseEngine):
         返回:
             BacktestEngine 实例
         """
-        return cls(
+        engine = cls(
             config=config,
             strategy=strategy,
             data_provider=data_provider,
             name=name,
+        )
+        # P0-01（#349）：直构路径与 create_engine 同构收敛门禁语义（manifest 构建/
+        # 入口断言/封印）。event 引擎构造事实：full_sample_declared=False、
+        # guard_injected=enable_lookahead_guard 默认 True（__init__ 缺省）。
+        engine._realism_manifest = _attach_realism_manifest(
+            engine,
+            config,
+            strategy,
+            engine_mode=ENGINE_MODE_EVENT,
+            engine_kwargs={"enable_lookahead_guard": True},
+        )
+        return engine
+
+    # ------------------------------------------------------------------
+    # 真实性门禁 manifest 构建（create_engine 与 from_data_provider 共用）
+    # ------------------------------------------------------------------
+
+    def attach_realism_manifest(
+        self,
+        config: BacktestConfig,
+        strategy: Optional[StrategyBase],
+        engine_mode: str,
+        engine_kwargs: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, pd.DataFrame]] = None,
+    ) -> Any:
+        """构建并挂载真实性门禁 manifest（P0-01 两阶段握手第①~④步，v2.2 §4.4）。
+
+        #349 收敛为模块级函数 ``_attach_realism_manifest`` 的薄封装（三引擎共用）；
+        语义/时序/P1-05 软接线/参数说明见该函数 docstring。
+        """
+        return _attach_realism_manifest(
+            self, config, strategy, engine_mode,
+            engine_kwargs=engine_kwargs, data=data,
         )
 
     # ------------------------------------------------------------------
@@ -957,6 +1158,11 @@ class BacktestEngine(BaseEngine):
                         "value": _bs_value,
                         "is_zero_cost": bool(_bs_type == "none" or _bs_value == 0.0),
                     })
+            # P0-04（#349）：收尾回写真实复权降级集合（provider 意图：回测后由引擎
+            # 读取写入 manifest；assert 前回写 → data_pit 判据真实生效——此前仅入口
+            # 空集且无回写点，判据永不触发，真实降级被隐藏）
+            from myquant.data_access.provider import get_adjust_degraded_symbols
+            _m.set_field("adjust_degraded_symbols", get_adjust_degraded_symbols())
             assert_realism_pass(_m)
         except Exception as exc:  # noqa: BLE001
             if get_config().enabled:
@@ -1223,142 +1429,20 @@ class BacktestScheduler:
                 data_provider=data_provider, name=engine_name, **kwargs,
             )
 
-        # ── P0-01 出口强制：回测真实性门禁（软接线，分期启用期 audit-only）──
-        # 时序（v2.2 §4.4）：构造引擎后采集 manifest → assert_realism_pass → seal
-        # （manifest 构建置于引擎创建之后，causality 组方能从引擎 context 真实采集——
-        #  P0-08 子项② 止血 A，替换原 mode 反推）
-        # 当前为软接线：enabled=false 时仅落 audit 不阻断；其余字段真实取值
-        # （t1/lot/liquidity/pool/survivorship/invariants/slippage）在 P0-08 子项③补齐。
-        try:
-            from myquant.realism_gate import (
-                RealismGateConfig,
-                RealismManifest,
-                assert_realism_pass,
-                set_config,
-            )
-            import myquant.realism_gate.checks  # noqa: F401 导入即注册四检查器
-
-            cfg_dict = config.to_dict() if hasattr(config, "to_dict") else {}
-            rg_cfg = cfg_dict.get("realism_gate", {}) or {}
-            # P1-03：严格类型校验（配置损坏 fail-closed，不静默 bool() 转换）
-            set_config(RealismGateConfig.from_dict(rg_cfg))
-
-            manifest = RealismManifest()
-            manifest.set_field("run_id", f"run_{id(config) & 0xFFFFFFFF:08x}")
-            manifest.set_field("strategy_id", getattr(strategy, "name", "") or "")
-            manifest.set_field("engine_mode_requested", self.mode)
-            manifest.set_field("engine_mode_resolved", mode)
-            manifest.set_field("start_date", str(getattr(config, "start_date", "")))
-            manifest.set_field("end_date", str(getattr(config, "end_date", "")))
-            manifest.set_field("initial_capital", float(getattr(config, "initial_capital", 0)))
-            manifest.set_field("price_limit.enabled", bool(cfg_dict.get("price_limit", {}).get("enabled", True)))
-            manifest.set_field("price_limit.pct_by_board", cfg_dict.get("price_limit", {}).get("pct_by_board", {}))
-            manifest.set_field("price_limit.pre_close_source", cfg_dict.get("price_limit", {}).get("pre_close_source", "data_col"))
-            manifest.set_field("suspension.enabled", bool(cfg_dict.get("suspension", {}).get("enabled", True)))
-            manifest.set_field("suspension.basis", cfg_dict.get("suspension", {}).get("basis", "volume_zero"))
-            # ── P0-08 子项③（止血 B）：7 组硬编码乐观值改真实实例读取（S-11）──
-            # t1/lot/liquidity/slippage 从 config 构造事实读（broker 在 run 时 on_init 才装配，
-            # create_engine 处仅有 config 事实；run 后由 _refresh_causality_manifest 按 broker 实测刷新）
-            manifest.set_field("t1_position_freeze.enabled", bool(getattr(config, "enable_t1", True)))
-            # P0-03 续卡（#348）：撮合层整手执行已接线（OrderMatcher/SimBroker
-            # 均按 lot_size 限制买入零股）→ lot_size>0 时整手约束真实生效，诚实报
-            # True；0（未装配整手约束）报 False（#346 起接线前的诚实 False 已成历史）。
-            _cfg_lot = int(getattr(config, "lot_size", 100))
-            manifest.set_field("lot_size.enforced", _cfg_lot > 0)
-            manifest.set_field("lot_size.value", _cfg_lot)
-            _liquidity_cap = float(getattr(config, "participation_rate", 1.0))
-            manifest.set_field("liquidity.participation_cap", _liquidity_cap)
-            # 参与率 1.0 = 全量参与（不限制），须显式声明（1.0 恒由 config 默认，诚实披露）
-            manifest.set_field("liquidity.declared_unlimited", _liquidity_cap >= 1.0)
-            # 滑点从 config.slippage（SlippageModel 真实实例）读，替换 YAML cfg_dict（YAML 被忽略）
-            _slippage_model = getattr(config, "slippage", None)
-            _slip_type = str(getattr(_slippage_model, "type", "fixed_bps"))
-            _slip_value = float(getattr(_slippage_model, "fixed_bps", 0.0))
-            if _slip_type == "none":
-                _slip_value = 0.0  # type="none" 实际滑点恒 0（calc 返回 0），报真实生效值
-            manifest.set_field("slippage.type", _slip_type)
-            manifest.set_field("slippage.value", _slip_value)
-            manifest.set_field(
-                "slippage.is_zero_cost",
-                bool(_slip_type == "none" or _slip_value == 0.0),
-            )
-            manifest.set_field("commission.buy_rate", float(cfg_dict.get("commission", {}).get("buy_rate", 0.0003)))
-            manifest.set_field("commission.sell_rate", float(cfg_dict.get("commission", {}).get("sell_rate", 0.0003)))
-            manifest.set_field("commission.min_commission", float(cfg_dict.get("commission", {}).get("min_commission", 5.0)))
-            manifest.set_field("commission.stamp_tax", float(cfg_dict.get("commission", {}).get("stamp_tax", 0.001)))
-            manifest.set_field("commission.transfer_fee", float(cfg_dict.get("commission", {}).get("transfer_fee", 0.00002)))
-            manifest.set_field("fee_base_includes_slippage", False)
-            manifest.set_field("fee_dilution_basis", "per_order")
-            manifest.set_field("adjust_effective_by_symbol", {})
-            # P0-04：从 provider 获取真实复权降级集合（延迟导入避免跨层硬依赖）
-            # #346 真实生效值对齐：_adjust_degraded_symbols 为模块级全局，跨回测残留
-            # 会污染入口断言（先前回测的降级标的误判本回测）；装配起点清空，
-            # run 内由 provider 加载（L615）重新填充，收尾 _refresh 读到本次回测真实集合。
-            try:
-                from myquant.data_access.provider import (
-                    get_adjust_degraded_symbols,
-                    reset_adjust_degraded,
-                )
-                reset_adjust_degraded()
-                manifest.set_field("adjust_degraded_symbols", get_adjust_degraded_symbols())
-            except Exception:
-                manifest.set_field("adjust_degraded_symbols", [])
-            manifest.set_field("quality.nan_price_rows", 0)
-            manifest.set_field("quality.ohlc_violation_rows", 0)
-            manifest.set_field("quality.coverage_rate", 1.0)
-            manifest.set_field("fingerprint_hash", None)
-            manifest.set_field("snapshot_id", None)
-            manifest.set_field("pool.pit_applied", True)
-            # P0-08 子项③：排除口径真实为 today（P0-06 只接量化字段，as_of 为乐观谎报）
-            manifest.set_field("pool.exclusion_basis", "today")
-            # P0-06：注入真实样本口径（requested/admitted/dropped）
-            _req = len(config.symbols)
-            _adm = len(data) if isinstance(data, dict) else 0
-            manifest.set_field("pool.requested_count", _req)
-            manifest.set_field("pool.admitted_count", _adm)
-            manifest.set_field("pool.dropped_count", max(0, _req - _adm))
-            manifest.set_field("pool.drop_reasons", {} if _req == _adm else {"data_missing": _req - _adm})
-            manifest.set_field("survivorship.discount", None)
-            manifest.set_field("survivorship.window", "1y")
-            manifest.set_field("survivorship.status", "unknown")
-            manifest.set_field("invariants.price_bounds", {})
-            manifest.set_field("invariants.volume_bound", {})
-            manifest.set_field("invariants.equity_identity", {})
-            manifest.set_field("invariants.cash_non_negative", {})
-            manifest.set_field("invariants.t1_consistency", {})
-            # ── P0-08 子项②：causality 组 run 前写构造事实 ──
-            # 引擎 context 在 on_init（run 时）才创建，create_engine 处不可实测；
-            # run 结束后由 _refresh_causality_manifest 从 context 实测刷新。
-            # context_sliced / current_bar_ts_enforced：run 前未置位，诚实 False；
-            # full_sample_declared：构造参数事实（vectorized 恒传 True，其余引擎默认 False）；
-            # guard_injected：enable_lookahead_guard=True 时引擎必自建/注入 guard（构造事实）。
-            manifest.update_group("causality", {
-                "context_sliced": False,
-                "current_bar_ts_enforced": False,
-                "full_sample_declared": mode == ENGINE_MODE_VECTORIZED,
-                "guard_injected": bool(kwargs.get("enable_lookahead_guard", True)),
-                # [P0-08⑧ 已落地] context.data value 直取已封死：DataWindow 窗口隔离
-                # （on_bar 保留 keys 枚举、封死 value 直取）构造即生效，on_init 阶段
-                # 按阶段语义放行全量（S-2）；运行期由 _refresh_causality_manifest 写真实值
-                "context_data_scoped": True,
-                # P0-01（#344）：引擎未运行 → causality 判据门控关闭（诚实占位不误伤）；
-                # run 收尾 _refresh 置 True 后判据正式生效
-                "assessed_at_run_end": False,
-            })
-            assert_realism_pass(manifest)
-            self._realism_manifest = manifest
-        except Exception as rg_e:  # noqa: BLE001
-            # P1-05：enabled=True 时不吞门禁异常（违规 → 传播导致非零退出）；
-            # enabled=False 时保持软接线（仅审计不阻断）。
-            _rg_cfg = RealismGateConfig.from_dict(cfg_dict.get("realism_gate", {}) or {})
-            if _rg_cfg.enabled:
-                raise
-            logger.debug(f"真实性门禁软接线（不阻断）: {type(rg_e).__name__}: {rg_e}")
-            self._realism_manifest = None
+        # ── P0-01 出口强制：回测真实性门禁（create_engine 与 from_data_provider 共用）──
+        # 时序（v2.2 §4.4）：构造引擎后采集 manifest → assert_realism_pass → seal；
+        # 实现收敛于模块级函数 _attach_realism_manifest（#349 统一直构路径门禁语义：
+        # 生产入口 from_data_provider 此前无 manifest，握手⑤跳过、判据完全不生效；
+        # 三引擎独立类共用同一模块级函数，门禁语义同构）。
+        engine._realism_manifest = _attach_realism_manifest(
+            engine, config, strategy, engine_mode=mode, engine_kwargs=kwargs, data=data,
+        )
 
         self.engine = engine
-        # P0-08 子项②：引擎实例挂载 manifest 引用，供 run() 结束后真实采集刷新
-        engine._realism_manifest = self._realism_manifest
+        # P0-08 子项②：引擎实例已在 attach 内挂载 manifest 引用（run 收尾真实采集刷新）
+        # scheduler 侧保留引用（与引擎同对象；P1-05 软接线失败时为 None），
+        # 兼容既有调用方/测试读取 scheduler._realism_manifest。
+        self._realism_manifest = getattr(engine, "_realism_manifest", None)
         self.selected_mode = mode
         logger.info(
             "调度器选中引擎: mode=%s, engine=%s", mode, type(engine).__name__

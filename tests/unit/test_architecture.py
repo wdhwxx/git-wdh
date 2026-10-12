@@ -84,7 +84,7 @@ S-3 R-19 更名 TestR19ZeroReference（诚实命名：引用级判定，非执�
           EX-12 四项消除且 EX-13K 装配引用新增后 27→24（#259），EX-09 两项后 24→22）；
           全量真环=2（另 1 组 strategies 包 re-export 惯用环为包装环，白名单剔除；
           环3 随 EX-12A 消除，回写#259）；
-          顶层真环=0；>1500 行白名单 14 项（相对路径，行数基线见 OVERSIZE_LINE_BASELINE）；
+          顶层真环=0；>1500 行白名单 15 项（相对路径，行数基线见 OVERSIZE_LINE_BASELINE）；
           零覆盖存量 49 个引用级业务模块（2026-10-08 冻结，新增零覆盖即红，回写#256）。
 运行状态：已在 conda_wdh 环境真实运行（门禁 30 passed/1 skipped：G3 新增 R-17/R-18/R-08
           三条 + R-16 强化后，R-05 白名单 1 项按设计 skip；#266 前为 26 passed/1 skipped）。
@@ -174,6 +174,9 @@ OVERSIZE_WHITELIST = {           # 相对 myquant 的路径（禁 basename）
     "gui/backtest_config_dialog.py", "risk/risk_manager.py",
     "web/dashboard.py", "ml/training_pipeline.py",
     "monitoring/dynamic_baseline.py", "acceptance/live_safety_gate.py",  # 回写#296：LIVE 门槛验收（0.1~0.9 + LIVE 用例13/F-6/R-123）增至 1749 行
+    "backtest/engine.py",  # 回写#349：核心引擎（create_engine 装配 + 三引擎共用
+                          # _attach_realism_manifest 模块级函数 + 门禁收尾刷新）超 1500
+                          # 行，加入白名单（R-24 薄化冻结：行数只减不增）
 }
 OVERSIZE_WARN_MARGIN = 1500      # >=1500 即临界预警（mixed_engine.py 恰 1500）
 
@@ -280,6 +283,8 @@ OVERSIZE_LINE_BASELINE: dict[str, int] = {
     "web/dashboard.py": 1760, "ml/training_pipeline.py": 1651,
     "monitoring/dynamic_baseline.py": 1546,  # 1552→1546（#260 去全局采集器兜底）
     "acceptance/live_safety_gate.py": 1749,  # 回写#296：实盘安全门禁验收（0.1~0.9 + LIVE 门槛 31 项）
+    "backtest/engine.py": 1524,  # 回写#349：核心引擎超 1500 入白名单（R-24 冻结基线；
+                                # 增量来源：三引擎共用 _attach_realism_manifest 模块级函数）
 }
 
 # R-19 零覆盖基线：✅ 已冻结（回写#256）。冻结集合 = 2026-10-08 实测引用级零覆盖业务模块 49 个
