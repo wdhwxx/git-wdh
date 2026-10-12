@@ -189,6 +189,11 @@ class StrategyContext:
     # 对外只读 property；底层字段带下划线，经 __init__ 由引擎注入
     _full_sample_declared: bool = field(default=False, init=True)
     _slicing_enabled: bool = False
+    # ── P0-08 子项⑥：访问器层实测记账（P1-07② 落点）──
+    # 仅"未封门路径（_slicing_enabled=False 的全量返回）"与"全量声明路径
+    # （full_sample_declared=True）"记账；已封门切片路径 max 恒 <= current_bar_ts，
+    # 判据恒假，记账零信息量（方案 L739 明确不记账）。per-(symbol) 真实访问最大日期。
+    accessed_max_dates: Dict[str, Optional[pd.Timestamp]] = field(default_factory=dict)
 
     # ── P0-08 子项②：全量逃生口声明（引擎构造参数，策略不可自设）──
     @property
@@ -223,14 +228,73 @@ class StrategyContext:
         if df is None:
             return None
         if self.full_sample_declared:
+            # 全量声明路径（vectorized 逃生口）——子项⑥记账
+            self._account_access(symbol, df)
             return df
         if not self._slicing_enabled:
+            # 未封门路径（on_init 放行窗口 / 引擎内部全量通道 / live）——子项⑥记账
+            self._account_access(symbol, df)
             return df
         if self.current_bar_ts is None:
             # fail-closed：切片开启但时点未设置 → 返回空（不允许静默全量）
             return df.iloc[0:0]
-        # pandas 切片视图 O(1)，不触发 Copy-on-Write
+        # pandas 切片视图 O(1)，不触发 Copy-on-Write（已封门路径不记账）
         return df.loc[:self.current_bar_ts]
+
+    def _account_access(self, symbol: str, df: pd.DataFrame) -> None:
+        """记录 symbol 的真实访问最大日期（仅未封门/全量声明路径调用）。
+
+        记账是"实测"而非静态声明：引擎/工具侧仍持全量通道的访问会留下
+        > current_bar_ts 的记录，供 run 收尾评估（P1-07② 判据 accessed_max_date
+        > current_bar_date → 阻断；用例⑭静态声明交叉校验）。
+
+        Args:
+            symbol: 标的代码。
+            df: 本次返回的（全量）数据视图。
+        """
+        if df is None or len(df.index) == 0:
+            return
+        _max_date = df.index.max()
+        _prev = self.accessed_max_dates.get(symbol)
+        if _prev is None or _max_date > _prev:
+            self.accessed_max_dates[symbol] = _max_date
+
+    def collect_access_accounting(self) -> Dict[str, Any]:
+        """P0-08 子项⑥：汇总访问器层实测记账，评估"读到未来"与静态声明交叉校验。
+
+        判据（方案 §5.4.1 子项⑥ + P1-07② 真拦截归属）：
+          - accessed_max_date > current_bar_date → 实测读到未来（真拦截）；
+          - 且静态声明 _slicing_enabled=True（context_sliced=true）→ 声明与实测
+            矛盾（用例⑭交叉校验）——manifest 是静态假设，可能谎报已保护，
+            记账把该缺陷变成可对账的动态事实。
+
+        评估时机：run 收尾（引擎 _refresh_causality_manifest 调用）；
+        current_bar_ts 未设（on_init 阶段 / vectorized / live）→ 不判（无当前 bar）。
+
+        Returns:
+            dict:
+                accessed_future: 任意 symbol 实测读到未来。
+                violations: 有未来访问时的明细 [{symbol, accessed, current}]。
+                static_declared_but_accessed_future: 声明已封门却实测读到未来。
+        """
+        result: Dict[str, Any] = {
+            "accessed_future": False,
+            "violations": [],
+            "static_declared_but_accessed_future": False,
+        }
+        if self.current_bar_ts is None:
+            return result
+        for symbol, max_date in self.accessed_max_dates.items():
+            if max_date is not None and max_date > self.current_bar_ts:
+                result["accessed_future"] = True
+                result["violations"].append({
+                    "symbol": symbol,
+                    "accessed": str(max_date),
+                    "current": str(self.current_bar_ts),
+                })
+                if self._slicing_enabled:
+                    result["static_declared_but_accessed_future"] = True
+        return result
 
     def get_position(self, symbol: str) -> Optional[Position]:
         if self.portfolio is None:

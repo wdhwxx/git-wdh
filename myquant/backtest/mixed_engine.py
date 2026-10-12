@@ -432,6 +432,18 @@ class MixedBacktestEngine:
                 "guard_injected": self.context.extra.get("lookahead_guard") is not None,
                 "context_data_scoped": False,
             })
+            # ── P0-08 子项⑥：访问器层实测记账评估（P1-07② 判据）──
+            # accessed_max_date > current_bar_date → 实测读到未来（真拦截）；
+            # 静态声明已封门却实测读到未来 → 交叉校验矛盾（用例⑭）。
+            _acct = self.context.collect_access_accounting()
+            _m.update_group("causality", {
+                "accessed_future": bool(_acct["accessed_future"]),
+                "static_declared_but_accessed_future": bool(
+                    _acct["static_declared_but_accessed_future"]
+                ),
+            })
+            if _acct["violations"]:
+                _m.set_field("causality.accounting_violations", _acct["violations"])
             # ── P0-08 子项③：run 后从真实实例刷新 t1/slippage（broker 在 on_init 装配，
             # create_engine 处仅有 config 构造事实；无 broker 的引擎保留 config 值）──
             _broker = getattr(self, "broker", None)

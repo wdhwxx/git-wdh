@@ -180,3 +180,117 @@ def test_assert_realism_pass_passes_when_sliced() -> None:
         assert manifest.sealed is True
     finally:
         set_config(previous)
+
+
+# ═══════════════════════════════════════════════
+#  子项⑥：访问器层记账（P1-07② 判据 + 用例⑭交叉校验）
+# ═══════════════════════════════════════════════
+
+import pandas as pd  # noqa: E402  记账用例用
+
+from myquant.strategies.base import StrategyContext  # noqa: E402
+
+_DATA_IDX = pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03", "2024-01-04"])
+_DATA_DF = pd.DataFrame({"close": [1.0, 2.0, 3.0, 4.0]}, index=_DATA_IDX)
+_SYMBOL = "000001.SZ"
+
+
+def _make_context(enable_slicing: bool) -> StrategyContext:
+    """构造带数据的记账测试上下文。"""
+    context = StrategyContext()
+    context.data = {_SYMBOL: _DATA_DF}
+    context._slicing_enabled = enable_slicing
+    return context
+
+
+def test_accounting_detects_future_read() -> None:
+    """真拦截：未封门路径 get_data 全量（含未来行）→ accessed_future → critical。"""
+    context = _make_context(enable_slicing=False)
+    context.current_bar_ts = _DATA_IDX[1]  # 当前 bar 01-02，数据含 01-03/01-04 未来
+    context.get_data(_SYMBOL)
+    acct = context.collect_access_accounting()
+    assert acct["accessed_future"] is True
+    assert len(acct["violations"]) == 1
+    assert acct["violations"][0]["symbol"] == _SYMBOL
+    # manifest 层 → 检查器判 critical
+    manifest = _make_manifest(context_sliced=False)
+    manifest.update_group(
+        "causality",
+        {
+            "accessed_future": acct["accessed_future"],
+            "static_declared_but_accessed_future": acct["static_declared_but_accessed_future"],
+            "accounting_violations": acct["violations"],
+        },
+    )
+    v = [x for x in check_causality(manifest) if x.field_path == "causality.accessed_future"]
+    assert len(v) == 1
+    assert v[0].critical is True
+
+
+def test_accounting_cross_check_violation() -> None:
+    """用例⑭：静态声明已封门（context_sliced=true）却实测读到未来 → 交叉校验报错。"""
+    context = _make_context(enable_slicing=True)
+    context.current_bar_ts = _DATA_IDX[1]
+    # 模拟引擎侧残留通道访问：未封门记账（直接注入实测记录，声明与实测矛盾）
+    context.accessed_max_dates[_SYMBOL] = _DATA_IDX[3]
+    acct = context.collect_access_accounting()
+    assert acct["accessed_future"] is True
+    assert acct["static_declared_but_accessed_future"] is True
+    manifest = _make_manifest(context_sliced=True)  # 静态声明 true
+    manifest.update_group("causality", {"static_declared_but_accessed_future": True})
+    v = [
+        x for x in check_causality(manifest)
+        if x.field_path == "causality.static_declared_but_accessed_future"
+    ]
+    assert len(v) == 1
+    assert v[0].critical is True
+
+
+def test_accounting_no_violation_when_sliced() -> None:
+    """不误伤：已封门路径 get_data 切片 → 不记账、不违规。"""
+    context = _make_context(enable_slicing=True)
+    context.current_bar_ts = _DATA_IDX[3]
+    context.get_data(_SYMBOL)
+    assert _SYMBOL not in context.accessed_max_dates  # 已封门不记账
+    acct = context.collect_access_accounting()
+    assert acct["accessed_future"] is False
+    assert acct["static_declared_but_accessed_future"] is False
+
+
+def test_accounting_no_violation_on_init() -> None:
+    """不误伤：on_init 阶段（current_bar_ts 未设）get_data 全量 → 记账但不判违规。"""
+    context = _make_context(enable_slicing=False)
+    context.current_bar_ts = None
+    context.get_data(_SYMBOL)
+    assert _SYMBOL in context.accessed_max_dates  # 未封门记账（on_init 放行窗口）
+    acct = context.collect_access_accounting()
+    assert acct["accessed_future"] is False  # 无当前 bar → 不判
+
+
+def test_accounting_escape_hatch_declared_no_violation() -> None:
+    """不误伤：vectorized 逃生口（full_sample_declared=True）→ 记账但不判违规。"""
+    context = StrategyContext(_full_sample_declared=True)
+    context.data = {_SYMBOL: _DATA_DF}
+    context.get_data(_SYMBOL)
+    assert _SYMBOL in context.accessed_max_dates  # 全量声明路径记账
+    acct = context.collect_access_accounting()
+    assert acct["accessed_future"] is False  # current_bar_ts 未设 → 不判
+
+
+def test_engine_refresh_writes_accounting_to_manifest() -> None:
+    """引擎驱动：未封门读未来 → run 收尾刷新把 accessed_future 写进 manifest。"""
+    from myquant.backtest.engine import BacktestEngine
+
+    engine = BacktestEngine(config=None)
+    engine.context = _make_context(enable_slicing=False)
+    engine.context.current_bar_ts = _DATA_IDX[1]
+    engine.context.get_data(_SYMBOL)  # 全量 → 记账
+    engine._realism_manifest = _make_manifest(context_sliced=False)
+    engine._refresh_causality_manifest()
+    m = engine._realism_manifest
+    assert m.get_field("causality.accessed_future") is True
+    acct_v = m.get_field("causality.accounting_violations", [])
+    assert isinstance(acct_v, list) and len(acct_v) == 1
+    # 检查器判 critical（接入 _collect_violations 的完整链路）
+    all_v = _collect_violations(m)
+    assert any(x.field_path == "causality.accessed_future" and x.critical for x in all_v)

@@ -993,7 +993,7 @@ Pythonwdhmm/
     │   │   ├── cost_model.py         # 零滑点/佣金费率为零 → critical
     │   │   ├── data_pit.py           # 复权降级标的/快照指纹 null/NaN 价格/OHLC 违反 → critical
     │   │   ├── sample_pool.py        # PIT 选股未生效/today 口径/幸存者偏差折价 null → critical
-    │   │   └── causality.py          # ✨【回写#334·P0-08 前置登记，#339 已实现】因果性收口检查（P0-08 子项⑤）：`context_sliced=False` 且未声明全量 → critical；接入子项④ fail-open 降级信号（`bar.timestamp` 异常不得静默放行）；L0，只可引用 L0，运行时事实以数据契约注入（R-02/R-16）；R-19 必配测试（tests/unit/test_checks_causality.py 新增）
+    │   │   └── causality.py          # ✨【回写#334·P0-08 前置登记，#339/#340 已实现】因果性收口检查（P0-08 子项⑤/⑥）：`context_sliced=False` 且未声明全量 → critical；`accessed_future`（访问器层实测读到未来，P1-07② 判据）→ critical；`static_declared_but_accessed_future`（静态声明 vs 实测矛盾，用例⑭）→ critical；接入子项④ fail-open 降级信号（`bar.timestamp` 异常不得静默放行）；L0，只可引用 L0，运行时事实以数据契约注入（R-02/R-16）；R-19 必配测试（tests/unit/test_checks_causality.py 新增）
 
     │
 
@@ -4792,5 +4792,14 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    c. **tests/unit/test_checks_causality.py（新建，8 项，R-19）**：纯函数单测（False+False → critical；True → 无；逃生口 declared=True → 无；缺失 None → 无）；注册集成（`_collect_violations` 含 causality 违规）；**用例⑫②闭环**（#338 引擎场景 fail-open 降级 → `_collect_violations` 判 critical）；**阻断闭环**（CRITICAL_FIELDS 全字段完整 manifest + enabled=True → `assert_realism_pass` 抛 RealismGateError 含 causality 违规）；不误伤闭环（context_sliced=True + enabled=True → 通过封印）。
    d. **验收结果**：py_compile 通过；targeted 56 passed（checks_causality 8 + realism_gate + manifest_truthfulness + slicing_failopen + causality_slicing）；全量回归 **3980 passed/4 skipped/0 failed**（+8 = 本卡 8 项）。**子项⑤完成**：未封门且未声明全量 → critical 阻断违规，接入 `_collect_violations`；**用例⑫②闭环齐**（①③ 在 #338 断言，② 由本卡检查器产出）。
    e. **纪律遵守**：蓝图目录树先行确认（causality.py 行 #334 已前置登记，本次补 #339 已实现标注）；L0 分层（只 import gate/manifest）；显式类型注解 + Google docstring；git 提交（commit message 引用 #339）。
+
+## #340 · 2026-10-12 · P0-08 子项⑥：访问器层记账（P1-07② 落点，accessed_max_date > current_bar_date 判据 + 用例⑭交叉校验）
+   事实来源：本次落地（施工方案 v2.2 §5.4.1 子项⑥，L739 + P0-08 卡验收用例⑭ + 前置调研第 11 部分 §5.5 真拦截归属/三层职责划分）；现状核验：StrategyContext.get_data 四分支（base.py:210-233）、三引擎 _refresh_causality_manifest（event engine.py:878 / mixed:413 / vectorized:436）同构采集、checks/causality.py（#339）。
+   a. **myquant/strategies/base.py（改动，StrategyContext）**：新增 `accessed_max_dates: Dict[str, Optional[pd.Timestamp]]`（per-symbol 实测访问最大日期）；get_data **未封门路径（_slicing_enabled=False 全量返回）与全量声明路径（full_sample_declared=True）记账**（`_account_access`，O(1) index.max()），**已封门切片路径不记账**（max 恒 ≤ current_bar_ts，判据恒假，零信息量——方案 L739 明确）；新增 `collect_access_accounting()`（纯返回，无跨层 import）评估：accessed_max_date > current_bar_date → accessed_future；且 _slicing_enabled=True（静态声明已封门）→ static_declared_but_accessed_future（用例⑭交叉校验）；current_bar_ts 未设（on_init 阶段/vectorized/live）→ 不判。
+   b. **三引擎 _refresh_causality_manifest（改动，event/mixed/vectorized 同构）**：run 收尾调 `context.collect_access_accounting()` → 写 manifest `causality.accessed_future` / `.static_declared_but_accessed_future`（恒写 bool）+ 有违规时 `.accounting_violations`（明细）。新字段**不进 CRITICAL_FIELDS**（增量可选，缺失由检查器 get_field 默认 False，兼容既有 manifest 构建）。
+   c. **myquant/realism_gate/checks/causality.py（改动）**：新增两判据——`accessed_future=True` → critical（真拦截：实测读到未来）；`static_declared_but_accessed_future=True` → critical（声明与实测矛盾）。docstring 同步三判据。
+   d. **tests/unit/test_checks_causality.py（扩展 +6 项）**：真拦截反红（未封门 get_data 全量 → accessed_future → critical）；**用例⑭交叉校验反红**（静态声明 context_sliced=true + 注入实测未来记录 → static_declared_but_accessed_future → critical）；不误伤×3（已封门切片不记账 / on_init 无 current_bar_ts 不判 / vectorized 逃生口不判）；引擎驱动（_refresh_causality_manifest 写 manifest → _collect_violations 判 critical）。
+   e. **验收结果**：py_compile 通过；targeted 240 passed/1 skipped（checks_causality 14 + causality_slicing + manifest_truthfulness + slicing_failopen + realism_gate/manifest + kunpeng + backtest + engines_v5）；全量回归 **3986 passed/4 skipped/0 failed**（+6 = 本卡 6 项）。**子项⑥完成**：访问器层记账落地（未封门/全量声明路径）+ 真拦截判据（P1-07②）+ 静态声明交叉校验（用例⑭）；记账范围与方案 L739 逐条一致（已封门不记账）。
+   f. **纪律遵守**：L0 分层（base.py 纯 pandas + collect 纯返回，checks 只 import gate/manifest）；已封门路径零记账开销；新字段增量兼容（不进 CRITICAL_FIELDS）；git 提交（commit message 引用 #340）。**遗留**：accessed_max_dates 的 run 起点复位归子项⑦（R-25 处置同批）。
 
 
