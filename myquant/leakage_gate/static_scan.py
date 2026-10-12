@@ -41,6 +41,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from myquant.leakage_gate.contract import _get_entry, _load_ledger, _load_registry
 from myquant.leakage_gate.gate import Violation, register_gate_check
+from myquant.leakage_gate.signal_words import is_full_sample_receiver
 
 logger = logging.getLogger("myquant.leakage_gate.static_scan")
 
@@ -82,8 +83,7 @@ _R03_CROSS_SECTION_FUNCS: Tuple[str, ...] = (
     "residual_diagnostics",
 )
 
-# R03 全样本接收者命名意图（跨时间全样本拟合的信号词）
-_R03_FULL_SAMPLE_RECEIVERS: Tuple[str, ...] = ("panel", "full", "all_", "entire", "whole")
+# R03 全样本接收者命名意图：统一判定在 leakage_gate.signal_words（S-6，R03/R07 共用）
 
 
 # ═══════════════════════════════════════════════
@@ -351,12 +351,6 @@ def _detect_full_standardize(tree: ast.AST, hits: List[RuleHit]) -> None:
             )
 
 
-def _is_full_sample_receiver(name: str) -> bool:
-    """接收者命名是否具全样本拟合意图（R03 警告信号词）。"""
-    low = name.lower()
-    return any(low.startswith(t) or t in low for t in _R03_FULL_SAMPLE_RECEIVERS)
-
-
 def _detect_full_sample_fit(
     tree: ast.AST,
     parents: Dict[ast.AST, ast.AST],
@@ -388,7 +382,7 @@ def _detect_full_sample_fit(
             receiver = func.value.id
         elif isinstance(func.value, ast.Attribute):
             receiver = func.value.attr
-        if _is_full_sample_receiver(receiver):
+        if is_full_sample_receiver(receiver):
             hits.append(
                 RuleHit(
                     rule_id="R03", severity="警告", line=getattr(node, "lineno", 0),
@@ -412,7 +406,7 @@ def _detect_cross_sectional_misuse(tree: ast.AST, hits: List[RuleHit]) -> None:
             receiver = func.value.id
         elif isinstance(func.value, ast.Attribute):
             receiver = func.value.attr
-        if _is_full_sample_receiver(receiver):
+        if is_full_sample_receiver(receiver):
             hits.append(
                 RuleHit(
                     rule_id="R07", severity="警告", line=getattr(node, "lineno", 0),

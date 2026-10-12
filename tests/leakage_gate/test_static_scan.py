@@ -18,6 +18,15 @@ import pytest
 import myquant.leakage_gate.static_scan as ss
 import myquant.leakage_gate.consumption as consumption_mod
 import myquant.leakage_gate.cross_sectional as cs
+import myquant.leakage_gate.signal_words as sw
+from myquant.leakage_gate import (
+    GateConfig,
+    LeakageGateError,
+    assert_all_gates_pass,
+    register_gate_check,
+    reset_gate_checks,
+    set_config,
+)
 
 # 台账列集合（测试用精简副本，与 config/data_time_semantics.yaml 口径一致）
 _LEDGER_KEYS = {
@@ -292,6 +301,102 @@ def test_check_cross_sectional_clean_no_warning(monkeypatch):
     monkeypatch.setattr(cs, "_strategy_source", lambda sid: src)
     vs = cs.check_cross_sectional("fake_strategy", "2026-10-10")
     assert vs == []
+
+
+# ═══════════════════════════════════════════════
+#  信号词 helper（S-6 统一判定，R03/R07 共用）
+# ═══════════════════════════════════════════════
+
+def test_signal_words_shared_helper():
+    """S-6：统一信号词 helper 覆盖 R03/R07 共用判定（panel/full/all_/entire/whole）。"""
+    assert sw.is_full_sample_receiver("panel")
+    assert sw.is_full_sample_receiver("full")
+    assert sw.is_full_sample_receiver("all_factors")
+    assert sw.is_full_sample_receiver("entire_dataset")
+    assert sw.is_full_sample_receiver("df_whole")
+    assert sw.FULL_SAMPLE_RECEIVERS == ("panel", "full", "all_", "entire", "whole")
+    # 不误伤：当日截面/滚动对照命名不应命中
+    assert not sw.is_full_sample_receiver("today")
+    assert not sw.is_full_sample_receiver("zscore")
+    assert not sw.is_full_sample_receiver("rolling")
+
+
+# ═══════════════════════════════════════════════
+#  跨路径一致性测试（S-7：同一源码两路径严重级判定一致）
+# ═══════════════════════════════════════════════
+
+def test_s7_r07_same_source_consistent_nonblocking(monkeypatch):
+    """S-7：同一 R07 命中的源码，static_scan 与 cross_sectional 两路径均判"警告"档（不阻断）。"""
+    src = (
+        "def build_candidates():\n"
+        "    panel = load_full_panel()\n"
+        "    ranked = panel.rank(axis=1)\n"
+        "    return ranked\n"
+    )
+    ledger = {"columns": {c: {"日基": "T", "severity": "提示"} for c in _LEDGER_KEYS}}
+    monkeypatch.setattr(ss, "_strategy_source", lambda sid: src)
+    monkeypatch.setattr(cs, "_strategy_source", lambda sid: src)
+    monkeypatch.setattr(ss, "_load_ledger", lambda: ledger)
+
+    static_vs = ss.check_static_scan("fake_strategy", "2026-10-10")
+    cross_vs = cs.check_cross_sectional("fake_strategy", "2026-10-10")
+
+    # 两路径对同一源码的严重级判定一致：均不产"阻断"档违规
+    assert all(v.severity != "阻断" for v in static_vs)
+    assert all(v.severity != "阻断" for v in cross_vs)
+    # static_scan 仅阻断档报违规（R07 警告留在 ScanResult.hits，不阻断）；
+    # cross_sectional 仍给 R07 警告提示（供 report 统计 / 人工复核）
+    assert static_vs == []
+    assert len(cross_vs) == 1
+    assert cross_vs[0].rule_id == "R07"
+    assert cross_vs[0].severity == "警告"
+
+
+def test_s4_gate_exit_only_blocks_blocking_severity(monkeypatch):
+    """S-4/S-7：出口断言真正消费 severity——仅"警告"违规不阻断引擎创建。
+
+    同一份 R07 源码经 static_scan + cross_sectional 两条路径注册后走出口断言：
+    enabled=True 时不应抛错（"警告档不阻断"命题为真）。
+    """
+    src = (
+        "def build_candidates():\n"
+        "    panel = load_full_panel()\n"
+        "    ranked = panel.rank(axis=1)\n"
+        "    return ranked\n"
+    )
+    ledger = {"columns": {c: {"日基": "T", "severity": "提示"} for c in _LEDGER_KEYS}}
+    monkeypatch.setattr(ss, "_strategy_source", lambda sid: src)
+    monkeypatch.setattr(cs, "_strategy_source", lambda sid: src)
+    monkeypatch.setattr(ss, "_load_ledger", lambda: ledger)
+
+    reset_gate_checks()
+    register_gate_check("static_scan", ss.check_static_scan)
+    register_gate_check("cross_sectional", cs.check_cross_sectional)
+    set_config(GateConfig(enabled=True, audit_violations=False))
+    try:
+        assert_all_gates_pass("fake_strategy", "2026-10-10")  # 仅警告 → 不抛错
+    finally:
+        reset_gate_checks()
+        set_config(GateConfig(enabled=False, audit_violations=True))
+
+
+def test_s4_gate_exit_still_blocks_real_blocking(monkeypatch):
+    """S-4/S-7：真实"阻断"档违规（如 R01a）仍被出口断言拦截——改档不破坏阻断能力。"""
+    src = "def compute_features(df):\n    df['fut'] = df['收盘价'].shift(-1)\n    return df\n"
+    ledger = {"columns": {c: {"日基": "T", "severity": "提示"} for c in _LEDGER_KEYS}}
+    monkeypatch.setattr(ss, "_strategy_source", lambda sid: src)
+    monkeypatch.setattr(ss, "_load_ledger", lambda: ledger)
+
+    reset_gate_checks()
+    register_gate_check("static_scan", ss.check_static_scan)
+    set_config(GateConfig(enabled=True, audit_violations=False))
+    try:
+        with pytest.raises(LeakageGateError) as exc_info:
+            assert_all_gates_pass("fake_strategy", "2026-10-10")
+        assert exc_info.value.violations[0].severity == "阻断"
+    finally:
+        reset_gate_checks()
+        set_config(GateConfig(enabled=False, audit_violations=True))
 
 
 # ═══════════════════════════════════════════════

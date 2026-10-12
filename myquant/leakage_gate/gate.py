@@ -34,6 +34,9 @@ from myquant.core.audit_log import AuditLogStore
 
 logger = logging.getLogger("myquant.leakage_gate.gate")
 
+# 阻断档 severity（P1-07⑥a / S-4：出口断言只对"阻断"档阻断，"警告"档仅提示不阻断）
+_BLOCKED_SEVERITY: str = "阻断"
+
 
 # ═══════════════════════════════════════════════
 #  配置
@@ -261,10 +264,12 @@ def assert_all_gates_pass(strategy_id: str, decision_time: str) -> None:
     """
     门禁中心出口断言（唯一出口强制，v3.0 §5.4）。
 
-    依次执行已注册门禁检查并汇总违规：
+    依次执行已注册门禁检查并汇总违规（含豁免压制）：
     - 无违规：直接通过；
-    - 有违规：若 audit_violations 则落 audit_log；
-      enabled=True 抛 LeakageGateError（阻断出口），
+    - 有违规：若 audit_violations 则落 audit_log（阻断与警告均记录留痕）；
+      enabled=True 且存在 **severity=阻断** 违规 → 抛 LeakageGateError（阻断出口）；
+      enabled=True 但仅 **severity=警告** 违规（如 R03/R07 命名启发式）→ 不阻断，
+        仅提示（S-4：出口真正消费 severity，"警告档不阻断"命题为真）；
       enabled=False 仅审计（警告档）不阻断。
 
     Args:
@@ -272,7 +277,7 @@ def assert_all_gates_pass(strategy_id: str, decision_time: str) -> None:
         decision_time: 决策时点（T日，YYYY-MM-DD）。
 
     Raises:
-        LeakageGateError: enabled 且存在违规时抛出。
+        LeakageGateError: enabled 且存在 severity=阻断 违规时抛出。
     """
     violations = _collect_violations(strategy_id, decision_time)
     if not violations:
@@ -285,8 +290,16 @@ def assert_all_gates_pass(strategy_id: str, decision_time: str) -> None:
     config = get_config()
     if config.audit_violations:
         _append_audit(violations)
-    if config.enabled:
-        raise LeakageGateError(violations)
-    logger.warning(
-        f"门禁违规（disabled 档，仅审计不阻断）: {len(violations)} 项，strategy={strategy_id}"
+    if not config.enabled:
+        logger.warning(
+            f"门禁违规（disabled 档，仅审计不阻断）: {len(violations)} 项，strategy={strategy_id}"
+        )
+        return
+    # [P1-07⑥a / S-4] 出口真正消费 severity：只"阻断"档阻断出口，"警告"档
+    # （如 R03/R07 命名启发式）仅提示不阻断（缺陷 C 修正方向①，方案 §2.3）
+    blocking = [v for v in violations if v.severity == _BLOCKED_SEVERITY]
+    if blocking:
+        raise LeakageGateError(blocking)
+    logger.info(
+        f"门禁仅警告违规（警告档不阻断出口）: {len(violations)} 项，strategy={strategy_id}"
     )

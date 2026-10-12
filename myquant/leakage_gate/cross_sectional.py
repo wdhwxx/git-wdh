@@ -26,10 +26,11 @@ from __future__ import annotations
 import ast
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, List, Optional
 
 from myquant.leakage_gate.contract import _load_ledger
 from myquant.leakage_gate.gate import Violation, register_gate_check
+from myquant.leakage_gate.signal_words import is_full_sample_receiver
 
 logger = logging.getLogger("myquant.leakage_gate.cross_sectional")
 
@@ -207,14 +208,7 @@ def _strategy_source(strategy_id: str) -> Optional[str]:
     return None
 
 
-# 横截面排名/分位接收者命名意图（R07 信号词）
-_FULL_SAMPLE_RECEIVERS: Tuple[str, ...] = ("panel", "full", "all_", "entire", "whole")
-
-
-def _is_full_sample_receiver(name: str) -> bool:
-    """接收者命名是否具横截面全样本意图（R07 告警信号词）。"""
-    low = name.lower()
-    return any(low.startswith(t) or t in low for t in _FULL_SAMPLE_RECEIVERS)
+# 横截面排名/分位接收者命名意图：统一判定在 leakage_gate.signal_words（S-6，R07/R03 共用）
 
 
 # ═══════════════════════════════════════════════
@@ -233,7 +227,9 @@ def check_cross_sectional(strategy_id: str, decision_time: str) -> List[Violatio
         decision_time: 决策时点（T日，YYYY-MM-DD）。
 
     Returns:
-        List[Violation]: R07 警告违规（警告档不阻断出口）；无警告为空列表。
+        List[Violation]: R07 警告违规（severity=警告）。按 S-4（P1-07⑥a），出口断言
+        assert_all_gates_pass 只阻断 severity=阻断 的违规，故本门禁的 R07 警告仅提示、
+        不阻断引擎创建（对齐 static_scan 的"警告档不阻断"）；无警告为空列表。
     """
     source = _strategy_source(strategy_id)
     if source is None:
@@ -255,7 +251,7 @@ def check_cross_sectional(strategy_id: str, decision_time: str) -> List[Violatio
             receiver = func.value.id
         elif isinstance(func.value, ast.Attribute):
             receiver = func.value.attr
-        if _is_full_sample_receiver(receiver):
+        if is_full_sample_receiver(receiver):
             violations.append(
                 Violation(
                     gate="cross_sectional", rule_id="R07", severity="警告",
