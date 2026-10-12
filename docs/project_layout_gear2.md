@@ -4908,8 +4908,8 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 - R-24 冻结基线：engine.py 1524→1531（基准加载语义注释增量，tests/unit/test_architecture.py）
 
 **待办（明天另一台电脑续）**：
-1. 全量 pytest（engine/mixed/e2e/architecture 改动确认，预计 4022+ passed）
-2. 生产回测完整 RESULT（真实 kunpeng.yaml enabled=true 全链路不再阻断——后台进程昨晚 22:32 起跑，日志持续正常推进；RESULT 行未出 = 未跑完，新机器重跑或缩短时段）
+1. ✅ 全量 pytest（2026-10-13 已跑：**4022 passed / 4 skipped / 0 failed**——engine/mixed/e2e/architecture 改动全绿）
+2. 生产回测完整 RESULT（真实 kunpeng.yaml enabled=true 全链路不再阻断——昨 22:32 起的后台进程已终止未跑完，无 RESULT；新机器重跑或缩短时段）
 3. 任务清单 P0-01 卡注记（#350 基准治理后 kunpeng.yaml 可用于生产回测）
 4. 若后续发现 benchmark 降级仍有其他入口（如 load_multiple 含 benchmark），按 P1-15 评审"基准加载降级不计入交易标的判据"备选
 
