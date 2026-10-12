@@ -4930,4 +4930,19 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 
 **纪律遵守**：白名单登记不改门禁行为（例外引擎本就不在判定域，登记是"说清楚"而非"开后门"）；frozenset 防误改；测试锁定；git 提交（commit message 引用 #351）。**P1-04 卡完成（M5 首卡就位）**。
 
+## #352 · 2026-10-13 · P1-05 核验完成（门禁拦截反映为退出码）
+
+**卡定义**：P1-05（M5）"不吞 LeakageGateError/RealismGateError；违规 → 非零退出"——卡上已标 ✅（#325：enabled=True 时 re-raise）。**开工前核卡状态**（用户指令），核验 #344/#345 后行为是否仍成立：
+
+**核验结论（全部成立，无代码缺口）**：
+- **三引擎收尾 re-raise（不吞异常）**：`engine.py:1183` / `mixed_engine.py:531` / `vectorized_engine.py:537`——_refresh 的 except 分支 `if get_config().enabled:` → `write_blocked_artifact` 落盘后 **`raise`**（#345 阻断落盘 + re-raise；enabled=False 走软接线 debug 不阻断）——RealismGateError 携带 violations 传播到 run() 调用方
+- **生产入口非零退出**：`scripts/生成回测报告.py` L234-237 `except Exception → logger.error + return 2`——run() 传播的 RealismGateError 被捕获后返回**非零退出码 2**
+- **strict 违规可追溯**（用户描述中的第二半句）：属 **P1-17（#313 已完成）**——leakage_gate strict 模式 _handle_violation 抛错前落 audit_log；realism_gate 侧 blocked 产物落盘（#345）即阻断路径的"可追溯"证据
+
+**落地**：`tests/unit/test_realism_gate_e2e.py` 新增 `test_p105_exit_code_paths`（1 项）——源码级锁定退出码路径（生成回测报告.py 含 `return 2`；三引擎收尾 write_blocked_artifact 后 200 字符内 `raise`）。运行期传播已有 e2e 阻断路径（pytest.raises(RealismGateError)）覆盖，本条锁源码不锁运行（避免重复）。
+
+**验收**：targeted 82 passed（architecture + realism_gate 相关）；全量 pytest 待跑。
+
+**纪律遵守**：纯核验 + 测试补强（零业务代码改动——既有实现已满足卡定义，不无谓改动）；git 提交（commit message 引用 #352）。**P1-05 卡维持 ✅（本轮核验留痕）**。
+
 

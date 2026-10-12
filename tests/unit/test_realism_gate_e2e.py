@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Dict, List
 
 import pandas as pd
@@ -433,3 +434,24 @@ def test_benchmark_loads_raw_from_provider() -> None:
         f"基准（指数）应按 raw 加载，实际 {bench_calls[0]['adjust']!r}（hfq 触发虚假降级）"
     )
     assert engine.result.is_success
+
+
+def test_p105_exit_code_paths() -> None:
+    """P1-05（#352 核验）：门禁拦截反映为退出码——不吞 RealismGateError，违规 → 非零退出。
+
+    核验路径（2026-10-13，卡已标 ✅ #325）：
+      - 三引擎收尾 _refresh 的 except 分支：enabled=True → write_blocked_artifact
+        落盘后 `raise`（#345 阻断落盘 + re-raise，#344 传播语义，不吞异常）；
+      - 生产入口 scripts/生成回测报告.py：except Exception → return 2（非零退出码）。
+    运行期传播已由阻断路径 e2e（pytest.raises(RealismGateError)）覆盖，本条锁源码路径。
+    """
+    root = Path(__file__).resolve().parents[2]
+    entry_src = (root / "scripts" / "生成回测报告.py").read_text(encoding="utf-8")
+    assert "return 2" in entry_src, "生产入口捕获门禁异常后须返回非零退出码（return 2）"
+
+    for eng in ("engine", "mixed_engine", "vectorized_engine"):
+        src = (root / "myquant" / "backtest" / f"{eng}.py").read_text(encoding="utf-8")
+        marker = src.find("write_blocked_artifact")
+        assert marker != -1, f"{eng}.py 收尾缺阻断产物落盘（#345）"
+        tail = src[marker:marker + 200]
+        assert "raise" in tail, f"{eng}.py 收尾 enabled=True 分支须 re-raise（#325/#344 不吞异常）"
