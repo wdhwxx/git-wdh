@@ -132,8 +132,12 @@ class BacktestConfig:
     participation_rate: float = 1.0     # 成交量参与率（1.0=全量成交，0<rate<1 限时）
     # ── P0-01 端到端（#345）：真实性门禁配置透传（enabled/audit_violations）──
     # create_engine 从 config.to_dict()["realism_gate"] 读取（YAML/API/测试均可配）；
-    # 缺省 {} → enabled=False（软接线审计档，分期启用期不误伤既有回测）
-    realism_gate: Dict[str, Any] = field(default_factory=dict)
+    # P1-03 收尾（#354）：默认带**显式段**（enabled=False 审计档）——代码直构
+    # 默认即"显式配置"（非缺失）；YAML 缺段时 config_builder 产出空段 → _attach
+    # 层判"配置缺失 = 阻断"（方案 §4.3：本门禁要求显式启用，缺失即红）
+    realism_gate: Dict[str, Any] = field(
+        default_factory=lambda: {"enabled": False, "audit_violations": True}
+    )
 
     def validate(self) -> List[str]:
         errors: List[str] = []

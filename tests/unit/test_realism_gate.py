@@ -18,6 +18,8 @@ tests/unit/test_realism_gate.py - 门禁中心出口断言测试（P0-01 第二�
 
 import pytest
 
+from myquant.backtest.engine import BacktestScheduler
+from myquant.models.backtest import BacktestConfig
 from myquant.realism_gate import (
     ManifestIncompleteError,
     RealismGateConfig,
@@ -286,3 +288,38 @@ class TestMisconfigurationFailClosed:
         cfg = RealismGateConfig.from_dict({"enabled": True, "audit_violations": False})
         assert cfg.enabled is True
         assert cfg.audit_violations is False
+
+    def test_missing_section_rejected_at_attach(self):
+        """P1-03 收尾（#354）：配置段缺失（realism_gate={}）→ 引擎装配层拒绝启动。
+
+        方案 §4.3"配置缺失 = 阻断"（本门禁要求显式启用，缺失即红；与 leakage_gate
+        段缺失落模块默认的刻意不同）。BacktestConfig 默认已带显式段（enabled=False
+        审计档），代码直构默认不触发——本条锁"显式空段 / YAML 缺段经 config_builder
+        产出空段"路径：create_engine 装配（_attach_realism_manifest）抛 RealismGateError。
+        """
+        cfg = BacktestConfig(
+            symbols=["000001.SZ"],
+            start_date="2024-01-01",
+            end_date="2024-01-10",
+            frequency="1d",
+            initial_capital=1_000_000.0,
+            realism_gate={},
+        )
+        scheduler = BacktestScheduler(mode="event")
+        with pytest.raises(RealismGateError, match="配置段缺失"):
+            scheduler.create_engine(config=cfg, strategy=None, data=None)
+
+    def test_explicit_section_allows_audit_mode(self):
+        """P1-03 裁定留痕：显式 enabled=False = 合法审计档（方案 §4.3 出口断言表），
+        不拒启——卡定义中"enabled:false 拒绝启动"以 v2.2 方案为准作废。"""
+        cfg = BacktestConfig(
+            symbols=["000001.SZ"],
+            start_date="2024-01-01",
+            end_date="2024-01-10",
+            frequency="1d",
+            initial_capital=1_000_000.0,
+            realism_gate={"enabled": False, "audit_violations": True},
+        )
+        scheduler = BacktestScheduler(mode="event")
+        engine = scheduler.create_engine(config=cfg, strategy=None, data=None)
+        assert engine._realism_manifest is not None  # 审计档装配成功（不拒启）

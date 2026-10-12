@@ -4961,4 +4961,23 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 
 **纪律遵守**：纯核验 + 测试补强（零业务代码改动）；git 提交（commit message 引用 #353）。**P1-06 卡维持 ✅（本轮核验留痕）——M5（P1-04→P1-05→P1-06→P1-18）四卡全部完成，里程碑关闭**。
 
+## #354 · 2026-10-13 · P1-03 收尾（fail-closed on misconfiguration——配置缺失 = 阻断落地）
+
+**卡定义**：P1-03（M2）"fail-closed on misconfiguration：段缺失/enabled:false/YAML 损坏 → 拒绝启动"——此前 ⚠️ 部分完成（#315：realism_gate 侧类型校验已有，但段缺失回落 enabled=False 仅审计；方案所称 test_gate_misconfig.py 不存在）。**裁定**（用户批准推荐方案：补"段缺失即拒启"，兑现与 leakage_gate 刻意不同的设计承诺）：
+
+**裁定结论**：
+- **配置缺失 = 阻断**（方案 §4.3）→ **补"段缺失即拒启"**（_attach 装配层）；leakage_gate 段缺失落模块默认 True 是**方案刻意的不同**（宽松语义），非不一致——文档注记消除疑虑
+- **卡定义"enabled:false → 拒绝启动"以 v2.2 方案为准作废**：§4.3 出口断言表明确 enabled=False = **合法审计档**（仅落 audit_log + 强制清单入产物），显式关闭 ≠ 缺失，不拒启
+- **方案所称 test_gate_misconfig.py**：蓝图 tests 目录树无登记 → 不新建（蓝图外文件红线），测试并入既有 `tests/unit/test_realism_gate.py`（TestMisconfigurationFailClosed 类）
+
+**落地**：
+- `myquant/models/backtest.py`：`realism_gate` 默认 `field(default_factory=dict)` → **默认带显式段 `{"enabled": False, "audit_violations": True}`**（代码直构默认即"显式配置"非缺失，测试/既有调用零回归；YAML 缺段经 config_builder 产出空段 → 走 _attach 拒启）
+- `myquant/backtest/engine.py` `_attach_realism_manifest`：**段缺失（None/空 dict/非 dict）→ raise RealismGateError**（"realism_gate 配置段缺失……拒绝启动"）+ 补导入 RealismGateError/RealismViolation——生产路径"忘记配门禁"不再静默审计空转；YAML 损坏（类型错误）拒启由 from_dict 严格校验已有（#315）
+- `tests/unit/test_realism_gate.py`：新增 2 项——`test_missing_section_rejected_at_attach`（realism_gate={} → create_engine 装配抛 RealismGateError"配置段缺失"）、`test_explicit_section_allows_audit_mode`（显式 enabled=False → 审计档装配成功，裁定留痕）
+- `tests/unit/test_architecture.py`：R-24 基线 engine.py **1531 → 1550**（#354 _attach 段缺失拒启约 19 行，功能必需的原则性豁免，注释留痕）
+
+**验收**：targeted 45 passed（realism_gate 相关）+ 全量 pytest **4029 passed/4 skipped/0 failed**（首轮 1 failed 系 R-24 基线未同步，更新后全绿）。
+
+**纪律遵守**：BacktestConfig 默认改非空段先查测试断言（无 `=={}` 依赖）；test_gate_misconfig.py 蓝图未登记不新建（并入既有测试文件）；R-24 基线同步更新；git 提交（commit message 引用 #354）。**P1-03 卡 ✅ 完成（M2 三卡 P1-01/P1-02/P1-03 全部收官）**。
+
 

@@ -283,9 +283,11 @@ OVERSIZE_LINE_BASELINE: dict[str, int] = {
     "web/dashboard.py": 1760, "ml/training_pipeline.py": 1651,
     "monitoring/dynamic_baseline.py": 1546,  # 1552→1546（#260 去全局采集器兜底）
     "acceptance/live_safety_gate.py": 1749,  # 回写#296：实盘安全门禁验收（0.1~0.9 + LIVE 门槛 31 项）
-    "backtest/engine.py": 1531,  # 回写#349：核心引擎超 1500 入白名单（R-24 冻结基线；
+    "backtest/engine.py": 1550,  # 回写#349：核心引擎超 1500 入白名单（R-24 冻结基线；
                                 # 增量来源：三引擎共用 _attach_realism_manifest 模块级函数；
-                                # 1524→1531（#350 基准数据治理：基准加载 adjust="raw" 语义注释））
+                                # 1524→1531（#350 基准数据治理：基准加载 adjust="raw" 语义注释）；
+                                # 1531→1550（#354 P1-03 收尾：_attach 段缺失拒启——配置缺失=阻断，
+                                # 方案 §4.3 fail-closed；只增不减的原则性豁免：功能必需行））
 }
 
 # R-19 零覆盖基线：✅ 已冻结（回写#256）。冻结集合 = 2026-10-08 实测引用级零覆盖业务模块 49 个

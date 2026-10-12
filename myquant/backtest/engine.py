@@ -115,7 +115,9 @@ def _attach_realism_manifest(
     """
     from myquant.realism_gate import (
         RealismGateConfig,
+        RealismGateError,
         RealismManifest,
+        RealismViolation,
         assert_realism_pass,
         set_config,
     )
@@ -123,9 +125,26 @@ def _attach_realism_manifest(
 
     _kwargs: Dict[str, Any] = engine_kwargs or {}
     cfg_dict = config.to_dict() if hasattr(config, "to_dict") else {}
-    rg_cfg = cfg_dict.get("realism_gate", {}) or {}
+    rg_raw = cfg_dict.get("realism_gate")
+    # P1-03 收尾（#354）：配置缺失 = 阻断（方案 §4.3——本门禁要求显式启用，
+    # 缺失即红；与 leakage_gate 段缺失落模块默认的刻意不同）。
+    # 段缺失（None/空 dict/非 dict）→ 拒绝启动；BacktestConfig 默认已带显式段
+    # （enabled=False 审计档），代码直构不触发；YAML 缺段经 config_builder 产出
+    # 空段 → 本处拒启（生产路径"忘记配门禁"不再静默审计空转）。
+    if not isinstance(rg_raw, dict) or not rg_raw:
+        raise RealismGateError(
+            "realism_gate 配置段缺失（配置缺失 = 阻断，方案 §4.3：本门禁要求"
+            "显式启用）——拒绝启动；请显式配置 realism_gate.enabled "
+            "（true=阻断档 / false=审计档）",
+            violations=[RealismViolation(
+                field_path="realism_gate",
+                critical=True,
+                message="配置段缺失（fail-closed，拒绝启动）",
+                actual_value=rg_raw,
+            )],
+        )
     # P1-03：严格类型校验（配置损坏 fail-closed，不静默 bool() 转换）
-    set_config(RealismGateConfig.from_dict(rg_cfg))
+    set_config(RealismGateConfig.from_dict(rg_raw))
     try:
         manifest = RealismManifest()
         manifest.set_field("run_id", f"run_{id(config) & 0xFFFFFFFF:08x}")
