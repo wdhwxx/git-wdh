@@ -4744,4 +4744,11 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    e. **验收结果**：py_compile 通过；R-26 锚点 + realism_gate/manifest 测试通过（targeted 48 passed）；全套回归 **3953 passed/4 skipped/2 failed**（较上轮 +1＝新增 on_init 锚点；2 failed 仍为既有配置本地红：`test_live_config_structure` 生产 live_config 缺 leakage_gate 段、`test_backtest_real_config_adjust_strict` 缺 adjust_strict，与本次无关）。**P0-08 前置完成**：R-26 结论落定、蓝图 footprint 登记、context_data_scoped 字段就位。
    f. **纪律遵守**：蓝图目录树先行登记（causality.py 于 realism_gate/checks/ 子树）；manifest 字段诚实注入（不写 True）；R-26 结论入任务清单（状态改已完成）；git 提交（commit message 引用 #334）。
 
+## #335 · 2026-10-12 · P0-08 子项①#3/⑧：mixed TARGET 路径切片置位（mixed 默认路径封门）
+   事实来源：本次落地（P0-08 子项①覆盖率审计指引 + 子项⑧ 部分前置，审计结论见《前置调研与设计决策记录_v2.2》第 12 部分）；代码级核验：mixed_engine.py `_execute_target` 原无任何切片置位（全文件 `_slicing_enabled`/`current_bar_ts` 仅 3 处 L740-744、全在 `_execute_signals`）。
+   a. **myquant/backtest/mixed_engine.py（改动，+13 行）**：`_execute_target`（L647）入口在 `generate_mixed_loop` 调用前置位 `current_bar_ts` + `_slicing_enabled=True`（与 `_execute_signals` L742-746 同语义：bar[t] 时 context.get_data() 只返回 ≤t 视图；Bar.timestamp 为秒级 Unix float，必须用 unit='s'）；异常捕获 `(TypeError, ValueError, OverflowError)` 显式记日志（不静默），保持未置位，由 P0-08 子项④/⑤（manifest `context_sliced=false` + checks/causality critical）拦截。
+   b. **原因**：子项①审计发现 mixed TARGET 路径（默认/生产主力，`_signal_mode` 默认 `SIGNAL_MODE_TARGET` L184）接口未封门——`_slicing_enabled` 恒 False → `get_data` 返回全量含未来；现役 4 策略实现均自约束（ma：`_calc_rsrs_value` L440-452 on_init 预计算缓存按 bar.timestamp 取 as-of 值；grid：generate_signal L267-316 纯 bar.close+网格状态不读数据；kunpeng：`_slice_upto` 自截断 L594；mean_reversion：`_calc_indicators` 按 timestamp 截断 L270-271）故**实际无未来读取**，但子项②止血 A（`context_sliced` 真实采集）落地后该路径将恒报 false → **必须先置位封门**（先摸底才能定记账落点的直接结论）。
+   c. **验收结果**：py_compile 通过；mixed/backtest/causality 相关 111 passed/1 skipped；全量回归 **3953 passed/4 skipped/2 failed**（2 failed 仍为既有配置本地红：`test_live_config_structure` 生产 live_config 缺 leakage_gate 段、`test_backtest_real_config_adjust_strict` 缺 adjust_strict，与本次无关；较上轮无新增失败）。**#3 置位完成**：mixed 默认路径接口封门，为子项②/⑤ 铺平。
+   d. **纪律遵守**：蓝图目录树先行确认（mixed_engine.py 为既有登记文件，无需新增树行）；异常显式记录不静默（py 规则禁 except: pass）；git 提交（commit message 引用 #335）。
+
 

@@ -648,6 +648,18 @@ class MixedBacktestEngine:
         """目标持仓模式：generate_mixed_loop -> 目标股数 -> 市价调仓订单。"""
         if self.strategy is None or self.context is None:
             return
+        # ── P0-08 子项①#3/⑧：mixed TARGET 路径补切片置位（原接口未封门）──
+        # 与 _execute_signals（L742-746）同语义：bar[t] 时 context.get_data() 只返回 <=t 视图；
+        # Bar.timestamp 为秒级 Unix float（time.time()），必须用 unit='s'。
+        try:
+            self.context.current_bar_ts = pd.Timestamp(bar.timestamp, unit='s')
+            self.context._slicing_enabled = True
+        except (TypeError, ValueError, OverflowError) as exc:
+            # 显式降级（不静默）：bar.timestamp 非法时保持未置位并记日志，
+            # 由 P0-08 子项④/⑤（manifest context_sliced=false + checks/causality critical）拦截
+            logger.error(
+                "bar.timestamp 非法，mixed TARGET 切片置位失败（保持未封门）: %s", exc,
+            )
         position = self.get_position(bar.symbol)
         target = self.strategy.generate_mixed_loop(bar, self.context, position)
         if target is None:
