@@ -4819,4 +4819,11 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    d. **验收结果**：py_compile 通过；targeted 469 passed/1 skipped（含 test_strategies/live_warmup/backtest_consistency_v5/fee_v5/acceptance 基线对拍）；全量回归 **3995 passed/4 skipped/0 failed**（+8 = 本卡 8 项）。**子项⑧完成**：结构封门收官——"策略只能看过去"从访问器约定升级为通道结构保证；**S-3 满足**（改动集中接口层 base.py，三引擎构造点与 live 写入点零改动，不动任何策略代码）；8 接触点实测兼容（7 幂等 + on_init 阶段放行）。
    e. **纪律遵守**：DataWindow L0（纯 dict + pandas 视图，无跨层 import）；__setattr__ 防绕过（整体赋值重包）；阶段语义与记账互不影响（get_data 经 data.get 取全量自行切片记账）；git 提交（commit message 引用 #342）。**遗留**：⑨不做声明（pandas monkey-patch/provider 记账否决，可能仅文档回写）。
 
+## #343 · 2026-10-12 · P0-08 子项⑨：不做声明收口（两否决点留痕核验 + 整卡 9 子项完成）
+   事实来源：本次核验（施工方案 v2.2 §5.4.1 子项⑨ L743"不做 pandas monkey-patch（R07 报告方案 B），不新增 provider accessed_max_date 记账（v2.1 方案，会 100% 误报）" + R07语义检测可行性审计报告_v1.0.MD 方案 B L91-106 + 前置调研 §5.4 R-10 L1211-1215 / D2 处置 L1461 + 方案 §2.10-G1 L429 代码验证）。**纯文档核验，零代码改动**。
+   a. **否决点 1：pandas monkey-patch（R07 报告方案 B）留痕链条核验 ✅ 完整**：R07 审计报告 L91-106 方案 B 全量留痕（原理 hook rank/quantile；缺点：侵入性强全局 hook 冲突 / 性能开销 / **误报率高**——滚动窗口 rank 的 df 不含未来行但 max index 可能 > current_ts / 风险⭐⭐⭐⭐）→ 前置调研 R-10 L1211-1215 处置：补方案 D 后重新比较，按"能用结构消除的不应退化为检测"，**方案 D 优先于 B** → D2 处置 L1461："改造为访问器层判据（P1-07②：accessed_max_date > current_bar_date），**不做 pandas hook（放弃报告方案 B）**" → 方案 L743 子项⑨固化"不做"。**代码库 grep 确认零残留**（仅 pytest monkeypatch fixture 名/注释无关命中）。
+   b. **否决点 2：provider accessed_max_date 记账（v2.1 方案）留痕链条核验 ✅ 完整**：方案 §2.10-G1 L429"该设计经代码验证不可用：provider 只在初始化时取一次全窗口，记账值恒为 end_date，会 100% 误报"→ v2.2 以 P0-07 因果切片替代（把因果性做进 StrategyContext 数据入口，而非事后记账）→ P0-08 以**访问器层记账**（子项⑥，只记未封门/全量声明路径）补充交叉校验 → 任务清单 P0-07 卡 L48 + P0-08 卡 L743 固化"不做"。**代码库 grep 确认零残留**（无 accessed_max_date_by_symbol/provider 记账）。
+   c. **收口结论**：两"不做"否决依据充分且全链路留痕（报告 → 前置调研处置 → 方案固化 → 任务清单固化 → 代码零残留）；P0-08 卡**9 子项全部完成**（①覆盖率审计 / ②止血A #336 / ③止血B #337 / ④止血C #338 / ⑤checks/causality #339 / ⑥访问器记账 #340 / ⑦run 起点复位 #341 / ⑧窗口隔离 #342 / ⑨不做声明 #343）；全量回归 **3995 passed/4 skipped/0 failed**；16 条验收用例（12 原 + ⑪manifest 真实性 / ⑫fail-open / ⑬keys-value 语义 / ⑭记账交叉校验）全部闭环。
+   d. **纪律遵守**：纯文档核验（任务清单 P0-08 卡状态更新为 ✅ 完成）；git 提交（commit message 引用 #343）。**P0-08 卡交付**：R07 退役评估前置已解除（S-10 排在本卡交付之后），下一步 P0-01 因果性判据落地。
+
 
