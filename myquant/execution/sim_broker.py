@@ -71,6 +71,7 @@ class SimBroker(ExecutionInterface):
         price_limit_pct: float = 0.10,
         enforce_limit: bool = False,
         is_suspended: Optional[Callable[[str], bool]] = None,
+        enable_t1: bool = True,
     ):
         """
         初始化模拟券商
@@ -81,6 +82,7 @@ class SimBroker(ExecutionInterface):
             slippage_model: 滑点模型（默认固定2基点）
             enable_partial_fill: 是否启用部分成交（默认全量成交，简化回测）
             participation_rate: 成交量参与率（0<rate<1 时按 bar.volume*rate 限成交，剩余走 partial_fill；默认 1.0 全量成交）
+            enable_t1: 是否启用 T+1 持仓冻结（A股标准，当日买入不可当日卖出；P1-08）
         """
         super().__init__(name="sim_broker")
         self.initial_capital = float(initial_capital)
@@ -97,6 +99,8 @@ class SimBroker(ExecutionInterface):
         self.enforce_limit = bool(enforce_limit)        # KP-P2-02: 是否强制涨跌停校验（event 路径开启）
         self.is_suspended = is_suspended                # KP-P2-02: 停牌判定函数
         self._prev_close: Dict[str, float] = {}        # KP-P2-02: 昨收基准（上一bar收盘）
+        self.enable_t1 = bool(enable_t1)                # P1-08: T+1 持仓冻结开关
+        self._t1_holdings: Dict[str, float] = {}       # P1-08: 当日已成交买入冻结（当日买入不可卖）
         self.state_machine = OrderStateMachine()
         self._market_prices: Dict[str, float] = {}  # 最新市场价
         logger.info(
@@ -359,6 +363,25 @@ class SimBroker(ExecutionInterface):
         if fill_qty <= 0:
             return None  # 参与率限制下无可成交数量，保留订单待后续 bar
 
+        # P1-08: T+1 持仓冻结（卖出时可用量 = 持仓 - 当日买入冻结）
+        if order.side == OrderSide.SELL and self.enable_t1:
+            pos = self.positions.get(order.symbol)
+            if pos is not None:
+                frozen = self._t1_holdings.get(order.symbol, 0.0)
+                available = pos.quantity - frozen
+                if fill_qty > available:
+                    if available <= 0:
+                        logger.debug(
+                            f"[sim_broker] T+1 冻结拒单: {order.symbol} "
+                            f"持仓={pos.quantity:.0f} 冻结={frozen:.0f} 可用=0"
+                        )
+                        return None
+                    fill_qty = int(available)
+                    logger.debug(
+                        f"[sim_broker] T+1 截断: {order.symbol} 请求={order.remaining_qty:.0f} "
+                        f"可用={available:.0f}（冻结={frozen:.0f}）"
+                    )
+
         # 创建成交记录
         trade = Trade(
             order_id=order.order_id,
@@ -469,6 +492,9 @@ class SimBroker(ExecutionInterface):
         total_cost = trade.quantity * trade.price + trade.commission
         if trade.side == OrderSide.BUY:
             self.cash -= total_cost
+            # P1-08: T+1 冻结累计（当日买入不可当日卖出）
+            if self.enable_t1:
+                self._t1_holdings[symbol] = self._t1_holdings.get(symbol, 0.0) + trade.quantity
         else:
             self.cash += (trade.quantity * trade.price - trade.commission)
 
@@ -482,6 +508,19 @@ class SimBroker(ExecutionInterface):
             for pos in self.positions.values()
             if pos.quantity != 0
         )
+
+    def settle_t1(self) -> None:
+        """P1-08: T+1 日终结算——清空当日买入冻结记录。
+
+        日终/次日开盘前调用（由引擎层控制时机），释放当日买入的冻结数量，
+        使次日起该部分持仓可卖出。防未来：只释放【已发生】的当日买入。
+        """
+        if not self.enable_t1:
+            return
+        released = dict(self._t1_holdings)
+        self._t1_holdings.clear()
+        if released:
+            logger.info(f"[sim_broker] T+1 结算完成，释放冻结: {released}")
 
     # ------------------------------------------------------------------
     # 属性
