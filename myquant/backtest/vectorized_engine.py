@@ -453,6 +453,9 @@ class VectorizedBacktestEngine:
                 "current_bar_ts_enforced": self.context.current_bar_ts is not None,
                 "full_sample_declared": bool(self.context.full_sample_declared),
                 "guard_injected": self.context.extra.get("lookahead_guard") is not None,
+                # P0-08 子项⑧：vectorized 逃生口（full_sample_declared=True）value 未封，
+                # 但策略不经 context.data 取数（generate_signals_vectorized 收 df 参数）——
+                # 诚实 False；逃生口已由 full_sample_declared 声明（critical 字段）
                 "context_data_scoped": False,
             })
             # ── P0-08 子项⑥：访问器层实测记账评估（P1-07② 判据）──

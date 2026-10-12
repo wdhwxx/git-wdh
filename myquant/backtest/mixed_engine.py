@@ -438,7 +438,8 @@ class MixedBacktestEngine:
                 "current_bar_ts_enforced": self.context.current_bar_ts is not None,
                 "full_sample_declared": bool(self.context.full_sample_declared),
                 "guard_injected": self.context.extra.get("lookahead_guard") is not None,
-                "context_data_scoped": False,
+                # P0-08 子项⑧：DataWindow 窗口隔离构造即生效，on_bar 封死 value 直取（真实）
+                "context_data_scoped": True,
             })
             # ── P0-08 子项⑥：访问器层实测记账评估（P1-07② 判据）──
             # accessed_max_date > current_bar_date → 实测读到未来（真拦截）；

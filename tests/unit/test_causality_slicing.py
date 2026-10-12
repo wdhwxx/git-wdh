@@ -196,3 +196,119 @@ class TestReusedContextNoLeftover:
         assert engine.context.current_bar_ts == idx[-1]  # 推进到本次末 bar
         # 访问账目已复位清空（on_bar 已封门不记账；若复位缺失，第一次的账目会残留）
         assert engine.context.accessed_max_dates == {}
+
+
+class TestWindowIsolation:
+    """P0-08 子项⑧：context.data 窗口隔离（S-2 阶段化 + S-13 精确定义）。
+
+    保留 keys 枚举（keys()/bool/len/contains 照常）；封死 value 直取
+    （__getitem__ 在 on_bar 阶段返回 ≤current_bar_ts 切片，取不到全量含未来）。
+    改动仅接口层（DataWindow 代理），不动任何策略代码（S-3）。
+    """
+
+    def test_on_bar_getitem_returns_slice(self, ctx):
+        """用例 1/10：on_bar 阶段 context.data["x"] 取不到全量（返回切片）。"""
+        ctx._slicing_enabled = True
+        ctx.current_bar_ts = pd.Timestamp("2024-01-03")  # index[2]
+        df = ctx.data["600519.SH"]
+        assert len(df) == 3
+        assert df.index[-1] == pd.Timestamp("2024-01-03")
+
+    def test_keys_enumeration_kept(self, ctx):
+        """不误伤：keys 枚举/布尔/长度照常（5 个策略接触点 ma/momentum/multi/grid）。"""
+        ctx._slicing_enabled = True
+        ctx.current_bar_ts = pd.Timestamp("2024-01-03")
+        assert list(ctx.data.keys()) == ["600519.SH"]
+        assert bool(ctx.data) is True
+        assert len(ctx.data) == 1
+        assert "600519.SH" in ctx.data
+
+    def test_on_init_getitem_returns_full(self, ctx):
+        """S-2 阶段语义：on_init（未切片）context.data["x"] 返回全量（保 ma 预计算）。"""
+        assert ctx._slicing_enabled is False
+        df = ctx.data["600519.SH"]
+        assert len(df) == 5
+
+    def test_escape_hatch_getitem_returns_full(self, sample_df):
+        """不误伤：vectorized 逃生口（full_sample_declared=True）value 直取全量。"""
+        c = StrategyContext(_full_sample_declared=True)
+        c.data = {"600519.SH": sample_df}
+        c._slicing_enabled = True
+        c.current_bar_ts = pd.Timestamp("2024-01-03")
+        df = c.data["600519.SH"]
+        assert len(df) == 5
+
+    def test_fail_closed_when_no_timestamp(self, ctx):
+        """切片开启但时点未设 → 空（fail-closed，与 get_data 一致，不静默全量）。"""
+        ctx._slicing_enabled = True
+        ctx.current_bar_ts = None
+        df = ctx.data["600519.SH"]
+        assert len(df) == 0
+
+    def test_get_returns_full_for_builder_power(self, ctx):
+        """pool_builder 幂等路径：data.get() 恒返回全量（build 二次 as_of 截断）。"""
+        ctx._slicing_enabled = True
+        ctx.current_bar_ts = pd.Timestamp("2024-01-03")
+        df = ctx.data.get("600519.SH")
+        assert len(df) == 5  # get 走 dict 原生 → 全量，供 build 自行截断
+
+    def test_setitem_write_works(self, ctx, sample_df):
+        """live 写入点：data[symbol]=... 照常工作（dict 子类 __setitem__）。"""
+        ctx.data["600519.SH"] = sample_df
+        assert ctx.data["600519.SH"] is sample_df  # on_init 阶段（未切片）直取
+
+    def test_engine_on_bar_data_is_scoped(self) -> None:
+        """引擎集成（用例⑩）：真实 mixed 引擎 on_bar 阶段 data[symbol] 为切片。
+
+        第 i 根 bar 断言长度为 i+1——若窗口隔离未生效（全量直取）则恒为 10，测试红。
+        """
+        from typing import List
+
+        from myquant.backtest.mixed_engine import MixedBacktestEngine
+        from myquant.models.backtest import BacktestConfig
+        from myquant.models.market_data import Bar
+        from myquant.strategies.base import StrategyBase
+
+        class _DataProbe(StrategyBase):
+            """数据探针：每根 on_bar 记录 context.data[symbol] 的切片长度。"""
+
+            name = "data_probe"
+
+            def __init__(self) -> None:
+                super().__init__()
+                self.lens: List[int] = []
+
+            def on_bar(self, bar: Bar, context: StrategyContext) -> List[object]:
+                df = context.data["000001.SZ"]
+                self.lens.append(len(df))
+                return []
+
+            def generate_signal(self, bar: Bar, context: StrategyContext) -> object:
+                return None
+
+        idx = pd.date_range("2024-01-01", periods=10, freq="B")
+        df10 = pd.DataFrame(
+            {
+                "open": 10.0,
+                "high": 11.0,
+                "low": 9.0,
+                "close": [10.0 + 0.1 * i for i in range(10)],
+                "pre_close": [10.0] + [10.0 + 0.1 * i for i in range(9)],
+                "volume": 1_000_000.0,
+            },
+            index=idx,
+        )
+        config = BacktestConfig(
+            start_date="2024-01-01",
+            end_date="2024-01-20",
+            symbols=["000001.SZ"],
+            initial_capital=1_000_000.0,
+            participation_rate=1.0,
+        )
+        probe = _DataProbe()
+        engine = MixedBacktestEngine(
+            config=config, strategy=probe, data={"000001.SZ": df10}
+        )
+        result = engine.run()
+        assert result is not None and result.is_success
+        assert probe.lens == list(range(1, 11))

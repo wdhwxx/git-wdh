@@ -160,6 +160,66 @@ class Signal:
 #  策略上下文
 # ═══════════════════════════════════════════════
 
+class DataWindow(dict):
+    """P0-08 子项⑧窗口隔离代理（S-13 精确定义）：保留 keys 枚举、封死 value 直取。
+
+    ``context.data`` 的运行时载体。dict 子类 → 策略/工具侧全部 dict 接口
+    （keys()/items()/len()/bool/contains/get）照常工作，只覆写 ``__getitem__``：
+      - on_bar 阶段（``_slicing_enabled=True``）：返回 ``index <= current_bar_ts``
+        的切片视图（O(1) pandas 视图）——封死 value 直取，策略读不到未来；
+      - on_init 阶段（``_slicing_enabled=False``）：返回全量（S-2 阶段语义，
+        保 ma_strategy on_init 全量预计算）；
+      - ``full_sample_declared=True``（vectorized 逃生口）：返回全量；
+      - 切片开启但时点未设：fail-closed 返回空（与 ``get_data`` 一致）。
+
+    阶段语义与记账互不影响：``get_data`` 仍经 ``self.data.get(symbol)`` 取全量后
+    自行切片并做访问器记账（子项⑥），``get()`` 恒返回全量——pool_builder.build
+    （ma_strategy.py:417）依赖该行为做二次 as_of 截断（幂等，验收用例⑫）。
+    """
+
+    def __init__(
+        self,
+        data: Dict[str, pd.DataFrame],
+        owner: "StrategyContext",
+    ) -> None:
+        """初始化窗口代理。
+
+        Args:
+            data: 原始 ``{symbol: DataFrame}`` 映射（引擎构造传入）。
+            owner: 所属 StrategyContext（读取切片开关/时点/逃生口声明）。
+        """
+        super().__init__(data)
+        self._owner: "StrategyContext" = owner
+
+    def __getitem__(self, symbol: str) -> pd.DataFrame:
+        """取 symbol 数据视图：on_bar 阶段返回切片，其余阶段返回全量。
+
+        Args:
+            symbol: 标的代码。
+
+        Returns:
+            DataFrame 视图（切片为 pandas O(1) 视图，不复制）。
+
+        Raises:
+            KeyError: symbol 不存在时（dict 原生语义）。
+        """
+        df = dict.__getitem__(self, symbol)
+        owner = self._owner
+        if owner is None:
+            return df
+        if owner.full_sample_declared:
+            # vectorized 逃生口（全量声明路径）——阶段语义放行
+            return df
+        if not owner._slicing_enabled:
+            # on_init 阶段 / live：阶段放行全量（S-2）
+            return df
+        if owner.current_bar_ts is None:
+            # fail-closed：切片开启但时点未设 → 空（不允许静默全量，与 get_data 一致）
+            return df.iloc[0:0]
+        # on_bar 阶段：封死 value 直取 → 返回 ≤current_bar_ts 的 O(1) 切片视图
+        return df.loc[:owner.current_bar_ts]
+
+
 @dataclass
 class StrategyContext:
     """
@@ -203,6 +263,29 @@ class StrategyContext:
     # （full_sample_declared=True）"记账；已封门切片路径 max 恒 <= current_bar_ts，
     # 判据恒假，记账零信息量（方案 L739 明确不记账）。per-(symbol) 真实访问最大日期。
     accessed_max_dates: Dict[str, Optional[pd.Timestamp]] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """P0-08 子项⑧：窗口隔离——data 包装为 DataWindow（保留 keys、封死 value 直取）。
+
+        引擎构造时传入普通 dict，此处统一包装为受控窗口；三引擎构造点与
+        live 写入点（``data[symbol]=...``）零改动（dict 子类天然兼容）。
+        """
+        self.data = DataWindow(self.data, owner=self)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        """拦截 ``data`` 整体赋值，确保始终为 DataWindow（P0-08⑧ 防绕过）。
+
+        元素写入（``data[symbol]=...``，live 同步点）走 DataWindow.__setitem__，
+        不受影响；整体赋值（``context.data = {...}``）一律重新包装为受控窗口，
+        防止用普通 dict 替换窗口绕过 value 直取封死。
+
+        Args:
+            name: 属性名。
+            value: 属性值（data 为 dict 时包装）。
+        """
+        if name == "data" and isinstance(value, dict) and not isinstance(value, DataWindow):
+            value = DataWindow(value, owner=self)
+        super().__setattr__(name, value)
 
     # ── P0-08 子项②：全量逃生口声明（引擎构造参数，策略不可自设）──
     @property

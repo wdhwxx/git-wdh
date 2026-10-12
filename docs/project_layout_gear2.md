@@ -4811,4 +4811,12 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
    e. **验收结果**：py_compile 通过；targeted 250 passed/1 skipped；全量回归 **3987 passed/4 skipped/0 failed**（+1 = 本卡用例⑪）。**子项⑦完成**：R-25 处置落地（两引擎 run 起点复位）+ 阶段契约 docstring 冻结（on_init 全量/on_bar 切片/run 起点复位）。vectorized 不在此范围（逃生口 full_sample_declared=True 无残留，R-25 ⑤）。
    f. **纪律遵守**：复位点位于 on_init 之前（不破坏首次 on_init 建 context）；防御 None（首次 run context 尚不存在）；git 提交（commit message 引用 #341）。**遗留**：⑧窗口隔离（on_bar 封死 context.data value 直取，S-13）下一步。
 
+## #342 · 2026-10-12 · P0-08 子项⑧：窗口隔离（on_init 放行全量 → on_bar 封死 context.data value 直取，S-2 阶段化 + S-13 精确定义）
+   事实来源：本次落地（施工方案 v2.2 §5.4.1 子项⑧ L741-742 + S-2/S-3 + 前置调研 R-21 访问模式实测：5 策略 8 接触点 7 幂等）；现状核验：context.data 直取点 grep（ma:195 items on_init / ma:414-417 bool+keys+build 传值 / momentum:439-440 / multi_factor:1043 / grid:218 / live:1148 元素写）、pool_builder.build（base.py:1020 用 data_dict.get → 自身 as_of 截断幂等）。
+   a. **myquant/strategies/base.py（改动，接口层）**：新增 **DataWindow(dict)** 窗口隔离代理——保留 keys 枚举（keys()/items()/len()/bool/contains 天然 dict），封死 value 直取（覆写 `__getitem__`：on_bar 阶段 `_slicing_enabled=True` 返回 `≤current_bar_ts` O(1) 切片；on_init/live 阶段放行全量；full_sample_declared=True 逃生口放行；切片开启但时点未设 fail-closed 空）；`get()` 恒全量（pool_builder.build 二次 as_of 截断幂等，用例⑫）。StrategyContext 新增 `__post_init__` 包装 data + `__setattr__` 拦截整体赋值（`context.data={...}` 一律重包，防绕过；live 元素写 `data[symbol]=...` 走 __setitem__ 天然兼容）。
+   b. **三引擎 _refresh_causality_manifest（改动）**：`context_data_scoped` 真实取值——event/mixed 改 **True**（DataWindow 构造即生效，on_bar 封死 value 直取）；vectorized 保持 **False**（逃生口未封，但策略不经 context.data 取数，逃生口已由 full_sample_declared 声明）。create_engine 入口（engine.py:1295）注释更新 + 改 True（结构封死构造即生效）。
+   c. **tests/unit/test_causality_slicing.py（+8 项，TestWindowIsolation）**：用例 1/10（on_bar data["x"] 取不到全量，返回切片）；不误伤（keys 枚举照常 ×4 策略接触点；on_init 放行全量保 ma 预计算；vectorized 逃生口放行）；fail-closed（时点未设空）；get() 全量（build 幂等路径）；live 写入（__setitem__）；**引擎集成用例⑩**（真实 mixed 引擎 on_bar 每 bar 断言 data[symbol] 切片长度=bar 序号，未生效则恒 10 红）。
+   d. **验收结果**：py_compile 通过；targeted 469 passed/1 skipped（含 test_strategies/live_warmup/backtest_consistency_v5/fee_v5/acceptance 基线对拍）；全量回归 **3995 passed/4 skipped/0 failed**（+8 = 本卡 8 项）。**子项⑧完成**：结构封门收官——"策略只能看过去"从访问器约定升级为通道结构保证；**S-3 满足**（改动集中接口层 base.py，三引擎构造点与 live 写入点零改动，不动任何策略代码）；8 接触点实测兼容（7 幂等 + on_init 阶段放行）。
+   e. **纪律遵守**：DataWindow L0（纯 dict + pandas 视图，无跨层 import）；__setattr__ 防绕过（整体赋值重包）；阶段语义与记账互不影响（get_data 经 data.get 取全量自行切片记账）；git 提交（commit message 引用 #342）。**遗留**：⑨不做声明（pandas monkey-patch/provider 记账否决，可能仅文档回写）。
+
 

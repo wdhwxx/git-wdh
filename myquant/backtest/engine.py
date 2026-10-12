@@ -903,7 +903,8 @@ class BacktestEngine(BaseEngine):
                 "current_bar_ts_enforced": self.context.current_bar_ts is not None,
                 "full_sample_declared": bool(self.context.full_sample_declared),
                 "guard_injected": self.context.extra.get("lookahead_guard") is not None,
-                "context_data_scoped": False,
+                # P0-08 子项⑧：DataWindow 窗口隔离构造即生效，on_bar 封死 value 直取（真实）
+                "context_data_scoped": True,
             })
             # ── P0-08 子项⑥：访问器层实测记账评估（P1-07② 判据）──
             # accessed_max_date > current_bar_date → 实测读到未来（真拦截）；
@@ -1292,9 +1293,10 @@ class BacktestScheduler:
                 "current_bar_ts_enforced": False,
                 "full_sample_declared": mode == ENGINE_MODE_VECTORIZED,
                 "guard_injected": bool(kwargs.get("enable_lookahead_guard", True)),
-                # [P0-08 前置登记] context.data value 直取封死状态：当前未封死（诚实 False），
-                # 由 P0-08⑧ 窗口隔离（on_bar 保留 keys 枚举、封死 value 直取）改真实取值
-                "context_data_scoped": False,
+                # [P0-08⑧ 已落地] context.data value 直取已封死：DataWindow 窗口隔离
+                # （on_bar 保留 keys 枚举、封死 value 直取）构造即生效，on_init 阶段
+                # 按阶段语义放行全量（S-2）；运行期由 _refresh_causality_manifest 写真实值
+                "context_data_scoped": True,
             })
             assert_realism_pass(manifest)
             self._realism_manifest = manifest
