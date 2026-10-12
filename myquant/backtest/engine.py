@@ -172,6 +172,8 @@ class BacktestEngine(BaseEngine):
             self._lookahead_guard = lookahead_guard or LookaheadGuard()
         # 订单ID -> 信号日期映射（用于成交时关联信号日，校验T+1规则）
         self._order_signal_dates: Dict[str, str] = {}
+        # P1-07 子项⑤：轻量防未来防线时间线缓存（on_stop 时喂给 LightLookaheadGuard）
+        self._bar_timestamps: List[float] = []
 
         # KP-P3-07: 回测复用实盘 RiskManager（on_init 装配；缺省 None 不拦截）
         self._risk_manager: Optional[Any] = None
@@ -516,6 +518,9 @@ class BacktestEngine(BaseEngine):
         if self.broker is not None and hasattr(self.broker, 'settle_t1'):
             self.broker.settle_t1()
 
+        # P1-07 子项⑤：记录 bar 时间戳（供 LightLookaheadGuard 时间线校验）
+        self._bar_timestamps.append(float(bar.timestamp))
+
         self._event_count += 1
 
     def _execute_signal(self, signal: Signal, bar: Bar) -> None:
@@ -734,6 +739,23 @@ class BacktestEngine(BaseEngine):
         取消所有挂单，计算绩效指标，生成回测结果。
         """
         logger.info("回测引擎停止，开始计算绩效...")
+
+        # P1-07 子项⑤：轻量防未来防线校验（与 mixed/vectorized 同构）
+        from myquant.core.exceptions import LookaheadError as _LightErr
+        from myquant.core.light_lookahead_guard import get_light_lookahead_guard
+        lg = get_light_lookahead_guard()
+        if lg.enabled:
+            try:
+                lg.reset()
+                for ts in self._bar_timestamps:
+                    lg.on_bar_close(ts)
+                lg.assert_pass()
+                if self.result is not None and hasattr(self.result, "extra"):
+                    self.result.extra["light_lookahead_passed"] = True
+            except _LightErr as exc:
+                logger.error("❌ 轻量防未来防线校验未通过: %s", exc)
+                if self.result is not None and hasattr(self.result, "mark_failed"):
+                    self.result.mark_failed(f"轻量防未来防线校验未通过: {exc}")
 
         # 1. 取消所有活跃订单
         if self.broker:
