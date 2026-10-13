@@ -4981,3 +4981,21 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 **纪律遵守**：BacktestConfig 默认改非空段先查测试断言（无 `=={}` 依赖）；test_gate_misconfig.py 蓝图未登记不新建（并入既有测试文件）；R-24 基线同步更新；git 提交（commit message 引用 #354）。**P1-03 卡 ✅ 完成（M2 三卡 P1-01/P1-02/P1-03 全部收官）**。
 
 
+
+## #355 · 2026-10-13 · P1-07 子项③ 空值 fail-closed 校正（[G13] 警告档 → 阻断档）
+
+**卡定义**：P1-07 子项③ "空值 fail-closed（[G13]）⚠️已落地但记'警告档'，须校正为'阻断档'"（方案 §2.10-G13，L314-322）。触发源：`_order_signal_dates.get(order.order_id, "")`（engine.py:491/backtest + live/engine.py:2416）失配（状态恢复、跨引擎订单、订单 ID 复用）。
+
+**落地**：
+- **myquant/core/lookahead_guard.py（改动）**：三处空值分支全部校正为**阻断档 fail-closed**（阻断档违规不带 severity 字段，与既有阻断档一致；audit_log 默认记"错误"）——
+  a. `record_indicator`：**data_end 为空（原零检查）→ 阻断档违规**（无法证明指标计算不含当日）；
+  b. `record_signal`：**signal_date 为空（原警告档）→ 阻断档违规**；**data_end 为空且 signal_date 非空（原零检查）→ 阻断档违规**；
+  c. `record_trade`：**trade_date 为空（原警告档）→ 阻断档违规**；**signal_date 空且 trade_date 非空（原两分支都不进→零违规，G13 首行）→ 阻断档违规**；
+  d. `record_trade` 新增显式豁免参数 `skip_t1_check: bool = False`（P1-07③：豁免必须显式声明，不得用空值静默跳过；默认 False 向后兼容，回测三引擎调用点零改动）。
+- **myquant/live/engine.py（改动）**：成交回报 record_trade 的"同日模拟撮合（paper，trade_date==signal_date）"与"无信号映射成交（手动补单/风控强平）"豁免改**显式 skip_t1_check=True**——不再用"置空 signal_date"静默跳过（该置空正是 G13 空值静默跳过触发路径之一）；成交日早于信号日仍是真违规。行为语义等价（原置空=零检查，现显式豁免=零检查），通道可见化。**R-24 基线 live/engine.py 3063→3065**（净 +2 行功能必需，test_architecture.py 注释留痕）。
+- **myquant/backtest/mixed_engine.py（改动）**：成交记录 guard 块对**无信号映射成交**（止损即时成交，风控动作非信号驱动，不经 submit_order/record_signal 登记）显式 `skip_t1_check=True`——G13 fail-closed 暴露的首个真实触发场景（原零检查，改阻断档后 test_stop_loss 即命中）；与 live 引擎"手动补单/风控强平"同语义豁免；空成交日（时间戳异常哨兵）不豁免仍阻断可见。
+- **tests/unit/test_guard_mounting.py（改动）**：TestFailOpenObservability → **TestFailClosedObservability**——3 项警告档断言改阻断档断言（空值 → assert_pass 抛 LookaheadError）；新增 3 项 fail-closed 用例（record_signal data_end 空 / record_trade signal_date 空 / record_indicator data_end 空）+ 1 项显式豁免用例（skip_t1_check=True 零违规不误伤）；strict 模式空值立即抛错用例同步。
+
+**验收**：py_compile 通过；targeted **186 passed / 1 skipped**（8 文件字母序，含 architecture R-24 + realism_gate 全量注册）；全量 pytest 两轮——首轮 3 failed（test_stop_loss：mixed 止损无信号映射被新阻断逻辑真实命中 → 修复后过；test_config_live_check 2 例：**pre-existing 本地配置漂移**——live_config.yaml 缺 leakage_gate 段、backtest_kunpeng/backtest_config.yaml 缺 adjust_strict（M0-16 契约），git stash 本次改动后单独复跑仍 2 failed，证明与本次改动无关，config/ 系 .gitignore 忽略文件）；二轮 **4030 passed / 4 skipped / 3 failed**（3 例均非本次引入：config 2 例同上 pre-existing + test_heartbeat 1 例 **flaky**——时间敏感心跳 seq 断言，单独重跑 23 passed）。
+
+**纪律遵守**：阻断档违规不带 severity 字段（与既有阻断档一致，`_handle_violation`/`assert_pass` 的"警告档仅记录不阻断"机制保留但已无警告档空值来源）；skip_t1_check 默认 False（既有构造/调用零破坏，仅 live 装配方显式启用）；live 侧豁免显式化不改变实盘行为（原置空=零检查，现显式豁免=零检查）；回测三引擎 record_trade 调用点不传 skip_t1_check → 空值即阻断（G13 fail-closed 语义生效）；git 提交（commit message 引用 #355）。**P1-07 子项③ 校正完成（任务清单 ⚠️ → ✅）**。

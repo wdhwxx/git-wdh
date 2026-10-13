@@ -738,6 +738,10 @@ class MixedBacktestEngine:
         if self._lookahead_guard:
             trade_date = self._bar_date_str(bar)
             signal_date = self._order_signal_dates.get(order.order_id, "")
+            # P1-07③（G13）：无信号映射成交（止损即时成交，风控动作非信号驱动）→
+            # 显式豁免 T+1 校验（与 live 引擎"手动补单/风控强平"同语义）；
+            # 空成交日（时间戳异常哨兵）仍阻断可见，不豁免。
+            skip_t1 = bool(trade_date) and not signal_date
             side_val = order.side.value if hasattr(order.side, "value") else str(order.side)
             self._lookahead_guard.record_trade(
                 symbol=symbol,
@@ -745,6 +749,7 @@ class MixedBacktestEngine:
                 signal_date=signal_date,
                 price_type="OPEN",
                 side=side_val,
+                skip_t1_check=skip_t1,
             )
         logger.debug(
             "成交: %s %s %.0f股@%.2f 手续费=%.2f 滑点=%.2f (%s)",

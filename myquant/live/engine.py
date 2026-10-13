@@ -2409,13 +2409,15 @@ class LiveEngine(BaseEngine):
 
             # ── 任务42：成交回报记录防未来校验（铁律3：信号T日→T+1成交）──
             # 实盘/paper模式下信号当日收盘生成、撮合可能在同日（trade_date==signal_date），
-            # 属"模拟撮合时点"与执行纪律差异，跳过T+1严格校验不误报；
-            # 成交日早于信号日（trade_date<signal_date）才是真违规，保留信号日交guard校验
+            # 属"模拟撮合时点"与执行纪律差异；无信号映射（手动补单/风控强平）无法校验。
+            # P1-07③（G13）：豁免必须显式（skip_t1_check=True），不再用"置空 signal_date"
+            # 静默跳过（空值已升级阻断档 fail-closed）；成交日早于信号日仍是真违规。
             if self._lookahead_guard:
                 trade_date = get_date_part(trade.timestamp) or ""
                 signal_date = self._order_signal_dates.get(trade.order_id, "")
-                if signal_date and trade_date and trade_date == signal_date:
-                    signal_date = ""  # 同日模拟撮合时点，跳过T+1严格校验
+                skip_t1 = bool(signal_date and trade_date and trade_date == signal_date) or (
+                    not signal_date and bool(trade_date)
+                )
                 side = trade.side.value if hasattr(trade.side, 'value') else str(trade.side)
                 self._lookahead_guard.record_trade(
                     symbol=trade.symbol,
@@ -2423,6 +2425,7 @@ class LiveEngine(BaseEngine):
                     signal_date=signal_date,
                     price_type="OPEN",
                     side=side,
+                    skip_t1_check=skip_t1,
                 )
 
             # 触发成交回调

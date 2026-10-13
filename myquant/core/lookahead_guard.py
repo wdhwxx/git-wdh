@@ -217,17 +217,30 @@ class LookaheadGuard:
         )
 
         # 铁律1校验：data_end 必须 < calc_date（不含当日）
-        if data_end and calc_date:
-            if data_end >= calc_date:
-                violation = {
-                    "rule": "铁律1-指标计算不含当日",
-                    "indicator": indicator_name,
-                    "symbol": symbol,
-                    "calc_date": calc_date,
-                    "data_end": data_end,
-                    "message": f"指标[{indicator_name}]计算日[{calc_date}]使用了截止日[{data_end}]的数据，data_end 必须 < calc_date（不含当日）",
-                }
-                self._handle_violation(violation)
+        # P1-07③（G13）：data_end 为空 → 阻断档 fail-closed——无法证明指标计算
+        # 不含当日（原静默零检查，校正为阻断档：宁可阻断，不可静默放行）。
+        if not data_end:
+            self._handle_violation({
+                "rule": "铁律1-指标计算不含当日",
+                "indicator": indicator_name,
+                "symbol": symbol,
+                "calc_date": calc_date,
+                "data_end": data_end,
+                "message": (
+                    f"指标[{indicator_name}]计算日[{calc_date}]未上报数据截止日"
+                    "（data_end 为空），无法证明计算不含当日——fail-closed 阻断"
+                ),
+            })
+        elif calc_date and data_end >= calc_date:
+            violation = {
+                "rule": "铁律1-指标计算不含当日",
+                "indicator": indicator_name,
+                "symbol": symbol,
+                "calc_date": calc_date,
+                "data_end": data_end,
+                "message": f"指标[{indicator_name}]计算日[{calc_date}]使用了截止日[{data_end}]的数据，data_end 必须 < calc_date（不含当日）",
+            }
+            self._handle_violation(violation)
 
         with self._lock:
             self._indicators.append(rec)
@@ -263,27 +276,34 @@ class LookaheadGuard:
         )
 
         # 铁律4校验：因子数据截止日必须 <= 信号日
-        if data_end and signal_date:
-            if data_end > signal_date:
-                violation = {
-                    "rule": "铁律4-因子仅用历史数据",
-                    "symbol": symbol,
-                    "signal_date": signal_date,
-                    "data_end": data_end,
-                    "message": f"信号日[{signal_date}]使用了截止日[{data_end}]的因子数据，data_end 必须 <= signal_date",
-                }
-                self._handle_violation(violation)
-        elif not signal_date:
-            # M1A-04（v3.0 §6.4.7-A）：空信号日（时间戳异常哨兵）不再静默跳过——
-            # 记警告档 violation，使"日期校验跳过"行为可见（警告档仅记录不阻断）。
+        # P1-07③（G13）：空信号日（时间戳异常哨兵）/空 data_end 均无法执行日期
+        # 校验——原警告档/零检查校正为阻断档 fail-closed（宁可阻断，不可静默放行）。
+        if not signal_date:
             self._handle_violation({
                 "rule": "铁律4-因子仅用历史数据",
-                "severity": "警告",
                 "symbol": symbol,
                 "signal_date": signal_date,
                 "data_end": data_end,
-                "message": f"信号日为空（时间戳异常哨兵），铁律4 日期校验跳过：symbol={symbol}",
+                "message": f"信号日为空（时间戳异常哨兵），铁律4 日期校验无法执行——fail-closed 阻断：symbol={symbol}",
             })
+        elif not data_end:
+            # G13：signal_date 非空但 data_end 为空 → 阻断（无法证明因子仅用历史数据）
+            self._handle_violation({
+                "rule": "铁律4-因子仅用历史数据",
+                "symbol": symbol,
+                "signal_date": signal_date,
+                "data_end": data_end,
+                "message": f"信号日[{signal_date}]未上报数据截止日（data_end 为空），无法证明因子仅用历史数据——fail-closed 阻断",
+            })
+        elif data_end > signal_date:
+            violation = {
+                "rule": "铁律4-因子仅用历史数据",
+                "symbol": symbol,
+                "signal_date": signal_date,
+                "data_end": data_end,
+                "message": f"信号日[{signal_date}]使用了截止日[{data_end}]的因子数据，data_end 必须 <= signal_date",
+            }
+            self._handle_violation(violation)
 
         with self._lock:
             self._signals.append(rec)
@@ -295,6 +315,7 @@ class LookaheadGuard:
         signal_date: str = "",
         price_type: str = "",
         side: str = "",
+        skip_t1_check: bool = False,
     ) -> None:
         """
         记录交易成交（铁律3：信号T日收盘→T+1开盘）
@@ -306,6 +327,9 @@ class LookaheadGuard:
         signal_date : 对应信号日（T日）
         price_type : 成交价类型（OPEN / CLOSE / VWAP）
         side : 买卖方向（BUY / SELL）
+        skip_t1_check : 显式豁免铁律3 日期校验（P1-07③：豁免必须显式声明，
+            不得用空值静默跳过——仅限实盘"同日模拟撮合/无信号映射成交"等
+            有意的执行纪律差异场景）。
         """
         if not self._enabled:
             return
@@ -319,33 +343,43 @@ class LookaheadGuard:
         )
 
         # 铁律3校验：成交日必须 > 信号日（T+1成交）
-        if signal_date and trade_date:
-            if trade_date <= signal_date:
-                violation = {
-                    "rule": "铁律3-信号T日收盘→T+1开盘",
-                    "symbol": symbol,
-                    "signal_date": signal_date,
-                    "trade_date": trade_date,
-                    "price_type": price_type,
-                    "message": f"信号日[{signal_date}]在成交日[{trade_date}]成交，违反T+1规则（trade_date 必须 > signal_date）",
-                }
-                self._handle_violation(violation)
-
+        # P1-07③（G13）：空成交日（时间戳异常哨兵）/空信号日（_order_signal_dates
+        # 失配）均无法执行日期校验——原警告档/零检查校正为阻断档 fail-closed
+        # （宁可阻断，不可静默放行）；skip_t1_check 显式豁免是唯一合法跳过通道。
+        if skip_t1_check:
+            pass  # 显式豁免：调用方已声明执行纪律差异，不校验
+        elif not trade_date:
+            self._handle_violation({
+                "rule": "铁律3-信号T日收盘→T+1开盘",
+                "symbol": symbol,
+                "trade_date": trade_date,
+                "signal_date": signal_date,
+                "message": f"成交日为空（时间戳异常哨兵），铁律3 日期校验无法执行——fail-closed 阻断：symbol={symbol}",
+            })
+        elif not signal_date:
+            # G13：signal_date 空、trade_date 非空（订单信号映射失配）→ 阻断
+            self._handle_violation({
+                "rule": "铁律3-信号T日收盘→T+1开盘",
+                "symbol": symbol,
+                "trade_date": trade_date,
+                "signal_date": signal_date,
+                "message": f"成交日[{trade_date}]无对应信号日（订单信号映射失配），铁律3 日期校验无法执行——fail-closed 阻断：symbol={symbol}",
+            })
+        elif trade_date <= signal_date:
+            violation = {
+                "rule": "铁律3-信号T日收盘→T+1开盘",
+                "symbol": symbol,
+                "signal_date": signal_date,
+                "trade_date": trade_date,
+                "price_type": price_type,
+                "message": f"信号日[{signal_date}]在成交日[{trade_date}]成交，违反T+1规则（trade_date 必须 > signal_date）",
+            }
+            self._handle_violation(violation)
+        else:
             # 进一步校验：T日信号应在T+1开盘成交
             if price_type and price_type.upper() not in ("OPEN", "VWAP"):
                 # T+1用收盘价成交也可能是合理的（如次日收盘确认），但标准模式应为开盘
                 pass
-        elif not trade_date:
-            # M1A-04（v3.0 §6.4.7-A）：空成交日（时间戳异常哨兵）不再静默跳过——
-            # 记警告档 violation，使"日期校验跳过"行为可见（警告档仅记录不阻断）。
-            self._handle_violation({
-                "rule": "铁律3-信号T日收盘→T+1开盘",
-                "severity": "警告",
-                "symbol": symbol,
-                "trade_date": trade_date,
-                "signal_date": signal_date,
-                "message": f"成交日为空（时间戳异常哨兵），铁律3 日期校验跳过：symbol={symbol}",
-            })
 
         with self._lock:
             self._trades.append(rec)
@@ -483,7 +517,8 @@ class LookaheadGuard:
         Raises
         ------
         LookaheadError : 存在阻断档未来函数违规时抛出
-        （M1A-04：仅警告档违规——空日期哨兵——返回 True 不阻断，违规列表仍可见）
+        （P1-07③：空值分支已校正为阻断档 fail-closed，不再有警告档空值来源；
+        机制保留——若存在 "警告" 档违规仅记录可见，不阻断）
         """
         if not self._enabled:
             return True

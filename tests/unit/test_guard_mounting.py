@@ -201,12 +201,14 @@ class TestStopLossAndDataAccessMounting:
 
 
 @pytest.mark.lookahead
-class TestFailOpenObservability:
-    """M1A-04（v3.0 §6.4.7-A）：fail-open 可观测化。
+class TestFailClosedObservability:
+    """P1-07③（G13）：空值 fail-closed 阻断档校正。
 
     - engine._bar_date_str 时间戳异常返回哨兵并计数（不再静默）；
-    - guard 空日期（哨兵）记警告档 violation——可见但非阻断；
-    - 阻断档违规仍抛错并落 audit_log（审计落点）。
+    - guard 空日期（信号日/成交日/data_end 哨兵）记**阻断档** violation——
+      assert_pass 抛错（fail-closed：宁可阻断，不可静默放行）；
+    - 显式豁免（skip_t1_check=True）是唯一合法跳过通道（实盘执行纪律差异）；
+    - 阻断档违规抛错并落 audit_log（审计落点）。
     """
 
     def test_bar_date_str_abnormal_counts(self) -> None:
@@ -231,29 +233,70 @@ class TestFailOpenObservability:
         assert out == "2025-07-15"
         assert BacktestEngine._bar_date_failures == 0
 
-    def test_record_signal_empty_signal_date_warns(self) -> None:
-        """空信号日（哨兵）：记警告档 violation，assert_pass 不阻断。"""
+    def test_record_signal_empty_signal_date_blocks(self) -> None:
+        """空信号日（哨兵）：记阻断档 violation，assert_pass 抛错。"""
         guard = LookaheadGuard()
         guard.record_signal("000001.SZ", "", "BUY", data_end="2025-07-10")
         assert len(guard.violations) == 1
-        assert guard.violations[0]["severity"] == "警告"
-        assert guard.assert_pass() is True
+        assert guard.violations[0].get("severity") != "警告"  # 阻断档
+        with pytest.raises(LookaheadError):
+            guard.assert_pass()
 
-    def test_record_trade_empty_trade_date_warns(self) -> None:
-        """空成交日（哨兵）：记警告档 violation，assert_pass 不阻断。"""
+    def test_record_signal_empty_data_end_blocks(self) -> None:
+        """G13：signal_date 非空但 data_end 为空 → 阻断档（无法证明因子仅用历史数据）。"""
+        guard = LookaheadGuard()
+        guard.record_signal("000001.SZ", "2025-07-15", "BUY", data_end="")
+        assert len(guard.violations) == 1
+        assert guard.violations[0].get("severity") != "警告"
+        with pytest.raises(LookaheadError):
+            guard.assert_pass()
+
+    def test_record_trade_empty_trade_date_blocks(self) -> None:
+        """空成交日（哨兵）：记阻断档 violation，assert_pass 抛错。"""
         guard = LookaheadGuard()
         guard.record_trade("000001.SZ", "", signal_date="2025-07-15")
         assert len(guard.violations) == 1
-        assert guard.violations[0]["severity"] == "警告"
-        assert guard.assert_pass() is True
+        assert guard.violations[0].get("severity") != "警告"
+        with pytest.raises(LookaheadError):
+            guard.assert_pass()
 
-    def test_strict_mode_warning_not_raise(self) -> None:
-        """严格模式下警告档仅记录不抛（空日期是数据异常不是未来函数违规）。"""
+    def test_record_trade_empty_signal_date_blocks(self) -> None:
+        """G13：signal_date 空、trade_date 非空（订单信号映射失配）→ 阻断档。"""
+        guard = LookaheadGuard()
+        guard.record_trade("000001.SZ", "2025-07-16", signal_date="")
+        assert len(guard.violations) == 1
+        assert guard.violations[0].get("severity") != "警告"
+        with pytest.raises(LookaheadError):
+            guard.assert_pass()
+
+    def test_record_indicator_empty_data_end_blocks(self) -> None:
+        """G13：record_indicator data_end 为空 → 阻断档（无法证明指标计算不含当日）。"""
+        guard = LookaheadGuard()
+        guard.record_indicator("MA", "000001.SZ", "2025-07-15", data_end="")
+        assert len(guard.violations) == 1
+        assert guard.violations[0].get("severity") != "警告"
+        with pytest.raises(LookaheadError):
+            guard.assert_pass()
+
+    def test_strict_mode_empty_value_raises(self) -> None:
+        """严格模式下空值违规立即抛错（阻断档，fail-closed）。"""
         guard = LookaheadGuard()
         guard.strict = True
-        guard.record_signal("000001.SZ", "", "BUY")
+        with pytest.raises(LookaheadError):
+            guard.record_signal("000001.SZ", "", "BUY")
         assert len(guard.violations) == 1
-        assert guard.violations[0]["severity"] == "警告"
+        assert guard.violations[0].get("severity") != "警告"
+
+    def test_skip_t1_check_explicit_exemption(self) -> None:
+        """P1-07③：显式豁免（skip_t1_check=True）不记违规（实盘执行纪律差异）。"""
+        guard = LookaheadGuard()
+        guard.record_trade(
+            "000001.SZ", "2025-07-16", signal_date="",
+            price_type="OPEN", side="BUY", skip_t1_check=True,
+        )
+        assert guard.stats["trades_recorded"] == 1
+        assert guard.stats["violations"] == 0
+        assert guard.assert_pass() is True
 
     def test_blocking_violation_raises_with_audit(self, monkeypatch) -> None:
         """阻断档违规仍抛错，且审计落点被调用（M1A-04 审计可观测）。"""

@@ -275,7 +275,7 @@ CONFIG_KEY_REQUIRED: set[str] = {
 #   risk_manager 1901→2020（0.7 三条异常交易规则 + anomaly_rules 参数）
 #   acceptance/live_safety_gate.py 1756→1749（0.1~0.9 + LIVE 门槛验收累计，#287~#296；入白名单）
 OVERSIZE_LINE_BASELINE: dict[str, int] = {
-    "monitoring/alerting.py": 3681, "live/engine.py": 3063, "core/event_bus.py": 2379,  # engine 2858→2869（#275 M0-09 出口强制挂载 +11 行治理注入）；alerting 3675→3681（#264 工厂注册代码）；event_bus 2383→2379（#261 事件池注入化）
+    "monitoring/alerting.py": 3681, "live/engine.py": 3065, "core/event_bus.py": 2379,  # engine 2858→2869（#275 M0-09 出口强制挂载 +11 行治理注入）；alerting 3675→3681（#264 工厂注册代码）；event_bus 2383→2379（#261 事件池注入化）；live/engine 3063→3065（#355 P1-07③ 空值 fail-closed：成交回报豁免显式化 skip_t1_check，净 +2 行功能必需）
     "live/scheduler.py": 2419, "monitoring/metrics_collector.py": 2273,  # 2382→2409（#265 阶段二 7 处装配点改经注册表，代码行增长）；metrics 2268→2273（#264 工厂注册代码）
     "monitoring/action_engine.py": 2307, "data_access/manager.py": 2200,  # 2170→2186→2200（#281 M1A-01/06 每股收益时点日基收敛+失败可观测化；M1A-10 available_time 增量派生+存量补列）
     "live/brokers/qmt_broker.py": 2170, "live/data_feed.py": 2147,
