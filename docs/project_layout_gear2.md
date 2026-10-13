@@ -764,6 +764,7 @@ Pythonwdhmm/
 
 │   │   ├── test_manifest_truthfulness.py # ✨【回写#337】manifest 真实性反红测试（P0-08 子项③用例⑪：create_engine manifest 真实构建 + 7 组硬编码乐观值改真实读取）
 │   │   ├── test_data_quality_gate.py # ✨【回写#363】P1-13 回测期数据质量门禁（21 项）：scan_data_quality 纯函数（NaN 价/OHLC 违例）/ provider 模块级累计 / engine._scan_entry_data_quality 入口聚合（data dict/None 占位/覆盖率截断）/ data_pit coverage_rate<0.5 critical / enabled=True fail-closed 反红（NaN/OHLC/低覆盖率 → RealismGateError）
+│   │   ├── test_data_snapshot_pin.py # ✨【回写#364】P1-12 数据快照 pin（15 项）：compute_data_snapshot L0 纯函数（空目录/哈希稳定/内容变化/忽略非数据文件/snapshot_id=前12字符）/ verify_sidecar（首次自动 pin / 一致 / 新增文件 / 改文件 / sidecar 损坏 / 缓存命中+reset 重扫）/ data_pit 指纹判据（applicable 缺失·不一致 critical、不适用跳过）/ _derive_status（applicable+None→unverified）
 
 │   │   ├── test_slicing_failopen_guard.py # ✨【回写#338】因果切片 fail-open 加固反红测试（P0-08 子项④用例⑫：engine/mixed 置位失败显式降级——保持未封门 + 哨兵计数 + 写 context_sliced=false）
 
@@ -994,7 +995,7 @@ Pythonwdhmm/
     │   │   ├── __init__.py           # 导入四子模块触发注册
     │   │   ├── market_rules.py       # 涨跌停/停牌/T+1/整手 未启用 → critical
     │   │   ├── cost_model.py         # 零滑点/佣金费率为零 → critical
-    │   │   ├── data_pit.py           # 复权降级标的/快照指纹 null/NaN 价格/OHLC 违反 → critical；✨【回写#363】P1-13 补 coverage_rate<0.5 → critical（数据覆盖率判据，None 不判）
+    │   │   ├── data_pit.py           # 复权降级标的/快照指纹 null/NaN 价格/OHLC 违反 → critical；✨【回写#363】P1-13 补 coverage_rate<0.5 → critical（数据覆盖率判据，None 不判）；✨【回写#364】P1-12 恢复指纹判据（#346 占位）：snapshot_applicable=True 下 fingerprint_hash=None → critical（快照缺失）/ data.snapshot_mismatch=True → critical（重跑目录与 sidecar 基线不一致）；applicable=False（内存预加载/live）跳过不判
     │   │   ├── sample_pool.py        # PIT 选股未生效/today 口径/幸存者偏差折价 null → critical
     │   │   └── causality.py          # ✨【回写#334·P0-08 前置登记，#339/#340 已实现】因果性收口检查（P0-08 子项⑤/⑥）：`context_sliced=False` 且未声明全量 → critical；`accessed_future`（访问器层实测读到未来，P1-07② 判据）→ critical；`static_declared_but_accessed_future`（静态声明 vs 实测矛盾，用例⑭）→ critical；接入子项④ fail-open 降级信号（`bar.timestamp` 异常不得静默放行）；L0，只可引用 L0，运行时事实以数据契约注入（R-02/R-16）；R-19 必配测试（tests/unit/test_checks_causality.py 新增）
 
@@ -1046,7 +1047,7 @@ Pythonwdhmm/
 
     │   ├── loader.py                 # ✨【V5·P0】数据加载器（回测专用）：预取next_chunk+分块加载（chunk_size）+流水线模式（多bar并行预取）+内存水位降级（联动utils/memory_watcher，超阈值自动降为单块流式）；三模式引擎共用同一加载路径；✨【回写#105】import 由 backtest.data_loader 改为 data_access.provider（同包），打断 data_access <-> backtest 循环依赖
 
-    │   ├── provider.py               # ✨【回写#105】历史数据提供层（2026-10-03 自 backtest/data_loader.py 下沉）：DataProviderBase 抽象基类 + HistoricalDataProvider（从 datasets/processed 加载 parquet/csv，严格 end_date 过滤防未来，hfq/qfq 复权现算按 factor_sync_service 因子表内存变换，EN→CN 列名兜底）；require_ohlcv 校验；backtest/data_loader.py 变为 re-export 薄壳，18 处历史调用方零改动；✨【回写#136】get_bars 前收盘价兜底派生（列缺失时收盘价.shift(1)）+ _recompute_price_derived_metrics 复权现算后同步刷新前收盘价；✨【回写#281】M1A-05 fail-open B + 复权治理 + PIT 访问：静默降级 raw 可观测化（_adjust_degraded_symbols 集合 + _append_adjust_degradation 落审计）、qfq+end_date=None 显式 warning（未来除权缩放穿越风险）、default_adjust_strict 构造参数、load_asof(decision_time) 严格 PIT + asof_join（merge_asof backward 只取历史）；✨【回写#363】P1-13 数据质量统计：scan_data_quality（NaN 价/OHLC 关系违例 L0 纯函数）+ accumulate_data_quality/get_data_quality_stats/reset_data_quality_stats 模块级累计（get_bars 出口统计，引擎收尾回写 manifest.quality.*）
+    │   ├── provider.py               # ✨【回写#105】历史数据提供层（2026-10-03 自 backtest/data_loader.py 下沉）：DataProviderBase 抽象基类 + HistoricalDataProvider（从 datasets/processed 加载 parquet/csv，严格 end_date 过滤防未来，hfq/qfq 复权现算按 factor_sync_service 因子表内存变换，EN→CN 列名兜底）；require_ohlcv 校验；backtest/data_loader.py 变为 re-export 薄壳，18 处历史调用方零改动；✨【回写#136】get_bars 前收盘价兜底派生（列缺失时收盘价.shift(1)）+ _recompute_price_derived_metrics 复权现算后同步刷新前收盘价；✨【回写#281】M1A-05 fail-open B + 复权治理 + PIT 访问：静默降级 raw 可观测化（_adjust_degraded_symbols 集合 + _append_adjust_degradation 落审计）、qfq+end_date=None 显式 warning（未来除权缩放穿越风险）、default_adjust_strict 构造参数、load_asof(decision_time) 严格 PIT + asof_join（merge_asof backward 只取历史）；✨【回写#363】P1-13 数据质量统计：scan_data_quality（NaN 价/OHLC 关系违例 L0 纯函数）+ accumulate_data_quality/get_data_quality_stats/reset_data_quality_stats 模块级累计（get_bars 出口统计，引擎收尾回写 manifest.quality.*）；✨【回写#364】P1-12 数据快照 pin：compute_data_snapshot（processed 目录全文件 sha256 内容哈希 + 目录级 fingerprint_hash/snapshot_id，L0 纯函数）+ write_sidecar（.snapshot.json 原子写）+ verify_sidecar（首次自动 pin / 一致通过 / 增删改→matched=False 带 diff / sidecar 损坏 fail-closed）+ reset_data_snapshot（按目录分键模块缓存，改目录须 reset 重扫）
 
     │   ├── full_clean_service.py     # ✨【回写】全量清洗业务逻辑层：FullCleanService——DB读取→清洗管线→事务写回→清洗元信息落库→bad归档→可选重建processed（subprocess调scripts/数据导出_DB到processed.py）；唯一调用方=scripts/数据全量清洗.py（CLI与GUI全量清洗对话框共用）；业务逻辑归myquant，脚本只做薄入口（架构纪律）；✨【回写#77】F4 新增公共函数 resolve_incremental_symbols（filter_excluded_symbols+filter_st_blacklist_symbols串联，读config/data_clean_run.json 14条实口径，json缺失回退DEFAULT_EXCLUDE_RULES+warning；返回keep+stats；防焊死：每次调用实时推导）——供增量下载与全量导出共用范围口径；✨【回写#79】新增 SUSPEND_DB_REL_PATH + filter_long_suspended_symbols（按 market_data(daily,hfq) MAX(trade_date) 与参考日 gap > exclude_suspended_days 剔除，等于阈值保留；DB无记录/解析失败/查询异常/阈值≤0 均保留不阻断；ref_date 可注入防未来）；resolve_incremental_symbols 串联该规则（stats 增 excluded_suspended，config 缺省 0 不启用）；FullCleanService.__init__ 读 exclude_suspended_days、resolve_symbols 用 dq.conn 同口径串联（全量/增量一致）；✨【回写#87】DEFAULT_EXCLUDE_RULES 10→14 条（补 68/90/20/99，与 config/data_clean_run.json + financial_sync_service 内置兜底一致，防 config 缺失时 B 股/科创板复活）
 
@@ -5151,3 +5152,21 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 **验收**：新测试 21 passed；targeted 148 passed（architecture 35 + config_live_check 22 + manifest_truthfulness + realism_gate 系列）；全量 pytest commit 前回填；真实数据基线无 NaN/OHLC 违例 → 生产回测不误伤；coverage 阈值 0.5（过半缺数据才拒，停牌小标的可容纳）。
 
 **纪律遵守**：蓝图目录树先行登记（provider.py 函数标注 / data_pit.py 判据标注 / tests/unit/test_data_quality_gate.py 新增行）；R-24 基线同步注释留痕；L0 纯函数不 import strategies（R-02）；S-11 诚实披露（quality.* CRITICAL_FIELDS 用构造占位 + 收尾真实回写替代硬编码乐观常量）；防未来（统计在 get_bars end_date 过滤后，只消费当前窗口）；全量 pytest 0 failed 才提交；git 提交（commit message 引用 #363）。**P1-13 完成（任务清单 ⬜ → ✅）**。
+
+---
+
+## #364 · 2026-10-13 · P1-12 数据快照 pin（processed 目录内容指纹 + sidecar 重跑校验）
+
+**现状核实**：engine `_attach_realism_manifest` 入口 `fingerprint_hash`/`snapshot_id` **硬编码 None**（ALLOW_NONE_FIELDS 放行不报错）→ data_pit 指纹判据（#346 因"采集未接线"被显式移除，留注释"接线后恢复"）空转；重跑若 processed 目录被增删改，门禁无从察觉（同轮回测不可复现）。
+
+**落地**：
+- **myquant/data_access/provider.py（改动，新增模块级函数区）**：`compute_data_snapshot(processed_dir)` L0 纯函数——扫描目录全部 .parquet/.csv，逐文件流式 sha256（1MB 分块，824MB/3195 标的全量摘要约数秒），记 {size, mtime_ns, sha256}，再对规范化文件清单整体 sha256 得目录级 `fingerprint_hash`、`snapshot_id`=前 12 字符；`write_sidecar` 写 `.snapshot.json`（临时文件 + replace 原子写，与数据同目录入 datasets/ 不入 git）；`verify_sidecar`——sidecar 不存在→首次自动 pin（first_pin=True）；存在则比对指纹，一致 matched=True，增删改→matched=False 带 diff（added/removed/changed）；sidecar 损坏按不一致 fail-closed（不静默当基线）；`reset_data_snapshot`（按目录路径分键的模块级缓存，同进程同目录不重复全量哈希；改目录须 reset 重扫——生产进程一个回测只 verify 一次，测试 tmp_path 天然分键不串扰）。
+- **myquant/backtest/engine.py（改动，R-24 基线 1681→1705 同步）**：`_attach_realism_manifest` 入口 `fingerprint_hash`/`snapshot_id` 由硬编码 None 改真实采集——data=None（provider 场景，从 processed 读）调 `verify_sidecar()` 写真值 + `data.snapshot_applicable=True` + `data.snapshot_mismatch=not matched`；data dict 预加载（内存数据/测试）→ `snapshot_applicable=False`（不扫目录，data_pit 跳过指纹判据，避免性能损耗与误伤）。
+- **myquant/realism_gate/manifest.py（改动）**：CRITICAL_FIELDS 新增 `data.snapshot_applicable` / `data.snapshot_mismatch`；`_derive_status()` 补"快照适用 + 指纹 None → unverified"（方案 §4.5 L542：null→unverified）。
+- **myquant/realism_gate/checks/data_pit.py（改动）**：恢复 #346 移除的指纹判据——`snapshot_applicable=True` 下 fingerprint_hash=None→critical（快照缺失）/ snapshot_mismatch=True→critical（重跑目录与 sidecar 基线不一致）；applicable=False（内存预加载/live）跳过不判。
+- **tests/unit/test_data_snapshot_pin.py（新建，15 项）**：compute 纯函数 4（空目录/哈希稳定·内容变化/忽略非数据文件/snapshot_id=前12）/ sidecar 校验 6（首次自动 pin/一致/新增文件/改文件/损坏/缓存命中+reset 重扫）/ data_pit 判据 3（缺失 critical/不一致 critical/不适用跳过）/ _derive_status 2（applicable+None→unverified、有指纹→ok）。连带 4 个既有 _fill_minimal/_make_full_manifest 补 `data.snapshot_applicable=False`/`data.snapshot_mismatch=False`（新 CRITICAL_FIELDS 必须喂合法值，否则 ManifestIncompleteError）。
+- **tests/unit/test_architecture.py（改动）**：OVERSIZE_LINE_BASELINE backtest/engine.py 1681→1705（#364 P1-12 功能必需 +24 行，注释留痕）。
+
+**验收**：新测试 15 passed；targeted 110 passed（architecture/config_live_check/manifest_truthfulness/realism_gate 系列/causality/data_quality/snapshot_pin 全绿）；全量 pytest commit 前回填。生产真实目录 3195 parquet/824MB 首次跑自动写 sidecar 固化基线（用户显式删除 .snapshot.json 即重新 pin 确认新数据）。
+
+**纪律遵守**：蓝图目录树先行登记（provider.py 函数标注 / data_pit.py 判据标注 / tests/unit/test_data_snapshot_pin.py 新增行）；R-24 基线同步注释留痕；L0 纯函数（compute_data_snapshot）不 import 引擎（R-02/R-16 分层合规，运行时事实由引擎调用注入）；S-11 诚实披露（快照采集失败按 None 缺失披露、不写乐观常量）；防未来（快照只哈希静态文件、不涉时序数据）；import 分三组（标准库 hashlib/json/datetime + 第三方 pandas + 本地 myquant）；禁裸 except（异常带类型 + 注释说明）；全量 pytest 0 failed 才提交；git 提交（commit message 引用 #364）。**P1-12 完成（任务清单 ⬜ → ✅，M7 第二卡）**。

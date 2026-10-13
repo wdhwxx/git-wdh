@@ -283,7 +283,7 @@ OVERSIZE_LINE_BASELINE: dict[str, int] = {
     "web/dashboard.py": 1760, "ml/training_pipeline.py": 1672,  # 1651→1672（#358 P1-11 训练出口泄漏审计报告薄接线 +21 行功能必需）
     "monitoring/dynamic_baseline.py": 1546,  # 1552→1546（#260 去全局采集器兜底）
     "acceptance/live_safety_gate.py": 1749,  # 回写#296：实盘安全门禁验收（0.1~0.9 + LIVE 门槛 31 项）
-    "backtest/engine.py": 1681,  # 回写#349：核心引擎超 1500 入白名单（R-24 冻结基线；
+    "backtest/engine.py": 1705,  # 回写#349：核心引擎超 1500 入白名单（R-24 冻结基线；
                                 # 增量来源：三引擎共用 _attach_realism_manifest 模块级函数；
                                 # 1524→1531（#350 基准数据治理：基准加载 adjust="raw" 语义注释）；
                                 # 1531→1550（#354 P1-03 收尾：_attach 段缺失拒启——配置缺失=阻断，
@@ -292,7 +292,9 @@ OVERSIZE_LINE_BASELINE: dict[str, int] = {
                                 # leakage_report +49 行功能必需；P2-11 decision_time 取 config.end_date）；
                                 # 1599→1681（#363 P1-13 回测期数据质量门禁：入口 quality 真实化
                                 # _scan_entry_data_quality + 收尾 provider 累计回写（含真实覆盖率），
-                                # +82 行功能必需））
+                                # +82 行功能必需）；
+                                # 1681→1705（#364 P1-12 数据快照 pin：入口 fingerprint_hash/
+                                # snapshot_id 由硬编码 None 改真实 verify_sidecar 采集，+24 行功能必需））
 }
 
 # R-19 零覆盖基线：✅ 已冻结（回写#256）。冻结集合 = 2026-10-08 实测引用级零覆盖业务模块 49 个
