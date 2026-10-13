@@ -5105,3 +5105,18 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 - **遗留仅为任务清单状态行滞后**（仍 ⚠️"待补约 3 行"，系 2026-10-12 复核后未随 #347 同步更新）→ 本次修正为 ✅，并补本核实回写。
 
 **验收**：test_config_builder.py 16 passed；全量 pytest（commit 前回填，基线 4049 passed / 4 skipped / 0 failed，本次无代码改动预期保持）。**P0-05 完成（任务清单 ⚠️ → ✅）**。
+
+## #361 · 2026-10-13 · P1-09 流动性约束落地收尾（participation_rate 配置段显式化）
+
+**卡定义**：任务清单 P1-09（L160）"流动性约束落地"——participation_rate 进配置并透传；无法建模显式声明无限流动性。原状态 ⚠️ 部分完成（#328：字段已进 `BacktestConfig`/`sim_broker`、引擎读点已接），遗留"无任何 YAML 设置 participation_rate + config_builder 不传 → 恒默认 1.0"。
+
+**核实**：config_builder 透传已由 **#347 一并落地**（`participation_rate=float(sim_broker_cfg.get("participation_rate", 1.0))`，L209）；引擎读点 mixed_engine.py:1268（`getattr(self.config, "participation_rate", 1.0)`）与 vectorized 已接。**剩余仅 YAML 无显式键**。
+
+**落地**：
+- **config/backtest_config.yaml / config/backtest_kunpeng.yaml（改动，.gitignore 忽略不入 commit）**：sim_broker 段 `lot_size` 后补 `participation_rate: 1.0`（1.0=全量成交，**显式声明无限流动性假设**，卡定义语义；行为与既有默认一致，消除隐式）。
+- **config/backtest_config.example.yaml（改动，tracked 入 commit）**：sim_broker 段补 `participation_rate: 1.0` + 行内注释（1.0=全量成交显式声明无限流动性；<1.0 按比例缩量成交），文档口径与真实配置一致。
+- **顺带登记（不改）**：两个真实 YAML 仍用旧键 `enforce_limit_up_down: true`（#347 已统一为 `enforce_limit`，tracked 文件均已同步，本地两个真实 YAML 未同步 → config_builder 读 `enforce_limit` 默认 False，涨跌停不强制）。属 P0-03 键名统一范围外的本地配置同步问题，登记提示，待用户确认后处理。
+
+**验收**：pyyaml 三文件解析 OK（participation_rate=1.0）；真实构建 `build_backtest_config` → `BacktestConfig.participation_rate=1.0`（symbols=3207，透传链闭环）；targeted **107 passed**（test_config_live_check 22 / test_config_builder 16 / test_manifest_truthfulness / realism_gate 系列）；全量 pytest commit 前回填。
+
+**纪律遵守**：只动 sim_broker 段（3 文件各补 1 键）；值 1.0 不改变行为（显式化而非行为变更）；example 为 tracked 文件入 commit 留痕、真实 YAML 忽略文件本地生效（与既有 config/ 治理口径一致）；enforce_limit_up_down 旧键登记不越界修改（P0-03 范围外）；git 提交（commit message 引用 #361）。**P1-09 完成（任务清单 ⚠️ → ✅）**。

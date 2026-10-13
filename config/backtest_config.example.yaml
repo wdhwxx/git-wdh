@@ -98,6 +98,7 @@ sim_broker:
   slippage_value: 0.0002              # 滑点数值（ratio模式为万2，与实盘冲击成本一致）
   enable_t1: true                     # A股T+1交易限制（true=当日买入不可卖）
   lot_size: 100                       # 最小交易单位100股（1手）
+  participation_rate: 1.0              # 单笔成交参与率（1.0=全量成交，显式声明无限流动性假设；<1.0 按比例缩量成交）
   price_limit_pct: 0.10               # 涨跌停限制（普通股票10%）
   enforce_limit: true         # 涨跌停日是否允许成交（涨停不能买，跌停不能卖）
 
