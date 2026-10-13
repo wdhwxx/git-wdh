@@ -206,9 +206,18 @@ def _attach_realism_manifest(
             manifest.set_field("adjust_degraded_symbols", get_adjust_degraded_symbols())
         except Exception:
             manifest.set_field("adjust_degraded_symbols", [])
-        manifest.set_field("quality.nan_price_rows", 0)
-        manifest.set_field("quality.ohlc_violation_rows", 0)
-        manifest.set_field("quality.coverage_rate", 1.0)
+        # P1-13 回测期数据质量门禁：真实数据质量统计（替换硬编码 0/1.0 乐观值）。
+        # data dict 预加载（传统 create_engine）：入口扫描每标的 DataFrame →
+        # manifest.quality.* 写真实值，data_pit 判据（NaN 价>0 / OHLC 违例>0 /
+        # coverage_rate<0.5 → critical）经 assert_realism_pass 在引擎创建前
+        # fail-closed 阻断（不静默放行脏数据）；
+        # data=None/非 dict（provider 场景，run 时 on_init 加载）：入口写构造占位
+        # （0 NaN/0 OHLC + coverage 1.0 无缺陷证据，CRITICAL_FIELDS 不可写 None），
+        # 运行期 provider.get_bars 累计真实统计，收尾 _refresh 回写覆盖（含真实覆盖率）。
+        _quality_stats = _scan_entry_data_quality(data, config)
+        manifest.set_field("quality.nan_price_rows", _quality_stats["nan_price_rows"])
+        manifest.set_field("quality.ohlc_violation_rows", _quality_stats["ohlc_violation_rows"])
+        manifest.set_field("quality.coverage_rate", _quality_stats["coverage_rate"])
         manifest.set_field("fingerprint_hash", None)
         manifest.set_field("snapshot_id", None)
         manifest.set_field("pool.pit_applied", True)
@@ -253,12 +262,60 @@ def _attach_realism_manifest(
     except Exception as rg_e:  # noqa: BLE001
         # P1-05：enabled=True 时不吞门禁异常（违规 → 传播导致非零退出）；
         # enabled=False 时保持软接线（仅审计不阻断）。
-        _rg_cfg = RealismGateConfig.from_dict(rg_cfg)
+        _rg_cfg = RealismGateConfig.from_dict(rg_raw)
         if _rg_cfg.enabled:
             raise
         logger.debug(f"真实性门禁软接线（不阻断）: {type(rg_e).__name__}: {rg_e}")
         engine._realism_manifest = None
     return engine._realism_manifest
+
+
+def _scan_entry_data_quality(
+    data: Optional[Dict[str, pd.DataFrame]],
+    config: BacktestConfig,
+) -> Dict[str, Any]:
+    """P1-13 入口数据质量统计（引擎创建前，替换硬编码乐观值）。
+
+    data dict 预加载场景：对每标的 DataFrame 调 ``scan_data_quality`` 聚合
+    nan_price_rows / ohlc_violation_rows；coverage_rate = 已加载标的数 / 请求标的数
+    （有数据标的占比，真实值替换原硬编码 1.0，上限截断 1.0 防基准混入超 100%）；
+    data 为 None（provider 场景，run 时 on_init 才加载）：三项均写 None
+    （S-11 诚实披露"未统计"，运行期由 provider.get_bars 累计、收尾 _refresh 回写）。
+
+    Args:
+        data: 已加载的 {symbol: DataFrame}（create_engine 入口传入）。
+        config: 回测配置（symbols 请求池，coverage 分母）。
+
+    Returns:
+        统计字典 {"nan_price_rows", "ohlc_violation_rows", "coverage_rate"}，
+        其中覆盖率可能为 None（data 为空或请求池为空）。
+    """
+    if data is None or not isinstance(data, dict) or len(data) == 0:
+        # provider 场景（run 时 on_init 才加载）或 data 非 dict：入口无预加载数据可扫描，
+        # 写构造占位（0 NaN/0 OHLC 违例 + coverage 1.0=无覆盖率缺陷证据）——
+        # quality.* 属 CRITICAL_FIELDS 不可写 None；运行期 provider.get_bars 累计真实统计，
+        # 收尾 _refresh 回写覆盖（与 causality 组入口 False/运行期 True 的构造占位模式一致，
+        # 收尾 assert 前 data_pit 判据真实生效，含真实覆盖率）
+        return {"nan_price_rows": 0, "ohlc_violation_rows": 0, "coverage_rate": 1.0}
+    from myquant.data_access.provider import scan_data_quality
+
+    nan_total = 0
+    ohlc_total = 0
+    for symbol, df in data.items():
+        if df is None or df.empty:
+            continue
+        _s = scan_data_quality(df, symbol=str(symbol))
+        nan_total += _s["nan_price_rows"]
+        ohlc_total += _s["ohlc_violation_rows"]
+    _req = len(getattr(config, "symbols", None) or [])
+    _coverage: Optional[float] = None
+    if _req > 0:
+        _coverage = min(1.0, len(data) / _req)
+    return {
+        "nan_price_rows": nan_total,
+        "ohlc_violation_rows": ohlc_total,
+        "coverage_rate": _coverage,
+    }
 
 
 class BacktestEngine(BaseEngine):
@@ -1189,6 +1246,31 @@ class BacktestEngine(BaseEngine):
             # 空集且无回写点，判据永不触发，真实降级被隐藏）
             from myquant.data_access.provider import get_adjust_degraded_symbols
             _m.set_field("adjust_degraded_symbols", get_adjust_degraded_symbols())
+            # P1-13：收尾回写运行期数据质量统计（provider 场景入口 data=None 未统计；
+            # 运行期 provider.get_bars 逐窗口累计 → 聚合回写真实值 → data_pit 判据
+            # 在 assert 前真实生效：回测期发现的 NaN 价/OHLC 违例在此阻断，不静默）
+            try:
+                from myquant.data_access.provider import get_data_quality_stats
+
+                _dq = get_data_quality_stats()
+                if _dq:
+                    _m.set_field(
+                        "quality.nan_price_rows",
+                        sum(v["nan_price_rows"] for v in _dq.values()),
+                    )
+                    _m.set_field(
+                        "quality.ohlc_violation_rows",
+                        sum(v["ohlc_violation_rows"] for v in _dq.values()),
+                    )
+                    # 真实覆盖率 = 运行期实际加载标的数 / 请求标的数（provider 场景
+                    # 入口占位 1.0 在此被真实值覆盖；缺数据未加载标的 → <1.0 → data_pit
+                    # 判据（<0.5 → critical）在收尾 assert 前真实生效）
+                    _m.set_field(
+                        "quality.coverage_rate",
+                        min(1.0, len(_dq) / max(1, len(self.config.symbols))),
+                    )
+            except Exception as _dq_e:  # noqa: BLE001
+                logger.debug("收尾数据质量统计回写失败（保留入口值）: %s", _dq_e)
             assert_realism_pass(_m)
         except Exception as exc:  # noqa: BLE001
             if get_config().enabled:

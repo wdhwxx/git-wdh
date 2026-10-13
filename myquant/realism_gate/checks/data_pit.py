@@ -66,6 +66,21 @@ def check_data_pit(manifest: RealismManifest) -> List[RealismViolation]:
             actual_value=ohlc_bad,
         ))
 
+    # 覆盖率过低（P1-13：过半请求标的无数据 → 样本代表性不足，fail-closed 阻断；
+    # 非数值（未统计/占位串）不判——CRITICAL_FIELDS 兜底 "test" 类占位不应误伤）
+    coverage = manifest.get_field("quality.coverage_rate", None)
+    if (
+        isinstance(coverage, (int, float))
+        and not isinstance(coverage, bool)
+        and coverage < 0.5
+    ):
+        violations.append(RealismViolation(
+            field_path="quality.coverage_rate",
+            critical=True,
+            message=f"数据覆盖率 {coverage:.2%} < 50%（过半请求标的无数据，样本代表性不足）",
+            actual_value=coverage,
+        ))
+
     return violations
 
 

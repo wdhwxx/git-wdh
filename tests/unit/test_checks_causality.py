@@ -89,6 +89,9 @@ def _make_full_manifest(context_sliced: bool) -> RealismManifest:
             manifest.set_field(path, False)
         elif path in ("quality.nan_price_rows", "quality.ohlc_violation_rows"):
             manifest.set_field(path, 0)
+        elif path == "quality.coverage_rate":
+            # P1-13（#363）：覆盖率判据（<0.5 → critical）新增后喂合法值防误伤
+            manifest.set_field(path, 1.0)
         elif path in ("pool.requested_count", "pool.admitted_count"):
             manifest.set_field(path, 1)
         elif path == "pool.dropped_count":

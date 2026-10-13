@@ -68,6 +68,26 @@ def reset_adjust_degraded() -> None:
     _adjust_degraded_symbols.clear()
 
 
+#: P1-13（回测期数据质量门禁）：各标的加载窗口的数据质量统计累计
+#: （nan_price_rows / ohlc_violation_rows）；供引擎入口断言与收尾回写
+#: manifest.quality.*（fail-closed：发现脏数据在引擎创建前/收尾阻断，不静默）。
+_DATA_QUALITY_STATS: Dict[str, Dict[str, int]] = {}
+
+
+def get_data_quality_stats() -> Dict[str, Dict[str, int]]:
+    """返回本次回测数据质量统计快照（P1-13：注入 manifest.quality.*）。
+
+    每次回测前应调用 reset_data_quality_stats() 清空，回测后由引擎读取
+    并写入 RealismManifest.quality.*（NaN 价行数 / OHLC 关系违例行数）。
+    """
+    return {k: dict(v) for k, v in sorted(_DATA_QUALITY_STATS.items())}
+
+
+def reset_data_quality_stats() -> None:
+    """清空数据质量统计（每次回测开始前调用，避免跨回测累积）。"""
+    _DATA_QUALITY_STATS.clear()
+
+
 #: 英文列名 → 中文列名映射（引擎内部统一使用中文表头）
 #: processed 导出脚本已将表头改为全中文；此处对来自数据库/旧英文表头的数据统一兜底转中文
 EN_TO_CN_COLUMN_MAP: Dict[str, str] = {
@@ -121,6 +141,65 @@ def require_ohlcv(df: pd.DataFrame, symbol: str = "") -> None:
         f"{prefix}行情缺少 OHLCV 列（需中文列 {REQUIRED_CN_OHLCV_COLUMNS} "
         f"或英文列 {REQUIRED_EN_OHLCV_COLUMNS}），实际列: {cols}"
     )
+
+
+#: P1-13 数据质量统计判据列（中文价格列；英文列经 get_bars EN→CN 转换后统一）
+_QUALITY_PRICE_COLUMNS: Tuple[str, ...] = ("开盘价", "最高价", "最低价", "收盘价")
+
+
+def scan_data_quality(df: pd.DataFrame, symbol: str = "") -> Dict[str, int]:
+    """扫描单标的 DataFrame 的数据质量统计（P1-13 回测期数据质量门禁）。
+
+    统计项：
+      - ``nan_price_rows``: 开盘价/最高价/最低价/收盘价 任一为 NaN 的行数
+        （坏值经 to_numeric(coerce) 变 NaN 后若未被清洗，回测可能产生异常成交）；
+      - ``ohlc_violation_rows``: OHLC 关系违反行数（high<low / high<open /
+        high<close / low>open / low>close，数据源错误或除权对齐错位信号）。
+
+    L0 纯函数：只消费传入 DataFrame，不读取外部状态（R-02 分层合规）。
+
+    Args:
+        df: 待扫描的行情 DataFrame（中文价格列；英文列请先经 EN→CN 转换）。
+        symbol: 标的代码（仅用于错误信息定位，可空）。
+
+    Returns:
+        统计字典 {"nan_price_rows": int, "ohlc_violation_rows": int}；
+        价格列缺失时返回全 0（列完整性由 require_ohlcv 另行校验）。
+    """
+    result = {"nan_price_rows": 0, "ohlc_violation_rows": 0}
+    if not all(c in df.columns for c in _QUALITY_PRICE_COLUMNS):
+        return result
+    o = df["开盘价"]
+    h = df["最高价"]
+    l = df["最低价"]
+    c = df["收盘价"]
+    result["nan_price_rows"] = int((o.isna() | h.isna() | l.isna() | c.isna()).sum())
+    result["ohlc_violation_rows"] = int(
+        ((h < l) | (h < o) | (h < c) | (l > o) | (l > c)).sum()
+    )
+    return result
+
+
+def accumulate_data_quality(symbol: str, df: pd.DataFrame) -> None:
+    """累计单标的加载窗口的数据质量统计（P1-13，get_bars 出口调用）。
+
+    统计值记入模块级 _DATA_QUALITY_STATS（每次回测前 reset 清空）；
+    仅累计非空且价格列完整的窗口，避免空 df/缺列误记。
+
+    Args:
+        symbol: 标的代码。
+        df: 已加载清洗后的行情 DataFrame（中文列）。
+    """
+    if df is None or df.empty:
+        return
+    stats = scan_data_quality(df, symbol=symbol)
+    _DATA_QUALITY_STATS[symbol] = {
+        "nan_price_rows": _DATA_QUALITY_STATS.get(symbol, {}).get("nan_price_rows", 0)
+        + stats["nan_price_rows"],
+        "ohlc_violation_rows": _DATA_QUALITY_STATS.get(symbol, {}).get(
+            "ohlc_violation_rows", 0
+        ) + stats["ohlc_violation_rows"],
+    }
 
 
 # ═══════════════════════════════════════════
@@ -536,6 +615,11 @@ class HistoricalDataProvider(DataProviderBase):
             )
         else:
             logger.warning(f"{symbol} 过滤后无数据")
+
+        # P1-13 回测期数据质量门禁：加载出口累计数据质量统计
+        # （NaN 价/OHLC 关系违例 → 引擎收尾 assert 前回写 manifest，fail-closed 阻断）。
+        # 本行使用的数据截至当前加载窗口（end_date 过滤已完成，无未来数据）。
+        accumulate_data_quality(symbol, df)
 
         return df
 
