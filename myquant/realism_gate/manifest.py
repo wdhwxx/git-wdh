@@ -143,6 +143,10 @@ CRITICAL_FIELDS: List[str] = [
     "quality.coverage_rate",
     "fingerprint_hash",
     "snapshot_id",
+    # P1-12 数据快照 pin：是否适用目录快照（provider 场景 True / 内存预加载·live False）
+    "data.snapshot_applicable",
+    # P1-12：重跑发现数据目录与 sidecar 基线不一致（True → data_pit critical 阻断）
+    "data.snapshot_mismatch",
     # 样本池
     "pool.pit_applied",
     "pool.exclusion_basis",
@@ -302,6 +306,13 @@ class RealismManifest:
             return "degraded"
         if exclusion_basis == "today":
             return "degraded"
+        # P1-12：快照适用（provider 场景）但指纹缺失 → unverified
+        # （方案 §4.5 L542：fingerprint_hash/snapshot_id 为 null → unverified）
+        if (
+            self.get_field("data.snapshot_applicable", False)
+            and self.get_field("fingerprint_hash", None) is None
+        ):
+            return "unverified"
         return "ok"
 
     # ── 跨运行签名（§4.10）────────────────────────────────────

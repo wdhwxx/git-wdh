@@ -92,6 +92,9 @@ def _make_full_manifest(context_sliced: bool) -> RealismManifest:
         elif path == "quality.coverage_rate":
             # P1-13（#363）：覆盖率判据（<0.5 → critical）新增后喂合法值防误伤
             manifest.set_field(path, 1.0)
+        elif path in ("data.snapshot_applicable", "data.snapshot_mismatch"):
+            # P1-12（#364）：默认不适用目录快照（data_pit 跳过指纹判据）、无不一致
+            manifest.set_field(path, False)
         elif path in ("pool.requested_count", "pool.admitted_count"):
             manifest.set_field(path, 1)
         elif path == "pool.dropped_count":

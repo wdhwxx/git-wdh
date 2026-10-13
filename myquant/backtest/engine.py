@@ -218,8 +218,32 @@ def _attach_realism_manifest(
         manifest.set_field("quality.nan_price_rows", _quality_stats["nan_price_rows"])
         manifest.set_field("quality.ohlc_violation_rows", _quality_stats["ohlc_violation_rows"])
         manifest.set_field("quality.coverage_rate", _quality_stats["coverage_rate"])
-        manifest.set_field("fingerprint_hash", None)
-        manifest.set_field("snapshot_id", None)
+        # ── P1-12 数据快照 pin：fingerprint_hash/snapshot_id 从硬编码 None 改真实采集 ──
+        # data=None（provider 场景，从 processed 目录读真实数据）：真扫目录校验
+        # sidecar（内容哈希基线），写入真实指纹；sidecar 缺失自动首次 pin；
+        # 重跑发现目录增删改 → snapshot_mismatch=True → data_pit 判据 critical 阻断。
+        # data dict 预加载（内存数据/测试）：数据与 processed 目录无关 →
+        # snapshot_applicable=False（不适用目录快照，data_pit 不判指纹）。
+        if data is None or not isinstance(data, dict):
+            try:
+                from myquant.data_access.provider import verify_sidecar
+                _sn = verify_sidecar()
+                manifest.set_field("data.snapshot_applicable", True)
+                manifest.set_field("fingerprint_hash", _sn["fingerprint_hash"])
+                manifest.set_field("snapshot_id", _sn["snapshot_id"])
+                manifest.set_field("data.snapshot_mismatch", not _sn["matched"])
+            except Exception as _sn_e:  # noqa: BLE001
+                # 快照采集失败：诚实披露为缺失（applicable=True 下 data_pit 判 critical）
+                logger.warning("数据快照 pin 采集失败（按缺失披露）: %s", _sn_e)
+                manifest.set_field("data.snapshot_applicable", True)
+                manifest.set_field("fingerprint_hash", None)
+                manifest.set_field("snapshot_id", None)
+                manifest.set_field("data.snapshot_mismatch", False)
+        else:
+            manifest.set_field("data.snapshot_applicable", False)
+            manifest.set_field("fingerprint_hash", None)
+            manifest.set_field("snapshot_id", None)
+            manifest.set_field("data.snapshot_mismatch", False)
         manifest.set_field("pool.pit_applied", True)
         # P0-08 子项③：排除口径真实为 today（P0-06 只接量化字段，as_of 为乐观谎报）
         manifest.set_field("pool.exclusion_basis", "today")

@@ -206,6 +206,208 @@ def accumulate_data_quality(symbol: str, df: pd.DataFrame) -> None:
 
 
 # ═══════════════════════════════════════════
+#  P1-12 数据快照 pin（processed 目录内容指纹 + sidecar 重跑校验）
+# ═══════════════════════════════════════════
+
+#: sidecar 文件名（processed 目录下，记录本次 pin 的文件清单+哈希基线；
+#: 与数据同目录，属 datasets/ 数据区，不入 git）
+SNAPSHOT_SIDECAR_NAME: str = ".snapshot.json"
+
+#: 流式哈希分块（1MB，避免整文件入内存；824MB/3195 标的全量摘要约数秒）
+_SNAPSHOT_HASH_CHUNK: int = 1024 * 1024
+
+#: 参与指纹的文件后缀（与 HistoricalDataProvider._scan_directory 口径一致）
+_SNAPSHOT_DATA_SUFFIXES: Tuple[str, ...] = (".parquet", ".csv")
+
+#: 快照校验结果的模块级缓存（按目录路径区分键）：同一进程内同一目录不会在
+#: 两次回测间变化，避免重复全量哈希 824MB/3195 标的（每次约数秒）；
+#: 测试用 tmp_path 与真实目录天然分键不串扰；reset_data_snapshot 清缓存。
+_DATA_SNAPSHOT_CACHE: Dict[str, Dict[str, Any]] = {}
+
+
+def _hash_data_file(path: Path) -> str:
+    """流式计算单个数据文件内容的 sha256 摘要（P1-12 内容哈希口径）。
+
+    Args:
+        path: 数据文件路径（.parquet / .csv）。
+
+    Returns:
+        sha256 十六进制串（64 字符）。
+    """
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(_SNAPSHOT_HASH_CHUNK), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def compute_data_snapshot(
+    processed_dir: Optional[Union[str, Path]] = None,
+) -> Dict[str, Any]:
+    """扫描 processed 目录全部数据文件，计算内容指纹快照（P1-12 数据快照 pin）。
+
+    对每个 .parquet/.csv 文件记录 ``{size, mtime_ns, sha256}``，再对规范化
+    文件清单整体做 sha256 得 ``fingerprint_hash``（目录级指纹）；``snapshot_id``
+    取其前 12 字符（短 id，供 manifest 落盘与跨运行比对）。
+
+    L0 纯函数：给定目录路径、只读文件系统，不读进程全局状态（R-02 分层合规）。
+
+    Args:
+        processed_dir: 数据目录；None 时用默认 ``datasets/processed/``。
+
+    Returns:
+        快照字典 ``{"file_count", "fingerprint_hash", "snapshot_id",
+        "files": {文件名: {"size", "mtime_ns", "sha256"}}}``；目录不存在时 files 为空。
+    """
+    base = (
+        Path(processed_dir)
+        if processed_dir is not None
+        else get_project_path("datasets", "processed")
+    )
+    files: Dict[str, Dict[str, Any]] = {}
+    if base.exists() and base.is_dir():
+        for fp in sorted(base.iterdir()):
+            if not fp.is_file() or fp.suffix.lower() not in _SNAPSHOT_DATA_SUFFIXES:
+                continue
+            stat = fp.stat()
+            files[fp.name] = {
+                "size": stat.st_size,
+                "mtime_ns": stat.st_mtime_ns,
+                "sha256": _hash_data_file(fp),
+            }
+    canonical = json.dumps(files, sort_keys=True, ensure_ascii=False)
+    fingerprint = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return {
+        "file_count": len(files),
+        "fingerprint_hash": fingerprint,
+        "snapshot_id": fingerprint[:12],
+        "files": files,
+    }
+
+
+def write_sidecar(
+    snapshot: Dict[str, Any],
+    processed_dir: Optional[Union[str, Path]] = None,
+) -> Path:
+    """把快照写入 sidecar（processed/.snapshot.json，临时文件 + replace 原子写）。
+
+    Args:
+        snapshot: ``compute_data_snapshot`` 的返回值。
+        processed_dir: 数据目录；None 时用默认 ``datasets/processed/``。
+
+    Returns:
+        sidecar 文件路径。
+    """
+    base = (
+        Path(processed_dir)
+        if processed_dir is not None
+        else get_project_path("datasets", "processed")
+    )
+    base.mkdir(parents=True, exist_ok=True)
+    sidecar = base / SNAPSHOT_SIDECAR_NAME
+    tmp = sidecar.with_suffix(".json.tmp")
+    payload = {
+        "fingerprint_hash": snapshot["fingerprint_hash"],
+        "snapshot_id": snapshot["snapshot_id"],
+        "file_count": snapshot["file_count"],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "files": snapshot["files"],
+    }
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=2, sort_keys=True)
+    tmp.replace(sidecar)
+    return sidecar
+
+
+def verify_sidecar(
+    processed_dir: Optional[Union[str, Path]] = None,
+) -> Dict[str, Any]:
+    """校验当前数据目录与 sidecar 基线是否一致（P1-12 重跑校验）。
+
+    流程：
+      1. 重扫目录算当前快照；
+      2. sidecar 不存在 → **首次 pin**：自动写 sidecar 固化当前快照，
+         返回 ``matched=True, first_pin=True``（用户显式删除 sidecar 即重新 pin）；
+      3. sidecar 存在 → 比对 ``fingerprint_hash``：一致 ``matched=True``；
+         不一致 ``matched=False``（数据目录在两次回测间被增删改，重跑不可复现，
+         回写增删改明细 ``diff``）；sidecar 损坏按不一致 fail-closed。
+
+    Args:
+        processed_dir: 数据目录；None 时用默认 ``datasets/processed/``。
+
+    Returns:
+        ``{"fingerprint_hash", "snapshot_id", "matched", "first_pin",
+        "expected_fingerprint", "diff"}``。
+    """
+    base = (
+        Path(processed_dir)
+        if processed_dir is not None
+        else get_project_path("datasets", "processed")
+    )
+    cache_key = str(base)
+    if cache_key in _DATA_SNAPSHOT_CACHE:
+        return dict(_DATA_SNAPSHOT_CACHE[cache_key])
+    result = _verify_sidecar_uncached(base)
+    _DATA_SNAPSHOT_CACHE[cache_key] = result
+    return dict(result)
+
+
+def _verify_sidecar_uncached(base: Path) -> Dict[str, Any]:
+    """``verify_sidecar`` 的无缓存实现（见对外 docstring；缓存层在 ``verify_sidecar``）。"""
+    current = compute_data_snapshot(base)
+    sidecar = base / SNAPSHOT_SIDECAR_NAME
+    result: Dict[str, Any] = {
+        "fingerprint_hash": current["fingerprint_hash"],
+        "snapshot_id": current["snapshot_id"],
+        "matched": True,
+        "first_pin": False,
+        "expected_fingerprint": None,
+        "diff": {},
+    }
+    if not sidecar.exists():
+        write_sidecar(current, base)
+        result["first_pin"] = True
+        return result
+    try:
+        with open(sidecar, "r", encoding="utf-8") as fh:
+            baseline = json.load(fh)
+    except (json.JSONDecodeError, OSError) as exc:
+        # sidecar 损坏：不能当基线——按不一致处理（fail-closed，提醒人工核对/重 pin）
+        logger.warning("快照 sidecar 损坏（%s），按不一致处理", exc)
+        result["matched"] = False
+        result["diff"] = {"sidecar_corrupt": str(exc)}
+        return result
+    expected = baseline.get("fingerprint_hash")
+    result["expected_fingerprint"] = expected
+    if expected == current["fingerprint_hash"]:
+        return result
+    old_files = baseline.get("files", {})
+    new_files = current["files"]
+    added = sorted(set(new_files) - set(old_files))
+    removed = sorted(set(old_files) - set(new_files))
+    changed = sorted(
+        name
+        for name in set(old_files) & set(new_files)
+        if old_files[name].get("sha256") != new_files[name].get("sha256")
+    )
+    result["matched"] = False
+    result["diff"] = {"added": added, "removed": removed, "changed": changed}
+    return result
+
+
+def reset_data_snapshot(processed_dir: Optional[Union[str, Path]] = None) -> None:
+    """清空快照校验缓存（每次回测开始前/测试隔离用）。
+
+    Args:
+        processed_dir: 指定目录清单项；None 清空全部目录缓存。
+    """
+    if processed_dir is None:
+        _DATA_SNAPSHOT_CACHE.clear()
+    else:
+        _DATA_SNAPSHOT_CACHE.pop(str(Path(processed_dir)), None)
+
+
+# ═══════════════════════════════════════════
 #  M1A-05 降级事件审计（v3.0 §6.4.7-B）
 # ═══════════════════════════════════════════
 

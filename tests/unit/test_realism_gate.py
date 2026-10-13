@@ -75,6 +75,8 @@ def _fill_minimal(m: RealismManifest) -> None:
     m.update_group("quality", {"nan_price_rows": 0, "ohlc_violation_rows": 0, "coverage_rate": 1.0})
     m.set_field("fingerprint_hash", "abc123")
     m.set_field("snapshot_id", "snap-001")
+    m.set_field("data.snapshot_applicable", False)
+    m.set_field("data.snapshot_mismatch", False)
     m.update_group("pool", {"pit_applied": True, "exclusion_basis": "as_of",
                             "requested_count": 50, "admitted_count": 50,
                             "dropped_count": 0, "drop_reasons": {}})

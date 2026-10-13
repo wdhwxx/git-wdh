@@ -94,6 +94,10 @@ def _fill_minimal(m: RealismManifest) -> None:
     m.set_field("adjust_degraded_symbols", [])
     m.set_field("fingerprint_hash", "abc123")
     m.set_field("snapshot_id", "snap-001")
+    # P1-12（#364）：不适用目录快照（data_pit 跳过指纹/mismatch 判据，
+    # 避免干扰本文件 quality.* 反红）、无不一致
+    m.set_field("data.snapshot_applicable", False)
+    m.set_field("data.snapshot_mismatch", False)
     m.update_group("pool", {"pit_applied": True, "exclusion_basis": "as_of",
                             "requested_count": 50, "admitted_count": 50,
                             "dropped_count": 0, "drop_reasons": {}})

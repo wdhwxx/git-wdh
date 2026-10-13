@@ -42,9 +42,29 @@ def check_data_pit(manifest: RealismManifest) -> List[RealismViolation]:
             actual_value=degraded,
         ))
 
-    # ── fingerprint_hash 判据（#346 真实采集对齐移除）──
-    # 数据快照指纹采集未接线（P1-15 关联）→ None 是诚实披露而非谎报；
-    # 判据移除避免入口误伤。接线后（非 None 才判）恢复。
+    # ── P1-12 数据快照 pin 判据（#346 占位恢复）──
+    # 仅对快照适用的回测（provider 场景 snapshot_applicable=True）判：
+    #   · fingerprint_hash 为 None → 快照缺失（无法证明数据未被改动）→ critical；
+    #   · snapshot_mismatch=True → 重跑发现 processed 目录与 sidecar 基线不一致
+    #     （文件增删改，重跑不可复现）→ critical。
+    # 内存预加载 / live（applicable=False）不适用目录快照，跳过不判。
+    if manifest.get_field("data.snapshot_applicable", False):
+        fp = manifest.get_field("fingerprint_hash", None)
+        if fp is None:
+            violations.append(RealismViolation(
+                field_path="fingerprint_hash",
+                critical=True,
+                message="数据快照指纹缺失（无法证明 processed 数据在两次回测间未被改动）",
+                actual_value=None,
+            ))
+        if manifest.get_field("data.snapshot_mismatch", False):
+            violations.append(RealismViolation(
+                field_path="data.snapshot_mismatch",
+                critical=True,
+                message="数据快照校验不一致：processed 目录与 sidecar 基线不符"
+                        "（重跑不可复现；确认数据更新后删除 .snapshot.json 重新 pin）",
+                actual_value=True,
+            ))
 
     # NaN 价格行
     nan_rows = manifest.get_field("quality.nan_price_rows", 0)
