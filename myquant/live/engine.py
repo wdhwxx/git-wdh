@@ -2912,6 +2912,10 @@ def create_live_engine(
     # （F-1 能力缺失 fail-closed）；paper/sim 尊重配置原值（false 可运行）。
     _assert_live_watchdog_gate(trade_mode)
 
+    # P1-11：实盘出口泄漏审计报告（R-16 §4.2；断言通过后、返回引擎前落盘；
+    # 实盘不 reset guard——统计为装配期进程累计，报告标注语义）
+    _write_live_leakage_report(strategy_name, lookahead_guard, name)
+
     return engine
 
 
@@ -2942,6 +2946,46 @@ def _assert_live_watchdog_gate(trade_mode: str) -> None:
                 "（A-4/A-5/A-6 看门狗未启用，能力缺失 fail-closed；"
                 "请在 config/settings.yaml 开启 monitoring.watchdog.enabled）"
             )
+
+
+def _write_live_leakage_report(
+    strategy_name: str,
+    lookahead_guard: Optional[Any],
+    engine_id: str,
+) -> None:
+    """实盘引擎装配泄漏审计报告落盘（P1-11 步骤②，R-16 §4.2）。
+
+    实盘决策时点 = 装配当天（无回测 end_date 概念，与 create_live_engine 内
+    assert_all_gates_pass 的 decision_time 同源）；lookahead_guard 为装配期
+    新实例（live 非全局单例，lookahead_guard.py:2838），统计取实例快照，
+    None（guard 未启用）记空段。报告落盘失败不阻断装配（审计旁路）。
+
+    Parameters
+    ----------
+    strategy_name : str
+        装配策略名。
+    lookahead_guard : LookaheadGuard | None
+        装配期 guard 实例（未启用时为 None）。
+    engine_id : str
+        引擎标识（写入实验 ID）。
+    """
+    from myquant.leakage_gate.gate import collect_gate_stats
+    from myquant.leakage_gate.report import write_experiment_report
+
+    decision_time = datetime.now().strftime("%Y-%m-%d")
+    try:
+        gate_stats = collect_gate_stats(strategy_name, decision_time)
+        write_experiment_report(
+            experiment_id=f"live_{strategy_name}_{engine_id}",
+            experiment_type="live",
+            strategy_id=strategy_name,
+            decision_time=decision_time,
+            gate_stats=gate_stats,
+            lookahead_guard=lookahead_guard.stats if lookahead_guard else None,
+        )
+    except Exception:
+        # 报告是审计产物：失败仅记录可见，不得阻断实盘装配（py 规则：记录后恢复）
+        logger.warning("实盘泄漏审计报告落盘失败（P1-11，审计旁路不阻断装配）", exc_info=True)
 
 
 def startup_assertions(

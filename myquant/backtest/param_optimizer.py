@@ -664,6 +664,38 @@ class WalkForwardResult:
 
 
 # ── 优化器 ────────────────────────────────────────────────────────────
+def _write_param_opt_leakage_report(opt: "ParamOptimizer") -> None:
+    """参数优化出口泄漏审计报告落盘（P1-11 步骤③，R-16 §4.4）。
+
+    decision_time 取样本内截止（in_sample_end，最近真实决策时点）或回测结束日
+    （end_date，P2-11 口径）；lookahead_guard 统计为进程内累计快照（并行子进程
+    各自维护单例，主进程统计语义为"当前进程已记录"）。报告失败不阻断优化。
+
+    Args:
+        opt: 已执行 optimize() 的优化器实例。
+    """
+    from myquant.core.lookahead_guard import get_lookahead_guard
+    from myquant.leakage_gate.gate import collect_gate_stats
+    from myquant.leakage_gate.report import write_experiment_report
+
+    decision_time = opt.end_date or opt.in_sample_end or ""
+    strategy_id = opt.strategy_name
+    try:
+        gate_stats = collect_gate_stats(strategy_id, decision_time)
+        write_experiment_report(
+            experiment_id=f"param_opt_{opt.start_date}_{decision_time}",
+            experiment_type="param_optimization",
+            strategy_id=strategy_id,
+            decision_time=decision_time,
+            gate_stats=gate_stats,
+            lookahead_guard=get_lookahead_guard().stats,
+        )
+    except Exception:
+        # 报告是审计产物：失败仅记录可见，不得阻断参数优化（py 规则：记录后恢复）
+        logger.warning(
+            "参数优化泄漏审计报告落盘失败（P1-11，审计旁路不阻断优化）", exc_info=True)
+
+
 class ParamOptimizer:
     """策略参数网格搜索优化器（进程池并行评估）。
 
@@ -881,6 +913,10 @@ class ParamOptimizer:
 
         # KP-P2-05：按 (params, symbol) 聚合 in/out 双区段为单条记录（含 in_*/out_* 双列）
         combined = _coalesce_outcomes(normalized)
+
+        # P1-11：参数优化出口泄漏审计报告（R-16 §4.4；P1-04 #351 收敛后
+        # 每 trial 已走 create_engine → 门禁断言已在引擎创建时执行，此处仅落报告）
+        _write_param_opt_leakage_report(self)
 
         return ParamOptimizationResult(
             strategy_name=self.strategy_name,

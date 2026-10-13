@@ -5045,3 +5045,24 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 **验收**：py_compile 通过；targeted **230 passed / 1 skipped**（leakage_gate 10 文件字母序 + unit/test_architecture.py R-24 + unit/test_factor_preprocessor.py + unit/test_pool_tradability_filter.py + unit/test_realism_gate.py 注册耦合）；全量 pytest **4039 passed / 4 skipped / 1 failed**（唯一失败 `test_backtest_real_config_adjust_strict`：**已知 pre-existing 配置漂移**——config YAML 缺 `data.adjust_strict`（M0-16 契约），用户已明确由定时任务「回测结束补 adjust_strict」在全时段回测结束后承接补齐，与本次改动零关联）；首轮全量曾暴露 2 例 `_SpyPoolBuilder` 旧签名回归（base.py `build` 新传 `decision_time=` → spy 覆写签名不匹配 TypeError），已在 tests/unit/test_strategies.py 适配 spy 签名（加 `decision_time=None` 并透传 super()，仅动测试不动产品代码）后重跑全量归零。
 
 **纪律遵守**：只改点名范围（④接线），未动既有 as_of 纯函数契约（validate_asof/validate_cross_sectional_panel 签名不变）；decision_time=None 跳过口径与 P0-05 截断口径一致；R-02 分层合规（L3→L0 正向）；git 提交（commit message 引用 #357）。**P1-07 子项④完成（任务清单 ⬜ → ✅，P1-07 卡 7/7 全交付）**。
+
+## #358 · 2026-10-13 · P1-11 leakage_report 四出口接线 + P2-11 decision_time 真实决策日（同批）
+
+**卡定义**：任务清单 L162 P1-11 "leakage_report 四出口接线（回测/实盘/训练/参数优化）——幽灵产物闭环"（方案 §2.6-G13 关联 §4 报告契约；R-16 前置已完成）；同批 L187 P2-11 "decision_time 真实决策日"（回测=config.end_date、训练=train_end、参优=end_date or in_sample_end、实盘=当天，审计记录诚实性 M0-16 关联）。
+
+**现状核实（R-16 §1 已定）**：report.py 5 个公开函数全部真实存在（build_leakage_report/write_leakage_report/load_leakage_report/summarize_report/write_experiment_report 便捷入口，**sections 透传 11 个注入字段）；gate.py collect_gate_stats(strategy_id, decision_time)；get_lookahead_guard() 全局单例（.stats 是属性）；guard 需 run 前 reset（engine.py on_init 已做）；四出口对报告函数均零调用 → 报告为"幽灵产物"（write_experiment_report 仅被 tests 调用）。
+
+**落地（四出口 + P2-11）**：
+- **myquant/leakage_gate/report.py（改动）**：新增 `set_report_output_dir(Optional[Path])` + `_REPORT_OUTPUT_DIR_OVERRIDE`（None=默认项目根/outputs）——测试隔离用：pytest 会话经 conftest 指向会话临时目录，避免四出口接线后全量测试落盘污染项目 outputs；生产调用不设置保持默认。
+- **myquant/leakage_gate/gate.py（改动）**：新增 `_decision_now(decision_time)`——决策日零点（空/非法回退当前零点兼容旧调用）；assert_all_gates_pass 中 suppress_violations 由 `now=_decision_now(decision_time)` 判定（P2-11：豁免有效期按决策日而非运行当天——回测 decision_time=config.end_date，保证豁免判定与审计时点一致）。
+- **myquant/backtest/engine.py（改动）**：create_engine 门禁断言 decision_time 改 `getattr(config,"end_date","") or ""`（去 time.strftime 运行当天，P2-11）；BacktestScheduler.run() 尾部新增 `_write_backtest_leakage_report` 模块级函数接线（collect_gate_stats + write_experiment_report；experiment_id=`backtest_{start}_{end}`；extra 打 engine_mode/strategy_none/is_success；guard 全局单例 stats——on_init 已 reset 干净快照；失败 except logger.warning 审计旁路不阻断回测）。
+- **myquant/live/engine.py（改动）**：create_live_engine 在 `_assert_live_watchdog_gate(trade_mode)` 后、return engine 前新增 `_write_live_leakage_report` 模块级函数（decision_time=装配当天 datetime.now().strftime；guard 为本地实例 stats、None 记空段；experiment_id=`live_{strategy}_{engine_id}`；失败不阻断装配）。
+- **myquant/ml/training_pipeline.py（改动）**：run() 收尾 return result 前薄接线 write_experiment_report（experiment_id=`training_{model}_{version}`；sanity 段复用 6b 门禁结果 _sanity_bad；decision_time=train_end；extra 记 n_train/n_val/source；try/except 不阻断训练）。
+- **myquant/backtest/param_optimizer.py（改动）**：optimize() 在 `_coalesce_outcomes` 后新增 `_write_param_opt_leakage_report` 模块级函数（decision_time = end_date or in_sample_end or ""；experiment_id=`param_opt_{start}_{decision_time}`；#351 起每 trial 已走 create_engine → 门禁断言已在引擎创建时执行，此处仅落报告；失败不阻断优化）。
+- **tests/conftest.py（改动）**：新增 session fixture `leakage_report_dir`(tmp_path_factory) + autouse `_leakage_report_test_isolation`（set_report_output_dir → yield → None 恢复）。
+- **tests/leakage_gate/test_report_wiring.py（新增，8 用例）**：四出口真实运行后报告落盘断言（backtest/live/training/param_optimization 各 1 项 + backtest strategy_none 显式 event 模式 1 项）+ P2-11 语义 3 项（_decision_now 解析回退 / suppress 按决策日判定 / covers 决策日边界含当日）。
+- **tests/unit/test_architecture.py（改动）**：R-24 基线更新（只增不减豁免=功能必需行 + 注释留痕 #358）——backtest/engine.py 1550→1599（+49）、live/engine.py 3065→3109（+44）、ml/training_pipeline.py 1651→1672（+21）。
+
+**验收**：py_compile 7 文件全 OK；新测试首轮 8 passed（strategy=None auto 模式不可达——resolve_mode 抛错既有行为，改显式 event 模式验证报告标注路径）；targeted **618 passed / 1 skipped / 1 failed**（27 文件字母序含 architecture R-24 + realism_gate + 全部相关引擎/出口测试；唯一失败 `test_backtest_real_config_adjust_strict`：**已知 pre-existing 配置漂移**——config YAML 缺 `data.adjust_strict`（M0-16 契约），用户已明确由定时任务「回测结束补 adjust_strict」在全时段回测结束后承接补齐，本任务禁止改 YAML，与本次改动零关联）；全量 pytest 待 commit 前复核（预期仅剩该 1 例 pre-existing 红）。
+
+**纪律遵守**：只改点名范围（四出口接线 + decision_time 语义）；strategy=None 报告标注路径在生产 auto 模式不可达（create_engine resolve_mode 拒启，报告语义仅显式 mode 可达——测试侧显式 event 验证，属既有行为非本次引入）；报告失败全部审计旁路（logger.warning 不阻断主流程，py 规则"记录后恢复"）；report.py/gate.py 属 L0 被 L3/L2 正向引用，R-02 分层合规；R-24 基线按实际增量更新（功能必需行豁免原则，注释留痕）；git 提交（commit message 引用 #358）。**P1-11 + P2-11 完成（任务清单 L162/L187 ⬜ → ✅）**。

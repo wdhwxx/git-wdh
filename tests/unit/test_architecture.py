@@ -275,19 +275,21 @@ CONFIG_KEY_REQUIRED: set[str] = {
 #   risk_manager 1901→2020（0.7 三条异常交易规则 + anomaly_rules 参数）
 #   acceptance/live_safety_gate.py 1756→1749（0.1~0.9 + LIVE 门槛验收累计，#287~#296；入白名单）
 OVERSIZE_LINE_BASELINE: dict[str, int] = {
-    "monitoring/alerting.py": 3681, "live/engine.py": 3065, "core/event_bus.py": 2379,  # engine 2858→2869（#275 M0-09 出口强制挂载 +11 行治理注入）；alerting 3675→3681（#264 工厂注册代码）；event_bus 2383→2379（#261 事件池注入化）；live/engine 3063→3065（#355 P1-07③ 空值 fail-closed：成交回报豁免显式化 skip_t1_check，净 +2 行功能必需）
+    "monitoring/alerting.py": 3681, "live/engine.py": 3109, "core/event_bus.py": 2379,  # engine 2858→2869（#275 M0-09 出口强制挂载 +11 行治理注入）；alerting 3675→3681（#264 工厂注册代码）；event_bus 2383→2379（#261 事件池注入化）；live/engine 3063→3065（#355 P1-07③ 空值 fail-closed：成交回报豁免显式化 skip_t1_check，净 +2 行功能必需）；3065→3109（#358 P1-11 实盘出口泄漏审计报告 _write_live_leakage_report +44 行功能必需）
     "live/scheduler.py": 2419, "monitoring/metrics_collector.py": 2273,  # 2382→2409（#265 阶段二 7 处装配点改经注册表，代码行增长）；metrics 2268→2273（#264 工厂注册代码）
     "monitoring/action_engine.py": 2307, "data_access/manager.py": 2200,  # 2170→2186→2200（#281 M1A-01/06 每股收益时点日基收敛+失败可观测化；M1A-10 available_time 增量派生+存量补列）
     "live/brokers/qmt_broker.py": 2170, "live/data_feed.py": 2147,
     "gui/backtest_config_dialog.py": 1861, "risk/risk_manager.py": 2020,
-    "web/dashboard.py": 1760, "ml/training_pipeline.py": 1651,
+    "web/dashboard.py": 1760, "ml/training_pipeline.py": 1672,  # 1651→1672（#358 P1-11 训练出口泄漏审计报告薄接线 +21 行功能必需）
     "monitoring/dynamic_baseline.py": 1546,  # 1552→1546（#260 去全局采集器兜底）
     "acceptance/live_safety_gate.py": 1749,  # 回写#296：实盘安全门禁验收（0.1~0.9 + LIVE 门槛 31 项）
-    "backtest/engine.py": 1550,  # 回写#349：核心引擎超 1500 入白名单（R-24 冻结基线；
+    "backtest/engine.py": 1599,  # 回写#349：核心引擎超 1500 入白名单（R-24 冻结基线；
                                 # 增量来源：三引擎共用 _attach_realism_manifest 模块级函数；
                                 # 1524→1531（#350 基准数据治理：基准加载 adjust="raw" 语义注释）；
                                 # 1531→1550（#354 P1-03 收尾：_attach 段缺失拒启——配置缺失=阻断，
-                                # 方案 §4.3 fail-closed；只增不减的原则性豁免：功能必需行））
+                                # 方案 §4.3 fail-closed；只增不减的原则性豁免：功能必需行）；
+                                # 1550→1599（#358 P1-11 回测出口泄漏审计报告 _write_backtest_
+                                # leakage_report +49 行功能必需；P2-11 decision_time 取 config.end_date））
 }
 
 # R-19 零覆盖基线：✅ 已冻结（回写#256）。冻结集合 = 2026-10-08 实测引用级零覆盖业务模块 49 个

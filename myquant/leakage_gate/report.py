@@ -43,12 +43,29 @@ REPORT_RETENTION_DAYS: int = 30
 _REPORT_PREFIX: str = "leakage_report_"
 #: 默认输出目录（相对项目根 outputs/）
 DEFAULT_OUTPUT_DIRNAME: str = "outputs"
+#: 报告输出根 override（测试隔离用；None = 默认项目根/outputs）
+_REPORT_OUTPUT_DIR_OVERRIDE: Optional[Path] = None
 
 _PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
 
 
+def set_report_output_dir(path: Optional[Path]) -> None:
+    """设置报告输出根（None 恢复默认项目根/outputs）。
+
+    P1-11 测试隔离用：pytest 会话经 tests/conftest.py 指向会话临时目录，
+    避免四出口接线后全量测试落盘污染项目 outputs；生产调用不设置，保持默认。
+
+    Args:
+        path: 输出根目录；None 恢复默认。
+    """
+    global _REPORT_OUTPUT_DIR_OVERRIDE
+    _REPORT_OUTPUT_DIR_OVERRIDE = Path(path) if path is not None else None
+
+
 def _default_output_dir() -> Path:
-    """默认报告输出目录（项目根/outputs）。"""
+    """默认报告输出目录（override 优先；否则项目根/outputs）。"""
+    if _REPORT_OUTPUT_DIR_OVERRIDE is not None:
+        return _REPORT_OUTPUT_DIR_OVERRIDE
     return _PROJECT_ROOT / DEFAULT_OUTPUT_DIRNAME
 
 

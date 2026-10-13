@@ -109,6 +109,29 @@ def _realism_gate_test_isolation() -> None:
 
 
 # ═══════════════════════════════════════════════════════════════
+#  泄漏审计报告输出隔离（P1-11 四出口接线）
+# ═══════════════════════════════════════════════════════════════
+# 四出口（回测/实盘/训练/参数优化）接线后，每次运行都会落盘 leakage_report；
+# 测试会话将报告根指向会话临时目录，避免全量测试污染项目 outputs
+# （生产默认 outputs/，由 report.py 默认输出目录承担）。
+
+@pytest.fixture(scope="session")
+def leakage_report_dir(tmp_path_factory: Any) -> Path:
+    """P1-11：泄漏审计报告输出隔离目录（会话临时，供测试断言落盘）。"""
+    return tmp_path_factory.mktemp("leakage_reports")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _leakage_report_test_isolation(leakage_report_dir: Path) -> None:
+    """P1-11：报告输出指向会话临时目录（避免污染项目 outputs）。"""
+    from myquant.leakage_gate.report import set_report_output_dir
+
+    set_report_output_dir(leakage_report_dir)
+    yield
+    set_report_output_dir(None)
+
+
+# ═══════════════════════════════════════════════════════════════
 #  统一中文列 OHLCV 构造工厂（#38 中文列规范）
 # ═══════════════════════════════════════════════════════════════
 

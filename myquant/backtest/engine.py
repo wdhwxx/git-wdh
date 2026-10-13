@@ -1420,7 +1420,9 @@ class BacktestScheduler:
 
             assert_all_gates_pass(
                 strategy_id=getattr(strategy, "name", "") or "",
-                decision_time=time.strftime("%Y-%m-%d"),
+                # P2-11：decision_time 取回测配置结束日（真实决策时点上限），
+                # 不再传运行当天 time.strftime——审计记录诚实性（R-16 §五-3）
+                decision_time=getattr(config, "end_date", "") or "",
             )
         mode = self.resolve_mode(strategy)
         if strategy is not None and not strategy.supports_mode(mode):
@@ -1500,6 +1502,8 @@ class BacktestScheduler:
         if hasattr(result, "extra") and isinstance(result.extra, dict):
             result.extra["engine_mode"] = self.selected_mode
             result.extra["scheduler_mode"] = self.mode
+        # P1-11：回测出口泄漏审计报告（R-16 §4.1；enabled=false 审计档亦落盘）
+        _write_backtest_leakage_report(config, strategy, self.selected_mode, result)
         return result
 
     def __repr__(self) -> str:
@@ -1508,6 +1512,51 @@ class BacktestScheduler:
             f"BacktestScheduler(mode={self.mode}, selected={self.selected_mode}, "
             f"engine={engine_type})"
         )
+
+
+def _write_backtest_leakage_report(
+    config: BacktestConfig,
+    strategy: Optional[StrategyBase],
+    engine_mode: Optional[str],
+    result: BacktestResult,
+) -> None:
+    """回测出口泄漏审计报告落盘（P1-11 步骤①，R-16 §4.1）。
+
+    数据契约注入：gate_stats 由 collect_gate_stats 采集（与 create_engine 内
+    assert_all_gates_pass 同形）；lookahead_guard 取全局单例统计——engine.run()
+    前 on_init 已 reset（engine.py:492），统计为本实验干净快照、不跨实验污染；
+    decision_time 与门禁断言一致取 config.end_date（P2-11，不再用运行当天）。
+    报告落盘失败不阻断回测（审计旁路）：记录 warning 并继续。
+
+    Args:
+        config: 回测配置。
+        strategy: 策略实例（None 时产空 gates 报告并在 extra 标注，P1-06 联动）。
+        engine_mode: 选定引擎模式。
+        result: 本次回测结果。
+    """
+    from myquant.leakage_gate.gate import collect_gate_stats
+    from myquant.leakage_gate.report import write_experiment_report
+
+    decision_time = getattr(config, "end_date", "") or ""
+    strategy_id = getattr(strategy, "name", "") or ""
+    try:
+        gate_stats = collect_gate_stats(strategy_id, decision_time)
+        write_experiment_report(
+            experiment_id=f"backtest_{getattr(config, 'start_date', '')}_{decision_time}",
+            experiment_type="backtest",
+            strategy_id=strategy_id,
+            decision_time=decision_time,
+            gate_stats=gate_stats,
+            lookahead_guard=get_lookahead_guard().stats,
+            extra={
+                "engine_mode": engine_mode or "",
+                "strategy_none": strategy is None,
+                "is_success": bool(getattr(result, "is_success", None)),
+            },
+        )
+    except Exception:
+        # 报告是审计产物：失败仅记录可见，不得阻断回测主流程（py 规则：记录后恢复）
+        logger.warning("回测泄漏审计报告落盘失败（P1-11，审计旁路不阻断回测）", exc_info=True)
 
 
 def run_backtest(

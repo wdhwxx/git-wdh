@@ -1446,6 +1446,27 @@ class TrainingPipeline:
             training_seconds=training_seconds,
             label_type=eff_label,
         )
+        # P1-11：训练出口泄漏审计报告（R-16 §4.3；薄接线 ≤3 行调用——
+        # sanity 段复用 6b 门禁结果 _sanity_bad，decision_time=train_end；
+        # 行数红线 1651 由 R-24 基线更新留痕 #358 承担）
+        from myquant.leakage_gate.report import write_experiment_report
+
+        try:
+            write_experiment_report(
+                f"training_{model_name}_{version_meta.version}", "training",
+                strategy_id=model_name,
+                decision_time=train_end,
+                sanity=_sanity_bad,
+                extra={
+                    "n_train": int(len(train_idx)),
+                    "n_val": int(len(valid_idx)),
+                    "source": source,
+                },
+            )
+        except Exception:
+            logger.warning(
+                "训练泄漏审计报告落盘失败（P1-11，审计旁路不阻断训练）", exc_info=True)
+
         logger.info(
             f"[ml] 训练完成 {result.tag}: {eff_label} "
             f"n_train={result.n_train} n_val={result.n_val} "

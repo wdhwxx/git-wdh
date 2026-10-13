@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Callable, Dict, List
 
 from myquant.core.audit_log import AuditLogStore
@@ -39,6 +40,24 @@ _BLOCKED_SEVERITY: str = "阻断"
 
 # info 档 severity（P1-07⑥b / D3 第二段：退役规则专用档位——仅提示，不落审计、不统计、不阻断）
 _INFO_SEVERITY: str = "info"
+
+
+def _decision_now(decision_time: str) -> datetime:
+    """决策日零点（P2-11：豁免/判定按决策日而非运行当天）。
+
+    Args:
+        decision_time: 决策时点（YYYY-MM-DD）。
+
+    Returns:
+        决策日零点 datetime；空串或非法格式回退当前时点零点
+        （兼容既有未传 decision_time 的调用，行为与 P2-11 前一致）。
+    """
+    if decision_time:
+        try:
+            return datetime.strptime(decision_time, "%Y-%m-%d")
+        except (TypeError, ValueError):
+            pass
+    return datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 # ═══════════════════════════════════════════════
@@ -301,8 +320,10 @@ def assert_all_gates_pass(strategy_id: str, decision_time: str) -> None:
     if not violations:
         return
     # M3-02：未过期豁免压制对应违规；过期豁免不压制 → 违规保留 → 门禁自动拦截
+    # P2-11：豁免有效期按"决策日"判定（而非运行当天）——decision_time 即门禁
+    # 出口的决策时点（回测 = config.end_date），保证豁免判定与审计时点一致。
     from myquant.leakage_gate.exemption import suppress_violations
-    violations = suppress_violations(violations)
+    violations = suppress_violations(violations, now=_decision_now(decision_time))
     if not violations:
         return
     config = get_config()
