@@ -75,6 +75,7 @@ from myquant.indicators.tradability import (
     filter_tradable,
     rejected_summary,
 )
+from myquant.leakage_gate.cross_sectional import CrossSectionalAsOfError, validate_asof
 from myquant.models.market_data import Bar
 from myquant.models.trade import OrderSide, OrderType, Position
 from myquant.strategies.base import (
@@ -546,8 +547,14 @@ class MultiFactorStrategy(StrategyBase):
             return signals
 
         # ── 2. 标准化基础因子（F-03：可选去极值/中性化预处理前置）──
+        # P1-07④：由当前调仓 bar 归一化决策时点，透传给横截面合成处的 as-of 校验；
+        # bar.timestamp<=0（实盘增量无有效时间）→ 无决策日可验，跳过校验（增量数据无未来）
+        decision_time: Optional[str] = None
+        _ts = float(getattr(bar, "timestamp", 0) or 0)
+        if _ts > 0:
+            decision_time = pd.Timestamp.fromtimestamp(_ts).strftime("%Y-%m-%d")
         base_scores, active_base = self._standardize_base_factors(
-            factor_series, market_cap)
+            factor_series, market_cap, decision_time=decision_time)
         if not active_base or len(base_scores) < 2:
             logger.warning(
                 f"[多因子调仓#{self._rebalance_count}] 标准化后有效标的{len(base_scores)}<2，跳过"
@@ -731,24 +738,63 @@ class MultiFactorStrategy(StrategyBase):
     def _standardize_base_factors(
         self, factor_series: Dict[str, pd.DataFrame],
         market_cap: Optional[Dict[str, float]] = None,
+        decision_time: Optional[str] = None,
     ) -> Tuple[Dict[str, Dict[str, float]], List[str]]:
         """标准化基础因子（F-03：可先去极值/中性化预处理，再 z-score）
 
-        返回 (factor_scores: {symbol: {factor: z}}, active_factors: List[str])
-        只包含权重>0的基础因子。
+        Args:
+            factor_series: {symbol: 因子时序 DataFrame}（trailing 计算）。
+            market_cap: {symbol: 流通市值}，中性化预处理用。
+            decision_time: 决策时点（YYYY-MM-DD，P1-07④），透传给横截面合成处
+                as-of 校验；None 时不校验（实盘增量无决策日语义）。
+
+        Returns:
+            (factor_scores: {symbol: {factor: z}}, active_factors: List[str])
+            只包含权重>0的基础因子。
         """
         factors = [f for f in self.BASE_FACTORS if f in self._base_factor_weights]
         if not factors:
             return {}, []
         if self.zscore_mode == "ts_rolling":
             return self._zscore_ts_rolling(factor_series, factors)
-        return self._zscore_cross_sectional(factor_series, factors, market_cap)
+        return self._zscore_cross_sectional(factor_series, factors, market_cap, decision_time=decision_time)
 
     def _zscore_cross_sectional(
         self, factor_series: Dict[str, pd.DataFrame], factors: List[str],
         market_cap: Optional[Dict[str, float]] = None,
+        decision_time: Optional[str] = None,
     ) -> Tuple[Dict[str, Dict[str, float]], List[str]]:
-        """横截面z-score：调仓日对全池标的标准化（trailing值，无未来）"""
+        """横截面z-score：调仓日对全池标的标准化（trailing值，无未来）
+
+        P1-07④ 横截面兜底：合成当日截面（raw 面板）前对每只标的的因子时序做
+        as-of 校验——任何标的时序索引晚于 decision_time → 抛 CrossSectionalAsOfError
+        阻断该截面（fail-closed；context.get_data 已封死切片，此为第二道防线，
+        防因子序列被外部构造/缓存污染引入未来行）。
+
+        Args:
+            factor_series: {symbol: 因子时序 DataFrame}（trailing 计算）。
+            factors: 参与标准化的基础因子名列表。
+            market_cap: {symbol: 流通市值}，中性化预处理用。
+            decision_time: 决策时点（YYYY-MM-DD）；None 时不校验。
+
+        Returns:
+            (factor_scores, active_factors)。
+
+        Raises:
+            CrossSectionalAsOfError: 合成截面发现晚于决策时点的数据行。
+        """
+        if decision_time is not None:
+            asof_bad: List[str] = []
+            for sym, series in factor_series.items():
+                if series is None or len(series) == 0:
+                    continue
+                asof_bad.extend(validate_asof(series, decision_time))
+            if asof_bad:
+                raise CrossSectionalAsOfError(
+                    f"多因子当日截面 as-of 校验失败（P1-07④），阻断该截面 "
+                    f"(decision_time={decision_time}): " + "; ".join(asof_bad)
+                )
+
         rows: Dict[str, Dict[str, float]] = {}
         for sym, series in factor_series.items():
             latest = series.iloc[-1]

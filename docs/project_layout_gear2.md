@@ -5020,3 +5020,28 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 **验收**：py_compile 通过；targeted **193 passed / 1 skipped**（leakage_gate 10 文件字母序 + unit/test_architecture.py R-24 + unit/test_realism_gate.py 注册耦合）；全量 pytest **4033 passed / 4 skipped / 1 failed**（唯一失败 `test_backtest_real_config_adjust_strict`：**已知 pre-existing 配置漂移**——config YAML 缺 `data.adjust_strict`（M0-16 契约，上轮 #355 已确认的 2 例之一，另一例 leakage_gate 段已补），用户明确要求**全时段回测结束后**由定时任务「回测结束补 adjust_strict」承接补齐，与本次改动零关联）。
 
 **纪律遵守**：R03 **保持警告档不变**（R-14 裁定，其检测对象——跨时间全样本拟合——未被 P0-08 收口消除）；"同批同向"（NF-07/S-6）完成形态 = 统一信号词 helper（#333 已做）+ 两者均不作阻断判据（命名启发式只配提示），具体档位差异由检测对象存续状态决定（D3 判据表设计，非执行偏差）；info 档不扩展包导出面（`collect_gate_stats` 测试侧从 gate 子模块导入）；git 提交（commit message 引用 #356）。**P1-07 子项⑥b 完成（任务清单 ⬜ → ✅）**。
+
+
+## #357 · 2026-10-13 · P1-07④横截面 validate_asof 接线（[G13] 兜底，fail-closed 阻断截面）
+
+**卡定义**：任务清单 L158 P1-07 子项④横截面 validate_asof 接线（此前为孤儿函数，零生产调用点，R-12）；方案 §P1-07 ④横截面兜底：validate_asof/validate_cross_sectional_panel 挂到横截面数据出口，违规即抛错阻断该截面。验收判据：构造"截面含未来日期"的因子 → 在合成处被阻断。
+
+**接线点（代码现实核验后选定两个真实决策截面出口）**：
+- **strategies/base.py StockPoolBuilder**（三因子股票池截面，回测截面合成点）：`calculate_factors` 新增 `decision_time` 参数，合成 factor_df 前逐标的 validate_asof 校验时间索引 ≤ decision_time，违规 → raise CrossSectionalAsOfError 阻断该截面；`build` 把 as_of 归一化为 YYYY-MM-DD 透传（截断主防线 + 校验兜底双保险）。
+- **strategies/multi_factor_strategy.py MultiFactorStrategy**（多因子当日截面合成点）：`_zscore_cross_sectional` 新增 `decision_time` 参数，合成 raw 面板前逐标的因子时序 validate_asof 校验 ≤ decision_time，违规 → raise 阻断；`_standardize_base_factors` 透传；`_do_rebalance` 由当前调仓 bar.timestamp 归一化决策时点。
+- **不接线（偏离说明）**：`data_access/financial_service.py calculate_factor_stats`（方案所称"factor_engine 当日截面合成处"）是 factor_engine 批量计算的**历史因子快照落库**（按标的自身交易日写最近 N 日），**无"决策时点"语义可验**——强行接线属错误层级（与 R-12 判定同构），故不接线，回写说明偏离。
+
+**异常与口径**：cross_sectional.py 新增 `CrossSectionalAsOfError(RuntimeError)`（P1-07④ 接线专用）；decision_time=None 时不校验（向后兼容：实盘增量数据无未来、无决策日语义，与 P0-05"不传则不截断"同口径）。分层：strategies（L3）→ leakage_gate（L0）为正向跨层，R-02 不拦。
+
+**顺带修复**：validate_asof 的 DatetimeIndex 分支缺陷——`times = data.index`（Index 对象）后 `future.head(20)` 不存在，导致"面板索引为 DatetimeIndex"场景恒误报"时间比较失败"；已归一化为 `pd.Series(data.index)`，index 分支从此正确判定（列分支行为不变，既有测试不受影响）。
+
+**改动文件**：
+- **myquant/leakage_gate/cross_sectional.py（改动）**：新增 CrossSectionalAsOfError；validate_asof index 分支归一化 Series 修复；模块 docstring 补 P1-07④ 接线说明。
+- **myquant/strategies/base.py（改动）**：import validate_asof/CrossSectionalAsOfError；calculate_factors 加 decision_time 校验（三因子截面合成前）；build 归一化 as_of → decision_time 透传。
+- **myquant/strategies/multi_factor_strategy.py（改动）**：import validate_asof/CrossSectionalAsOfError；_do_rebalance 由 bar.timestamp 归一化决策日；_standardize_base_factors/_zscore_cross_sectional 透传 + 合成前 as-of 校验。
+- **tests/unit/test_pool_tradability_filter.py（改动，+3）**：calculate_factors 未来行阻断 / 干净通过 / build 截断+校验正常路径。
+- **tests/unit/test_factor_preprocessor.py（改动，+3）**：_zscore_cross_sectional 未来行阻断 / 干净通过 / _standardize_base_factors 完整链透传阻断。
+
+**验收**：py_compile 通过；targeted **230 passed / 1 skipped**（leakage_gate 10 文件字母序 + unit/test_architecture.py R-24 + unit/test_factor_preprocessor.py + unit/test_pool_tradability_filter.py + unit/test_realism_gate.py 注册耦合）；全量 pytest **4039 passed / 4 skipped / 1 failed**（唯一失败 `test_backtest_real_config_adjust_strict`：**已知 pre-existing 配置漂移**——config YAML 缺 `data.adjust_strict`（M0-16 契约），用户已明确由定时任务「回测结束补 adjust_strict」在全时段回测结束后承接补齐，与本次改动零关联）；首轮全量曾暴露 2 例 `_SpyPoolBuilder` 旧签名回归（base.py `build` 新传 `decision_time=` → spy 覆写签名不匹配 TypeError），已在 tests/unit/test_strategies.py 适配 spy 签名（加 `decision_time=None` 并透传 super()，仅动测试不动产品代码）后重跑全量归零。
+
+**纪律遵守**：只改点名范围（④接线），未动既有 as_of 纯函数契约（validate_asof/validate_cross_sectional_panel 签名不变）；decision_time=None 跳过口径与 P0-05 截断口径一致；R-02 分层合规（L3→L0 正向）；git 提交（commit message 引用 #357）。**P1-07 子项④完成（任务清单 ⬜ → ✅，P1-07 卡 7/7 全交付）**。

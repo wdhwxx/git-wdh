@@ -1022,9 +1022,14 @@ class TestP006StrategyNoDirectOrder:
 class _SpyPoolBuilder(StockPoolBuilder):
     """记录实际进入三因子计算的数据快照（P0-05 断言截断生效）"""
 
-    def calculate_factors(self, data_dict: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+    def calculate_factors(
+        self,
+        data_dict: Dict[str, pd.DataFrame],
+        decision_time: Optional[str] = None,
+    ) -> pd.DataFrame:
+        # P1-07④：StockPoolBuilder.build 已透传 decision_time（as_of 归一化）
         self.seen = {s: df.copy() for s, df in data_dict.items()}
-        return super().calculate_factors(data_dict)
+        return super().calculate_factors(data_dict, decision_time=decision_time)
 
 
 class TestP005PoolBuilderAsOf:

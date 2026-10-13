@@ -9,6 +9,11 @@ leakage_gate/cross_sectional.py - 横截面 as-of 校验器（阶段 1-B，M1B-0
 不 import strategies 包（L0→L3 反向跨层会被 R-02 拦截）；运行时面板校验为纯函数，
 由调用方（回测/因子计算）在得到当日截面时传入校验。
 
+P1-07④ 接线（回写#357）：validate_asof / validate_cross_sectional_panel 由生产横截面
+出口显式调用——StockPoolBuilder.calculate_factors（三因子截面合成，strategies/base.py）
+与 MultiFactorStrategy._zscore_cross_sectional（多因子当日截面合成，multi_factor_strategy.py）；
+发现晚于决策时点的行 → 抛 CrossSectionalAsOfError 阻断该截面（fail-closed 兜底）。
+
 职责（v3.0 §6.5-2 / §10 规则表 R07）：
   - validate_asof                 纯函数：面板时间列逐行不得晚于决策时点
   - validate_cross_sectional_panel 纯函数：当日截面 = 只含该日数据，无未来日期
@@ -42,6 +47,15 @@ _STRATEGIES_DIR: Path = Path(__file__).resolve().parents[2] / "myquant" / "strat
 # ═══════════════════════════════════════════════
 #  运行时 as-of 校验（纯函数）
 # ═══════════════════════════════════════════════
+
+class CrossSectionalAsOfError(RuntimeError):
+    """横截面 as-of 校验失败：合成当日截面时发现晚于决策时点的数据行。
+
+    P1-07④ 接线专用异常：生产截面合成点（三因子股票池 / 多因子当日截面）
+    调用 validate_asof / validate_cross_sectional_panel 发现未来日期行后抛出，
+    fail-closed 阻断该截面（不允许含未来数据的截面进入选股/打分）。
+    """
+
 
 def validate_asof(
     data: Any,
@@ -78,7 +92,8 @@ def validate_asof(
         if time_col in data.columns:
             times = pd.to_datetime(data[time_col], errors="coerce")
         elif isinstance(data.index, pd.DatetimeIndex):
-            times = data.index
+            # 归一化为 Series：DatetimeIndex 无 .head()，需 Series 语义做截断显示
+            times = pd.Series(data.index)
         else:
             return [f"DataFrame 缺少时间列 {time_col!r} 且索引非 DatetimeIndex"]
 

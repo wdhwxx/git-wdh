@@ -45,6 +45,7 @@ import pandas as pd
 
 from myquant.core.date_utils import get_date_part
 from myquant.core.logger import get_logger
+from myquant.leakage_gate.cross_sectional import CrossSectionalAsOfError, validate_asof
 from myquant.models.market_data import Bar
 from myquant.models.trade import Order, OrderSide, OrderType, Position
 
@@ -1027,8 +1028,33 @@ class StockPoolBuilder:
         logger.info(f"可交易性过滤: {len(symbols)} → {len(tradable)}")
         return tradable
 
-    def calculate_factors(self, data_dict: Dict[str, pd.DataFrame]) -> pd.DataFrame:
-        """计算三因子得分"""
+    def calculate_factors(
+        self,
+        data_dict: Dict[str, pd.DataFrame],
+        decision_time: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """计算三因子得分（P1-07④ 横截面兜底：合成前 as-of 校验）。
+
+        Args:
+            data_dict: {symbol: 行情DataFrame}（每标的截至决策日或全量数据）。
+            decision_time: 决策时点（YYYY-MM-DD，P1-07④）。非空时对每只标的
+                逐行校验时间索引 ≤ decision_time，发现晚于决策日的行即抛
+                CrossSectionalAsOfError 阻断该截面（fail-closed 兜底；build 路径
+                已按 as_of 截断，此处为截断失效/直接调用时的第二道防线）。
+                None 时不校验（向后兼容：调用方无决策时点语义时跳过）。
+        """
+        if decision_time is not None:
+            asof_bad: List[str] = []
+            for symbol, df in data_dict.items():
+                if df is None or len(df) == 0:
+                    continue
+                asof_bad.extend(validate_asof(df, decision_time))
+            if asof_bad:
+                raise CrossSectionalAsOfError(
+                    "三因子截面 as-of 校验失败（P1-07④），阻断该截面: "
+                    + "; ".join(asof_bad)
+                )
+
         records = []
         for symbol, df in data_dict.items():
             if df is None or len(df) < max(self.volatility_period, self.momentum_period) + 1:
@@ -1096,9 +1122,11 @@ class StockPoolBuilder:
             as_of: 时点截断（P0-05修复）——仅使用 index <= as_of 的历史数据计算因子，
                 防止选股用到回测末日的收盘价/波动率/动量（未来函数）。
                 不传则不截断（向后兼容；生产 on_bar 路径必须传当前 bar.timestamp）。
+                截断后仍由 calculate_factors 按同一时点做 as-of 校验（P1-07④ 兜底）。
         """
         filtered = self.filter_by_code(symbols)
         valid_data: Dict[str, pd.DataFrame] = {}
+        decision_time: Optional[str] = None
         for s in filtered:
             df = data_dict.get(s)
             if df is None:
@@ -1108,9 +1136,11 @@ class StockPoolBuilder:
                 # bar.timestamp 为 epoch 秒(float)，需先归一化为 Timestamp 才能与 DatetimeIndex 比较
                 as_of_ts = pd.Timestamp.fromtimestamp(as_of) if isinstance(as_of, (int, float)) else as_of
                 df = df[df.index <= as_of_ts]
+                # P1-07④：归一化为日期字符串供 calculate_factors 的 as-of 校验复用
+                decision_time = as_of_ts.strftime("%Y-%m-%d")
             valid_data[s] = df
         # KP-P2-01：插入可交易性过滤（ST/停牌/次新/20日均量），数据已按 as_of 截断
         filtered = self.filter_by_tradability(list(valid_data.keys()), valid_data)
         valid_data = {s: valid_data[s] for s in filtered if s in valid_data}
-        factor_df = self.calculate_factors(valid_data)
+        factor_df = self.calculate_factors(valid_data, decision_time=decision_time)
         return self.select_by_intersection(factor_df)

@@ -41,6 +41,7 @@ from myquant.indicators.factor_preprocessor import (
     winsorize_mad,
     winsorize_quantile,
 )
+from myquant.leakage_gate.cross_sectional import CrossSectionalAsOfError
 from myquant.strategies.multi_factor_strategy import MultiFactorStrategy
 
 
@@ -421,6 +422,51 @@ def test_strategy_invalid_mode_raises() -> None:
     """非法 preprocess_mode → ValueError"""
     with pytest.raises(ValueError):
         MultiFactorStrategy(preprocess_mode="bogus")
+
+
+# ═══════════════════════════════════════════════
+#  P1-07④ 横截面 as-of 兜底（validate_asof 接线）
+# ═══════════════════════════════════════════════
+
+def _inject_future_row(fs: Dict[str, pd.DataFrame], sym: str) -> Dict[str, pd.DataFrame]:
+    """给指定标的的因子序列追加晚于决策时点（2026-10-10）的未来行。"""
+    idx = pd.date_range("2026-12-01", periods=2, freq="B")
+    extra = pd.DataFrame(
+        {f: [0.1, 0.2] for f in MultiFactorStrategy.BASE_FACTORS},
+        index=idx,
+    )
+    fs = dict(fs)
+    fs[sym] = pd.concat([fs[sym], extra])
+    return fs
+
+
+def test_zscore_cross_sectional_asof_future_blocked() -> None:
+    """截面因子序列含未来日期 → _zscore_cross_sectional 抛错阻断该截面。"""
+    fs = _inject_future_row(_make_factor_series(12, seed=31), "TEST0000")
+    mf = MultiFactorStrategy()
+    with pytest.raises(CrossSectionalAsOfError, match="as-of 校验失败"):
+        mf._zscore_cross_sectional(
+            fs, list(MultiFactorStrategy.BASE_FACTORS), decision_time="2026-10-10",
+        )
+
+
+def test_zscore_cross_sectional_asof_clean() -> None:
+    """全部序列索引 <= 决策日 → 正常合成当日截面。"""
+    fs = _make_factor_series(12, seed=32)
+    mf = MultiFactorStrategy()
+    scores, active = mf._zscore_cross_sectional(
+        fs, list(MultiFactorStrategy.BASE_FACTORS), decision_time="2026-10-10",
+    )
+    assert sorted(active) == sorted(list(MultiFactorStrategy.BASE_FACTORS))
+    assert len(scores) == 12
+
+
+def test_standardize_base_factors_asof_future_blocked() -> None:
+    """_standardize_base_factors 透传 decision_time：含未来行经完整调用链亦阻断。"""
+    fs = _inject_future_row(_make_factor_series(12, seed=33), "TEST0000")
+    mf = MultiFactorStrategy()
+    with pytest.raises(CrossSectionalAsOfError, match="as-of 校验失败"):
+        mf._standardize_base_factors(fs, None, decision_time="2026-10-10")
 
 
 def test_strategy_market_cap_calc() -> None:

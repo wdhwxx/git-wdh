@@ -1,7 +1,14 @@
 # -*- coding: utf-8 -*-
-"""T-40 KP-P2-01 三因子股票池可交易性过滤：ST/停牌/次新/20日均量剔除 + 比例参数化。"""
+"""T-40 KP-P2-01 三因子股票池可交易性过滤：ST/停牌/次新/20日均量剔除 + 比例参数化。
+
+P1-07④：三因子截面合成处 as-of 兜底（validate_asof 接线，含未来行 → 阻断）。
+"""
 from typing import Dict
 
+import pandas as pd
+import pytest
+
+from myquant.leakage_gate.cross_sectional import CrossSectionalAsOfError
 from myquant.strategies.base import StockPoolBuilder
 from myquant.strategies.ma_strategy import RSRSStrategy
 from tests.conftest import make_ohlcv_df
@@ -78,3 +85,35 @@ def test_ma_strategy_pool_top_ratio_default_one_third():
     assert s.pool_top_ratio == 1.0 / 3.0
     s2 = RSRSStrategy(pool_top_ratio=0.4)
     assert s2.pool_top_ratio == 0.4
+
+
+# ═══════════════════════════════════════════════
+#  P1-07④ 横截面 as-of 兜底（validate_asof 接线）
+# ═══════════════════════════════════════════════
+
+def test_calculate_factors_asof_future_blocked():
+    """截面含未来日期行 → calculate_factors 抛 CrossSectionalAsOfError 阻断该截面。"""
+    data: Dict = {"000001.SZ": _good_df(), "000002.SZ": _good_df()}
+    # 给 000002.SZ 追加晚于决策时点（2026-10-10）的未来行
+    future = make_ohlcv_df([99.0], start="2026-12-01")
+    data["000002.SZ"] = pd.concat([data["000002.SZ"], future])
+    with pytest.raises(CrossSectionalAsOfError, match="as-of 校验失败"):
+        StockPoolBuilder().calculate_factors(data, decision_time="2026-10-10")
+
+
+def test_calculate_factors_asof_clean():
+    """全部标的索引 <= 决策日 → calculate_factors 正常合成截面。"""
+    data: Dict = {"000001.SZ": _good_df(), "000002.SZ": _good_df()}
+    factor_df = StockPoolBuilder().calculate_factors(data, decision_time="2026-10-10")
+    assert "000001.SZ" in factor_df.index
+    assert {"volatility", "price", "momentum"}.issubset(factor_df.columns)
+
+
+def test_build_asof_truncation_and_check_ok():
+    """build(as_of=决策日)：截断 + as-of 校验正常路径不抛、正常选股。"""
+    data: Dict = {"000001.SZ": _good_df(), "000002.SZ": _good_df()}
+    pool = StockPoolBuilder().build(
+        list(data), data, as_of=pd.Timestamp("2026-10-10").timestamp()
+    )
+    assert isinstance(pool, list)
+    assert set(pool).issubset({"000001.SZ", "000002.SZ"})
