@@ -236,6 +236,42 @@ def test_results_manifest_attached_when_compliant(
     assert saved["realism_manifest"]["fields"]["causality"]["context_sliced"] is True
 
 
+def test_report_flow_writes_results_manifest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    """回写#355：报告流程自动落盘——generate_full_report 消费 result.realism_manifest
+    （引擎收尾 to_dict 产物，Dict）→ results.json 含 realism_manifest 键。
+
+    此前 write_manifest_to_results 仅由测试/阻断路径调用（正常路径零接线），
+    生产回测暴露后补齐：报告生成时自动落盘（方案 §4.3"必须落盘"正常路径闭环）。
+    同时锁定"Dict 兼容"分支（引擎挂 Dict 而非实例也能写）。
+    """
+    monkeypatch.chdir(tmp_path)
+    engine = _run_backtest(_CompliantStrategy(), enabled=True, tmp_path=tmp_path)
+    assert engine.result.realism_manifest is not None
+
+    from myquant.backtest.report import ReportGenerator
+
+    out_dir = os.path.join(str(tmp_path), "report_out")
+    ReportGenerator(title="t").generate_full_report(
+        engine.result, out_dir, include_monte_carlo=False, include_pdf=False
+    )
+    results_path = os.path.join(out_dir, "results.json")
+    assert os.path.exists(results_path), "报告流程应自动落盘 results.json"
+    with open(results_path, "r", encoding="utf-8") as f:
+        saved = json.load(f)
+    assert "realism_manifest" in saved
+    assert saved["realism_manifest"]["sealed"] is True
+    # 报告页（summary）含门禁清单段
+    summary = [
+        p for p in os.listdir(out_dir) if p.startswith("summary_") and p.endswith(".txt")
+    ]
+    assert summary, "应生成 summary 文本报告"
+    with open(os.path.join(out_dir, summary[0]), "r", encoding="utf-8") as f:
+        text = f.read()
+    assert "回测真实性门禁清单" in text, "报告页应含门禁清单段"
+
+
 def test_manifest_attached_when_audit_only(
     monkeypatch: pytest.MonkeyPatch, tmp_path: object
 ) -> None:

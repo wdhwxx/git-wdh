@@ -40,6 +40,7 @@ from myquant.backtest.monte_carlo import MonteCarloAnalyzer, MonteCarloResult
 from myquant.backtest.pdf_report import PdfReportGenerator, downsample_equity_curve
 from myquant.core.logger import get_logger
 from myquant.models.backtest import BacktestResult, EquityPoint, TradeRecord
+from myquant.realism_gate.report import write_manifest_to_results
 from myquant.utils.csv_utils import CSV_HEADER_MAPS, export_csv_cn
 
 logger = get_logger(__name__)
@@ -142,6 +143,22 @@ class ReportGenerator:
         final_value = result.config.initial_capital * result.final_equity
         lines.append(f"  最终资产:     {final_value:>12,.2f}")
         lines.append("")
+
+        # 回测真实性门禁清单（方案 §4.3"清单强制写入报告页"；回写#355）
+        _rg = getattr(result, "realism_manifest", None)
+        if _rg:
+            _rg_status = _rg.get("status", "unknown")
+            _rg_violations = _rg.get("violations", []) or []
+            lines.append("【回测真实性门禁清单】")
+            lines.append(f"  清单状态:   {_rg_status}")
+            lines.append(f"  违规数:     {len(_rg_violations)}")
+            if _rg_violations:
+                for _v in _rg_violations[:10]:
+                    _crit = bool(_v.get("critical", False))
+                    lines.append(f"    - [{'critical' if _crit else 'warn'}] "
+                                 f"{_v.get('field_path')}: {_v.get('message', '')}")
+            lines.append("")
+
         lines.append("=" * 60)
 
         return "\n".join(lines)
@@ -601,6 +618,14 @@ class ReportGenerator:
         with open(text_path, 'w', encoding='utf-8') as f:
             f.write(text)
         paths['text'] = text_path
+
+        # 真实性门禁清单落盘（方案 §4.3"必须落盘：清单强制写入 results.json"；
+        # 回写#355：正常路径（回测成功）同样落盘——此前仅阻断路径 blocked 产物
+        # 已接线，正常路径清单无处可查，生产回测暴露后补齐）
+        manifest = getattr(result, "realism_manifest", None)
+        if manifest:
+            write_manifest_to_results(os.path.join(output_dir, "results.json"), manifest)
+            logger.info(f"真实性门禁清单已写入 results.json: {output_dir}")
 
         logger.info(f"完整报告已生成: {output_dir}")
         return paths

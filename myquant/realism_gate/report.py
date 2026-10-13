@@ -31,15 +31,20 @@ logger = logging.getLogger("myquant.realism_gate.report")
 
 def write_manifest_to_results(
     results_path: str,
-    manifest: RealismManifest,
+    manifest: Union[RealismManifest, Dict[str, Any]],
 ) -> str:
     """把 RealismManifest 写入 results.json 的 realism_manifest 键。
 
     若 results.json 已存在则合并（保留其他键）；不存在则新建。
 
+    P1-03 收尾（#355）：兼容已序列化 dict——引擎收尾把 manifest 以
+    ``to_dict()`` 产物挂到 ``BacktestResult.realism_manifest``（Dict），
+    报告流程（backtest/report.py generate_full_report）落盘时直接传入
+    该 Dict，无需重建实例（RealismManifest 实例与 to_dict 产物均可）。
+
     Args:
         results_path: results.json 绝对路径。
-        manifest: 已 seal 的 RealismManifest 实例。
+        manifest: 已 seal 的 RealismManifest 实例，或其实例的 to_dict() 产物。
 
     Returns:
         实际写入的文件路径。
@@ -52,7 +57,9 @@ def write_manifest_to_results(
         except (json.JSONDecodeError, OSError) as e:
             logger.warning(f"results.json 读取失败（将覆盖重建）: {e}")
 
-    existing["realism_manifest"] = manifest.to_dict()
+    existing["realism_manifest"] = (
+        manifest.to_dict() if isinstance(manifest, RealismManifest) else manifest
+    )
 
     tmp_path = results_path + ".tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:

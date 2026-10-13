@@ -4980,6 +4980,21 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 
 **纪律遵守**：BacktestConfig 默认改非空段先查测试断言（无 `=={}` 依赖）；test_gate_misconfig.py 蓝图未登记不新建（并入既有测试文件）；R-24 基线同步更新；git 提交（commit message 引用 #354）。**P1-03 卡 ✅ 完成（M2 三卡 P1-01/P1-02/P1-03 全部收官）**。
 
+## #355 · 2026-10-13 · 正常路径清单落盘接线（§4.3"必须落盘"闭环）
+
+**背景**：生产回测（完整全时段 2024-01-01~2026-09-16、3195 标的、enabled=true，2h46m 跑完 exit 0）暴露真实缺口——**回测成功路径 results.json 未落盘**：`write_manifest_to_results` 全仓零调用（仅阻断路径 `write_blocked_artifact` 已接线 #345），`ReportGenerator` 不消费 realism_manifest——方案 §4.3"清单强制写入 results.json 与报告页"只兑现了阻断路径。
+
+**落地**：
+- `myquant/realism_gate/report.py`：`write_manifest_to_results` **兼容已序列化 dict**——引擎收尾把 manifest 以 `to_dict()` 产物挂到 `BacktestResult.realism_manifest`（Dict，engine.py:1124）；报告流程直接传 Dict 无需重建实例（签名 Union[RealismManifest, Dict] + isinstance 分支）
+- `myquant/backtest/report.py` `generate_full_report`：报告生成后 `result.realism_manifest` 非 None → `write_manifest_to_results(output_dir/results.json, manifest)`（**正常路径自动落盘**；分层合法：backtest(L3) → realism_gate(L0) 高层依赖低层，与 engine.py 先例一致）
+- `myquant/backtest/report.py` `generate_text`：**报告页追加【回测真实性门禁清单】段**（清单状态/违规数/前 10 条违规 field_path+message）
+- `tests/unit/test_realism_gate_e2e.py`：新增 `test_report_flow_writes_results_manifest`（1 项）——generate_full_report → results.json 含 realism_manifest（sealed=True）+ summary 含门禁清单段；**锁定 Dict 兼容分支**
+- **顺带修复 YAML 配置完整性**（全量测试暴露，与本次改动无关但同批修复）：`backtest_kunpeng.yaml` 与 `backtest_config.yaml` 的 `data.adjust_strict: true` 缺失（文件此前被部分回滚，realism_gate 段/ adjust_strict 键均丢）→ 已补（M0-16 要求；两文件 .gitignore 忽略不入 commit）
+
+**验收**：targeted 113 passed（e2e+realism_gate+backtest+report）+ 全量 pytest **4049 passed/4 skipped/0 failed**（首轮 1 failed 系 YAML adjust_strict 缺失，补键后全绿）。
+
+**纪律遵守**：落盘走既有 L0 函数（复用不重写）；报告页追加段不动既有结构；YAML 修复限缺失键补回（不改语义）；git 提交（commit message 引用 #355）。**§4.3"必须落盘"正常路径闭环——生产回测成功时清单随报告自动落盘**。
+
 
 
 ## #355 · 2026-10-13 · P1-07 子项③ 空值 fail-closed 校正（[G13] 警告档 → 阻断档）
