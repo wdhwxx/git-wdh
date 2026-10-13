@@ -5093,3 +5093,15 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 **验收**：移除后覆盖复核——backtest_config.yaml 3207 池**零缺项**、backtest_kunpeng.yaml 3195 池**零缺项**（判据：adjust_factor event_date ≤ 2026-09-16 去重 symbol 覆盖，排除 benchmark 000300.SH raw 加载，#350 口径）；tests/unit/test_config_live_check.py **22 passed**（含 test_backtest_real_config_adjust_strict——此前 pre-existing 配置漂移 1 例随配置补齐转绿）；全量 pytest 结果 commit 前回填。
 
 **纪律遵守**：只动用户点名范围（backtest_config.yaml 池 codes）；19 个标的身份全部经官方终止上市/摘牌公告核验（上交所/深交所 + 央广网等媒体，代表 URL 留档于对话）；config YAML 为 .gitignore 忽略文件不入 commit——配置变更留痕走蓝图 + 任务清单（与既有 config/ 治理口径一致）；git 提交（commit message 引用 #359）。**「回测结束补 adjust_strict」待办闭环（缺项处置完成，两池 adjust_strict=True 下可正常回测）**。
+
+## #360 · 2026-10-13 · P0-05 收尾核实（#347 已一并落地，补任务清单留痕）
+
+**卡定义**：任务清单 P0-05（L119-128）"消灭静默零成本/零约束通道"——验收判据：`slippage_mode: fixed` → 要么真实生效、要么显式报错；不得静默零滑点。
+
+**核实结论（本卡无新增代码）**：P0-05 收尾的代码改动已由 **#347（P0-03 卡本体收尾）一并落地**：
+- **myquant/backtest/config_builder.py（#347 已改）**：`slippage_mode` 分支重写——`ratio`（转 bps）/ `none`（显式零滑点，诚实披露）/ 未知值 → `raise ValueError("slippage_mode 未知值...（合法值: ratio/none）")`（L180-186，蓝图 #347 记录已写明）；
+- **myquant/models/backtest.py（#323 已改）**：`SlippageModel.calc()` 未知 `type` → `ValueError`；
+- **测试覆盖**：tests/unit/test_config_builder.py `test_slippage_mode_unknown_raises`（`mystery` → ValueError match "slippage_mode"）+ `test_slippage_mode_none_explicit`（显式 none 零滑点路径），targeted **16 passed**。
+- **遗留仅为任务清单状态行滞后**（仍 ⚠️"待补约 3 行"，系 2026-10-12 复核后未随 #347 同步更新）→ 本次修正为 ✅，并补本核实回写。
+
+**验收**：test_config_builder.py 16 passed；全量 pytest（commit 前回填，基线 4049 passed / 4 skipped / 0 failed，本次无代码改动预期保持）。**P0-05 完成（任务清单 ⚠️ → ✅）**。
