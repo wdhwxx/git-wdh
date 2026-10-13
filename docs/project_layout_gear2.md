@@ -5081,3 +5081,15 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 **验收**：py_compile 7 文件全 OK；新测试首轮 8 passed（strategy=None auto 模式不可达——resolve_mode 抛错既有行为，改显式 event 模式验证报告标注路径）；targeted **618 passed / 1 skipped / 1 failed**（27 文件字母序含 architecture R-24 + realism_gate + 全部相关引擎/出口测试；唯一失败 `test_backtest_real_config_adjust_strict`：**已知 pre-existing 配置漂移**——config YAML 缺 `data.adjust_strict`（M0-16 契约），用户已明确由定时任务「回测结束补 adjust_strict」在全时段回测结束后承接补齐，本任务禁止改 YAML，与本次改动零关联）；全量 pytest 待 commit 前复核（预期仅剩该 1 例 pre-existing 红）。
 
 **纪律遵守**：只改点名范围（四出口接线 + decision_time 语义）；strategy=None 报告标注路径在生产 auto 模式不可达（create_engine resolve_mode 拒启，报告语义仅显式 mode 可达——测试侧显式 event 验证，属既有行为非本次引入）；报告失败全部审计旁路（logger.warning 不阻断主流程，py 规则"记录后恢复"）；report.py/gate.py 属 L0 被 L3/L2 正向引用，R-02 分层合规；R-24 基线按实际增量更新（功能必需行豁免原则，注释留痕）；git 提交（commit message 引用 #358）。**P1-11 + P2-11 完成（任务清单 L162/L187 ⬜ → ✅）**。
+
+## #359 · 2026-10-13 · 回测结束补 adjust_strict 配套处置：19 缺 hfq 因子标的移除（backtest_config 池 3226→3207）
+
+**背景**：「回测结束补 adjust_strict」待办（用户 2026-10-13 创建，每小时整点定时检查）11:37 轮核查：quant.db adjust_factor 覆盖 5235 标的（event_date ≤ 2026-09-16），backtest_config.yaml 3226 池缺 hfq 因子 **19 个**、backtest_kunpeng.yaml 3195 池零缺项；两个 YAML 的 data 段已在 11:35-11:37 被写入 `adjust: hfq` + `adjust_strict: True`（写入者未核实，config/*.yaml 系 .gitignore 忽略不入 commit）。按待办指令（存在缺项 → 不补 → 报告等指示），先完成 19 个缺项标的**身份核实**：18 个已于 2025-05~2026-03 间终止上市/摘牌（含 5 家主动退市——玉龙股份/中航产融/*ST天茂/中国重工/德邦股份、锦州港重大违法强制退市、中国重工被吸收合并换股等，本地最后数据日与官方摘牌日全部互证）；仅 **689009.SH 九号公司 CDR 在市**（2026-10-13 上交所正常交易，但 adjust_factor 0 行）。用户拍板执行 **A+B**：19 个标的全部从 backtest_config.yaml 池移除（689009.SH 的 B 处置选"暂移出池"）。
+
+**落地**：
+- **config/backtest_config.yaml（改动，.gitignore 忽略不入 commit）**：`stock_pool.codes` **3226→3207**，移除 18 退市标的（000584.SZ/000622.SZ/000627.SZ/000851.SZ/002231.SZ/002336.SZ/002750.SZ/600190.SH/600200.SH/600387.SH/600462.SH/600705.SH/600804.SH/601028.SH/601989.SH/603003.SH/603056.SH/603388.SH）+ 689009.SH；仅动 codes 列表块，其余段（backtest/stock_pool 其余键/data/leakage_gate 等）原样保留；文件保持 UTF-8 + CRLF 原格式；kunpeng 池 3195 不受影响。
+- **docs 留痕（入 commit）**：本蓝图 #359 回写 + 任务清单 P0-04 卡状态行追加数据侧配套处置说明（19 缺项闭环）。
+
+**验收**：移除后覆盖复核——backtest_config.yaml 3207 池**零缺项**、backtest_kunpeng.yaml 3195 池**零缺项**（判据：adjust_factor event_date ≤ 2026-09-16 去重 symbol 覆盖，排除 benchmark 000300.SH raw 加载，#350 口径）；tests/unit/test_config_live_check.py **22 passed**（含 test_backtest_real_config_adjust_strict——此前 pre-existing 配置漂移 1 例随配置补齐转绿）；全量 pytest 结果 commit 前回填。
+
+**纪律遵守**：只动用户点名范围（backtest_config.yaml 池 codes）；19 个标的身份全部经官方终止上市/摘牌公告核验（上交所/深交所 + 央广网等媒体，代表 URL 留档于对话）；config YAML 为 .gitignore 忽略文件不入 commit——配置变更留痕走蓝图 + 任务清单（与既有 config/ 治理口径一致）；git 提交（commit message 引用 #359）。**「回测结束补 adjust_strict」待办闭环（缺项处置完成，两池 adjust_strict=True 下可正常回测）**。
