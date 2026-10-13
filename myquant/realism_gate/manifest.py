@@ -320,21 +320,29 @@ class RealismManifest:
     def manifest_signature(self) -> str:
         """计算跨运行可比性签名（§4.10）。
 
-        剔除 ``run_id`` / 时间戳类字段后对剩余字段做规范化 JSON 哈希。
-        用于 param_optimizer/batch_backtest 聚合时以签名为分组键，
-        跨签名禁止合并排行。
+        剔除 ``run_id`` / 时间戳类字段 / 运行区间与引擎模式等运行特异字段后，
+        对剩余真实性相关字段做规范化 JSON 哈希。用于 param_optimizer /
+        batch_backtest / candidate_pool 聚合时以签名为分组键，跨签名禁止合并排行。
 
         Returns:
             sha256 十六进制串（前 16 字符）。
         """
-        # 剔除 run_id（每次运行唯一）与任何 *_ts/timestamp 字段
+        # 精确剔除的运行特异 key（每次运行唯一/时间戳）
+        _EXACT = frozenset({"run_id", "decision_time", "created_ts", "sealed",
+                            "start_date", "end_date", "pairs"})
+        # 前缀剔除：engine_mode_*（引擎模式选择，随运行变化、非真实性事实）
+        _PREFIX = ("engine_mode_",)
+
         def _purge(obj: Any) -> Any:
             if isinstance(obj, dict):
-                return {
-                    k: _purge(v)
-                    for k, v in sorted(obj.items())
-                    if k not in ("run_id", "decision_time", "created_ts", "sealed")
-                }
+                cleaned: Dict[str, Any] = {}
+                for k, v in sorted(obj.items()):
+                    if k in _EXACT:
+                        continue
+                    if any(k.startswith(p) for p in _PREFIX):
+                        continue
+                    cleaned[k] = _purge(v)
+                return cleaned
             if isinstance(obj, list):
                 return [_purge(x) for x in obj]
             return obj

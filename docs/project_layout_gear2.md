@@ -768,6 +768,8 @@ Pythonwdhmm/
 │   │   ├── test_data_quality_gate.py # ✨【回写#363】P1-13 回测期数据质量门禁（21 项）：scan_data_quality 纯函数（NaN 价/OHLC 违例）/ provider 模块级累计 / engine._scan_entry_data_quality 入口聚合（data dict/None 占位/覆盖率截断）/ data_pit coverage_rate<0.5 critical / enabled=True fail-closed 反红（NaN/OHLC/低覆盖率 → RealismGateError）
 │   │   ├── test_data_snapshot_pin.py # ✨【回写#364】P1-12 数据快照 pin（15 项）：compute_data_snapshot L0 纯函数（空目录/哈希稳定/内容变化/忽略非数据文件/snapshot_id=前12字符）/ verify_sidecar（首次自动 pin / 一致 / 新增文件 / 改文件 / sidecar 损坏 / 缓存命中+reset 重扫）/ data_pit 指纹判据（applicable 缺失·不一致 critical、不适用跳过）/ _derive_status（applicable+None→unverified）
 
+│   │   ├── test_signature_guard.py  # ✨【回写#366】P1-16 签名守门反红测试（12 项）：manifest_signature 剔除（run_id/start_date/end_date/engine_mode_* 稳定、改成本口径签名变）/ group_by_signature（同签名分组·无签名归 None 组）/ assert_uniform_signature（单签放行·无签名向后兼容放行·多签名抛 RealismGateError+差异清单含各签名组）/ diff_signatures（逐字段对称差）/ param_optimizer 跨签名 outcomes 拒合并·同签放行
+
 │   │   ├── test_slicing_failopen_guard.py # ✨【回写#338】因果切片 fail-open 加固反红测试（P0-08 子项④用例⑫：engine/mixed 置位失败显式降级——保持未封门 + 哨兵计数 + 写 context_sliced=false）
 
 │   │   ├── test_realism_gate_e2e.py # ✨【回写#345】P0-01 端到端验收测试（3 项：阻断路径 blocked 产物落盘 / 正常路径 results.json 完整清单 / 审计档 enabled=false 清单仍落盘；真实 create_engine+run 链路 + 违规探针策略触发 causality 判据）
@@ -988,7 +990,9 @@ Pythonwdhmm/
 
     │   ├── __init__.py               # ✨【回写#305】薄 re-export：RealismManifest/RealismViolation/RealismGateError/ManifestIncompleteError/CRITICAL_FIELDS/WARNING_FIELDS/ENUM_DOMAINS
 
-    │   ├── manifest.py               # ✨【回写#305】RealismManifest 数据契约核心（~310 行）：异常体系（RealismGateError/ManifestIncompleteError）+ RealismViolation（无 severity）+ CRITICAL_FIELDS 52 项 + ALLOW_NONE_FIELDS（participation_cap/survivorship.discount 允许 null）+ ENUM_DOMAINS 取值域校验 + build()（完整性校验+status 推导 ok/degraded）+ manifest_signature()（剔除 run_id/时间戳 sha256）+ to_dict/from_dict 序列化 + seal/is_sealed
+    │   ├── manifest.py               # ✨【回写#305】RealismManifest 数据契约核心（~310 行）：异常体系（RealismGateError/ManifestIncompleteError）+ RealismViolation（无 severity）+ CRITICAL_FIELDS 52 项 + ALLOW_NONE_FIELDS（participation_cap/survivorship.discount 允许 null）+ ENUM_DOMAINS 取值域校验 + build()（完整性校验+status 推导 ok/degraded）+ manifest_signature()（剔除 run_id/时间戳 sha256）+ to_dict/from_dict 序列化 + seal/is_sealed；✨【回写#366】manifest_signature() 剔除清单补全——精确剔除 start_date/end_date/pairs（运行区间与标的清单，随运行变化非真实性事实）+ 前缀剔除 engine_mode_*（引擎模式选择），原仅剔 run_id/decision_time/created_ts/sealed
+
+    │   ├── signature_guard.py        # ✨【回写#366】跨运行可比性守门（§4.10 P1-16，L0 纯函数）：group_by_signature（按 manifest_signature 分组，无签名字段归 None 组向后兼容）+ assert_uniform_signature（合并多份结果前校验签名一致，≥2 个不同签名抛 RealismGateError 并输出差异清单——各签名组记录数与代表标识）+ split_ranked_uniform（跨签名安全出口按组分别排序）+ diff_signatures（逐字段对称差+值不同清单）；鸭子类型 dict 消费避免与 backtest 循环 import；被 param_optimizer._rank / batch_report._top_rows / candidate_pool 合并点调用
 
     │   ├── gate.py                   # ✨【回写#306】门禁中心出口断言（~230 行）：RealismGateConfig（enabled 默认 False 分期启用期 / audit_violations）+ register_realism_check 注册钩子 + assert_realism_pass 唯一出口（§4.3 时序：build 完整性 fail-closed → 执行检查 → critical 违规 enabled=True 落 audit_log+抛 RealismGateError；enabled=False audit 档不阻断 → 通过 seal）+ 检查器异常 fail-closed 记 gate-error 违规；依赖 core.audit_log（L0 合法，BASE-7 哈希链）
 
@@ -5190,3 +5194,21 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 **验收**：新反红 13 passed；targeted 54 passed（exemption 旧 13 + 新 13 + report_wiring + guard_mounting）；全量 pytest commit 前回填。生产默认台账 database/exemptions.json 与 audit_log 的 database/quant.db 同数据区。
 
 **纪律遵守**：蓝图目录树先行登记（exemption.py 标注 / tests/leakage_gate 新增 hardening 行 / scripts 新增豁免管理.py 行）；L0 纯模块（exemption 仅依赖 myquant.core.audit_log，R-02/R-16 分层合规，Violation 鸭子类型消费避免循环 import）；fail-closed（gate-error 双保险，宁可阻断不可放行）；防未来（豁免有效性只按已给定 valid_from/valid_until 与当前时点判定，不预测未来）；import 分三组；禁裸 except（_audit 兜底带类型 + 注释）；全量 pytest 0 failed 才提交；git 提交（commit message 引用 #365）。**P1-14 完成（任务清单 ⬜ → ✅，M7 第三卡）**。
+
+---
+
+## #366 · 2026-10-13 · P1-16 manifest 签名与跨运行可比性（M7 收官卡）
+
+**现状核实**：manifest.py 已有 `manifest_signature()`（L320），但剔除清单只剔 `run_id/decision_time/created_ts/sealed`——方案 §4.10（L612 起）要求连运行区间（start_date/end_date）、标的清单（pairs）、引擎模式（engine_mode_*）一并剔除，否则同一份真实性配置换个回测区间/模式就被判成不同配置，跨运行可比性签名失真；且 param_optimizer/batch_backtest/candidate_pool 三处聚合排行**零签名守门**，把不同真实性配置的回测混排收益即重演 batch_backtest 指纹缺 mode 的同类缺陷。
+
+**落地**：
+- **myquant/realism_gate/manifest.py（改动）**：`manifest_signature()` 剔除清单补全——精确剔除集合 `_EXACT` 追加 `start_date/end_date/pairs`；新增前缀剔除 `_PREFIX=("engine_mode_",)`（引擎模式选择随运行变化、非真实性事实）。原 `_purge` 只做 dict key 精确剔除，改为精确 + 前缀双判。
+- **myquant/realism_gate/signature_guard.py（新建，L0 纯函数守门模块）**：`group_by_signature(items, sig_field="manifest_signature")`（按签名分组，无签名字段记录归 None 组向后兼容）+ `assert_uniform_signature(items, context, sig_field)`（≥2 个不同签名 → 抛 RealismGateError(violations=[])，消息含差异清单：每个签名组的记录数与代表标识 strategy/symbol/params/split）+ `split_ranked_uniform`（跨签名安全出口，按组分别排序交回调用方，禁止跨组合并）+ `diff_signatures(a, b)`（逐字段对称差 + 值不同清单，供跨签名人工复核）。鸭子类型 dict 消费（读 manifest_signature 字段），仅 import manifest.RealismGateError，不 import backtest（R-02/R-16 分层合规，避免循环 import）。
+- **myquant/backtest/param_optimizer.py（改动）**：evaluate_params 构造 outcome 时，engine.run() 后取 `engine._realism_manifest.manifest_signature()` 写入 outcome["manifest_signature"]（门禁软接线 _realism_manifest=None 留 None；采集异常不阻断主流程，记 warning）；`_rank()` 排序入口首行调 `assert_uniform_signature(outcomes, context="参数优化聚合排行")`——跨配置 outcomes 拒合并排行。
+- **myquant/backtest/batch_report.py（改动）**：`_top_rows()` 合并多标的排行前调 `assert_uniform_signature(rows, context="批量报告 TopN 合并")`（无签名字段旧数据向后兼容放行）。
+- **myquant/backtest/candidate_pool.py（改动）**：多标的 rows 构造完成、落 DataFrame 前调 `assert_uniform_signature(rows, context="候选池多标的合并")`。
+- **tests/unit/test_signature_guard.py（新建，12 项）**：签名剔除稳定性（run_id/start_date/end_date/engine_mode_* 改后签名不变、改 slippage 成本口径签名变）/ group_by_signature（同签一组、无签名归 None 组）/ assert_uniform（单签放行、无签名单向后兼容放行、多签抛 RealismGateError 且消息含两签名组差异清单）/ diff_signatures（逐字段对称差）/ param_optimizer 跨签名 outcomes 拒合并、同签放行。
+
+**验收**：新反红 12 passed；targeted 82 passed（realism_manifest + realism_gate + signature_guard + data_snapshot_pin + exemption_hardening）+ candidate_pool 12 passed 全绿；py_compile 7 文件全 OK；全量 pytest commit 前回填。
+
+**纪律遵守**：蓝图目录树先行登记（realism_gate/signature_guard.py 新行 + manifest.py 行追加 #366 标注 + tests/unit/test_signature_guard.py 新行）；L0 纯函数（signature_guard 仅依赖 manifest.RealismGateError，不 import backtest，R-02/R-16 分层合规，鸭子类型 dict 消费避免循环 import）；fail-closed（跨签名聚合即拒合并，宁可阻断不可跨配置混排）；向后兼容（无 manifest_signature 字段的旧数据/旧落盘放行，新 outcome 采集后自动守门）；签名采集失败不阻断回测主流程（留 None + warning）；import 分三组（标准库 logging/typing + 本地 manifest）；禁裸 except（param_optimizer 签名采集兜底带类型 + 注释）；全量 pytest 0 failed 才提交；git 提交（commit message 引用 #366）。**P1-16 完成（任务清单 ⬜ → ✅，M7 收官卡）**。

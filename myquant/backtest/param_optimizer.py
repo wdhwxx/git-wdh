@@ -43,6 +43,7 @@ from myquant.strategies.base import StrategyBase
 from myquant.strategies.ma_strategy import MACrossStrategy
 from myquant.utils.parallel import parallel_factor_context
 from myquant.utils.timer import format_duration
+from myquant.realism_gate.signature_guard import assert_uniform_signature
 
 logger = logging.getLogger("myquant.backtest.param_optimizer")
 
@@ -253,6 +254,16 @@ def evaluate_params(
                 "trade_count": int(len(result.trades)),
             }
         )
+        # P1-16（#366）：记录本轮回测的 manifest 签名，供聚合排行按签名分组、
+        # 跨签名拒绝合并（§4.10）。门禁软接线（_realism_manifest=None）时留 None。
+        try:
+            _manifest = getattr(engine, "_realism_manifest", None)
+            base["manifest_signature"] = (
+                _manifest.manifest_signature() if _manifest is not None else None
+            )
+        except Exception as exc:  # noqa: BLE001 - 签名采集失败不阻断回测主流程
+            base["manifest_signature"] = None
+            logger.warning(f"manifest 签名采集失败（留 None 不阻断）: {exc}")
     except Exception as exc:  # noqa: BLE001 - 任务函数必须隔离所有异常
         base["error"] = f"{type(exc).__name__}: {exc}"
     return base
@@ -421,6 +432,9 @@ class ParamOptimizationResult:
         Returns:
             排序后的结果字典列表，每条附加 "_rank" 排名。
         """
+        # P1-16（#366）：聚合排序前校验 manifest 签名一致——跨真实性配置
+        # （不同策略池/数据口径/参数范围）禁止合并排行（§4.10）。
+        assert_uniform_signature(outcomes, context="参数优化聚合排行")
         direction = OBJECTIVE_DIRECTION[self.objective]
         scored = [(t, self._score(t, prefix)) for t in outcomes]
         # 有分值的按方向排序在前，None（失败/缺指标）按原始顺序排最后

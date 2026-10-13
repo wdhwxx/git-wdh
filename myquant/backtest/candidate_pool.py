@@ -25,6 +25,8 @@ from typing import Any, Dict, Optional
 
 import pandas as pd
 
+from myquant.realism_gate.signature_guard import assert_uniform_signature
+
 logger = logging.getLogger(__name__)
 
 # ── 常量（模块顶部，禁止魔法数字）──────────────────────────────────────
@@ -204,6 +206,9 @@ def build_candidate_pool(
             "is_top30": False,
         })
 
+    # P1-16（#366）：合并多标的结果前校验 manifest 签名一致——跨真实性配置
+    # 禁止合并排行（§4.10）；无签名字段的旧缓存向后兼容放行。
+    assert_uniform_signature(rows, context="候选池多标的合并")
     pool = pd.DataFrame(rows, columns=OUTPUT_COLUMNS)
     pool = pool.sort_values("avg_sharpe", ascending=False, kind="stable").reset_index(drop=True)
     pool.loc[: top_n - 1, "is_top30"] = True

@@ -29,6 +29,7 @@ import numpy as np
 
 from myquant.backtest.pdf_report import PdfReportGenerator, _ReportPdf
 from myquant.core.logger import get_logger
+from myquant.realism_gate.signature_guard import assert_uniform_signature
 
 logger = get_logger(__name__)
 
@@ -231,7 +232,12 @@ class BatchSummaryReportGenerator:
         )
 
     def _top_rows(self, rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """按总收益降序取前 MAX_TOP_ROWS 行（仅 completed 且有收益值）。"""
+        """按总收益降序取前 MAX_TOP_ROWS 行（仅 completed 且有收益值）。
+
+        P1-16（#366）：合并排行前校验 manifest 签名一致——跨真实性配置的多标的
+        结果禁止合并排行（§4.10）；无签名字段的旧数据向后兼容放行。
+        """
+        assert_uniform_signature(rows, context="批量报告 TopN 合并")
         valid = [
             row for row in rows
             if row.get("status") == "completed"
