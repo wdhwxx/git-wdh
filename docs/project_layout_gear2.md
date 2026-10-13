@@ -5120,3 +5120,14 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 **验收**：pyyaml 三文件解析 OK（participation_rate=1.0）；真实构建 `build_backtest_config` → `BacktestConfig.participation_rate=1.0`（symbols=3207，透传链闭环）；targeted **107 passed**（test_config_live_check 22 / test_config_builder 16 / test_manifest_truthfulness / realism_gate 系列）；全量 pytest commit 前回填。
 
 **纪律遵守**：只动 sim_broker 段（3 文件各补 1 键）；值 1.0 不改变行为（显式化而非行为变更）；example 为 tracked 文件入 commit 留痕、真实 YAML 忽略文件本地生效（与既有 config/ 治理口径一致）；enforce_limit_up_down 旧键登记不越界修改（P0-03 范围外）；git 提交（commit message 引用 #361）。**P1-09 完成（任务清单 ⚠️ → ✅）**。
+
+## #362 · 2026-10-13 · 本地配置键名同步：enforce_limit_up_down → enforce_limit（P0-03 键名统一遗留收尾）
+
+**背景**：#361 附带登记——两个真实 YAML（backtest_config.yaml / backtest_kunpeng.yaml）仍用旧键 `enforce_limit_up_down: true`（#347 已统一为 `enforce_limit`，tracked 文件均同步），导致 config_builder 读 `enforce_limit` 默认 **False（涨跌停不强制）**，与用户配置原意图（true=强制，涨停不能买/跌停不能卖）断链。用户拍板开工同步。
+
+**落地（行为修正，对齐用户原配置意图）**：
+- **config/backtest_config.yaml / config/backtest_kunpeng.yaml（改动，.gitignore 忽略不入 commit）**：sim_broker 段 `enforce_limit_up_down: true` → `enforce_limit: true`（#347 键名统一语义保持）。**行为影响**：enforce_limit False → True——此前本地配置的"强制涨跌停"意图被 #347 键名统一静默丢失（config_builder 只读新键），本次恢复为 True，属**行为修正**（非新增漂移）。
+
+**验收**：pyyaml 两文件解析 OK（`enforce_limit=True`、旧键无残留）；真实构建 `BacktestConfig.enforce_limit=True / price_limit_pct=0.1 / participation_rate=1.0`（symbols=3207）；targeted **177 passed**（config_live_check 22 / config_builder 16 / execution / manifest_truthfulness / realism_gate 系列）；全量 pytest commit 前回填。
+
+**纪律遵守**：只动两真实 YAML 单键（键名统一，语义不变）；YAML 忽略文件不入 commit，留痕走蓝图 + 任务清单（与既有 config/ 治理口径一致）；git 提交（commit message 引用 #362）。**本地配置键名统一遗留闭环（P1-09 附带登记项同步完成）**。
