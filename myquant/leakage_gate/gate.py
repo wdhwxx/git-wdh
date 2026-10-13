@@ -37,6 +37,9 @@ logger = logging.getLogger("myquant.leakage_gate.gate")
 # 阻断档 severity（P1-07⑥a / S-4：出口断言只对"阻断"档阻断，"警告"档仅提示不阻断）
 _BLOCKED_SEVERITY: str = "阻断"
 
+# info 档 severity（P1-07⑥b / D3 第二段：退役规则专用档位——仅提示，不落审计、不统计、不阻断）
+_INFO_SEVERITY: str = "info"
+
 
 # ═══════════════════════════════════════════════
 #  配置
@@ -93,7 +96,8 @@ class Violation:
     Attributes:
         gate: 违规门禁名（contract/consumption/static_scan/cross_sectional/pit_proxy）。
         rule_id: 规则 ID（R01~R11，见 v3.0 §10）。
-        severity: 档位（阻断/警告；对应红线清单 RL-01~14 的豁免档位）。
+        severity: 档位（阻断/警告/info；对应红线清单 RL-01~14 的豁免档位。
+            info=退役规则提示（P1-07⑥b，如 R07），出口不落审计、不统计、不阻断）。
         message: 违规说明。
         strategy_id: 涉事策略名（契约主键 name）。
         decision_time: 决策时点（T日，YYYY-MM-DD）。
@@ -251,6 +255,8 @@ def collect_gate_stats(strategy_id: str, decision_time: str) -> Dict[str, Dict[s
     """
     stats: Dict[str, Dict[str, int]] = {}
     for v in _collect_violations(strategy_id, decision_time):
+        if v.severity == _INFO_SEVERITY:
+            continue  # [P1-07⑥b] info 档（退役规则，如 R07）不纳入门禁统计
         entry = stats.setdefault(v.gate, {"blocked": 0, "warning": 0, "total": 0})
         entry["total"] += 1
         if v.severity == "阻断":
@@ -266,9 +272,10 @@ def assert_all_gates_pass(strategy_id: str, decision_time: str) -> None:
 
     依次执行已注册门禁检查并汇总违规（含豁免压制）：
     - 无违规：直接通过；
+    - info 档违规（P1-07⑥b，退役规则如 R07）：仅 logger 提示，不落审计、不统计、不阻断；
     - 有违规：若 audit_violations 则落 audit_log（阻断与警告均记录留痕）；
       enabled=True 且存在 **severity=阻断** 违规 → 抛 LeakageGateError（阻断出口）；
-      enabled=True 但仅 **severity=警告** 违规（如 R03/R07 命名启发式）→ 不阻断，
+      enabled=True 但仅 **severity=警告** 违规（如 R03 命名启发式）→ 不阻断，
         仅提示（S-4：出口真正消费 severity，"警告档不阻断"命题为真）；
       enabled=False 仅审计（警告档）不阻断。
 
@@ -280,6 +287,17 @@ def assert_all_gates_pass(strategy_id: str, decision_time: str) -> None:
         LeakageGateError: enabled 且存在 severity=阻断 违规时抛出。
     """
     violations = _collect_violations(strategy_id, decision_time)
+    if not violations:
+        return
+    # [P1-07⑥b / D3 第二段] info 档（退役规则，如 R07 命名启发式）仅提示——
+    # 不落审计、不统计、不阻断；其余（阻断/警告）走既有流程
+    infos = [v for v in violations if v.severity == _INFO_SEVERITY]
+    rest = [v for v in violations if v.severity != _INFO_SEVERITY]
+    if infos:
+        logger.info(
+            f"门禁 info 提示（退役规则，如 R07 命名启发式）: {len(infos)} 项，strategy={strategy_id}"
+        )
+    violations = rest
     if not violations:
         return
     # M3-02：未过期豁免压制对应违规；过期豁免不压制 → 违规保留 → 门禁自动拦截
@@ -296,7 +314,7 @@ def assert_all_gates_pass(strategy_id: str, decision_time: str) -> None:
         )
         return
     # [P1-07⑥a / S-4] 出口真正消费 severity：只"阻断"档阻断出口，"警告"档
-    # （如 R03/R07 命名启发式）仅提示不阻断（缺陷 C 修正方向①，方案 §2.3）
+    # （如 R03 命名启发式）仅提示不阻断（缺陷 C 修正方向①，方案 §2.3）
     blocking = [v for v in violations if v.severity == _BLOCKED_SEVERITY]
     if blocking:
         raise LeakageGateError(blocking)

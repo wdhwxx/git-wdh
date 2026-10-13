@@ -19,7 +19,8 @@ leakage_gate/static_scan.py - 静态 AST 扫描器（阶段 1-B，M1B-01/02/03�
          （G-04 单独里程碑检查点：先警告 + 人工复核，见 docs/…/R03里程碑检查点.md）
   - R04   train_test_split / KFold(shuffle=True) → 阻断（0 命中，P2）
   - R05   StandardScaler().fit_transform(全量) → 阻断（0 命中，P2）
-  - R07   横截面排名/分位输入未按决策日切齐 → 警告（横截面校验器负责运行时判定）
+  - R07   横截面排名/分位输入未按决策日切齐 → info 提示（P1-07⑥b 退役：
+         P0-08 收口后"含未来行的切片"策略侧不可构造，检测对象消失，降级为非阻断 info）
   - R09   财务 PIT join 用 report_date 而非 eff_disclosure_date → 阻断（4→0 命中，
          M1A-01/02 修复后收敛；白名单 financial_service/time_semantics/derived_metrics）
   - R10   数据导出路径派生列未登记于 data_time_semantics.yaml → 阻断（0 命中）
@@ -50,6 +51,9 @@ _STRATEGIES_DIR: Path = Path(__file__).resolve().parents[2] / "myquant" / "strat
 
 # 台账阻断档 severity（v3.0 §6.1：severity=阻断）
 _BLOCKED_SEVERITY: str = "阻断"
+
+# info 档 severity（P1-07⑥b / D3 第二段：退役规则专用档位，如 R07——仅提示不阻断）
+_INFO_SEVERITY: str = "info"
 
 # R09 白名单（正确 PIT 实现，可合法出现 report_date 字段/注释，不含"按报告期做时点匹配"签名）
 _R09_CORRECT_MODULES: Tuple[str, ...] = (
@@ -96,7 +100,7 @@ class RuleHit:
 
     Attributes:
         rule_id: 规则 ID（R01a/R01b/R02/R03/R04/R05/R07/R09/R10/R11）。
-        severity: 档位（阻断/警告）。
+        severity: 档位（阻断/警告/info；info=退役规则提示，如 R07，P1-07⑥b）。
         line: 命中源码行号（1 基；0 表示未知）。
         message: 命中说明（阻断规则含反泄漏口径；白名单命中含"为何合法"）。
         file: 源文件名（未提供时为空串）。
@@ -394,7 +398,12 @@ def _detect_full_sample_fit(
 
 
 def _detect_cross_sectional_misuse(tree: ast.AST, hits: List[RuleHit]) -> None:
-    """R07：横截面排名/分位输入未按决策日切齐 → 警告（运行时校验器负责判定）。"""
+    """R07：横截面排名/分位输入未按决策日切齐 → info 提示（P1-07⑥b 退役）。
+
+    退役依据（决策件 §5.3 判据表第 1 行 / D3 第二段）：P0-08 已收口 `context.data`
+    （on_bar 封死直取），"含未来行的切片"在策略侧不可构造 → R07 检测对象消失；
+    本规则降级为非阻断 info（仅静态提示，不进门禁统计/审计/阻断）。
+    """
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -409,9 +418,10 @@ def _detect_cross_sectional_misuse(tree: ast.AST, hits: List[RuleHit]) -> None:
         if is_full_sample_receiver(receiver):
             hits.append(
                 RuleHit(
-                    rule_id="R07", severity="警告", line=getattr(node, "lineno", 0),
+                    rule_id="R07", severity=_INFO_SEVERITY, line=getattr(node, "lineno", 0),
                     message=f"横截面排名/分位输入候选: {receiver}.{func.attr}()（RL-07）——"
-                            f"须按决策日切齐当日截面，运行时由 cross_sectional 校验器判定",
+                            f"P1-07⑥b 退役提示：P0-08 收口后结构上不可构造含未来切片；"
+                            f"若确有未切齐输入请经 validate_asof/validate_cross_sectional_panel 校验",
                 )
             )
 
@@ -729,7 +739,8 @@ def check_static_scan(strategy_id: str, decision_time: str) -> List[Violation]:
     """静态扫描门禁检查（register_gate_check("static_scan", ...)）。
 
     扫描指定策略源码；仅阻断档命中（R01a/R02/R04/R05/R09/R10）报违规；
-    R03/R07 警告档与 R01b 放行登记不阻断出口（G-04 / §10.3）。
+    R03 警告档与 R01b 放行登记不阻断出口（G-04 / §10.3）；R07 已退役为 info 提示
+    （P1-07⑥b），不在本门禁返回的违规中。
 
     Args:
         strategy_id: 策略契约主键（name）。
@@ -846,6 +857,10 @@ def main_cli(argv: Optional[List[str]] = None) -> int:
                 {"rule": h.rule_id, "file": h.file, "line": h.line, "message": h.message}
                 for h in all_hits if h.severity == "警告"
             ],
+            "info_hits": [
+                {"rule": h.rule_id, "file": h.file, "line": h.line, "message": h.message}
+                for h in all_hits if h.severity == _INFO_SEVERITY
+            ],
             "r01b_registered": len(r01b),
         }, ensure_ascii=False, indent=2))
         return 1 if blocking else 0
@@ -857,7 +872,10 @@ def main_cli(argv: Optional[List[str]] = None) -> int:
             print(f"    [{h.rule_id}] line {h.line} {h.message}")
     if all_hits:
         for h in all_hits:
-            flag = "阻断" if h.severity == _BLOCKED_SEVERITY else "警告"
+            flag = (
+                "阻断" if h.severity == _BLOCKED_SEVERITY
+                else ("警告" if h.severity == "警告" else "info")
+            )
             print(f"  [{flag}][{h.rule_id}] {h.file}:{h.line} {h.message}")
     else:
         print("  无规则命中")

@@ -2,8 +2,9 @@
 """
 test_static_scan.py - 静态 AST 扫描器反向测试（阶段 1-B，M1B-06）
 =================================================================
-每条阻断级规则注入命中源 → 必报红（阻断档）；R01b 放行登记；R03/R07 警告档；
-列引用清单与 consumption 判定一致；内容哈希缓存命中不重扫；
+每条阻断级规则注入命中源 → 必报红（阻断档）；R01b 放行登记；R03 警告档；
+R07 已退役为 info 提示（P1-07⑥b）；列引用清单与 consumption 判定一致；
+内容哈希缓存命中不重扫；
 横截面 as-of 校验（M1B-04）与因子截断重算自检（M1B-05）反向验证。
 
 反向测试原则（v3.0 §10 / M1B-06 验收）：注入带泄漏的源码/面板，
@@ -27,6 +28,7 @@ from myquant.leakage_gate import (
     reset_gate_checks,
     set_config,
 )
+from myquant.leakage_gate.gate import collect_gate_stats
 
 # 台账列集合（测试用精简副本，与 config/data_time_semantics.yaml 口径一致）
 _LEDGER_KEYS = {
@@ -161,7 +163,7 @@ def test_r10_registered_insert_column_ok():
 
 
 # ═══════════════════════════════════════════════
-#  警告档规则（G-04：R03 先警告；R07 横截面告警）
+#  警告档规则（G-04：R03 先警告；R07 已退役为 info 提示，P1-07⑥b）
 # ═══════════════════════════════════════════════
 
 def test_r03_full_sample_fit_warning_not_blocking():
@@ -192,8 +194,8 @@ def test_r03_cross_section_whitelist_no_warning():
     assert "R03" not in _rule_ids(r)
 
 
-def test_r07_cross_section_misuse_warning():
-    """R07：横截面排名/分位输入未按决策日切齐 → 警告。"""
+def test_r07_cross_section_misuse_info():
+    """R07：横截面排名/分位输入未按决策日切齐 → info 提示（P1-07⑥b 退役，不阻断）。"""
     src = (
         "def build_candidates():\n"
         "    panel = load_full_panel()\n"
@@ -203,7 +205,7 @@ def test_r07_cross_section_misuse_warning():
     r = _hits(src)
     hits = [h for h in r.hits if h.rule_id == "R07"]
     assert len(hits) == 1
-    assert hits[0].severity == "警告"
+    assert hits[0].severity == "info"
 
 
 # ═══════════════════════════════════════════════
@@ -285,14 +287,14 @@ def test_check_static_scan_clean_source_no_blocking(monkeypatch):
     assert vs == []
 
 
-def test_check_cross_sectional_warns_on_misuse(monkeypatch):
-    """check_cross_sectional：注入横截面全样本 rank → R07 警告。"""
+def test_check_cross_sectional_info_on_misuse(monkeypatch):
+    """check_cross_sectional：注入横截面全样本 rank → R07 info 提示（退役，不阻断）。"""
     src = "def build():\n    panel = load_full_panel()\n    return panel.rank(axis=1)\n"
     monkeypatch.setattr(cs, "_strategy_source", lambda sid: src)
     vs = cs.check_cross_sectional("fake_strategy", "2026-10-10")
     assert len(vs) == 1
     assert vs[0].rule_id == "R07"
-    assert vs[0].severity == "警告"
+    assert vs[0].severity == "info"
 
 
 def test_check_cross_sectional_clean_no_warning(monkeypatch):
@@ -326,7 +328,7 @@ def test_signal_words_shared_helper():
 # ═══════════════════════════════════════════════
 
 def test_s7_r07_same_source_consistent_nonblocking(monkeypatch):
-    """S-7：同一 R07 命中的源码，static_scan 与 cross_sectional 两路径均判"警告"档（不阻断）。"""
+    """S-7：同一 R07 命中的源码，static_scan 与 cross_sectional 两路径均判 info 档（P1-07⑥b 退役，不阻断）。"""
     src = (
         "def build_candidates():\n"
         "    panel = load_full_panel()\n"
@@ -344,19 +346,19 @@ def test_s7_r07_same_source_consistent_nonblocking(monkeypatch):
     # 两路径对同一源码的严重级判定一致：均不产"阻断"档违规
     assert all(v.severity != "阻断" for v in static_vs)
     assert all(v.severity != "阻断" for v in cross_vs)
-    # static_scan 仅阻断档报违规（R07 警告留在 ScanResult.hits，不阻断）；
-    # cross_sectional 仍给 R07 警告提示（供 report 统计 / 人工复核）
+    # static_scan 仅阻断档报违规（R07 info 留在 ScanResult.hits，不进违规流）；
+    # cross_sectional 仍给 R07 info 提示（退役后仅提示，不统计不审计不阻断）
     assert static_vs == []
     assert len(cross_vs) == 1
     assert cross_vs[0].rule_id == "R07"
-    assert cross_vs[0].severity == "警告"
+    assert cross_vs[0].severity == "info"
 
 
 def test_s4_gate_exit_only_blocks_blocking_severity(monkeypatch):
-    """S-4/S-7：出口断言真正消费 severity——仅"警告"违规不阻断引擎创建。
+    """S-4/S-7/P1-07⑥b：出口断言真正消费 severity——R07 退役为 info 后不阻断引擎创建。
 
     同一份 R07 源码经 static_scan + cross_sectional 两条路径注册后走出口断言：
-    enabled=True 时不应抛错（"警告档不阻断"命题为真）。
+    enabled=True 时不应抛错（"info 档不阻断"命题为真）。
     """
     src = (
         "def build_candidates():\n"
@@ -397,6 +399,32 @@ def test_s4_gate_exit_still_blocks_real_blocking(monkeypatch):
     finally:
         reset_gate_checks()
         set_config(GateConfig(enabled=False, audit_violations=True))
+
+
+def test_r07_info_not_in_gate_stats(monkeypatch):
+    """P1-07⑥b：R07 退役为 info 后不进入门禁统计（collect_gate_stats 不含 R07 门禁项）。"""
+    src = (
+        "def build_candidates():\n"
+        "    panel = load_full_panel()\n"
+        "    ranked = panel.rank(axis=1)\n"
+        "    return ranked\n"
+    )
+    ledger = {"columns": {c: {"日基": "T", "severity": "提示"} for c in _LEDGER_KEYS}}
+    monkeypatch.setattr(ss, "_strategy_source", lambda sid: src)
+    monkeypatch.setattr(cs, "_strategy_source", lambda sid: src)
+    monkeypatch.setattr(ss, "_load_ledger", lambda: ledger)
+
+    reset_gate_checks()
+    register_gate_check("static_scan", ss.check_static_scan)
+    register_gate_check("cross_sectional", cs.check_cross_sectional)
+    try:
+        stats = collect_gate_stats("fake_strategy", "2026-10-10")
+    finally:
+        reset_gate_checks()
+    # R07 属 cross_sectional 门禁且已退役 info → 该门禁不得出现在统计中（不 setdefault）
+    assert "cross_sectional" not in stats
+    # static_scan 对同一源码无阻断违规（R07 info 不进违规流）→ 也无统计
+    assert "static_scan" not in stats
 
 
 # ═══════════════════════════════════════════════

@@ -4999,3 +4999,24 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 **验收**：py_compile 通过；targeted **186 passed / 1 skipped**（8 文件字母序，含 architecture R-24 + realism_gate 全量注册）；全量 pytest 两轮——首轮 3 failed（test_stop_loss：mixed 止损无信号映射被新阻断逻辑真实命中 → 修复后过；test_config_live_check 2 例：**pre-existing 本地配置漂移**——live_config.yaml 缺 leakage_gate 段、backtest_kunpeng/backtest_config.yaml 缺 adjust_strict（M0-16 契约），git stash 本次改动后单独复跑仍 2 failed，证明与本次改动无关，config/ 系 .gitignore 忽略文件）；二轮 **4030 passed / 4 skipped / 3 failed**（3 例均非本次引入：config 2 例同上 pre-existing + test_heartbeat 1 例 **flaky**——时间敏感心跳 seq 断言，单独重跑 23 passed）。
 
 **纪律遵守**：阻断档违规不带 severity 字段（与既有阻断档一致，`_handle_violation`/`assert_pass` 的"警告档仅记录不阻断"机制保留但已无警告档空值来源）；skip_t1_check 默认 False（既有构造/调用零破坏，仅 live 装配方显式启用）；live 侧豁免显式化不改变实盘行为（原置空=零检查，现显式豁免=零检查）；回测三引擎 record_trade 调用点不传 skip_t1_check → 空值即阻断（G13 fail-closed 语义生效）；git 提交（commit message 引用 #355）。**P1-07 子项③ 校正完成（任务清单 ⚠️ → ✅）**。
+
+## #356 · 2026-10-13 · P1-07 子项⑥b R07 退役评估（降级为非阻断 info）
+
+**卡定义**：P1-07 子项⑥b "R07 退役评估（降级为非阻断 info，S-10）"（任务清单 L158）。依据决策件 §5.3 判据表第 1 行 / D3 第二段（§5.5 签核）：D2 完成 且 `context.data` 已收口（D1=甲）→ 退役 R07（删除 R07 检查，或降级为非阻断 info）——"含未来行的切片"在策略侧已不可构造 → 检测无对象；保留只会成为 NF-04 命名地雷。
+
+**退役判据核验（全部成立）**：
+- D2（新增 P0-08 因果性收口）✅ 已交付（#332~#342 系列）；
+- D1=甲（阶段化窗口隔离：`on_init` 放行全量 → `on_bar` 封死 `context.data` 直取）✅ 已交付（#342）；
+- P1-07② 访问器层判据（真拦截归属：`accessed_max_date > current_bar_date` → 阻断）✅ 已交付（#340）；
+- R-14（R03 里程碑检查点接入 CI + 保持警告档）✅ 已裁定（§5.6）。
+→ 判据表第 1 行成立：**R07 命名启发式规则退役**，降级为非阻断 info（本卡选择"降级"形态，非删除——保留静态可见性供人工复核）。
+
+**落地**：
+- **myquant/leakage_gate/gate.py（改动）**：新增 `_INFO_SEVERITY = "info"` 第三档（退役规则专用）；Violation severity 语义扩展（阻断/警告/info，info=仅提示不落审计不统计不阻断）；`collect_gate_stats` 对 info 档 `continue` 跳过（退役规则不纳入门禁统计、不 setdefault）；`assert_all_gates_pass` 先滤出 info 档仅 logger 提示，其余（阻断/警告）走既有流程（豁免压制 → 落审计 → enabled → 阻断检查）。
+- **myquant/leakage_gate/static_scan.py（改动）**：`_detect_cross_sectional_misuse` 的 R07 命中档位 `警告` → `_INFO_SEVERITY`，message 更新为退役提示；RuleHit severity 语义扩展；`check_static_scan` 逻辑不变（仍只返回阻断违规，R07 info 留在 ScanResult.hits 不进违规流）；`main_cli` 文本 flag 三态（阻断/警告/info）+ JSON 输出新增 `info_hits` 字段。
+- **myquant/leakage_gate/cross_sectional.py（改动）**：`check_cross_sectional` 的 R07 违规档位 `警告` → `info`；模块与函数 docstring 写明退役依据（P0-08 收口后检测对象消失，仅静态提示）。
+- **tests/leakage_gate/test_static_scan.py（改动）**：R07 相关断言 `警告` → `info`（`test_r07_cross_section_misuse_info` / `test_check_cross_sectional_info_on_misuse` / S-7 跨路径一致性测试）；S-4 出口测试注释同步；**新增 `test_r07_info_not_in_gate_stats`**（退役后 `collect_gate_stats` 不含 R07 所属门禁项）。
+
+**验收**：py_compile 通过；targeted **193 passed / 1 skipped**（leakage_gate 10 文件字母序 + unit/test_architecture.py R-24 + unit/test_realism_gate.py 注册耦合）；全量 pytest **4033 passed / 4 skipped / 1 failed**（唯一失败 `test_backtest_real_config_adjust_strict`：**已知 pre-existing 配置漂移**——config YAML 缺 `data.adjust_strict`（M0-16 契约，上轮 #355 已确认的 2 例之一，另一例 leakage_gate 段已补），用户明确要求**全时段回测结束后**由定时任务「回测结束补 adjust_strict」承接补齐，与本次改动零关联）。
+
+**纪律遵守**：R03 **保持警告档不变**（R-14 裁定，其检测对象——跨时间全样本拟合——未被 P0-08 收口消除）；"同批同向"（NF-07/S-6）完成形态 = 统一信号词 helper（#333 已做）+ 两者均不作阻断判据（命名启发式只配提示），具体档位差异由检测对象存续状态决定（D3 判据表设计，非执行偏差）；info 档不扩展包导出面（`collect_gate_stats` 测试侧从 gate 子模块导入）；git 提交（commit message 引用 #356）。**P1-07 子项⑥b 完成（任务清单 ⬜ → ✅）**。

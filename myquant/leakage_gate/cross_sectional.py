@@ -13,10 +13,11 @@ leakage_gate/cross_sectional.py - 横截面 as-of 校验器（阶段 1-B，M1B-0
   - validate_asof                 纯函数：面板时间列逐行不得晚于决策时点
   - validate_cross_sectional_panel 纯函数：当日截面 = 只含该日数据，无未来日期
   - check_cross_sectional         门禁检查（register_gate_check("cross_sectional", ...)）：
-    扫描策略源码，R07 警告档标记横截面排名/分位输入未按决策日切齐的候选点
+    扫描策略源码，R07 以 info 提示（P1-07⑥b 退役：P0-08 收口后检测对象消失）
+    标记横截面排名/分位输入未按决策日切齐的候选点
 
 R03（跨时间全样本拟合）的截面/时序区分判定在 static_scan（R03 警告档，G-04），
-本模块只负责"当日截面"的 as-of 运行时校验与 R07 静态告警，不重复实现。
+本模块只负责"当日截面"的 as-of 运行时校验与 R07 静态提示，不重复实现。
 
 防未来函数：本模块只校验"已提供"的面板数据时间是否 ≤ 决策时点，不预测未来。
 """
@@ -219,17 +220,22 @@ def check_cross_sectional(strategy_id: str, decision_time: str) -> List[Violatio
     """横截面 as-of 门禁检查（register_gate_check("cross_sectional", ...)）。
 
     静态扫描策略源码：对具全样本接收者命名（panel/full/all_/entire/whole）的
-    rank/quantile 调用给 R07 警告（RL-07）。运行时面板 as-of 由调用方用
+    rank/quantile 调用给 R07 info 提示（RL-07）。运行时面板 as-of 由调用方用
     validate_asof / validate_cross_sectional_panel 校验，本门禁不持有运行数据。
+
+    R07 已退役（P1-07⑥b / D3 第二段）：P0-08 收口 `context.data`（on_bar 封死
+    直取）后，"含未来行的切片"在策略侧不可构造 → R07 检测对象消失，降级为非阻断
+    info。出口断言 assert_all_gates_pass 对 info 档仅提示、不落审计、不统计、不阻断
+    （S-4 语义扩展，见 gate.py）。
 
     Args:
         strategy_id: 策略契约主键（name）。
         decision_time: 决策时点（T日，YYYY-MM-DD）。
 
     Returns:
-        List[Violation]: R07 警告违规（severity=警告）。按 S-4（P1-07⑥a），出口断言
-        assert_all_gates_pass 只阻断 severity=阻断 的违规，故本门禁的 R07 警告仅提示、
-        不阻断引擎创建（对齐 static_scan 的"警告档不阻断"）；无警告为空列表。
+        List[Violation]: R07 info 提示（severity=info）。按 P1-07⑥b，出口断言
+        assert_all_gates_pass 对 info 档不阻断引擎创建（对齐 static_scan 的
+        "info 不阻断"）；无提示为空列表。
     """
     source = _strategy_source(strategy_id)
     if source is None:
@@ -254,9 +260,10 @@ def check_cross_sectional(strategy_id: str, decision_time: str) -> List[Violatio
         if is_full_sample_receiver(receiver):
             violations.append(
                 Violation(
-                    gate="cross_sectional", rule_id="R07", severity="警告",
+                    gate="cross_sectional", rule_id="R07", severity="info",
                     message=f"横截面排名/分位输入候选 {receiver}.{func.attr}() 未按决策日切齐"
-                            f"（RL-07，line {getattr(node, 'lineno', 0)}）；运行时须经 "
+                            f"（RL-07，line {getattr(node, 'lineno', 0)}）；P1-07⑥b 退役提示："
+                            f"P0-08 收口后结构上不可构造含未来切片，若确有未切齐输入请经 "
                             f"validate_asof/validate_cross_sectional_panel 校验当日截面只用当日数据",
                     strategy_id=strategy_id, decision_time=decision_time,
                 )
