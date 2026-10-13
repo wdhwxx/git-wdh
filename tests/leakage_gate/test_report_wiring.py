@@ -239,19 +239,20 @@ def test_p211_suppress_uses_decision_time() -> None:
     from myquant.leakage_gate.exemption import Exemption, ExemptionStore
 
     store = ExemptionStore()  # 纯内存库，不落盘
-    store.grant(
+    e = store.grant(
         Exemption(
             exemption_id="EX-P211-1",
             reason="P2-11 决策日判定测试",
-            rule_id="R99",
+            rule_id="R03",
             approver="tester",
             valid_from="2024-01-01",
-            valid_until="2024-06-30",
+            valid_until="2024-03-31",
             target="",
         )
     )
+    store.approve(e.exemption_id, approver="lead")  # P1-14：批准后才压制
     v = Violation(
-        gate="test", rule_id="R99", severity="阻断",
+        gate="test", rule_id="R03", severity="阻断",
         message="P2-11 测试违规", strategy_id="ma_cross", decision_time="",
     )
     # 决策日 2025-01-01 > valid_until → 豁免过期，违规保留（阻断）
@@ -271,22 +272,23 @@ def test_p211_assert_pass_exemption_uses_decision_time() -> None:
     from myquant.leakage_gate.exemption import Exemption, ExemptionStore
 
     store = ExemptionStore()
-    store.grant(
+    e = store.grant(
         Exemption(
             exemption_id="EX-P211-2",
             reason="P2-11 决策日=valid_until 边界测试",
-            rule_id="R98",
+            rule_id="R04",
             approver="tester",
             valid_from="2024-01-01",
             valid_until="2024-03-01",  # 决策日当天过期边界（含）
             target="ma_cross",
         )
     )
+    store.approve(e.exemption_id, approver="lead")  # P1-14：批准后才压制
     # 决策日解析 → 2024-03-01 零点；valid_until 含当日 → is_active=True
     now = _decision_now("2024-03-01")
-    assert store.covers(violation_for("R98"), now=now) is True
+    assert store.covers(violation_for("R04"), now=now) is True
     # 决策日次日 → 已过期 → 不压制
-    assert store.covers(violation_for("R98"), now=_decision_now("2024-03-02")) is False
+    assert store.covers(violation_for("R04"), now=_decision_now("2024-03-02")) is False
 
 
 def violation_for(rule_id: str) -> Violation:

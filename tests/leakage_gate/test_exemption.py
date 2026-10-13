@@ -27,16 +27,23 @@ from myquant.leakage_gate.gate import (
 NOW = datetime(2026, 10, 10).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
-def _exempt(rule_id="R99", target="", valid_until="2026-12-31", vid="EX-T1"):
+def _exempt(rule_id="R03", target="", valid_until="2026-10-31", vid="EX-T1"):
     return ex.Exemption(
         exemption_id=vid,
         reason="测试豁免：保守近似，无未来数据",
         rule_id=rule_id,
         approver="tester",
-        valid_from="2026-01-01",
+        valid_from="2026-08-15",
         valid_until=valid_until,
         target=target,
     )
+
+
+def _grant_approved(store, **kw):
+    """grant + approve：P1-14 审批闭环后，仅 approved 豁免压制违规（#365）。"""
+    e = store.grant(_exempt(**kw))
+    assert store.approve(e.exemption_id, approver="reviewer") is True
+    return e
 
 
 def test_grant_load_roundtrip_memory():
@@ -45,7 +52,8 @@ def test_grant_load_roundtrip_memory():
     loaded = store.load()
     assert len(loaded) == 1
     assert loaded[0].exemption_id == "EX-T1"
-    assert loaded[0].approver == "tester"
+    assert loaded[0].status == "pending"  # grant 后默认 pending，approver 待批准时填实
+    assert loaded[0].approver == ""
 
 
 def test_grant_persists_file(tmp_path):
@@ -70,11 +78,13 @@ def test_grant_duplicate_id_raises():
 
 
 def test_revoke():
+    """P1-14 起 revoke 为软撤销（status→revoked，记录保留可追溯，不再物理删除）。"""
     store = ex.ExemptionStore()
     store.grant(_exempt())
     assert store.revoke("EX-T1") is True
-    assert store.revoke("EX-T1") is False
-    assert store.load() == []
+    assert store.revoke("EX-T1") is False  # 已 revoked 幂等
+    kept = store.load()
+    assert len(kept) == 1 and kept[0].status == "revoked"
 
 
 def test_is_active_boundaries():
@@ -93,32 +103,32 @@ def test_is_active_boundaries():
 
 def test_covers_active_global_and_targeted():
     store = ex.ExemptionStore()
-    store.grant(_exempt(rule_id="R99", target=""))
-    store.grant(_exempt(rule_id="R01", target="strat_a", vid="EX-T2"))
-    v_global = Violation(gate="g", rule_id="R99", severity="阻断", message="m")
+    _grant_approved(store, rule_id="R03", target="")
+    _grant_approved(store, rule_id="R01a", target="strat_a", vid="EX-T2")
+    v_global = Violation(gate="g", rule_id="R03", severity="阻断", message="m")
     assert store.covers(v_global, NOW) is True
     # 定向豁免只覆盖指定策略
-    v_a = Violation(gate="g", rule_id="R01", severity="阻断", message="m", strategy_id="strat_a")
-    v_b = Violation(gate="g", rule_id="R01", severity="阻断", message="m", strategy_id="strat_b")
+    v_a = Violation(gate="g", rule_id="R01a", severity="阻断", message="m", strategy_id="strat_a")
+    v_b = Violation(gate="g", rule_id="R01a", severity="阻断", message="m", strategy_id="strat_b")
     assert store.covers(v_a, NOW) is True
     assert store.covers(v_b, NOW) is False
 
 
 def test_covers_ignores_expired():
     store = ex.ExemptionStore()
-    store.grant(_exempt(rule_id="R99", valid_until="2026-09-01"))  # 已过期
-    v = Violation(gate="g", rule_id="R99", severity="阻断", message="m")
+    _grant_approved(store, rule_id="R03", valid_until="2026-09-01")  # 已过期
+    v = Violation(gate="g", rule_id="R03", severity="阻断", message="m")
     assert store.covers(v, NOW) is False  # 过期豁免不压制 → 门禁拦截
 
 
 def test_suppress_removes_only_active():
     store = ex.ExemptionStore()
-    store.grant(_exempt(rule_id="R99", valid_until="2026-12-31"))   # 有效
-    store.grant(_exempt(rule_id="R98", valid_until="2026-09-01", vid="EX-X"))  # 过期
-    v1 = Violation(gate="g", rule_id="R99", severity="阻断", message="m1")
-    v2 = Violation(gate="g", rule_id="R98", severity="阻断", message="m2")
+    _grant_approved(store, rule_id="R03")   # 有效（默认窗口，NOW 在其中）
+    _grant_approved(store, rule_id="R04", valid_until="2026-09-01", vid="EX-X")  # 过期
+    v1 = Violation(gate="g", rule_id="R03", severity="阻断", message="m1")
+    v2 = Violation(gate="g", rule_id="R04", severity="阻断", message="m2")
     kept = store.suppress([v1, v2], NOW)
-    assert [v.rule_id for v in kept] == ["R98"]  # 过期 R98 保留阻断，有效 R99 被压制
+    assert [v.rule_id for v in kept] == ["R04"]  # 过期 R04 保留阻断，有效 R03 被压制
 
 
 def test_empty_store_no_suppress():
@@ -149,18 +159,18 @@ def test_gate_blocks_expired_exemption():
     try:
         store = ex.ExemptionStore()
         ex.set_store(store)
-        # 有效豁免 → 压制违规 → 通过
-        store.grant(_exempt(rule_id="R99", valid_until="2026-12-31"))
+        # 有效豁免（已批准）→ 压制违规 → 通过
+        _grant_approved(store, rule_id="R03")
         register_gate_check("exempt_test", lambda sid, dt: [
-            Violation(gate="exempt_test", rule_id="R99", severity="阻断", message="m",
+            Violation(gate="exempt_test", rule_id="R03", severity="阻断", message="m",
                       strategy_id=sid, decision_time=dt)])
         assert_all_gates_pass("strat_a", "2026-10-10")  # 不抛错（被压制）
 
         # 豁免过期 → 不压制 → 门禁自动拦截
-        store.grant(_exempt(rule_id="R97", valid_until="2026-09-01", vid="EX-EXP"))
+        _grant_approved(store, rule_id="R04", valid_until="2026-09-01", vid="EX-EXP")
         reset_gate_checks()
         register_gate_check("exempt_expired", lambda sid, dt: [
-            Violation(gate="exempt_expired", rule_id="R97", severity="阻断", message="m",
+            Violation(gate="exempt_expired", rule_id="R04", severity="阻断", message="m",
                       strategy_id=sid, decision_time=dt)])
         with pytest.raises(LeakageGateError):
             assert_all_gates_pass("strat_a", "2026-10-10")

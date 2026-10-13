@@ -493,6 +493,8 @@ Pythonwdhmm/
 │   ├── 数据导出_DB到processed.py      # ✨【回写】DB导出入口（当前主格式）：quant.db的hfq日线→datasets/processed/扁平parquet，逐只导出+完整性校验+断点续传；格式与实盘数据提供器一致（实盘无缝对接）；取代旧CSV子目录版脚本（导出DB到回测数据.py，仅存档不再使用）；✨【回写#72】CN_COLUMN_MAP/SELECT/数值列加 turnover→换手率，导出列集合=增量 _en_to_cn 13列统一；✨【回写#77】F1 改扁平式（去set_index/"日期"列整数YYYYMMDD/eps按df["日期"].dt.strftime/verify_parquet读"日期"列+旧索引式判失败触发重建/to_parquet(index=False)/新增_int_date_to_iso）+ export_all 接 resolve_incremental_symbols 规则过滤（防 DB 全量污染 processed）；✨【回写#136】load_symbol_data 派生 前收盘价=收盘价.shift(1)（df.insert 紧跟收盘价列，防涨跌停校验 pre_close 恒 0 空转）；✨【回写#281】M1A-01③ 每股收益匹配改统一时点日落点（SQL 增选 ann_date + match_latest_financial，原注释自称"防未来函数"实为穿越）+ M1A-09/10/11 available_time 派生（=有效披露日+1，禁止与 trade_date 混同）+ export_manifest.json 批次 sidecar（available_time_rule/schema_revision/stats，旧 manifest rev 不兼容抛 DataVersionMismatchError，旧 manifest 缺失/异常仅告警不阻断）
 │   ├── 复权因子同步.py          # ✨【回写#82】方案B复权因子同步薄入口：--all/--symbols/--limit/--dry-run；业务逻辑在 data_access/factor_sync_service.py（架构纪律）✅已完成
 
+│   ├── 豁免管理.py              # ✨【回写#365】P1-14 豁免流管理薄入口：list/grant/approve/revoke 子命令；业务逻辑归 myquant.leakage_gate.exemption（架构纪律）；台账受控持久化 database/exemptions.json
+
 │   ├── 数据全量清洗.py                # ✨【回写】全量清洗薄入口：参数解析→组装配置→调用FullCleanService.run()；链路=DB读取→清洗管线→事务写回→清洗元信息→bad归档→可选重建processed；支持--config/--symbols/--dry-run/--workers；与GUI全量清洗对话框共用同一服务
 
 │   ├── 垃圾数据清理.py                # ✨【回写】垃圾数据清理工具入口：扫描识别测试残留/孤儿文件/旧格式冗余/缓存/轮转日志（A-F安全分级），默认dry-run，--execute才执行；含保护清单（主库/主数据/真实报告永不删）
@@ -859,7 +861,8 @@ Pythonwdhmm/
 │   │   ├── test_static_scan.py        # ✨【回写#283】静态 AST 扫描器反向测试（M1B-06，27 用例）：R01a/R02/R04/R05/R09/R10 阻断级注入命中必报红 + R01b 放行登记 + R03/R07 警告档（含截面白名单不误报）+ 列引用与 consumption 判定一致 + 内容哈希缓存命中不重扫 + 只扫变更文件 + check_static_scan/check_cross_sectional 门禁 + 横截面 as-of 校验（M1B-04）+ 因子截断重算自检（M1B-05，正常通过/泄漏阻断/短数据跳过）
     │   │   ├── test_sanity.py             # ✨【回写#284】模型层统计门禁反向测试（轨道 E，M2-01~06，22 用例）：shuffle-label 基线/显著告警/噪声放行 + 训练侧时间越界/窗口退化/epoch 秒口径 + 特征-标签对齐（含样本数不一致）+ 特征白名单注入每股收益必报红（on_columns + 门禁出口）+ SeedSidecar 记录/verify/不一致阻断/monte_carlo 与 param_optimizer 接线
     │   │   ├── test_report.py             # ✨【回写#285】泄漏审计报告反向测试（轨道 F，M3-01，13 用例）：报告全审计段构建/缺失段空+来源标记/落盘回读/摘要/保留期/写缺 meta 报错/便捷入口 + collect_gate_stats 门禁统计 + cleanup_service 模式识别（BACKTEST_OUTPUT_PATTERNS+PERIOD_FILE_PATTERN）与按期归组清理衔接
-    │   │   ├── test_exemption.py          # ✨【回写#285】豁免流反向测试（轨道 F，M3-02，13 用例）：登记/持久化/非法有效期/重复 ID/撤销/有效期边界/覆盖匹配（全局+定向）/过期不压制/抑制只去有效/空库/落 audit_log/gate 集成（有效豁免通过、过期豁免 → 门禁中心自动拦截 LeakageGateError）/set_store 隔离
+    │   │   ├── test_exemption.py          # ✨【回写#285】豁免流反向测试（轨道 F，M3-02，13 用例）：登记/持久化/非法有效期/重复 ID/撤销/有效期边界/覆盖匹配（全局+定向）/过期不压制/抑制只去有效/空库/落 audit_log/gate 集成（有效豁免通过、过期豁免 → 门禁中心自动拦截 LeakageGateError）/set_store 隔离；✨【回写#365】P1-14 适配：rule_id 换白名单合法值 + grant 后显式 approve（审批闭环）+ revoke 改软删除留痕断言
+    │   │   ├── test_exemption_hardening.py # ✨【回写#365】P1-14 豁免流加固反红测试（13 用例）：超 90 天拒 / 非法 rule_id 拒 / gate-error grant 拒 + covers 双保险永不压制 / pending 不压·approved 才压 / grant 强制 pending 防绕过 / revoke 后不压且留痕 / approver 与 actor 分离双审计 / 审批人非空校验 / 持久化跨重载（重启不丢）
 
 │   │   └── test_gate_governance.py  # ✨【回写#273】门禁中心治理测试（M0-11 核心）：GateConfig 开关（enabled 阻断/disabled 仅审计）、Violation 台账结构、违规落 audit_log（临时库验证）、检查注册冲突/异常 fail-closed
 
@@ -977,7 +980,7 @@ Pythonwdhmm/
     │   ├── signal_words.py           # ✨【回写#333】R03/R07 共用"全样本接收者命名"信号词判定（P1-07⑥a/S-6 统一 helper）：FULL_SAMPLE_RECEIVERS（panel/full/all_/entire/whole）+ is_full_sample_receiver；static_scan（R03）与 cross_sectional（R07）共用单一实现，消除两处重复（L0 纯判定，不 import strategies）
     │   ├── sanity.py                 # ✨【回写#284】模型层统计门禁中枢（阶段 2，轨道 E，M2-01~06，v3.0 §6.6）：M2-01 shuffle-label 探测（run_shuffle_label_baseline 打乱标签基线分布+阈值=mean+k*std，check_shuffle_label 真实指标显著>噪声上界→告警/拦截）+ M2-02 validate_train_temporal（特征最近时间 ≤ train_end_time 且 > train_start_time，epoch 秒口径与 _ts_to_str 一致）+ M2-03 validate_feature_label_alignment（特征 available_time ≤ 标签 decision_time）+ M2-04 check_feature_whitelist 挂"feature_whitelist"门禁（features.py BAR_CN_COLUMN_MAP 新增 severity=阻断 列如每股收益→R11 出口报红；AST 读文件非 import）+ M2-05/06 SeedSidecar（随机种子 sidecar 记录在案、种子不一致→SeedSidecarError 阻断）+ check_training_sanity 汇总（供 training_pipeline run() 薄接线）
     │   ├── report.py                 # ✨【回写#285】泄漏审计报告产物（阶段 3，M3-01，v3.0 §6.7）：每次回测/训练/参数优化产出 leakage_report.json（门禁统计 gate.collect_gate_stats + 违规明细 + 消费侧列引用与 severity 命中 + 截断重算 + sanity + 数据版本 sidecar 摘要 + lookahead_guard 统计 + 复权降级标的清单）；L0 纯构建器（复权降级/数据版本/lookahead 由 L3/L4 调用方注入，避免 L0→L3/L4 跨层 import）；write/load/summarize + 保留期 REPORT_RETENTION_DAYS=30；与 scripts/清理历史回测输出.py 衔接（cleanup_service 纳入 leakage_report_*.json + PERIOD_FILE_PATTERN 前缀，按回测期归组清理）
-    │   ├── exemption.py              # ✨【回写#285】豁免流实现（阶段 3，M3-02，v3.0 §6.7）：Exemption（豁免 ID/原因/有效期 valid_from~valid_until/审批人/target=rule_id+strategy）+ ExemptionStore（JSON 台账 + grant 落 audit_log 哈希链 + revoke/list_active/list_expired）+ covers/suppress（仅"未过期"豁免压制对应违规）；gate.py assert_all_gates_pass 集成 suppress_violations——过期豁免不压制 → 违规保留 → 门禁中心自动拦截（验收 M3-02）；L0 纯模块，Violation 鸭子类型消费避免循环 import
+    │   ├── exemption.py              # ✨【回写#285】豁免流实现（阶段 3，M3-02，v3.0 §6.7）：Exemption（豁免 ID/原因/有效期 valid_from~valid_until/审批人/target=rule_id+strategy）+ ExemptionStore（JSON 台账 + grant 落 audit_log 哈希链 + revoke/list_active/list_expired）+ covers/suppress（仅"未过期"豁免压制对应违规）；gate.py assert_all_gates_pass 集成 suppress_violations——过期豁免不压制 → 违规保留 → 门禁中心自动拦截（验收 M3-02）；L0 纯模块，Violation 鸭子类型消费避免循环 import；✨【回写#365】P1-14 豁免流加固：ALLONED_RULE_IDS 白名单（grant 校验防 typo）+ NON_EXEMPTABLE_RULE_IDS={"gate-error"}（门禁自检故障不可豁免）+ MAX_EXEMPTION_DAYS=90（长期全局豁免拒）+ 审批状态机 pending→approved→revoked（仅 approved 且未过期压制；grant 强制 pending 并清空 approver）+ approve/revoke（approver 与 actor 分离双审计落 audit_log；revoke 软删除留痕）+ 模块级默认库指向 database/exemptions.json 受控持久化（重启不丢）
 
     │
 
@@ -5170,3 +5173,20 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 **验收**：新测试 15 passed；targeted 110 passed（architecture/config_live_check/manifest_truthfulness/realism_gate 系列/causality/data_quality/snapshot_pin 全绿）；全量 pytest commit 前回填。生产真实目录 3195 parquet/824MB 首次跑自动写 sidecar 固化基线（用户显式删除 .snapshot.json 即重新 pin 确认新数据）。
 
 **纪律遵守**：蓝图目录树先行登记（provider.py 函数标注 / data_pit.py 判据标注 / tests/unit/test_data_snapshot_pin.py 新增行）；R-24 基线同步注释留痕；L0 纯函数（compute_data_snapshot）不 import 引擎（R-02/R-16 分层合规，运行时事实由引擎调用注入）；S-11 诚实披露（快照采集失败按 None 缺失披露、不写乐观常量）；防未来（快照只哈希静态文件、不涉时序数据）；import 分三组（标准库 hashlib/json/datetime + 第三方 pandas + 本地 myquant）；禁裸 except（异常带类型 + 注释说明）；全量 pytest 0 failed 才提交；git 提交（commit message 引用 #364）。**P1-12 完成（任务清单 ⬜ → ✅，M7 第二卡）**。
+
+---
+
+## #365 · 2026-10-13 · P1-14 豁免流加固（持久化 + 审批两态 + 双审计）
+
+**现状核实**：exemption.py 已有 Exemption/ExemptionStore（JSON 台账 + grant 落 audit_log + revoke/covers/suppress），但（v2.2 第三轮两轮独立命中 P0-G）：①有效期 valid_until **无上限**（可批 10 年全局豁免）；②rule_id **无枚举**（typo 导致豁免对不上违规）；③**gate-error（门禁自检故障）可被豁免**（fail-closed 被后门绕开）；④生产**无持久化**（模块级默认库 ExemptionStore() 内存空库，重启即丢）；⑤**无审批闭环**（grant 即生效，无 pending/approved 状态机、无独立审批人）。
+
+**落地**：
+- **myquant/leakage_gate/exemption.py（改动）**：新增模块级常量——ALLOWED_RULE_IDS 白名单（R01a/R01b/R02/R03/R04/R05/R07/R09/R10/R11，grant 校验防 typo）、NON_EXEMPTABLE_RULE_IDS={"gate-error"}（门禁自检故障不可豁免，grant 拒 + covers 双保险永不压制）、MAX_EXEMPTION_DAYS=90（长期全局豁免拒）、EXEMPTION_STATUSES、_DEFAULT_LEDGER_PATH（项目根/database/exemptions.json）。Exemption 增 status（默认 pending）/actor 两字段；grant() 加校验链（有效期→90 天跨度→gate-error→白名单→ID 重复）并**强制 pending + 清空 approver**（approve 时才填实，防绕过审批闭环）；新增 approve(exemption_id, approver)（pending→approved，approver 非空校验，落 exemption_approve 审计）；revoke() 改软删除（status→revoked 留痕可追溯，不再物理删除）；covers() 仅压 status==approved 且 is_active，gate-error 直接返 False；抽 _audit() 统一落审计；get_store() 默认库改指向受控持久化路径（重启不丢）。
+- **tests/leakage_gate/test_exemption.py（适配，13 用例）**：helper 默认 rule_id 换白名单合法值、窗口收进 90 天；新增 _grant_approved（grant+approve）helper；需压制用例显式 approve；revoke 断言改软删除留痕；grant 后 approver 断言改空。
+- **tests/leakage_gate/test_exemption_hardening.py（新建，13 用例）**：超 90 天拒 / 恰好 90 天放行 / 非法 rule_id 拒 / gate-error grant 拒 + covers 双保险 / pending 不压·approved 才压 / grant 强制 pending（传 approved 也降级）/ revoke 后不压且留痕 / approver 与 actor 分离双审计 / 审批人非空校验 / 持久化跨 store 重载（重启不丢、revoked 状态保留）。
+- **scripts/豁免管理.py（新建薄入口）**：list/grant/approve/revoke 子命令，业务逻辑归 myquant.leakage_gate.exemption（架构纪律）；list 按 pending/approved/revoked 分组打印。
+- **tests/leakage_gate/test_report_wiring.py（适配）**：P2-11 两用例 rule_id 换合法值 + 补 approve。
+
+**验收**：新反红 13 passed；targeted 54 passed（exemption 旧 13 + 新 13 + report_wiring + guard_mounting）；全量 pytest commit 前回填。生产默认台账 database/exemptions.json 与 audit_log 的 database/quant.db 同数据区。
+
+**纪律遵守**：蓝图目录树先行登记（exemption.py 标注 / tests/leakage_gate 新增 hardening 行 / scripts 新增豁免管理.py 行）；L0 纯模块（exemption 仅依赖 myquant.core.audit_log，R-02/R-16 分层合规，Violation 鸭子类型消费避免循环 import）；fail-closed（gate-error 双保险，宁可阻断不可放行）；防未来（豁免有效性只按已给定 valid_from/valid_until 与当前时点判定，不预测未来）；import 分三组；禁裸 except（_audit 兜底带类型 + 注释）；全量 pytest 0 failed 才提交；git 提交（commit message 引用 #365）。**P1-14 完成（任务清单 ⬜ → ✅，M7 第三卡）**。

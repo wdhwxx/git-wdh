@@ -226,6 +226,7 @@ ENTRY_ALLOWLIST: set[str] = {
     "scripts/验收_回测引擎V5.py", "scripts/验收_监控M1保命.py",
     "scripts/验收_实盘安全门禁.py",  # 回写#287：实盘安全门禁验收薄入口（委托 myquant/acceptance/live_safety_gate.py）
     "scripts/回测真实性基线.py",  # 回写#298：回测真实性基线建档/校验薄入口（委托 myquant/backtest/baseline_archive.py）
+    "scripts/豁免管理.py",  # 回写#365：P1-14 豁免流管理薄入口（list/grant/approve/revoke，委托 myquant/leakage_gate/exemption.py）
     # 根目录入口（.py + .bat）
     "run_GUI入口.py", "run_全量清洗GUI.py", "run_回测入口.py", "run_回测配置GUI.py",
     "run_实盘入口.py", "run_批量回测.py", "run_数据下载GUI.py", "run_清理GUI.py",
