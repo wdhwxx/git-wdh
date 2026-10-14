@@ -269,8 +269,8 @@ jobs:
       - name: 策略注册器验证
         run: |
           python -c "
-          from myquant.strategies import list_available_strategies
-          strategies = list_available_strategies()
+          from myquant.strategies import list_strategies
+          strategies = list_strategies()
           print(f'  已注册策略: {strategies}')
           assert 'rsrs' in strategies, 'RSRS策略未注册'
           assert 'ma_cross' in strategies, '均线策略未注册'
@@ -427,8 +427,8 @@ jobs:
           assert 'log_bad_records' in cfg and 'log_quality_report' in cfg, 'BUG-07 开关缺失'
           rules = load_clean_rules(use_settings=False)
           assert len(rules['bar']) > 0 and len(rules['tick']) > 0, '规则映射为空'
-          print(f"  清洗配置: bar={len(rules['bar'])}条规则 / tick={len(rules['tick'])}条规则" +
-                f" 开关=log_bad:{cfg['log_bad_records']}/log_report:{cfg['log_quality_report']}")
+          print(f'  清洗配置: bar={len(rules[\"bar\"])}条规则 / tick={len(rules[\"tick\"])}条规则')
+          print(f'  开关=log_bad:{cfg[\"log_bad_records\"]}/log_report:{cfg[\"log_quality_report\"]}')
           print('  ✓ 数据清洗规则库加载冒烟通过')
           "
 
@@ -597,11 +597,8 @@ jobs:
       - name: pip-audit 依赖漏洞扫描（KP-M03）
         run: |
           pip install pip-audit
-          if [ -f requirements.lock ]; then
-            pip-audit -r requirements.lock
-          else
-            pip-audit
-          fi
+          # 直接审计已安装环境（requirements.lock 中 akshare 传递依赖未钉死，--require-hashes 模式拒绝）
+          pip-audit
 
       - name: gitleaks 密钥泄露扫描（KP-M03）
         uses: gitleaks/gitleaks-action@v2
