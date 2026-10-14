@@ -78,7 +78,7 @@ results/**/*
 *.hdf5
 
 # ===== 模型产物 =====
-models/
+/models/
 *.pkl
 *.pickle
 *.pt
