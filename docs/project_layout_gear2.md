@@ -5323,3 +5323,19 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 **验收**：TestMisconfigurationFailClosed 7 passed；**全量 pytest 4167 passed / 4 skipped / 0 failed**（与 #372 基线持平，本次无代码改动）。
 
 **纪律遵守**：未新增/改动代码（纯文档复核）；幂等回写；全量 pytest 0 failed 才提交；git 提交（commit message 引用 #373）。**P1 高优先 18/18 全部清零——P1-03 确认无残留洞，回测真实性门禁 P0/P1/P2 全阶段收口。**
+
+---
+
+## #374 · 2026-10-14 · 文档侧欠账核验收口：G-1/G-2/C-4/C-5/C-6 全部误记（实际已落地）
+
+**现状核实**：总清单第四节列 G-1/G-2/C-4/C-5/C-6 五项文档欠账，称"不改代码但不做会挡住开工"。逐行回文档/代码核验：全部为误记——
+- **G-1**：两基线测试文件 `tests/unit/test_causality_slicing.py`、`tests/leakage_gate/test_static_scan.py` 均存在（R07 反向测试在 test_static_scan.py:290-305）。
+- **G-2**：跨路径一致性测试已落地——`test_static_scan.py::test_s7_r07_same_source_consistent_nonblocking`（同一 R07 源码经 static_scan + cross_sectional 两路径，均判 info 不阻断）+ `test_s4_gate_exit_only_blocks_blocking_severity`（出口断言真消费 severity，info 档不阻断引擎创建）；复跑 test_static_scan 32 passed。
+- **C-4/C-5**：前置调研记录 §6.1（L821-831）已追加 R-21 边界修订——on_init 放行全量/on_bar 封死直取、治理项由评审纪律升级为结构保证（P0-08）、实施形态阶段化（禁止构造时一次性切片破坏 ma on_init 预计算）。
+- **C-6**：前置调研记录 §5.6（L1552-1562）已完成 R-14 裁定记录——"接入 CI 但保持警告档（只报告不阻断构建）"，并显式关联 R07/R03 共用命名启发式（严重级同批同向）。
+
+**落地（本次无代码改动，纯文档复核 + 误记修正）**：总清单第四节末尾追加 [2026-10-14 复核] 块，标注五项欠账实际均落地、无遗留。
+
+**验收**：test_static_scan 32 passed；test_realism_gate TestMisconfigurationFailClosed 7 passed（#373 同批）；**全量 pytest 4167 passed / 4 skipped / 0 failed**（无代码改动，基线持平）。
+
+**纪律遵守**：未新增/改动代码（纯文档复核）；幂等回写；全量 pytest 0 failed 才提交；git 提交（commit message 引用 #374）。**回测真实性门禁 P0/P1/P2 全阶段 + 前置调研 26 项 + 文档侧欠账全部收口，无遗留施工项。**
