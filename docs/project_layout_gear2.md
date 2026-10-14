@@ -5339,3 +5339,18 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 **验收**：test_static_scan 32 passed；test_realism_gate TestMisconfigurationFailClosed 7 passed（#373 同批）；**全量 pytest 4167 passed / 4 skipped / 0 failed**（无代码改动，基线持平）。
 
 **纪律遵守**：未新增/改动代码（纯文档复核）；幂等回写；全量 pytest 0 failed 才提交；git 提交（commit message 引用 #374）。**回测真实性门禁 P0/P1/P2 全阶段 + 前置调研 26 项 + 文档侧欠账全部收口，无遗留施工项。**
+
+---
+
+## #375 · 2026-10-14 · R-25 归档：_slicing_enabled 运行时复用复位点已冻结
+
+**现状核实**：前置调研 26 项里 R-25 是唯一"半完成"——`_slicing_enabled` 生命周期：无复位点已确认，运行时复用（mixed 引擎跨两次 run 不残留）此前标"待验"。逐行回测试核验：该待验项已由 `tests/unit/test_causality_slicing.py::TestReusedContextNoLeftover` 完整冻结（P0-08 子项⑦ run 起点复位三态）。
+
+**落地（纯文档归档，无代码改动）**：
+- 冻结内容：mixed 引擎首次 run 末 `_slicing_enabled=True` + `current_bar_ts=末bar` + `accessed_max_dates` 记账；第二次 run 起点复位三态（旧时点/账目清空）后 on_bar 主循环重新置位——跨 run 无切片状态残留。
+- 复跑 TestReusedContextNoLeftover 1 passed。
+- 总清单前置调研段 R-25 由 `[ ] 半完成` 改 `[x] 已归档`。
+
+**验收**：TestReusedContextNoLeftover 1 passed；全量 pytest 维持 4167 passed / 4 skipped / 0 failed（无代码改动）。
+
+**纪律遵守**：未新增/改动代码（纯文档归档）；幂等回写；git 提交（commit message 引用 #375）。**前置调研 26 项全部完成——回测真实性门禁 P0/P1/P2 + 前置调研 + 文档欠账至此 100% 收口，无任何遗留施工项。**
