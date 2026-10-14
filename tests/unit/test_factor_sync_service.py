@@ -60,8 +60,7 @@ class TestSymbolConversion:
 
 class TestCleanEvents:
     def test_remove_dirty_rows_and_sort(self):
-        svc = FactorSyncService(Path("D:\\Projects\\Pythonwdhmm"))
-        svc._ak = StubAK()
+        # _clean_events 是静态方法，无需实例化（实例化会要求 database/quant.db 存在）
         df = _events_df(
             ["2024-06-19", "1900-01-01", "2023-12-20", "2024-06-19"],
             [8.239032, 1.0, 8.071836, 8.24],  # 同日重复（后者胜）

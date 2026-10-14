@@ -14,6 +14,8 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 
+import pytest
+
 from myquant.models.trade import Order, OrderSide, OrderType
 from myquant.risk.rules import RiskContext, TradingHoursRule
 
@@ -66,6 +68,8 @@ class TestEntryTradingDay:
         from run_实盘入口 import _is_trading_day
 
         cal = load_trade_calendar(Path(".").resolve())
+        if not cal:
+            pytest.skip("交易日历缓存为空（CI 无网络/无本地数据）")
         assert cal  # 缓存存在且非空
         trading = sorted(cal)[-1]  # 最近已知交易日
         assert _is_trading_day(trading) is True

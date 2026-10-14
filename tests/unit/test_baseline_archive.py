@@ -38,10 +38,13 @@ from myquant.models.backtest import (
 
 @pytest.fixture(scope="module")
 def archiver(tmp_path_factory) -> BaselineArchiver:
-    """构造隔离输出目录的档案器（不依赖项目磁盘）。"""
+    """构造隔离输出目录的档案器（在 tmp 造假 config，不依赖项目磁盘上的 backtest_config.yaml）。"""
     tmp = tmp_path_factory.mktemp("baseline_archive_out")
+    fake_cfg = tmp / "backtest_config.yaml"
+    fake_cfg.write_text("strategy_name: rsrs\nsymbols: []\n", encoding="utf-8")
     return BaselineArchiver(
-        project_root=Path(r"D:\Projects\Pythonwdhmm"),
+        project_root=tmp,
+        config_path=fake_cfg,
         out_dir=tmp,
     )
 

@@ -101,6 +101,7 @@ def test_incident_document_exists():
         assert kw in text, f"制度文档缺关键词: {kw}"
 
 
+@pytest.mark.skipif(not LIVE_CONFIG.exists(), reason="live_config.yaml 未入库（实盘配置，CI 跳过）")
 def test_live_config_on_unhealthy_declared():
     """live_config.yaml 巡检 action 声明可执行处置 on_unhealthy=[alert, pause_trading]。"""
     cfg = yaml.safe_load(io.open(LIVE_CONFIG, "r", encoding="utf-8"))
