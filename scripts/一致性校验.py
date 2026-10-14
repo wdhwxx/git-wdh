@@ -211,6 +211,23 @@ def main() -> int:
     if root_str not in sys.path:
         sys.path.insert(0, root_str)
 
+    # G1 EX-09A：装配撮合执行器工厂（薄入口脚本为合法装配层；
+    # BacktestEngine 不再静默降级，未注册 broker_factory 直接 raise ValueError）
+    from myquant.backtest.assembly import register_broker_factory
+    from myquant.execution.sim_broker import SimBroker
+
+    register_broker_factory(
+        lambda cfg: SimBroker(
+            initial_capital=cfg.initial_capital,
+            commission_model=cfg.commission,
+            slippage_model=cfg.slippage,
+            price_limit_pct=float(cfg.to_dict().get("price_limit_pct", 0.10)),
+            enforce_limit=bool(cfg.to_dict().get("enforce_limit", False)),
+            is_suspended=None,
+            lot_size=int(getattr(cfg, "lot_size", 0)),
+        )
+    )
+
     args = setup_argument_parser().parse_args()
 
     # 1. 参数解析与防御校验

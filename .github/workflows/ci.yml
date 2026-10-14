@@ -138,6 +138,7 @@ jobs:
           cache: pip
 
       - name: 安装系统依赖（PySide6 EGL/GL 运行时，headless runner 需要）
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libegl1 libgl1 libxkbcommon0
