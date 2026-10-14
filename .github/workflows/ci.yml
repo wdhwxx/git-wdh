@@ -126,6 +126,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         python-version: ["3.12"]
+    env:
+      # Windows runner 默认 cp1252/charmap 控制台，print/subprocess 打中文会崩
+      PYTHONIOENCODING: utf-8
 
     steps:
       - name: 检出代码
