@@ -520,6 +520,7 @@ def analyze_source(
     ledger_keys: Set[str],
     blocked: Set[str],
     filename: str = "",
+    line_range: Optional[Tuple[int, int]] = None,
 ) -> ScanResult:
     """对单份源码执行全部规则扫描 + 列引用提取（一次遍历）。
 
@@ -528,6 +529,9 @@ def analyze_source(
         ledger_keys: 台账全部列名集合。
         blocked: 台账 severity=阻断 的列集合（R11 判定输入）。
         filename: 源文件名（R09/R10 白名单判定用）。
+        line_range: 可选 (起始行, 结束行)（P2-14 class 粒度收窄）——给定后只保留
+            落在该区间内的规则命中，避免同文件另一策略类的违规连带误伤本策略。
+            None = 扫整文件（向后兼容）。
 
     Returns:
         ScanResult: 命中（阻断/警告）+ 列引用清单 + R01b 放行登记。
@@ -553,6 +557,15 @@ def analyze_source(
     _detect_r10(tree, ledger_keys, hits)
 
     referenced = extract_referenced_columns(source, ledger_keys)
+
+    # P2-14 class 粒度收窄：按匹配策略类的行区间过滤规则命中，避免同文件
+    # 多策略类时把另一类的违规连带算到本策略头上（ma_strategy.py 双类共存）。
+    if line_range is not None:
+        lo, hi = line_range
+        hits = [h for h in hits if lo <= getattr(h, "line", 0) <= hi]
+        r01b_registered = [
+            h for h in r01b_registered if lo <= getattr(h, "line", 0) <= hi
+        ]
 
     return ScanResult(
         file=filename,
@@ -650,12 +663,27 @@ def clear_cache() -> None:
 #  策略源码定位（文件级，非 import）
 # ═══════════════════════════════════════════════
 
-def _file_defines_name(source: str, strategy_id: str) -> bool:
-    """判断源码文件是否定义了 name == strategy_id 的策略类。"""
+def _find_class_range(
+    source: str, strategy_id: str
+) -> Optional[Tuple[int, int]]:
+    """定位 ``name == strategy_id`` 策略类的源码行区间（P2-14 class 粒度收窄）。
+
+    一个文件可能同时定义多个策略类（如 ``ma_strategy.py`` 同时含
+    ``RSRSStrategy(name="rsrs")`` 与 ``MACrossStrategy(name="ma_cross")``）。
+    按"整文件扫描"会把另一策略类的违规连带算到本策略头上。本函数返回匹配
+    类的 ``(lineno, end_lineno)``，供 ``analyze_source`` 收窄扫描范围。
+
+    Args:
+        source: 源码文本。
+        strategy_id: 策略契约主键（name）。
+
+    Returns:
+        Optional[Tuple[int, int]]: 匹配类的 (起始行, 结束行)；未匹配/解析失败返回 None。
+    """
     try:
         tree = ast.parse(source)
     except SyntaxError:
-        return False
+        return None
     for node in ast.walk(tree):
         if not isinstance(node, ast.ClassDef):
             continue
@@ -668,8 +696,16 @@ def _file_defines_name(source: str, strategy_id: str) -> bool:
                 and isinstance(item.value, ast.Constant)
                 and item.value.value == strategy_id
             ):
-                return True
-    return False
+                return (
+                    getattr(node, "lineno", 1),
+                    getattr(node, "end_lineno", getattr(node, "lineno", 1)),
+                )
+    return None
+
+
+def _file_defines_name(source: str, strategy_id: str) -> bool:
+    """判断源码文件是否定义了 name == strategy_id 的策略类。"""
+    return _find_class_range(source, strategy_id) is not None
 
 
 def _strategy_source(strategy_id: str) -> Optional[str]:
@@ -710,14 +746,76 @@ def referenced_columns_for_strategy(strategy_id: str) -> Set[str]:
     source = _strategy_source(strategy_id)
     if source is None:
         return set()
+    # P2-14 class 粒度收窄：只扫匹配策略类的行区间，避免同文件多策略类连带误伤
+    cls_range = _find_class_range(source, strategy_id)
     # 命中缓存：按内容哈希复用扫描结果
     h = hashlib.sha256(source.encode("utf-8")).hexdigest()
     key = f"__strategy__:{strategy_id}"
     if key in _cache and _cache[key][0] == h:
         return set(_cache[key][1].referenced_columns)
-    result = analyze_source(source, ledger_keys, _blocked_columns(ledger), filename=f"strategy:{strategy_id}")
+    result = analyze_source(
+        source, ledger_keys, _blocked_columns(ledger),
+        filename=f"strategy:{strategy_id}", line_range=cls_range,
+    )
     _cache[key] = (h, result)
     return set(result.referenced_columns)
+
+
+def _all_strategy_names() -> List[str]:
+    """AST 枚举策略目录下所有策略类的 ``name`` 主键（P2-12 台账 consumers 实测用）。
+
+    Returns:
+        List[str]: 策略 name 列表（去重，按文件/类出现顺序）。
+    """
+    names: List[str] = []
+    if not _STRATEGIES_DIR.is_dir():
+        logger.error(f"策略目录不存在: {_STRATEGIES_DIR}")
+        return names
+    for py in sorted(_STRATEGIES_DIR.glob("*.py")):
+        if py.name in ("__init__.py", "base.py", "registry.py", "param_tuner.py"):
+            continue
+        text = _file_text(py)
+        if text is None:
+            continue
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            logger.error(f"策略源码解析失败 {py.name}")
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            for item in node.body:
+                if (
+                    isinstance(item, ast.Assign)
+                    and len(item.targets) == 1
+                    and isinstance(item.targets[0], ast.Name)
+                    and item.targets[0].id == "name"
+                    and isinstance(item.value, ast.Constant)
+                    and isinstance(item.value.value, str)
+                    and item.value.value not in names
+                ):
+                    names.append(item.value.value)
+    return names
+
+
+def collect_consumers_by_column() -> Dict[str, List[str]]:
+    """AST 实测反向聚合：每列数据被哪些策略类消费（P2-12 台账 consumers 自动核对）。
+
+    遍历全部策略类，实测其引用列，聚合为 ``{列名: [消费策略 name, ...]}``，
+    供与 ``config/data_time_semantics.yaml`` 人工填写的 ``consumers`` 字段对照，
+    发现漂移（新增策略/改列引用未回写台账）。本函数为只读实测，不改写 yaml。
+
+    Returns:
+        Dict[str, List[str]]: {列名: [消费策略 name, ...]}（按列名排序）。
+    """
+    result: Dict[str, List[str]] = {}
+    for sid in _all_strategy_names():
+        for col in referenced_columns_for_strategy(sid):
+            consumers = result.setdefault(col, [])
+            if sid not in consumers:
+                consumers.append(sid)
+    return dict(sorted(result.items()))
 
 
 def _blocked_columns(ledger: Dict[str, Any]) -> Set[str]:
@@ -772,7 +870,12 @@ def check_static_scan(strategy_id: str, decision_time: str) -> List[Violation]:
     source = _strategy_source(strategy_id)
     if source is None:
         return []  # 未定位策略源码：不阻断（源码定位非强制，consumption 同口径）
-    result = analyze_source(source, ledger_keys, blocked, filename=f"strategy:{strategy_id}")
+    # P2-14 class 粒度收窄：只扫匹配策略类的行区间
+    cls_range = _find_class_range(source, strategy_id)
+    result = analyze_source(
+        source, ledger_keys, blocked,
+        filename=f"strategy:{strategy_id}", line_range=cls_range,
+    )
     violations: List[Violation] = []
     for h in result.blocking_hits:
         violations.append(

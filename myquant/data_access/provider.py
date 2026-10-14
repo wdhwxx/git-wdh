@@ -799,7 +799,16 @@ class HistoricalDataProvider(DataProviderBase):
         if "前收盘价" not in df.columns and "收盘价" in df.columns:
             df["前收盘价"] = pd.to_numeric(df["收盘价"], errors="coerce").shift(1)
 
-        # 去除内部标记列（清洗时添加的_warnings等）
+        # 去除内部标记列（清洗时添加的_warnings等）。
+        # P2-09：`_warnings` 是清洗层打的行级质量标记（价格跳变/异常波动等），
+        # 不再无条件静默丢弃——先提升到 ``df.attrs["row_warnings"]`` 保留质量
+        # 信息（供下游审计/质量门禁消费），再 drop 内部列（list 列混在 OHLCV
+        # 数值列会污染向量化计算，故不直接保留为 DataFrame 列）。
+        if "_warnings" in df.columns:
+            df.attrs["row_warnings"] = {
+                str(idx): list(w)
+                for idx, w in zip(df.index, df["_warnings"])
+            }
         internal_cols = [c for c in df.columns if c.startswith("_")]
         if internal_cols:
             df = df.drop(columns=internal_cols)
