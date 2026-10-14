@@ -137,6 +137,11 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
+      - name: 安装系统依赖（PySide6 EGL/GL 运行时，headless runner 需要）
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon0
+
       - name: 安装项目（dev + benchmark + gui + web 依赖）
         # P2-D12-001 整改：补 gui extras —— test_paper_run_dialog.py 依赖 PySide6，
         # 缺此组 CI 在收集阶段即失败（该文件 L19 已设 QT_QPA_PLATFORM=offscreen）
