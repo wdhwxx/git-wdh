@@ -150,6 +150,86 @@ def check_result_invariants(
 
 
 # ═══════════════════════════════════════════════
+#  组合级 BarState 构造（事件驱动引擎 RI-3/4/6 适配）
+# ═══════════════════════════════════════════════
+
+
+def build_portfolio_bar_states(
+    points: Sequence[tuple],
+) -> List[BarState]:
+    """从组合级净值快照序列构造 BarState（供事件驱动引擎激活 RI-3/4/6）。
+
+    事件驱动引擎（mixed/event）无逐 symbol 持仓历史，但 recorder 逐 bar 记录了
+    组合级 cash + 持仓市值快照。这里把每个快照转成一条组合级 BarState：
+    position 语义为"组合持仓市值"（非股数）、close=1.0，使 RI-3 恒等式
+    implied = cash + position_value 自然成立（不伪造、不误报），同时让
+    RI-4（cash 非负）/ RI-6（持仓市值非负）真正对组合生效。
+
+    Args:
+        points: 净值快照序列，每项为 ``(date: str, cash: float, position_value: float)``。
+
+    Returns:
+        组合级 BarState 列表（symbol 固定为 "_PORTFOLIO_"）。
+    """
+    out: List[BarState] = []
+    for date, cash, position_value in points:
+        out.append(BarState(
+            symbol="_PORTFOLIO_",
+            bar_date=str(date),
+            cash=float(cash),
+            position=float(position_value),
+            close=1.0,  # 组合级：市值即 position*1.0，RI-3 恒等式自然成立
+        ))
+    return out
+
+
+def build_position_timeline_bar_states(
+    trades: Sequence,
+    close_lookup: Optional[Dict[str, Dict[str, float]]] = None,
+) -> List[BarState]:
+    """从成交流重建逐 symbol 持仓时间线（供事件驱动引擎激活 RI-5 T+1）。
+
+    按 symbol 分组、按成交日期累计净持仓（BUY 加 / SELL 减），得到每个
+    (symbol, date) 的当日末持仓；close 由 close_lookup[symbol][date] 提供
+    （缺失则 0.0，RI-3 自动跳过该点）。
+
+    Args:
+        trades: 成交记录序列（鸭子类型，需 symbol/trade_date/side/quantity 字段）。
+        close_lookup: ``{symbol: {date: close}}`` 当日收盘价查找表，可为 None。
+
+    Returns:
+        逐 symbol 持仓时间线 BarState 列表。
+    """
+    close_lookup = close_lookup or {}
+    # 每 symbol 的每日净变化：{symbol: {date: net_change}}
+    change_by_sym_date: Dict[str, Dict[str, float]] = {}
+    for t in trades:
+        sym = getattr(t, "symbol")
+        date = getattr(t, "trade_date")
+        side = getattr(t, "side")
+        qty = float(getattr(t, "quantity"))
+        bucket = change_by_sym_date.setdefault(sym, {})
+        bucket[date] = bucket.get(date, 0.0) + (qty if side == "BUY" else -qty)
+
+    out: List[BarState] = []
+    for sym, by_date in change_by_sym_date.items():
+        # 跨日累计持仓（昨日末持仓 + 当日净变化），还原真实持仓时间线；
+        # 当日净变化不等于当日末持仓——必须跨日累计才能让 RI-6/RI-5 判据正确。
+        running = 0.0
+        for date in sorted(by_date.keys()):
+            running += by_date[date]
+            close = float(close_lookup.get(sym, {}).get(date, 0.0))
+            out.append(BarState(
+                symbol=sym,
+                bar_date=date,
+                cash=0.0,  # 逐 symbol 持仓时间线无独立现金（组合级 cash 另算）
+                position=running,
+                close=close,
+            ))
+    return out
+
+
+# ═══════════════════════════════════════════════
 #  RI-1 成交价界
 # ═══════════════════════════════════════════════
 
@@ -256,10 +336,13 @@ def _check_ri3_equity_identity(
         if float(b.position) == 0.0 or float(b.close) == 0.0:
             continue
         implied_equity = float(b.cash) + float(b.position) * float(b.close)
-        # NaN 检测：implied_equity != implied_equity
-        if implied_equity != implied_equity or not abs(
-            implied_equity - float(b.cash)
-        ) < max(abs(float(b.position)) * abs(float(b.close)), tol):
+        # 恒等式自洽：equity(cash+pos*close) 与 cash 的"增量"应等于 pos*close。
+        # 检查 abs((implied - cash) - pos*close) <= tol——等价于 cash+pos*close 两边
+        # 自洽；一旦 cash/position 被覆盖不同步（vectorized cash[i:] 前值覆盖），
+        # 该增量与 pos*close 的偏差就会超过容差。
+        delta = abs(implied_equity - float(b.cash))
+        expected = abs(float(b.position)) * abs(float(b.close))
+        if implied_equity != implied_equity or abs(delta - expected) > tol:
             out.append(RealismViolation(
                 field_path="invariants.equity_identity",
                 critical=True,

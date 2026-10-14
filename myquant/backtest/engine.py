@@ -1055,6 +1055,126 @@ class BacktestEngine(BaseEngine):
     # 生命周期：停止
     # ------------------------------------------------------------------
 
+    def _run_realism_invariants(self) -> bool:
+        """P1-15：结果侧真实性不变量校验（event 引擎，v2.2 §4.9）。
+
+        从 recorder 注入：当日行情反查（RI-1 价界 / RI-2 量界）+ 组合级
+        equity_curve 快照（RI-3 权益恒等 / RI-4 现金非负 / RI-6 持仓非负）+
+        成交流重建持仓时间线（RI-5 T+1 一致）。
+
+        Returns:
+            True 表示通过，可 mark_complete；False 违规已 mark_failed。
+        """
+        try:
+            from myquant.realism_gate.invariants import (
+                TradeRecord,
+                build_position_timeline_bar_states,
+                build_portfolio_bar_states as _bp,
+                check_result_invariants,
+            )
+        except ImportError:
+            logger.debug("realism_gate.invariants 未就绪，跳过 P1-15 校验")
+            return True
+
+        trades = self.recorder.get_trades() if self.recorder else []
+        inv_trades: list = []
+        for t in trades:
+            sym = t.symbol
+            df = self.data.get(sym)
+            if df is None:
+                continue
+            try:
+                trade_date = pd.Timestamp(t.timestamp, unit="s").strftime("%Y-%m-%d")
+            except (TypeError, ValueError):
+                continue
+            idx_str = df.index.astype(str)
+            if trade_date not in idx_str:
+                continue
+            try:
+                row = df.iloc[idx_str.get_loc(trade_date)]
+                inv_trades.append(TradeRecord(
+                    symbol=sym,
+                    trade_date=trade_date,
+                    side=t.side,
+                    price=float(t.price),
+                    quantity=float(t.quantity),
+                    day_low=float(row["最低价"]),
+                    day_high=float(row["最高价"]),
+                    day_volume=float(row["成交量"]),
+                    slippage_amount=abs(float(t.slippage)) * float(t.price),
+                ))
+            except (KeyError, ValueError, IndexError):
+                continue
+
+        # 组合级 bar_states（RI-3/4/6）+ 持仓时间线（RI-5）
+        bar_states: list = []
+        if self.recorder is not None:
+            equity_curve = self.recorder.get_equity_curve()
+            points = [(ep.date, ep.cash, ep.position_value) for ep in equity_curve]
+            bar_states.extend(_bp(points))
+        if trades:
+            close_lookup: dict = {}
+            for sym in {t.symbol for t in trades}:
+                df = self.data.get(sym)
+                if df is None or "收盘价" not in df.columns:
+                    continue
+                close_lookup[sym] = {
+                    str(d): float(c) for d, c in zip(df.index, df["收盘价"])
+                }
+            timeline_trades = [
+                type("T", (), {
+                    "symbol": it.symbol, "trade_date": it.trade_date,
+                    "side": it.side, "quantity": it.quantity,
+                })()
+                for it in inv_trades
+            ]
+            bar_states.extend(
+                build_position_timeline_bar_states(timeline_trades, close_lookup)
+            )
+
+        if not inv_trades and not bar_states:
+            return True
+
+        try:
+            violations = check_result_invariants(
+                trades=inv_trades,
+                bar_states=bar_states,
+                initial_capital=float(self.config.initial_capital),
+                participation_cap=float(
+                    getattr(self.config, "participation_rate", 1.0)
+                ),
+            )
+        except ValueError as exc:
+            logger.warning("P1-15 invariants 输入参数错误，跳过: %s", exc)
+            return True
+
+        active = (
+            "invariants.price_bounds",
+            "invariants.volume_bound",
+            "invariants.equity_identity",
+            "invariants.cash_non_negative",
+            "invariants.t1_consistency",
+            "invariants.position_non_negative",
+        )
+        real = [v for v in violations if v.field_path in active]
+        if real:
+            msg = "; ".join(v.message for v in real[:5])
+            logger.error("❌ P1-15 event 结果侧不变量未通过: %s", msg)
+            if self.result is not None and hasattr(self.result, "extra"):
+                self.result.extra["realism_invariants_failed"] = True
+                self.result.extra["realism_invariants_violations"] = [
+                    {"field": v.field_path, "message": v.message} for v in real[:10]
+                ]
+                self.result.mark_failed(f"realism_invariants_failed: {msg}")
+            return False
+        logger.info(
+            "✅ P1-15 event 结果侧不变量校验通过（RI-1~6，trades=%d, bars=%d）",
+            len(inv_trades), len(bar_states),
+        )
+        if self.result is not None and hasattr(self.result, "extra"):
+            self.result.extra["realism_invariants_passed"] = True
+        return True
+
     def on_stop(self) -> None:
         """
         停止回测引擎
@@ -1124,7 +1244,8 @@ class BacktestEngine(BaseEngine):
         self.result.trades = self.recorder.get_trades() if self.recorder else []
         # #S3修复：回测结束时运行防未来函数统一校验（引擎内置能力，不再仅依赖入口脚本）
         # P0-01修复：先校验，通过才标记 completed；失败已在方法内 mark_failed，不得覆盖
-        if self._run_lookahead_assert():
+        # P1-15：事件驱动引擎补齐结果侧不变量（RI-1~6），与 mixed/vectorized 同构
+        if self._run_lookahead_assert() and self._run_realism_invariants():
             self.result.mark_complete()
 
         self._stopped = True

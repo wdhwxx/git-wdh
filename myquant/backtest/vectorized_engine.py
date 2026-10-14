@@ -938,16 +938,25 @@ class VectorizedBacktestEngine:
             logger.debug("realism_gate.invariants 未就绪，跳过 P1-15 校验")
             return True
 
-        # 1. bar_states（RI-4 现金非负 / RI-6 持仓非负）
+        # 1. bar_states（RI-3 权益恒等 / RI-4 现金非负 / RI-6 持仓非负）
+        #    close 从 self.data[symbol] OHLCV 按 bar_date 反查（RI-3 激活）
         bar_states: List[BarState] = []
         for sr in self._symbol_results:
+            df = self.data.get(sr.symbol)
+            idx_str = df.index.astype(str) if df is not None else None
             for i in range(len(sr.dates)):
+                close_i = 0.0
+                if idx_str is not None and sr.dates[i] in idx_str:
+                    try:
+                        close_i = float(df.iloc[idx_str.get_loc(sr.dates[i])]["收盘价"])
+                    except (KeyError, ValueError, IndexError):
+                        close_i = 0.0
                 bar_states.append(BarState(
                     symbol=sr.symbol,
                     bar_date=sr.dates[i],
                     cash=float(sr.cash[i]),
                     position=float(sr.position[i]),
-                    close=0.0,  # RI-3 暂不接线（无逐 bar close）
+                    close=close_i,
                 ))
 
         # 2. trades 注入当日行情（RI-1 价界 / RI-2 量界 / RI-5 T+1）
@@ -1001,10 +1010,11 @@ class VectorizedBacktestEngine:
             logger.warning("P1-15 invariants 输入参数错误，跳过: %s", exc)
             return True
 
-        # 激活 RI-1/2/4/5/6（RI-3 因 close=0 自动跳过，不在 active 列表）
+        # 激活 RI-1/2/3/4/5/6（RI-3 已接真实 close，恒等校验生效）
         active = (
             "invariants.price_bounds",
             "invariants.volume_bound",
+            "invariants.equity_identity",
             "invariants.cash_non_negative",
             "invariants.t1_consistency",
             "invariants.position_non_negative",

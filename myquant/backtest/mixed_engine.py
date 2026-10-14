@@ -1262,13 +1262,48 @@ class MixedBacktestEngine:
             except (KeyError, ValueError, IndexError):
                 continue
 
-        if not inv_trades:
+        # P1-15 遗留补齐：组合级 equity_curve 快照 → RI-3/4/6；成交流重建持仓时间线 → RI-5
+        try:
+            from myquant.realism_gate.invariants import (
+                build_portfolio_bar_states as _bp,
+                build_position_timeline_bar_states,
+            )
+        except ImportError:
+            _bp = None  # 旧版 invariants 无此函数，降级仅 RI-1/2
+            build_position_timeline_bar_states = None  # type: ignore[assignment]
+        bar_states: list = []
+        # 1) 组合级 bar_states（RI-3 权益恒等 / RI-4 现金非负 / RI-6 持仓非负）
+        if _bp is not None and self.recorder is not None:
+            equity_curve = self.recorder.get_equity_curve()
+            points = [(ep.date, ep.cash, ep.position_value) for ep in equity_curve]
+            bar_states.extend(_bp(points))
+        # 2) 逐 symbol 持仓时间线（RI-5 T+1 一致）
+        if build_position_timeline_bar_states is not None and trades:
+            close_lookup: dict = {}
+            for sym in {t.symbol for t in trades}:
+                df = self.data.get(sym)
+                if df is None or "收盘价" not in df.columns:
+                    continue
+                close_lookup[sym] = {
+                    str(d): float(c) for d, c in zip(df.index, df["收盘价"])
+                }
+            # 复用 inv_trades（已带当日行情）重建持仓时间线
+            timeline_trades = [
+                type("T", (), {
+                    "symbol": it.symbol, "trade_date": it.trade_date,
+                    "side": it.side, "quantity": it.quantity,
+                })()
+                for it in inv_trades
+            ]
+            bar_states.extend(build_position_timeline_bar_states(timeline_trades, close_lookup))
+
+        if not inv_trades and not bar_states:
             return True
 
         try:
             violations = check_result_invariants(
                 trades=inv_trades,
-                bar_states=[],  # mixed 无逐 bar cash/position 序列
+                bar_states=bar_states,
                 initial_capital=float(self.config.initial_capital),
                 participation_cap=float(
                     getattr(self.config, "participation_rate", 1.0)
@@ -1278,10 +1313,14 @@ class MixedBacktestEngine:
             logger.warning("P1-15 invariants 输入参数错误，跳过: %s", exc)
             return True
 
-        # mixed 只跑 RI-1 价界 / RI-2 量界（RI-4/5/6 需逐 bar 明细，留后续）
+        # mixed 全量 RI-1~RI-6（遗留补齐 RI-3/4/5/6）
         active = (
             "invariants.price_bounds",
             "invariants.volume_bound",
+            "invariants.equity_identity",
+            "invariants.cash_non_negative",
+            "invariants.t1_consistency",
+            "invariants.position_non_negative",
         )
         real = [v for v in violations if v.field_path in active]
 

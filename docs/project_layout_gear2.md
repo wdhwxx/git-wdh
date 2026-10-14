@@ -5274,3 +5274,23 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 **验收**：P2-02 实测 CLI `--real --symbols 000001.SZ --modes mixed,vectorized`：两引擎期末净值均 0.998356、max_abs=0、对拍 ✅（basis 均 per_order 紧对拍一致）；针对性 consistency 45 passed（42+3 新增）；py_compile 2 文件 OK；**全量 pytest 4121 passed / 4 skipped / 0 failed**（基线 4118 + 新增 3，吻合）。
 
 **纪律遵守**：常量提取（FEE_DILUTION_BASIS 类常量、DEFAULT_PROCESSED_DIR 等）；Google docstring + 全量类型注解；禁裸 except（沿用既有）；防未来（费用口径标注只读不参与回测数据流，fee_table 查表只依赖成交金额与模型参数不涉行情时序）；不删除用户文件（fee_table 评估后保留仅加状态注释，符合治理规则 3.3 废弃标注而非删除）；R-23/R-24 本轮无新增脚本/超行文件；全量 pytest 0 failed 才提交；git 提交（commit message 引用 #370）。**P2 十四张卡全部闭环（P2-02 口径显式化、P2-06 死代码评估留档）——回测真实性门禁 P2 阶段正式收口。**
+
+---
+
+## #371 · 2026-10-14 · P1-15 遗留收口：event/mixed 补齐 RI-3/4/5/6 结果侧真实性不变量
+
+**现状核实**：P1-15（v2.2 §4.9 六条结果侧不变量 RI-1~RI-6）此前"次刀"只交付了 invariants.py 本体 + vectorized 接线 RI-1/2/4/5/6 + mixed 接线 RI-1/2（反红测试 15 passed），**明确留尾巴**：①vectorized BarState close=0.0 导致 RI-3 权益恒等自动跳过；②mixed 只跑 RI-1/2、bar_states=[]（RI-3/4/5/6 未激活）；③event 引擎（engine.py）完全零接线（on_stop 仅 `_run_lookahead_assert()`）。本项目任务体系只有 P0/P1/P2 三档、无 P3，P1-15 是唯一"已交付但留尾巴"的施工项。
+
+**落地**：
+- **invariants.py 新增两个纯构造函数**（L0 层只消费注入序列、不 import backtest）：
+  - `build_portfolio_bar_states(points)`：组合级 equity_curve 快照 `(date, cash, position_value)` → BarState（symbol=`_PORTFOLIO_`、close=1.0），激活 RI-3/4/6——组合级恒等式 `cash+position_value=equity` 由 recorder.record_equity 构造保证，position=市值仍激活 RI-6、cash 仍激活 RI-4。
+  - `build_position_timeline_bar_states(trades, close_lookup)`：从成交流**跨日累计**重建逐 symbol 持仓时间线（昨日末持仓+当日净变化），激活 RI-5 T+1。
+- **RI-3 校验公式方向修复**：原 `abs(implied-cash) < max(position*close, tol)` 是严格小于恒等式——`implied=cash+position*close` 时 `abs(implied-cash)` 精确等于 `position*close`，浮点尾巴必误报（18 failed 的根因）。改为正确恒等式自洽判据：`abs((implied-cash) - position*close) <= tol`，即"cash 到净值的增量应恰等于 position×close"，cash/position 被覆盖不同步时偏差才超限。
+- **vectorized_engine**：`_run_realism_invariants` 的 bar_states 从 `self.data[sr.symbol]` 按 bar_date 反查"收盘价"填 close（原 close=0.0），active 列表加 `invariants.equity_identity`，RI-3 真正激活。
+- **mixed_engine**：补组合级 bar_states（recorder.get_equity_curve()）+ 持仓时间线（inv_trades → build_position_timeline_bar_states，close_lookup 加 `"收盘价" in df.columns` 防御测试 fixture 无中文列），active 扩为 RI-1~6。
+- **event engine.py**：新建 `_run_realism_invariants` 方法（同 mixed 模式），on_stop 接线改 `if self._run_lookahead_assert() and self._run_realism_invariants(): self.result.mark_complete()`——三引擎六条不变量真正对齐。
+- **踩坑记录**：①close_lookup 直接 `df["收盘价"]` 对测试 fixture（无中文列）抛 KeyError，18 failed → 加列存在性判断收敛；②持仓时间线初版按"当日净变化"算 position，净卖出日 net=-19400 触发 RI-6 误报 → 改为跨日累计持仓；③组合级 close=1.0 + RI-3 原公式浮点误报 → 修公式方向。
+
+**验收**：invariants 反红 15 passed；三引擎核心（engines_v5 + engine_events + consistency_v5 + invariants_red）100 passed；guard_mounting + kunpeng + R24 79 passed；**全量 pytest 4121 passed / 4 skipped / 0 failed**（与 P2 收官基线一致）。
+
+**纪律遵守**：常量提取（_EQUITY_TOL 沿用、symbol=`_PORTFOLIO_` 占位常量）；Google docstring + 全量类型注解（两个新纯函数 `-> List[BarState]`）；禁裸 except（DataFrame 反查包 `(KeyError, ValueError, IndexError)` 记 continue 不吞）；防未来（持仓时间线只依赖成交流与当日已收 bar 收盘价，不读未来）；R-24 抬 `backtest/engine.py` 1716→1837（+121 行 event invariants 接线功能必需，附注释）；治理冻结基线回写并注明功能必需；全量 pytest 0 failed 才提交；git 提交（commit message 引用 #371）。**P1-15 六条不变量三引擎（event/mixed/vectorized）全部对齐，回测真实性门禁 P0/P1/P2 至此无留尾巴施工项。**
