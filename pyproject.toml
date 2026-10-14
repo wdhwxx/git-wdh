@@ -20,6 +20,8 @@ dependencies = [
     # V5 内存监控（memory_watcher / health_check）核心依赖：
     # 虽为延迟导入（缺依赖可降级），但内存监控属 V5 核心能力，声明为运行依赖
     "psutil>=6.0.0",
+    # 字段加密（field_crypto / metrics_history 用 Fernet）
+    "cryptography>=42.0.0",
 ]
 
 [project.optional-dependencies]

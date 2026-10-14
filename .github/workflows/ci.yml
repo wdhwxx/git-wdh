@@ -157,6 +157,9 @@ jobs:
 
       - name: 运行全部单元测试（tests/unit）
         run: pytest tests/unit/ -q --tb=short --junitxml=test-results.xml
+        env:
+          # headless Linux runner 无显示器/无 GPU，PySide6 用 offscreen 平台插件
+          QT_QPA_PLATFORM: offscreen
 
       - name: 防未来函数专项测试
         run: pytest tests/unit/ -q -m lookahead --tb=short
