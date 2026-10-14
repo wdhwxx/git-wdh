@@ -28,7 +28,7 @@ test_factor_validator.py - F-02 因子有效性校验（IC/ICIR）单元测试
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
+from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -50,7 +50,6 @@ from myquant.indicators.factor_validator import (
     validate_factor_logic,
 )
 from myquant.strategies.multi_factor_strategy import MultiFactorStrategy
-
 
 # ═══════════════════════════════════════════════
 #  Fixture：合成面板数据

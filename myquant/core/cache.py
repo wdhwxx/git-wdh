@@ -25,7 +25,6 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 from myquant.core.constants import CACHE_DEFAULT_TTL, CACHE_MAX_SIZE
 
-
 # ═══════════════════════════════════════════════
 #  内存 LRU 缓存
 # ═══════════════════════════════════════════════

@@ -18,15 +18,14 @@ from __future__ import annotations
 
 import pytest
 
-from myquant.core.constants import SeverityLevel
 import myquant.monitoring.data_quality_explorer as dqe
+from myquant.core.constants import SeverityLevel
 from myquant.monitoring.data_quality_explorer import (
-    DataFreshnessSli,
-    METRIC_FRESHNESS_LAG_SECONDS,
+    FRESHNESS_ERROR_MULTIPLE,
     METRIC_DATA_GAP_COUNT,
     METRIC_FACTOR_SYNC_DELAY_SECONDS,
-    METRIC_FINANCIAL_SYNC_DELAY_SECONDS,
-    FRESHNESS_ERROR_MULTIPLE,
+    METRIC_FRESHNESS_LAG_SECONDS,
+    DataFreshnessSli,
 )
 
 

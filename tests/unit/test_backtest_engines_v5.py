@@ -28,14 +28,13 @@ from myquant.backtest.mixed_engine import MixedBacktestEngine
 from myquant.backtest.vectorized_engine import VectorizedBacktestEngine
 from myquant.models.backtest import BacktestConfig
 from myquant.models.market_data import Bar
-from myquant.models.trade import Order, OrderSide, OrderType, Position
+from myquant.models.trade import OrderSide, OrderType, Position
 from myquant.strategies.base import (
     Signal,
     SignalType,
     StrategyBase,
     StrategyContext,
 )
-
 
 # ═══════════════════════════════════════════════
 #  测试桩：行情数据 / 配置 / 策略

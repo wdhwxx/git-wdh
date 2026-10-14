@@ -19,7 +19,7 @@ test_health_check.py - A-1 L0 基础设施监控补全单元测试
 
 from __future__ import annotations
 
-from typing import Any, List, Tuple
+from typing import Tuple
 
 import pytest
 

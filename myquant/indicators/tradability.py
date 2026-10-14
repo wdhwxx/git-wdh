@@ -30,9 +30,8 @@ tradability.py - F-11 可交易性过滤（共享过滤函数）
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
-import numpy as np
 import pandas as pd
 
 # ── 默认阈值（报告 F-11 初始建议，按样本校准可调）──

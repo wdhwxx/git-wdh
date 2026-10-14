@@ -18,10 +18,6 @@ import pandas as pd
 import pytest
 
 from myquant.backtest.candidate_pool import (
-    DEFAULT_MAX_DRAWDOWN,
-    DEFAULT_MIN_SHARPE,
-    DEFAULT_MIN_TRADES,
-    DEFAULT_TOP_N,
     OUTPUT_COLUMNS,
     build_candidate_pool,
 )

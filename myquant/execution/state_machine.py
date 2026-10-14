@@ -25,7 +25,7 @@ execution/state_machine.py - 订单生命周期状态机
 __version__ = "0.1.0"
 __author__ = "Pythonwdhmm"
 
-from typing import Dict, Optional, Set
+from typing import Dict, Set
 
 from myquant.core.exceptions import ExecutionError
 from myquant.core.logger import get_logger

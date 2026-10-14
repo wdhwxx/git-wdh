@@ -94,8 +94,8 @@ def setup_fetcher(project_root: Path):
     薄入口：调用 myquant.data_access 内部函数
     """
     from myquant.data_access import DataFetcher
-    from myquant.data_access.sources.tdx_source import TdxDataSource
     from myquant.data_access.sources.akshare_source import AkshareDataSource
+    from myquant.data_access.sources.tdx_source import TdxDataSource
 
     fetcher = DataFetcher()
 
@@ -120,8 +120,8 @@ def setup_data_manager(fetcher, project_root: Path):
     """
     from myquant.data_access import DataManager
     from myquant.database import get_connection
-    from myquant.database.schema import table_exists, TABLE_NAMES
     from myquant.database.migrations import migrate_to_latest
+    from myquant.database.schema import TABLE_NAMES, table_exists
 
     db_path = project_root / "database" / "quant.db"
     conn = get_connection(db_path)
@@ -337,8 +337,6 @@ def validate_data(fetcher, manager, project_root: Path) -> List[dict]:
 
     薄入口：调用 DataManager.validate_data
     """
-    from myquant.utils.file_utils import ensure_dir
-    from pathlib import Path as P
 
     processed_dir = project_root / "datasets" / "processed"
     if not processed_dir.exists():
@@ -446,7 +444,7 @@ def show_data_source_status(tdx, ak):
     # akshare
     ak_icon = "✅" if ak._check_akshare() else "❌"
     print(f"│  [akshare网络] {ak_icon}  财务数据: 支持                        │")
-    print(f"│  [券商实时]    ⏸  未配置（实盘时接入XTP/QMT）                  │")
+    print("│  [券商实时]    ⏸  未配置（实盘时接入XTP/QMT）                  │")
     print("└────────────────────────────────────────────────────────────────┘")
     print()
 

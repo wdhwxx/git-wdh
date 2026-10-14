@@ -20,7 +20,7 @@ test_factor_preprocessor.py - F-03 因子预处理（去极值+中性化+残差�
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Dict, List
 
 import numpy as np
 import pandas as pd
@@ -43,7 +43,6 @@ from myquant.indicators.factor_preprocessor import (
 )
 from myquant.leakage_gate.cross_sectional import CrossSectionalAsOfError
 from myquant.strategies.multi_factor_strategy import MultiFactorStrategy
-
 
 # ═══════════════════════════════════════════════
 #  测试辅助

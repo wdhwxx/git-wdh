@@ -346,29 +346,27 @@ def save_indicators_to_features(
 from .factor_cache import (  # noqa: E402
     FactorCache,
     get_factor_cache,
+    is_parallel_mode,
     reset_factor_cache,
     set_parallel_mode,
-    is_parallel_mode,
 )
 
 # ============================================================================
 # 向量化因子引擎（V5回测性能优化新增，批量计算+缓存+指纹联动）
 # ============================================================================
-
 from .factor_engine import (  # noqa: E402
     FactorEngine,
     get_factor_engine,
     reset_factor_engine,
 )
+from .momentum import KDJ, MOM, ROC, RSI  # noqa: E402
 
 # ============================================================================
 # 导入各指标模块（必须在基类和注册表定义之后，避免循环导入）
 # ============================================================================
-
 from .moving_average import EMA, MACD, SMA, WMA  # noqa: E402
-from .momentum import KDJ, MOM, ROC, RSI  # noqa: E402
-from .volatility import ATR, BollingerBands, Volatility, ExtremeRegime  # noqa: E402
 from .rsrs import RSRS  # noqa: E402
+from .volatility import ATR, BollingerBands, ExtremeRegime, Volatility  # noqa: E402
 
 __all__ = [
     # 核心基础设施

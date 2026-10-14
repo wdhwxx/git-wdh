@@ -16,13 +16,13 @@ TODO(后续迭代):
 
 from myquant.api.dependencies.get_services import (
     ServiceContainer,
-    get_service_container,
-    get_strategy_manager,
+    get_allocator,
     get_backtest_engine,
+    get_data_manager,
     get_live_engine,
     get_risk_manager,
-    get_data_manager,
-    get_allocator,
+    get_service_container,
+    get_strategy_manager,
 )
 
 __all__ = [

@@ -31,20 +31,27 @@ __version__ = "0.1.0"
 __author__ = "Pythonwdhmm"
 
 from myquant.strategies.base import (
-    Signal, SignalType, StrategyBase, StrategyContext, StockPoolBuilder,
+    Signal,
+    SignalType,
+    StockPoolBuilder,
+    StrategyBase,
+    StrategyContext,
 )
-from myquant.strategies.registry import (
-    create_strategy, discover_strategies, get_strategy_class,
-    list_strategies, register_strategy,
-)
+from myquant.strategies.grid_strategy import GridStrategy
+from myquant.strategies.kunpeng_strategy import KunpengStrategy
 
 # 导入策略实现（触发 @register_strategy 装饰器）
 from myquant.strategies.ma_strategy import MACrossStrategy, RSRSStrategy
-from myquant.strategies.grid_strategy import GridStrategy
-from myquant.strategies.momentum_strategy import MomentumStrategy
 from myquant.strategies.mean_reversion_strategy import MeanReversionStrategy
+from myquant.strategies.momentum_strategy import MomentumStrategy
 from myquant.strategies.multi_factor_strategy import MultiFactorStrategy
-from myquant.strategies.kunpeng_strategy import KunpengStrategy
+from myquant.strategies.registry import (
+    create_strategy,
+    discover_strategies,
+    get_strategy_class,
+    list_strategies,
+    register_strategy,
+)
 
 __all__ = [
     # 核心基础设施

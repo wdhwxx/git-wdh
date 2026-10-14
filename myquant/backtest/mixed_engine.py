@@ -68,11 +68,16 @@ from myquant.backtest.metrics import MetricsCalculator
 from myquant.backtest.order_matcher import OrderMatcher
 from myquant.backtest.recorder import TradeRecorder
 from myquant.core.lookahead_guard import LookaheadGuard  # #H2修复：防未来函数校验器
-from myquant.models.backtest import BacktestConfig, BacktestResult, PerformanceMetrics, EquityPoint
+from myquant.models.backtest import (
+    BacktestConfig,
+    BacktestResult,
+    EquityPoint,
+    PerformanceMetrics,
+)
 from myquant.models.market_data import Bar, MarketEvent
 from myquant.models.trade import Order, OrderSide, OrderType, Position, Trade
 from myquant.risk.rules import StopLossRule  # KP-P3-07: 止损阈值与实盘同源
-from myquant.strategies.base import Signal, SignalType, StrategyBase, StrategyContext
+from myquant.strategies.base import Signal, StrategyBase, StrategyContext
 
 logger = logging.getLogger(__name__)
 
@@ -1266,6 +1271,8 @@ class MixedBacktestEngine:
         try:
             from myquant.realism_gate.invariants import (
                 build_portfolio_bar_states as _bp,
+            )
+            from myquant.realism_gate.invariants import (
                 build_position_timeline_bar_states,
             )
         except ImportError:

@@ -28,8 +28,8 @@ import pytest
 
 from myquant.core.constants import SeverityLevel
 from myquant.monitoring.dynamic_baseline import (
-    CATEGORY_BASELINE,
     ALERT_SOURCE,
+    CATEGORY_BASELINE,
     DEFAULT_REGIME,
     METRIC_ANOMALY,
     METRIC_BASELINE_MEAN,
@@ -142,7 +142,7 @@ class TestMomYoy:
         _feed_steady(db)
         # 上一点 99.99 → 当前 105：mom ≈ (105-99.99)/99.99 ≈ 0.05
         ev = db.record("latency_ms", _ts(30), 105.0)
-        ratio = ev["ratio"] if ev else None
+        ev["ratio"] if ev else None
         # 该点可能出带也可能不出带；无论是否异常，ratio.mom 应被计算
         # 直接从内部评估：喂一个明确出带的点拿 event
         ev2 = db.record("latency_ms", _ts(31), 120.0)
@@ -249,7 +249,7 @@ class TestAnomalyEvent:
         _feed_steady(db)
         ev1 = db.record("latency_ms", _ts(30), 120.0)
         # 同 ts 重复喂（覆盖同值）→ 幂等，不重复产出
-        ev2 = db.record("latency_ms", _ts(30), 120.0)
+        db.record("latency_ms", _ts(30), 120.0)
         assert ev1 is not None
         # 同 ts 覆盖后重新评估：基线历史不变 → 仍是异常；但应只对应一条事件
         # 缓冲中同 ts 只一条

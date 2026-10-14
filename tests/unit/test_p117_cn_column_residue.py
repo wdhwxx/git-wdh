@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import numpy as np
 import pandas as pd
 
 from myquant.strategies.grid_strategy import GridStrategy

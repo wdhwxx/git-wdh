@@ -31,7 +31,6 @@ from pathlib import Path
 from typing import Optional
 
 from .fetcher import DataFetcher
-from .sources.base import DataSourceStatus
 
 logger = logging.getLogger(__name__)
 

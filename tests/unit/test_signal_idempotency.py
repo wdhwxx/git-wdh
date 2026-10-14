@@ -15,17 +15,13 @@ test_signal_idempotency.py - 信号/订单幂等去重测试（任务43）
 """
 from __future__ import annotations
 
-import time
 from datetime import datetime
 
-import pytest
-
-from myquant.live.engine import LiveEngine, RiskConfig
 from myquant.live.brokers.qmt_broker import QmtBroker
+from myquant.live.engine import LiveEngine, RiskConfig
 from myquant.models.market_data import Bar, BarFrequency
 from myquant.models.trade import Order, OrderSide, OrderType
 from myquant.strategies.base import Signal, SignalType
-
 
 # ═══════════════════════════════════════════
 #  辅助函数

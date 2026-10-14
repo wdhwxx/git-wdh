@@ -17,8 +17,8 @@ from __future__ import annotations
 
 import pytest
 
-from myquant.models.trade import OrderSide, OrderType
 from myquant.live.brokers.ptrade_broker import PtradeBroker
+from myquant.models.trade import OrderSide, OrderType
 
 
 @pytest.fixture()

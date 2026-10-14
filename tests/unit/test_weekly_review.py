@@ -13,17 +13,16 @@ test_weekly_review.py - §7 周告警复盘报告生成器测试（R-01）
 
 from __future__ import annotations
 
-import tempfile
 import time
 from pathlib import Path
 
 import pytest
 
-from myquant.core.constants import SeverityLevel
-from myquant.database.connection import DatabaseConnection
 from myquant.core.alert_store import AlertStore
-from myquant.monitoring.alerting import Alert
+from myquant.core.constants import SeverityLevel
 from myquant.core.metrics_history import MetricsHistoryStore
+from myquant.database.connection import DatabaseConnection
+from myquant.monitoring.alerting import Alert
 from myquant.monitoring.weekly_review import (
     WEEK_SECONDS,
     WeeklyReviewReport,

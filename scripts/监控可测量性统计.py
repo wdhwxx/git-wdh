@@ -34,7 +34,8 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
+
 
 # 顶部 sys.path 注入：CLI 直跑免设 PYTHONPATH（与推理延迟基准.py 等对齐）
 def _bootstrap_root() -> Path:

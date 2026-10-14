@@ -43,7 +43,6 @@ import pandas as pd
 import pytest
 
 from myquant.models.market_data import Bar, BarFrequency
-from myquant.strategies.registry import _strategy_registry
 from myquant.strategies import (
     GridStrategy,
     MACrossStrategy,
@@ -62,9 +61,8 @@ from myquant.strategies import (
     list_strategies,
     register_strategy,
 )
-
+from myquant.strategies.registry import _strategy_registry
 from tests.conftest import make_ohlcv_df
-
 
 # ═══════════════════════════════════════════
 #  Fixture：行情数据构造工具
@@ -563,7 +561,7 @@ class TestMACrossStrategy:
         df2.iloc[15:, df2.columns.get_loc("收盘价")] *= 2.0
         ctx2 = _make_context(df2)
         ma2 = MACrossStrategy(fast_period=3, slow_period=10)
-        signals2 = _run_strategy_on_bars(ma2, ctx2, df2)
+        _run_strategy_on_bars(ma2, ctx2, df2)
 
         # 前10根bar的信号应该一致（修改点之前）
         # 比较前10根bar产生的信号数量

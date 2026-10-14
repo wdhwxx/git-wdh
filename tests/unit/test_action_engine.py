@@ -18,22 +18,17 @@ import pytest
 from myquant.monitoring.action_engine import (
     STATUS_BLOCKED,
     STATUS_EXECUTED,
-    STATUS_EXPIRED,
     STATUS_FAILED,
     STATUS_NOT_SUPPORTED,
     STATUS_PENDING_APPROVAL,
     STATUS_PROPOSED,
     STATUS_REJECTED,
-    STATUS_ROLLED_BACK,
     STATUS_SKIPPED,
-    ActionApproval,
     ActionEngine,
     ActionExecutor,
     ActionRule,
-    ActionResult,
     NotifyExecutor,
     NotifyTraderExecutor,
-    PauseStrategyExecutor,
     RollbackDataVersionExecutor,
     StopSignalGenerationExecutor,
     SwitchDataSourceExecutor,
@@ -43,7 +38,6 @@ from myquant.monitoring.action_engine import (
     register_action_executor,
     reset_action_engine,
 )
-
 
 # ── 测试辅助 ──────────────────────────────────────────────────
 

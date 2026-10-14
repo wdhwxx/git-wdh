@@ -33,7 +33,6 @@ scripts/灾备演练/年度灾备演练.py 为薄入口。
 from __future__ import annotations
 
 import json
-import logging
 import os
 import sqlite3
 import tempfile

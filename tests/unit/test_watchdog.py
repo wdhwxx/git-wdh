@@ -271,7 +271,6 @@ class TestEngineHeartbeatWatcherA5:
 
     def test_窗口约束告警(self, capsys) -> None:
         """N×间隔 >= 窗口时记 warning（R-02 约束）。"""
-        import logging
         EngineHeartbeatWatcher(
             _AliveEngine(), probe_interval_seconds=20,
             consecutive_misses=5, hang_judge_window_seconds=60,  # 5×20=100>=60

@@ -20,7 +20,7 @@ web 层经 ``from myquant.web.dashboard import MonitorCenterDataProvider`` 保�
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from myquant.core.logger import get_logger
 

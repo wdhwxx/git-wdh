@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from myquant.live.scheduler import HealthPatrol, LiveScheduler, attach_engine
+from myquant.live.scheduler import LiveScheduler, attach_engine
 
 
 @pytest.fixture()

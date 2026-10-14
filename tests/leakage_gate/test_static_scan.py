@@ -16,10 +16,10 @@ from __future__ import annotations
 
 import pytest
 
-import myquant.leakage_gate.static_scan as ss
 import myquant.leakage_gate.consumption as consumption_mod
 import myquant.leakage_gate.cross_sectional as cs
 import myquant.leakage_gate.signal_words as sw
+import myquant.leakage_gate.static_scan as ss
 from myquant.leakage_gate import (
     GateConfig,
     LeakageGateError,
@@ -501,7 +501,7 @@ def test_factor_selfcheck_trailing_passes(_ohlcv):
 
 def test_factor_selfcheck_lookahead_blocks(_ohlcv):
     """截断重算自检：泄漏指标（shift(-1)）→ FactorLookaheadError 阻断。"""
-    from myquant.indicators import register_indicator, IndicatorBase
+    from myquant.indicators import IndicatorBase, register_indicator
     from myquant.indicators.factor_engine import FactorEngine, FactorLookaheadError
 
     @register_indicator

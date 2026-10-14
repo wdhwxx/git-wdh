@@ -176,7 +176,7 @@ def main() -> int:
         # 生成报告（仅在有任一阶段结果时）
         if import_stats is not None or factor_stats is not None:
             print("\n[阶段3] 生成全中文入库报告 ...")
-            from myquant.data_access.financial_service import ImportStats, FactorStats
+            from myquant.data_access.financial_service import FactorStats, ImportStats
             imp = import_stats or ImportStats()
             fac = factor_stats or FactorStats()
             csv_out, html_out = svc.generate_report(imp, fac, output_dir)

@@ -22,20 +22,19 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional
+
+# 任务13：脏数据类型/修复策略自动推断（与 core/constants.py 对接）
+from myquant.core.constants import DIRTY_TYPE_REPAIR_MAP, DirtyDataType
 
 from .connection import DatabaseConnection
 from .schema import (
     TABLE_NAMES,
-    MarketDataSchema,
-    FinancialDataSchema,
-    FactorDataSchema,
     CleanRunMetaSchema,
     DirtyDataStatsSchema,
+    FactorDataSchema,
+    FinancialDataSchema,
 )
-
-# 任务13：脏数据类型/修复策略自动推断（与 core/constants.py 对接）
-from myquant.core.constants import DirtyDataType, DIRTY_TYPE_REPAIR_MAP
 
 
 class DataQueries:

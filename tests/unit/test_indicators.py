@@ -36,12 +36,10 @@ import pandas as pd
 import pytest
 
 from myquant.indicators import IndicatorBase
-from myquant.indicators.moving_average import SMA, EMA, WMA, MACD
-from myquant.indicators.momentum import ROC, MOM, RSI, KDJ
-from myquant.indicators.volatility import ATR, Volatility, BollingerBands
-
+from myquant.indicators.momentum import KDJ, MOM, ROC, RSI
+from myquant.indicators.moving_average import EMA, MACD, SMA, WMA
+from myquant.indicators.volatility import ATR, BollingerBands, Volatility
 from tests.conftest import make_ohlcv_df
-
 
 # ═══════════════════════════════════════════
 #  Fixture：标准 OHLCV 数据

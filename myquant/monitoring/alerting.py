@@ -72,13 +72,20 @@ from collections import deque
 from dataclasses import dataclass, field
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Any, Callable, Deque, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Deque, Dict, List, Optional, Sequence, Tuple
 from urllib import request as urlrequest
 from urllib.error import URLError
 
-from myquant.core.constants import DEFAULT_DEPENDENCY_MAP, MetricType, SeverityLevel, TRADE_EXCEPTION_ALERT_LEVEL_MAP
+from myquant.core.constants import (
+    DEFAULT_DEPENDENCY_MAP,
+    TRADE_EXCEPTION_ALERT_LEVEL_MAP,
+    MetricType,
+    SeverityLevel,
+)
 from myquant.core.logger import get_logger
-from myquant.core.registry import register_component  # G2-5：get_alert_manager 工厂注册（供 live/scheduler 经 L0 取用）
+from myquant.core.registry import (
+    register_component,  # G2-5：get_alert_manager 工厂注册（供 live/scheduler 经 L0 取用）
+)
 
 logger = get_logger("monitoring.alerting")
 
@@ -1028,7 +1035,7 @@ class WebhookAlertChannel(AlertChannel):
 
     def _build_wecom_payload(self, alert: Alert) -> Dict[str, Any]:
         """构建企业微信Webhook payload"""
-        level_color = {"info": "#17a2b8", "warning": "#ffc107", "error": "#dc3545", "critical": "#6f42c1"}.get(alert.level.value, "#6c757d")
+        {"info": "#17a2b8", "warning": "#ffc107", "error": "#dc3545", "critical": "#6f42c1"}.get(alert.level.value, "#6c757d")
         content = f"**[{alert.level.value.upper()}] {alert.message}**\n"
         content += f"> 来源: {alert.source}\n"
         content += f"> 分类: {alert.category}\n"
@@ -3409,8 +3416,8 @@ def _run_a10_self_test() -> int:
     import tempfile
     from pathlib import Path
 
-    from myquant.database.connection import DatabaseConnection
     from myquant.core.alert_store import AlertStore
+    from myquant.database.connection import DatabaseConnection
 
     passed = 0
     failures: List[str] = []

@@ -24,7 +24,6 @@ import re
 from enum import Enum
 from typing import List, Optional, Tuple
 
-
 # ═══════════════════════════════════════════
 #  错误码枚举
 # ═══════════════════════════════════════════
@@ -322,6 +321,6 @@ if __name__ == "__main__":
     # 严重/警告分类
     assert ErrorCode.MISSING_SYMBOL in CRITICAL_ERROR_CODES
     assert ErrorCode.PRICE_JUMP in WARNING_ERROR_CODES
-    print(f"  分类映射: MISSING_SYMBOL=CRITICAL, PRICE_JUMP=WARNING ✅")
+    print("  分类映射: MISSING_SYMBOL=CRITICAL, PRICE_JUMP=WARNING ✅")
 
     print("\n所有自检通过 ✅")

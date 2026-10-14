@@ -23,12 +23,6 @@ from typing import Any, Dict, List
 
 import pytest
 
-from myquant.backtest.metrics import (
-    compare_attribution,
-    group_contribution,
-    group_risk_contribution,
-    period_bucket_of,
-)
 from myquant.backtest.attribution import (
     ALL_DIMENSIONS,
     DIMENSION_FACTOR,
@@ -40,6 +34,12 @@ from myquant.backtest.attribution import (
     SOURCE_BACKTEST,
     SOURCE_LIVE,
     AttributionAnalyzer,
+)
+from myquant.backtest.metrics import (
+    compare_attribution,
+    group_contribution,
+    group_risk_contribution,
+    period_bucket_of,
 )
 
 _BASE: float = 1_700_000_000.0

@@ -822,7 +822,7 @@ if __name__ == "__main__":
     df_shuffled = df.sample(frac=1.0, random_state=42)
     fp_shuffled = compute_fingerprint(df_shuffled, symbol="600519.SH")
     assert fp1 == fp_shuffled, "行顺序不应影响指纹!"
-    print(f"    ✓ 打乱行序后指纹不变")
+    print("    ✓ 打乱行序后指纹不变")
 
     # 5. 列顺序无关性验证
     print("\n[5] 列顺序无关性验证 (重排列 → 指纹不变)")
@@ -830,7 +830,7 @@ if __name__ == "__main__":
     df_reordered = df[cols_reversed]
     fp_reordered = compute_fingerprint(df_reordered, symbol="600519.SH")
     assert fp1 == fp_reordered, "列顺序不应影响指纹!"
-    print(f"    ✓ 重排列后指纹不变")
+    print("    ✓ 重排列后指纹不变")
 
     # 6. 数据变更检测
     print("\n[6] 数据变更检测 (修改收盘价 → 指纹变化)")
@@ -840,7 +840,7 @@ if __name__ == "__main__":
     assert fp1 != fp_modified, "数据变更应产生不同指纹!"
     print(f"    原指纹: {fp1.hash_value[:16]}...")
     print(f"    新指纹: {fp_modified.hash_value[:16]}...")
-    print(f"    ✓ 数据变更被正确检测")
+    print("    ✓ 数据变更被正确检测")
 
     # 7. 空 DataFrame 处理
     print("\n[7] 空 DataFrame 处理")
@@ -849,7 +849,7 @@ if __name__ == "__main__":
     print(f"    {fp_empty}")
     assert fp_empty.row_count == 0
     assert fp_empty.start_date == "" and fp_empty.end_date == ""
-    print(f"    ✓ 空 DataFrame 指纹正常")
+    print("    ✓ 空 DataFrame 指纹正常")
 
     # 8. 字符串日期列处理
     print("\n[8] 字符串日期列处理 (date 列为字符串)")
@@ -859,7 +859,7 @@ if __name__ == "__main__":
     print(f"    日期范围: {fp_str.start_date} ~ {fp_str.end_date}")
     assert fp_str.start_date == "2024-01-02"
     assert fp_str.end_date == "2024-01-08"
-    print(f"    ✓ 字符串日期列正确识别")
+    print("    ✓ 字符串日期列正确识别")
 
     # 9. 指纹持久化 (单个)
     print("\n[9] 指纹持久化 (保存 / 加载)")
@@ -868,7 +868,7 @@ if __name__ == "__main__":
     save_fingerprint(fp1, fp_file)
     fp_loaded = load_fingerprint(fp_file)
     assert fp1 == fp_loaded, "保存后加载的指纹应与原指纹一致!"
-    print(f"    ✓ 保存/加载往返一致")
+    print("    ✓ 保存/加载往返一致")
 
     # 10. FingerprintStore 多标的仓库
     print("\n[10] FingerprintStore 多标的仓库")
@@ -897,7 +897,7 @@ if __name__ == "__main__":
     changed = store.get_changed_symbols(new_fps)
     print(f"    变更标的: {changed}")
     assert changed == ["600519.SH"], "只有 600519.SH 应被检测为变更!"
-    print(f"    ✓ 变更检测正确")
+    print("    ✓ 变更检测正确")
 
     # 12. sync 批量同步 + 持久化验证
     print("\n[12] sync 批量同步 (全量覆盖 + 原子写入)")
@@ -909,7 +909,7 @@ if __name__ == "__main__":
     store2 = FingerprintStore(store_path)
     assert len(store2) == 2
     assert store2.get("600519.SH") == fp_a_new
-    print(f"    ✓ sync 后重新加载, 数据一致")
+    print("    ✓ sync 后重新加载, 数据一致")
 
     # 13. 新增标的检测
     print("\n[13] 新增标的检测")
@@ -923,7 +923,7 @@ if __name__ == "__main__":
     changed2 = store.get_changed_symbols(new_fps2)
     print(f"    变更标的 (含新增): {changed2}")
     assert "300750.SZ" in changed2, "新增标的应被检测为变更!"
-    print(f"    ✓ 新增标的检测正确")
+    print("    ✓ 新增标的检测正确")
 
     # 14. 输入校验
     print("\n[14] 输入校验 (非法参数)")
@@ -931,13 +931,13 @@ if __name__ == "__main__":
         compute_fingerprint(df, symbol="")
         assert False, "应抛出 ValueError"
     except ValueError:
-        print(f"    ✓ 空 symbol 抛出 ValueError")
+        print("    ✓ 空 symbol 抛出 ValueError")
 
     try:
         compute_fingerprint("not_a_dataframe", symbol="600519.SH")  # type: ignore
         assert False, "应抛出 TypeError"
     except TypeError:
-        print(f"    ✓ 非 DataFrame 输入抛出 TypeError")
+        print("    ✓ 非 DataFrame 输入抛出 TypeError")
 
     # 清理
     shutil.rmtree(tmp_dir, ignore_errors=True)

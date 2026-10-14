@@ -8,9 +8,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from myquant.data_access import DataFetcher
+from myquant.data_access.share_change_sync_service import ShareChangeSyncService
 from myquant.data_access.sources.akshare_source import AkshareDataSource
 from myquant.data_access.sources.tdx_source import TdxDataSource
-from myquant.data_access.share_change_sync_service import ShareChangeSyncService
 
 
 def _setup_fetcher(project_root: Path):

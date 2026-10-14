@@ -30,7 +30,6 @@ from myquant.database.connection import DatabaseConnection
 from myquant.database.queries import CleanDataQueries
 from myquant.database.schema import create_all_tables
 
-
 # ═══════════════════════════════════════════
 #  临时数据库 Fixtures
 # ═══════════════════════════════════════════

@@ -13,8 +13,6 @@ import struct
 from datetime import date
 from pathlib import Path
 
-import pytest
-
 from myquant.data_access.sources.tdx_source import TdxDataSource
 from myquant.database.queries import DataQueries
 

@@ -103,7 +103,9 @@ from myquant.risk import (
     RiskGuardian,
     RiskManager,
 )
-from myquant.risk.risk_manager import build_risk_manager_from_config  # 回写#255 P0-2：配置工厂下沉风控层，回测/实盘同源
+from myquant.risk.risk_manager import (
+    build_risk_manager_from_config,  # 回写#255 P0-2：配置工厂下沉风控层，回测/实盘同源
+)
 from myquant.strategies.base import Signal, StrategyBase, StrategyContext
 
 logger = get_logger("live.engine")

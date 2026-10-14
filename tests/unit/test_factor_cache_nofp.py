@@ -35,17 +35,15 @@ import pandas as pd
 import pytest
 
 from myquant.indicators.factor_cache import (
-    CACHE_HIT_L1,
     CACHE_HIT_L2,
     CACHE_HIT_L3,
-    NOFP_FINGERPRINT_TTL,
     NO_FINGERPRINT_PLACEHOLDER,
+    NOFP_FINGERPRINT_TTL,
     FactorCache,
     _build_l2_relpath,
     _sanitize_path_segment,
 )
 from myquant.utils.data_fingerprint import compute_fingerprint
-
 from tests.conftest import make_ohlcv_df
 
 # ─────────────────────────────────────────────

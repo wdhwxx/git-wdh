@@ -22,9 +22,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
-
-import pytest
+from typing import List
 
 # 路径配置
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -62,7 +60,7 @@ def _make_order(symbol: str = "LAT.SZ", side: OrderSide = OrderSide.BUY,
 def test_submit_market_order_latency():
     """市价单下单延迟"""
     broker = _make_broker()
-    order = _make_order(order_type=OrderType.MARKET)
+    _make_order(order_type=OrderType.MARKET)
     runner = BenchmarkRunner(warmup=BENCH_WARMUP, iterations=BENCH_ITERATIONS)
     runner.run("市价单下单(submit_order)", lambda: broker.submit_order(_make_order()),
                threshold_ms=EXECUTION_LATENCY_MS)

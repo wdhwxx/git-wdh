@@ -45,8 +45,7 @@ from myquant.strategies import (
     discover_strategies,
     list_strategies,
 )
-from myquant.strategies.base import Signal, SignalType, StrategyContext
-
+from myquant.strategies.base import StrategyContext
 from tests.conftest import make_ohlcv_df
 
 # ═══════════════════════════════════════════════

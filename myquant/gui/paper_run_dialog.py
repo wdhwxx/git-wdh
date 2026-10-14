@@ -29,7 +29,7 @@ from myquant.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-from PySide6.QtCore import QObject, QRect, QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QObject, QRect, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QColor, QMouseEvent, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -353,7 +353,7 @@ class PaperRunDialog(QDialog):
             "--stats-json", stats_path,
         ]
         self._append_log(f"[GUI] 启动子进程: {' '.join(cmd)}")
-        self._append_log(f"[GUI] 结束后自动导出: JSON + HTML + PDF + CSV → outputs/paper_stats/")
+        self._append_log("[GUI] 结束后自动导出: JSON + HTML + PDF + CSV → outputs/paper_stats/")
         try:
             creationflags = 0
             if sys.platform == "win32":
@@ -481,6 +481,6 @@ def run_paper_dialog(project_root: Path) -> int:
     Returns:
         QDialog.exec() 返回值。
     """
-    app = QApplication.instance() or QApplication(sys.argv)
+    QApplication.instance() or QApplication(sys.argv)
     dlg = PaperRunDialog(project_root)
     return dlg.exec()

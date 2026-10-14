@@ -24,11 +24,10 @@ from typing import Any, Dict, List
 import pytest
 
 from myquant.core.constants import SeverityLevel
-from myquant.database.connection import DatabaseConnection
 from myquant.core.field_crypto import FieldCrypto
 from myquant.core.metrics_history import MetricsHistoryStore
+from myquant.database.connection import DatabaseConnection
 from myquant.monitoring.rolling_performance import (
-    DEFAULT_STRATEGY,
     METRIC_INTRADAY_DRAWDOWN,
     METRIC_RETURN_30D,
     RollingPerformanceMonitor,

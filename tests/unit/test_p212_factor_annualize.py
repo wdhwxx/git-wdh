@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from myquant.indicators.factor_validator import _annualized_mean, TRADING_DAYS_PER_YEAR
+from myquant.indicators.factor_validator import TRADING_DAYS_PER_YEAR, _annualized_mean
 
 
 def test_annualize_divides_by_horizon() -> None:

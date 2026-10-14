@@ -18,13 +18,12 @@ test_emergency_liquidation.py - 紧急一键平仓服务测试（任务47 / P2�
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 import pytest
 
 from myquant.live.emergency_liquidation import EmergencyLiquidationService
-from myquant.models.trade import Order, OrderSide, OrderStatus, OrderType, Position
-
+from myquant.models.trade import Order, OrderSide, OrderType, Position
 
 # ═══════════════════════════════════════════════
 #  FakeBroker - 可编程平仓测试券商
@@ -217,7 +216,7 @@ def test_可卖数量为零_跳过() -> None:
 def test_无可卖字段_回退全仓() -> None:
     """Position 无 extra.available_qty → 按全仓卖出（券商侧 T+1 校验兜底）"""
     broker = FakeBroker(positions=[_pos(quantity=100)])
-    report = _make_service(broker).execute(confirm=True)
+    _make_service(broker).execute(confirm=True)
 
     assert broker.submitted[0].quantity == 100
 

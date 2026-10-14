@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -901,7 +901,7 @@ if __name__ == "__main__":
         print(f"    本次统计: L1={stats2['l1_hits']}, L2={stats2['l2_hits']}, L3={stats2['l3_misses']}")
         assert result2.shape[0] == 120, f"结果行数应为120，got: {result2.shape[0]}"
         assert stats2["l3_misses"] == 4, f"首次应全部L3未命中，got: {stats2['l3_misses']}"
-        print(f"    ✓ 批量计算正常，4个因子全部L3未命中")
+        print("    ✓ 批量计算正常，4个因子全部L3未命中")
 
         # ── 测试 3: 第二次计算（L1 命中） ──
         print("\n[3] 第二次计算（L1 内存缓存命中）")
@@ -914,7 +914,7 @@ if __name__ == "__main__":
         print(f"    本次统计: L1={stats3['l1_hits']}, L2={stats3['l2_hits']}, L3={stats3['l3_misses']}")
         assert stats3["l1_hits"] == 4, f"第二次应全部L1命中，got: {stats3['l1_hits']}"
         pd.testing.assert_frame_equal(result3, result2, check_freq=False)
-        print(f"    ✓ L1 缓存命中，结果一致")
+        print("    ✓ L1 缓存命中，结果一致")
 
         # ── 测试 4: 禁用 L1 的新引擎（L2 命中） ──
         print("\n[4] 禁用L1的新引擎（L2 磁盘缓存命中）")
@@ -928,7 +928,7 @@ if __name__ == "__main__":
         print(f"    本次统计: L1={stats4['l1_hits']}, L2={stats4['l2_hits']}, L3={stats4['l3_misses']}")
         assert stats4["l2_hits"] == 4, f"应全部L2命中，got: {stats4['l2_hits']}"
         pd.testing.assert_frame_equal(result4, result2, check_freq=False)
-        print(f"    ✓ L2 磁盘缓存命中，结果一致")
+        print("    ✓ L2 磁盘缓存命中，结果一致")
 
         # ── 测试 5: 数据指纹变更（L3 未命中） ──
         print("\n[5] 数据指纹变更（缓存自动失效，L3 未命中）")
@@ -943,7 +943,7 @@ if __name__ == "__main__":
         )
         print(f"    本次统计: L1={stats5['l1_hits']}, L2={stats5['l2_hits']}, L3={stats5['l3_misses']}")
         assert stats5["l3_misses"] == 4, f"指纹变更应全部L3未命中，got: {stats5['l3_misses']}"
-        print(f"    ✓ 数据指纹变更，缓存自动失效")
+        print("    ✓ 数据指纹变更，缓存自动失效")
 
         # ── 测试 6: 自动计算指纹 ──
         print("\n[6] 自动计算数据指纹（不传入指纹）")
@@ -955,7 +955,7 @@ if __name__ == "__main__":
         )
         print(f"    结果形状: {result6.shape}")
         assert result6.shape[1] == 2, f"应2个因子输出列，got: {result6.shape[1]}"
-        print(f"    ✓ 自动计算指纹正常")
+        print("    ✓ 自动计算指纹正常")
 
         # ── 测试 7: 禁用因子 ──
         print("\n[7] 禁用特定因子")
@@ -970,7 +970,7 @@ if __name__ == "__main__":
         print(f"    结果列: {list(result7.columns)}")
         assert "rsi_14_rsi" not in result7.columns, "禁用的因子不应出现在结果中"
         assert result7.shape[1] == 3, f"应3个因子（1个被禁用），got: {result7.shape[1]}"
-        print(f"    ✓ 禁用因子正常跳过")
+        print("    ✓ 禁用因子正常跳过")
 
         # ── 测试 8: 多标的批量计算 ──
         print("\n[8] 多标的批量计算")
@@ -985,7 +985,7 @@ if __name__ == "__main__":
         print(f"    标的数: {len(batch_results)}")
         assert len(batch_results) == 2
         assert "TEST.SH" in batch_results and "TEST2.SH" in batch_results
-        print(f"    ✓ 多标的批量计算正常")
+        print("    ✓ 多标的批量计算正常")
 
         # ── 测试 9: 引擎统计 ──
         print("\n[9] 引擎统计信息")
@@ -998,7 +998,7 @@ if __name__ == "__main__":
         print(f"    命中率: {engine_stats['hit_rate']:.2%}")
         assert engine_stats["total_calls"] > 0
         assert engine_stats["hit_rate"] > 0
-        print(f"    ✓ 统计信息正常")
+        print("    ✓ 统计信息正常")
 
         # ── 测试 10: 失效缓存 ──
         print("\n[10] 缓存失效")
@@ -1013,7 +1013,7 @@ if __name__ == "__main__":
             data_fingerprint=fp,
         )
         assert stats10["l3_misses"] == 1, f"失效后应L3未命中，got: {stats10['l3_misses']}"
-        print(f"    ✓ 缓存失效正常")
+        print("    ✓ 缓存失效正常")
 
         # ── 测试 11: 全局单例 ──
         print("\n[11] 全局单例测试")
@@ -1021,7 +1021,7 @@ if __name__ == "__main__":
         singleton1 = get_factor_engine(cache_dir=str(tmp_cache_dir / "global"))
         singleton2 = get_factor_engine()
         assert singleton1 is singleton2, "get_factor_engine 应返回同一实例"
-        print(f"    ✓ 全局单例正常")
+        print("    ✓ 全局单例正常")
         reset_factor_engine()
 
         # ── 测试 12: 输入校验 ──
@@ -1030,19 +1030,19 @@ if __name__ == "__main__":
             engine.calculate(data=test_data, symbol="", factor_configs=factor_configs)
             assert False, "空 symbol 应抛出 ValueError"
         except ValueError:
-            print(f"    ✓ 空 symbol 抛出 ValueError")
+            print("    ✓ 空 symbol 抛出 ValueError")
 
         try:
             engine.calculate(data=test_data, symbol="TEST", factor_configs=[])
             assert False, "空因子配置应抛出 ValueError"
         except ValueError:
-            print(f"    ✓ 空因子配置抛出 ValueError")
+            print("    ✓ 空因子配置抛出 ValueError")
 
         try:
             engine.calculate(data=pd.DataFrame(), symbol="TEST", factor_configs=factor_configs)
             assert False, "空数据应抛出 ValueError"
         except ValueError:
-            print(f"    ✓ 空数据抛出 ValueError")
+            print("    ✓ 空数据抛出 ValueError")
 
     finally:
         # 清理临时目录

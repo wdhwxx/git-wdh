@@ -42,7 +42,6 @@ from myquant.indicators.factor_engine import (
     FactorEngine,
 )
 from myquant.utils.data_fingerprint import compute_fingerprint
-
 from tests.conftest import make_ohlcv_df
 
 # ─────────────────────────────────────────────

@@ -2,7 +2,6 @@
 """G3 探针 4：R-08 配置反查——settings.yaml monitoring 键消费集合。"""
 from __future__ import annotations
 
-import ast
 import re
 from collections import defaultdict
 from pathlib import Path

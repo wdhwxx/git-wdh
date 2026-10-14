@@ -23,7 +23,7 @@ backtest/execution/data_access，R-02/R-16 分层合规）；items 以鸭子类�
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 from myquant.realism_gate.manifest import RealismGateError
 

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
+
 from myquant.live.scheduler import LiveScheduler, attach_engine
 
 ROOT = Path(__file__).resolve().parents[2]

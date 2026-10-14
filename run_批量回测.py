@@ -39,7 +39,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any, List
+from typing import Any
 
 
 def _backtest_broker_factory(config: Any) -> Any:

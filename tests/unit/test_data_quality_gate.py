@@ -20,13 +20,13 @@ from typing import Any, Dict
 import pandas as pd
 import pytest
 
+from myquant.backtest.engine import _scan_entry_data_quality
 from myquant.data_access.provider import (
     accumulate_data_quality,
     get_data_quality_stats,
     reset_data_quality_stats,
     scan_data_quality,
 )
-from myquant.backtest.engine import _scan_entry_data_quality
 from myquant.realism_gate import (
     RealismGateConfig,
     RealismGateError,

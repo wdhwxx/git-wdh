@@ -26,17 +26,17 @@ import pytest
 from myquant.core.constants import SeverityLevel
 from myquant.monitoring.signal_consistency import (
     CATEGORY_SIGNAL_CONSISTENCY,
+    DEDUP_DEVIATION_RATE,
     DEV_DIRECTION,
     DEV_MISSING_LIVE,
     DEV_PRICE,
     DEV_TIME,
-    DEDUP_DEVIATION_RATE,
     METRIC_ALIGNED,
-    METRIC_MISMATCHED,
     METRIC_MISMATCH_RATE,
+    METRIC_MISMATCHED,
     METRIC_TOTAL,
-    SOURCE_MODULE,
     REGISTERED_METRICS,
+    SOURCE_MODULE,
     SignalConsistencyChecker,
 )
 

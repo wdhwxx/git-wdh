@@ -45,15 +45,17 @@ import logging
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from myquant.core.constants import SeverityLevel
-from myquant.core.registry import register_component  # G2-5：get_account_reconciler 工厂注册（供 live/scheduler 经 L0 取用）
+from myquant.core.registry import (
+    register_component,  # G2-5：get_account_reconciler 工厂注册（供 live/scheduler 经 L0 取用）
+)
 
 logger = logging.getLogger("myquant.monitoring.account_reconciler")
 
 if TYPE_CHECKING:  # 避免运行时循环依赖（portfolio ↔ monitoring）
-    from myquant.live.portfolio import LivePortfolio, ReconciliationDiff
+    from myquant.live.portfolio import ReconciliationDiff
 
 # ── 常量（模块顶部，禁魔法数字）─────────────────────────────────────────────
 RECONCILIATION_ALERT_CATEGORY: str = "reconciliation"  # 与 A-7 告警 category 对齐

@@ -20,13 +20,10 @@ import pytest
 from myquant.monitoring.dynamic_baseline import (
     CAL_STATUS_APPLIED,
     CAL_STATUS_PROPOSED,
-    CAL_STATUS_ROLLED_BACK,
-    CalibrationRecord,
     DynamicBaseline,
     ThresholdCalibrator,
     _read_calibrator_config,
 )
-
 
 # ── 测试辅助 ──────────────────────────────────────────────────
 

@@ -19,8 +19,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from myquant.data_access.factor_sync_service import (  # noqa: E402
+    DEFAULT_SLEEP,
+    FactorSyncService,
+)
 from myquant.database import get_connection  # noqa: E402
-from myquant.data_access.factor_sync_service import FactorSyncService, DEFAULT_SLEEP  # noqa: E402
 
 
 def _load_all_symbols(db_path: Path) -> list[str]:

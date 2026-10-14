@@ -203,7 +203,7 @@ def _find_blocked_files(tmp_path: object, strategy_id: str) -> List[str]:
     return [
         os.path.join(outputs, f)
         for f in os.listdir(outputs)
-        if f.startswith(f"realism_gate_blocked_") and strategy_id in f
+        if f.startswith("realism_gate_blocked_") and strategy_id in f
     ]
 
 

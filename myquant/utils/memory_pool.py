@@ -29,7 +29,15 @@ import uuid
 from collections import deque
 from contextlib import contextmanager
 from typing import (
-    Any, Callable, Deque, Dict, Generic, Iterator, List, Optional, TypeVar,
+    Any,
+    Callable,
+    Deque,
+    Dict,
+    Generic,
+    Iterator,
+    List,
+    Optional,
+    TypeVar,
 )
 
 from myquant.core.event_bus import Event, EventType

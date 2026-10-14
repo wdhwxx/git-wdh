@@ -24,7 +24,7 @@ measurability.py - P0-8 可测量性与故障注入统计模块
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence
 
 logger = logging.getLogger("myquant.core.measurability")

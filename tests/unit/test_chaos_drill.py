@@ -14,18 +14,15 @@ import time
 
 import pytest
 
-from myquant.core.constants import SeverityLevel
 from myquant.acceptance.chaos_drill import (
     CLASSIFICATION_FN,
-    CLASSIFICATION_UNKNOWN,
-    ChaosDrillRunner,
     DEFAULT_OBSERVE_WINDOW_SECONDS,
+    ChaosDrillRunner,
     DrillCase,
-    DrillCaseResult,
     InjectOutcome,
-    build_builtin_cases,
     _budget_for,
 )
+from myquant.core.constants import SeverityLevel
 from myquant.core.measurability import (
     CLASSIFICATION_TP,
     FI_CASES,

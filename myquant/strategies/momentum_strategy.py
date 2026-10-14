@@ -44,16 +44,19 @@ strategies/momentum_strategy.py - 动量交易策略
 __version__ = "0.1.0"
 __author__ = "Pythonwdhmm"
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 
 from myquant.core.logger import get_logger
 from myquant.models.market_data import Bar
-from myquant.models.trade import OrderSide, OrderType, Position
+from myquant.models.trade import Position
 from myquant.strategies.base import (
-    Signal, SignalType, StrategyBase, StrategyContext,
+    Signal,
+    SignalType,
+    StrategyBase,
+    StrategyContext,
 )
 from myquant.strategies.registry import register_strategy
 
@@ -325,7 +328,7 @@ class MomentumStrategy(StrategyBase):
                     signals.append(Signal(
                         symbol=sym, signal_type=SignalType.SELL,
                         strength=1.0, price=sym_price,
-                        reason=f"rebalance_sell (not in pool)",
+                        reason="rebalance_sell (not in pool)",
                         strategy_id=self.name,
                     ))
 

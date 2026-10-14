@@ -35,17 +35,13 @@ from __future__ import annotations
 
 import threading
 from datetime import datetime, timedelta
-from functools import lru_cache
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 from .sources.base import (
     DataSourceBase,
-    DataSourceStatus,
     MarketDataResult,
 )
 from .sources.composite_source import CompositeDataSource
-
 
 # ─────────────────────────────────────────────
 # 常量定义

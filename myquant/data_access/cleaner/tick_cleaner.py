@@ -40,8 +40,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from myquant.core.logger import get_logger
 from myquant.data_access.cleaner.base_cleaner import (
     CleanerBase,
-    CleanRule,
-    CleanResult,
     CleanerRegistry,
 )
 
@@ -170,7 +168,6 @@ def _deduplicate_ticks(
 
     if strategy == "drop_all":
         # 需要找出所有重复的key并全部移除
-        from collections import Counter
         key_counts: Dict[Tuple, int] = {}
         for rec in records:
             key = (

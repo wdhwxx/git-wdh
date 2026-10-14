@@ -34,7 +34,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Tuple
 
 import numpy as np
 import pandas as pd
@@ -616,7 +616,7 @@ if __name__ == "__main__":
     print(f"    rsrs_r2 范围: [{result['rsrs_r2'].min():.4f}, {result['rsrs_r2'].max():.4f}]")
     assert result.shape[0] == 500
     assert result["rsrs_raw"].notna().sum() > 0
-    print(f"    ✓ 闭式OLS向量化计算正常")
+    print("    ✓ 闭式OLS向量化计算正常")
 
     # ── 测试 3: 正确性验证（与naive循环对比） ──
     print("\n[3] 正确性验证（与naive Python循环对比）")
@@ -688,7 +688,7 @@ if __name__ == "__main__":
     print("\n[5] 防未来函数校验")
     passed = rsrs.validate_no_lookahead(test_data)
     assert passed, "防未来函数校验失败"
-    print(f"    ✓ 防未来函数校验通过")
+    print("    ✓ 防未来函数校验通过")
 
     # ── 测试 6: 流式更新 ──
     print("\n[6] 流式更新测试")
@@ -722,7 +722,7 @@ if __name__ == "__main__":
         print(f"    位置 {valid_pos}: 流式β={stream_beta:.6f}, 批量β={batch_beta:.6f}")
         assert np.isclose(stream_beta, batch_beta, rtol=1e-10), \
             f"流式与批量结果不一致: {stream_beta} vs {batch_beta}"
-        print(f"    ✓ 流式更新与批量计算结果一致")
+        print("    ✓ 流式更新与批量计算结果一致")
     else:
         print(f"    ⚠ 100根数据不足，跳过流式一致性验证 (需要 period+norm_window={period+norm_window} 根)")
 
@@ -735,14 +735,14 @@ if __name__ == "__main__":
     # low全相同时β应为NaN（无法回归）
     assert result_const["rsrs_raw"].notna().sum() == 0, \
         "low全相同时β应全部为NaN"
-    print(f"    ✓ low全相同时β全部为NaN")
+    print("    ✓ low全相同时β全部为NaN")
 
     # 空数据
     try:
         rsrs.calculate(pd.DataFrame())
         assert False, "空数据应抛出ValueError"
     except ValueError:
-        print(f"    ✓ 空数据正确抛出ValueError")
+        print("    ✓ 空数据正确抛出ValueError")
 
     # ── 测试 8: R² 范围 ──
     print("\n[8] R² 范围验证")
@@ -750,7 +750,7 @@ if __name__ == "__main__":
     assert (r2_valid >= 0).all() and (r2_valid <= 1).all(), \
         f"R² 应在 [0,1] 范围内, 实际: [{r2_valid.min()}, {r2_valid.max()}]"
     print(f"    R² 范围: [{r2_valid.min():.4f}, {r2_valid.max():.4f}]")
-    print(f"    ✓ R² 全部在 [0,1] 范围内")
+    print("    ✓ R² 全部在 [0,1] 范围内")
 
     print("\n" + "=" * 60)
     print("  ✓ rsrs.py 闭式OLS纯向量化 全部自测通过")

@@ -30,14 +30,15 @@ test_monitoring.py - 监控告警模块单元测试
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List, Optional
 
-import pytest
-
+from myquant.core.health_check import (
+    HealthChecker,
+    HealthCheckResult,
+    HealthStatus,
+)
 from myquant.monitoring.alerting import (
     Alert,
     AlertAggregator,
-    AlertChannel,
     AlertManager,
     AlertRule,
     ConsoleAlertChannel,
@@ -46,17 +47,11 @@ from myquant.monitoring.alerting import (
     SeverityLevel,
     WebhookAlertChannel,
 )
-from myquant.core.health_check import (
-    HealthChecker,
-    HealthCheckResult,
-    HealthStatus,
-)
 from myquant.monitoring.metrics_collector import (
     Metric,
-    MetricType,
     MetricsCollector,
+    MetricType,
 )
-
 
 # ═══════════════════════════════════════════
 #  辅助函数
@@ -265,7 +260,6 @@ class TestAlertChannel:
 
     def test_channel_disabled(self):
         """禁用通道（通过基类参数）"""
-        from myquant.monitoring.alerting import AlertChannel
         # 用子类创建后检查 enabled 属性
         ch = ConsoleAlertChannel()
         assert hasattr(ch, "enabled")

@@ -43,16 +43,19 @@ strategies/grid_strategy.py - 网格交易策略
 __version__ = "0.1.0"
 __author__ = "Pythonwdhmm"
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 
 from myquant.core.logger import get_logger
 from myquant.models.market_data import Bar
-from myquant.models.trade import OrderSide, OrderType, Position
+from myquant.models.trade import Position
 from myquant.strategies.base import (
-    Signal, SignalType, StrategyBase, StrategyContext,
+    Signal,
+    SignalType,
+    StrategyBase,
+    StrategyContext,
 )
 from myquant.strategies.registry import register_strategy
 

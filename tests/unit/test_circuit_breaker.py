@@ -30,17 +30,16 @@ import pytest  # noqa: E402
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from myquant.core.audit_log import AuditLogStore  # noqa: E402
 from myquant.core.constants import SeverityLevel  # noqa: E402
 from myquant.core.event_bus import Event, EventBus, EventType  # noqa: E402
 from myquant.database.connection import DatabaseConnection  # noqa: E402
-from myquant.core.audit_log import AuditLogStore  # noqa: E402
 from myquant.monitoring.circuit_breaker import (  # noqa: E402
     CircuitBreaker,
     CircuitBreakerConfig,
     reset_circuit_breaker_singleton,
 )
 from myquant.risk.risk_manager import RiskManager  # noqa: E402
-
 
 # ═══════════════════════════════════════════════
 #  fakes / fixtures

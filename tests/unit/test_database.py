@@ -31,13 +31,12 @@ from __future__ import annotations
 
 import os
 import tempfile
-from typing import Any, Dict, List, Optional
 
 import pytest
 
 from myquant.database import (
-    DatabaseConnection,
     TABLE_NAMES,
+    DatabaseConnection,
     close_all_connections,
     create_all_tables,
     get_connection,
@@ -54,7 +53,6 @@ from myquant.database.schema import (
     get_table_count,
     table_exists,
 )
-
 
 # ═══════════════════════════════════════════
 #  Fixture：内存数据库

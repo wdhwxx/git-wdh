@@ -29,11 +29,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
-
-from PySide6.QtCore import QDate, QObject, QSize, QThread, Signal, QUrl
+from PySide6.QtCore import QDate, QObject, QSize, QThread, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
@@ -61,8 +60,8 @@ from PySide6.QtWidgets import (
 
 from myquant.backtest.batch_backtest import STRATEGY_REGISTRY, BatchBacktester
 from myquant.backtest.data_loader import HistoricalDataProvider
-from myquant.models.backtest import CommissionModel, SlippageModel
 from myquant.backtest.param_optimizer import make_demo_data
+from myquant.models.backtest import CommissionModel, SlippageModel
 from myquant.utils.csv_utils import CSV_HEADER_MAPS, export_csv_cn
 from myquant.utils.memory_watcher import MemoryWatcher
 
@@ -1122,7 +1121,7 @@ def _main() -> int:
     project_root = Path(__file__).resolve().parents[2]
     sys.path.insert(0, str(project_root))
 
-    app = QApplication.instance() or QApplication([])
+    QApplication.instance() or QApplication([])
     tab = BatchBacktestTab(project_root=project_root)
     print(f"[1] Tab6 实例化成功: {type(tab).__name__}")
     registered = sorted(tab._strategy_checks.keys())

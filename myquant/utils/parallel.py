@@ -79,7 +79,6 @@ from typing import (
     Iterator,
     List,
     Optional,
-    Sequence,
     Tuple,
     Union,
 )
@@ -983,11 +982,12 @@ if __name__ == "__main__":
     # （上下文管理器经 __main__ 执行，factor_cache 导入的是真名模块），
     # 故此处经真名模块 myquant.utils.parallel 引用，保证状态一致。
     print("\n[7] parallel_factor_context 关闭 L1 缓存")
+    import shutil
+    import tempfile
+    from pathlib import Path
+
     import myquant.utils.parallel as _self_mod
     from myquant.indicators.factor_cache import FactorCache
-    import tempfile
-    import shutil
-    from pathlib import Path
 
     tmp_dir = Path(tempfile.mkdtemp(prefix="parallel_test_"))
     try:

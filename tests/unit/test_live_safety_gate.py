@@ -9,7 +9,7 @@ test_live_safety_gate.py - 实盘安全门禁第0阶段验收测试（回写#287
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import pytest
 

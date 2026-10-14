@@ -511,11 +511,12 @@ def main() -> int:
 
     # ── 4. 报告文档生成（CSV / HTML / PDF） ──
     try:
-        from myquant.backtest.batch_report import (
-            BatchSummaryReportGenerator,
-            BatchReportMeta,
-        )
         import csv as _csv
+
+        from myquant.backtest.batch_report import (
+            BatchReportMeta,
+            BatchSummaryReportGenerator,
+        )
 
         report_dir = out_dir / f"kunpeng_batch_{stamp}"
         report_dir.mkdir(parents=True, exist_ok=True)

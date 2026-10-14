@@ -9,7 +9,6 @@ test_report.py - 泄漏审计报告（M3-01）专项测试
 R-19 零覆盖：显式子模块 import。
 """
 
-from pathlib import Path
 
 import pytest
 

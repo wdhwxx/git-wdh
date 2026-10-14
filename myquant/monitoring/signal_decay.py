@@ -794,7 +794,7 @@ def _run_self_test() -> int:
     for i in range(5):  # 5 条跨 400s，密度=5/1000=0.005 < 0.02
         ts = base + 100.0 + i * 100.0
         mon2.record_pair(ts, float(i), 0.1 * i, realized_at=ts + 1.0)
-    st2 = mon2.evaluate()
+    mon2.evaluate()
     p2 = [c for c in am2.calls if c["deduplication_key"] == "signal_decay:density:default"]
     check("4) 密度低于下限触发 P2/WARNING", len(p2) == 1 and p2[0]["level"].name == "WARNING",
           f"calls={[c['deduplication_key'] for c in am2.calls]}")

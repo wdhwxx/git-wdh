@@ -15,8 +15,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any, Dict, List
 
-import pytest
-
 from myquant.data_access.financial_service import FinancialImportService
 
 

@@ -392,7 +392,7 @@ def _build_monitoring_config(raw: Dict[str, Any]) -> Dict[str, Any]:
     result["patrol_interval"] = _positive_int(
         "patrol_interval", DEFAULT_MONITORING["patrol_interval"]
     )
-    wd = result.get("watchdog") or {}
+    result.get("watchdog") or {}
     result["watchdog"] = {
         "enabled": _bool("watchdog.enabled", DEFAULT_MONITORING["watchdog"]["enabled"]),
         "bar_timeout_seconds": _positive_float(
@@ -408,7 +408,7 @@ def _build_monitoring_config(raw: Dict[str, Any]) -> Dict[str, Any]:
             DEFAULT_MONITORING["watchdog"]["order_pending_timeout_seconds"],
         ),
     }
-    al = result.get("alerts") or {}
+    result.get("alerts") or {}
     result["alerts"] = {
         "store_enabled": _bool("alerts.store_enabled", DEFAULT_MONITORING["alerts"]["store_enabled"]),
         "dedup_window_seconds": _positive_float(
@@ -429,7 +429,7 @@ def _build_monitoring_config(raw: Dict[str, Any]) -> Dict[str, Any]:
             "alerts.escalation_enabled", DEFAULT_MONITORING["alerts"]["escalation_enabled"]
         ),
     }
-    ae = result.get("action_engine") or {}
+    result.get("action_engine") or {}
     ae_rules: List[Any] = _list("action_engine.rules", [])
     clean_rules: List[Dict[str, Any]] = []
     for i, r in enumerate(ae_rules):

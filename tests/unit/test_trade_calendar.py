@@ -15,11 +15,14 @@ from datetime import date
 from pathlib import Path
 
 import pandas as pd
-import pytest
 
 from myquant.data_access.sources.base import DataSourceBase
 from myquant.utils import time_utils
-from myquant.utils.trade_calendar import load_trade_calendar, save_trade_calendar, sync_trade_calendar
+from myquant.utils.trade_calendar import (
+    load_trade_calendar,
+    save_trade_calendar,
+    sync_trade_calendar,
+)
 
 
 class _DummySource(DataSourceBase):

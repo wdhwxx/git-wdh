@@ -262,7 +262,7 @@ def cmd_check(project_root: Path, db_path: str | None) -> int:
         if ver in heads:
             print("  [状态] 已是最新版本，无需迁移")
         else:
-            print(f"  [状态] 有新版本可用，建议执行 upgrade")
+            print("  [状态] 有新版本可用，建议执行 upgrade")
     else:
         print("  [状态] 未标记 Alembic 版本，建议执行 stamp head（已有库）或 upgrade（新库）")
 

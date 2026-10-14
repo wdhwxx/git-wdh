@@ -27,15 +27,18 @@ test_execution.py - 执行层单元测试
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List, Optional
 
 import pytest
 
 from myquant.execution import ExecutionInterface, OrderStateMachine, SimBroker
 from myquant.models.backtest import CommissionModel, SlippageModel
 from myquant.models.market_data import Bar
-from myquant.models.trade import Order, OrderSide, OrderStatus, OrderType, Position, Trade
-
+from myquant.models.trade import (
+    Order,
+    OrderSide,
+    OrderStatus,
+    OrderType,
+)
 
 # ═══════════════════════════════════════════
 #  辅助函数

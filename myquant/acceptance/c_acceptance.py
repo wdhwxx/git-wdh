@@ -126,7 +126,6 @@ class CAcceptanceRunner:
 
     # ── C-1 模型漂移 ────────────────────────────────────────────
     def _check_c1_drift(self) -> None:
-        from myquant.core.constants import SeverityLevel  # noqa: WPS433
         from myquant.ml.model_monitor import (  # noqa: WPS433
             DRIFT_STATUS_DRIFT,
             DRIFT_STATUS_HEALTHY,
@@ -197,7 +196,9 @@ class CAcceptanceRunner:
 
     # ── C-2 滚动绩效 ────────────────────────────────────────────
     def _check_c2_rolling(self) -> None:
-        from myquant.monitoring.rolling_performance import RollingPerformanceMonitor  # noqa: WPS433
+        from myquant.monitoring.rolling_performance import (
+            RollingPerformanceMonitor,  # noqa: WPS433
+        )
 
         fake = _FakeAlert()
         mon = RollingPerformanceMonitor(
@@ -292,6 +293,7 @@ class CAcceptanceRunner:
 
     # ── C-5 归因 ───────────────────────────────────────────────
     def _check_c5_attribution(self) -> None:
+        from myquant.backtest.attribution import AttributionAnalyzer  # noqa: WPS433
         from myquant.backtest.metrics import (  # noqa: WPS433
             ATTRIBUTION_DEFAULT_GROUP,
             compare_attribution,
@@ -299,7 +301,6 @@ class CAcceptanceRunner:
             group_risk_contribution,
             period_bucket_of,
         )
-        from myquant.backtest.attribution import AttributionAnalyzer  # noqa: WPS433
 
         an = AttributionAnalyzer(period="day", clock=_fixed_clock)
         an.add_record("backtest", BASE_TS, pnl=100.0, strategy="trend_a",
@@ -395,7 +396,9 @@ class CAcceptanceRunner:
     # ── C-7 根因 ────────────────────────────────────────────────
     def _check_c7_incident(self) -> None:
         from myquant.core.constants import SeverityLevel  # noqa: WPS433
-        from myquant.monitoring.incident_context import IncidentContextEngine  # noqa: WPS433
+        from myquant.monitoring.incident_context import (
+            IncidentContextEngine,  # noqa: WPS433
+        )
 
         fake = _FakeAlert()
         eng = IncidentContextEngine(window_seconds=60.0, alert_manager=fake,
@@ -504,7 +507,9 @@ class CAcceptanceRunner:
 
     # ── C-10 信号一致性 ────────────────────────────────────────
     def _check_c10_consistency(self) -> None:
-        from myquant.monitoring.signal_consistency import SignalConsistencyChecker  # noqa: WPS433
+        from myquant.monitoring.signal_consistency import (
+            SignalConsistencyChecker,  # noqa: WPS433
+        )
 
         # 对齐序列：回测/实盘完全一致 → mismatch_rate=0，不告警
         fake_h = _FakeAlert()

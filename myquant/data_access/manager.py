@@ -37,19 +37,25 @@ from myquant.core.logger import get_logger
 
 logger = get_logger("data_access.manager")
 
-from .fetcher import DataFetcher
-from .sources.base import MarketDataResult
-from .cleaner import load_clean_config, run_clean_pipeline
 from myquant.data_access.time_semantics import (
     eff_disclosure_date,
     match_latest_financial,
     next_day,
 )
 from myquant.utils.file_utils import (
-    ensure_dir, get_project_path, write_csv, read_csv,
-    read_json, write_json, file_sha256, file_lock,
+    ensure_dir,
+    file_lock,
+    file_sha256,
+    get_project_path,
+    read_csv,
+    read_json,
+    write_csv,
+    write_json,
 )
 
+from .cleaner import load_clean_config, run_clean_pipeline
+from .fetcher import DataFetcher
+from .sources.base import MarketDataResult
 
 # ─────────────────────────────────────────────
 # 常量定义
@@ -628,11 +634,10 @@ class DataManager:
             return report
 
         data = data_result.data
-        prev_close = None
 
         for i, row in enumerate(data):
             date = row.get("date", "")
-            close = row.get("close")
+            row.get("close")
             volume = row.get("volume", 0)
             pct_chg = row.get("pct_chg")
 
@@ -667,7 +672,6 @@ class DataManager:
                 except ValueError:
                     pass
 
-            prev_close = close
 
         # 总体状态判断
         issue_count = (

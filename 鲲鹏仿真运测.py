@@ -67,7 +67,7 @@ def main() -> int:
     # 启动仿真运行模式选择弹窗
     try:
         from myquant.gui.paper_run_dialog import run_paper_dialog
-        ret = run_paper_dialog(project_root)
+        run_paper_dialog(project_root)
         # 仿真弹窗关闭即结束，不再自动拉起回测配置窗口
         return 0
     except Exception as e:

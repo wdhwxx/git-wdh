@@ -87,7 +87,7 @@ class DataQualityExplorer:
         """质量等级中文描述"""
         if not grade:
             return "-"
-        from myquant.core.constants import QualityGrade, QUALITY_GRADE_DESC_MAP
+        from myquant.core.constants import QUALITY_GRADE_DESC_MAP, QualityGrade
         try:
             return QUALITY_GRADE_DESC_MAP.get(QualityGrade(grade), grade)
         except (ValueError, KeyError):
@@ -98,7 +98,7 @@ class DataQualityExplorer:
         """脏数据类型中文描述"""
         if not dirty_type:
             return "-"
-        from myquant.core.constants import DirtyDataType, DIRTY_TYPE_DESC_MAP
+        from myquant.core.constants import DIRTY_TYPE_DESC_MAP, DirtyDataType
         try:
             return DIRTY_TYPE_DESC_MAP.get(DirtyDataType(dirty_type), dirty_type)
         except (ValueError, KeyError):

@@ -31,7 +31,6 @@ run_批量回测.py 主入口的支撑核心：
 from __future__ import annotations
 
 import hashlib
-from functools import partial
 import json
 import logging
 import os
@@ -39,6 +38,7 @@ import tempfile
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -52,11 +52,11 @@ from myquant.models.backtest import (
     SlippageModel,
 )
 from myquant.strategies.grid_strategy import GridStrategy
+from myquant.strategies.kunpeng_strategy import KunpengStrategy
 from myquant.strategies.ma_strategy import MACrossStrategy, RSRSStrategy
 from myquant.strategies.mean_reversion_strategy import MeanReversionStrategy
 from myquant.strategies.momentum_strategy import MomentumStrategy
 from myquant.strategies.multi_factor_strategy import MultiFactorStrategy
-from myquant.strategies.kunpeng_strategy import KunpengStrategy
 from myquant.utils.data_fingerprint import (
     DataFingerprint,
     FingerprintStore,
@@ -73,7 +73,10 @@ logger = logging.getLogger("myquant.backtest.batch_backtest")
 DEFAULT_INITIAL_CAPITAL: float = 1_000_000.0
 DEFAULT_FREQUENCY: str = "1d"
 DEFAULT_DATA_SOURCE: str = "batch"
-from myquant.core.constants import RESULTS_FORMAT_VERSION  # P3-D10-001 整改：双源收敛为单一权威（myquant/core/constants.py）
+from myquant.core.constants import (
+    RESULTS_FORMAT_VERSION,  # P3-D10-001 整改：双源收敛为单一权威（myquant/core/constants.py）
+)
+
 DEFAULT_MODE: str = "auto"
 DEFAULT_BENCHMARK: str = "000300.SH"
 DEFAULT_RISK_FREE_RATE: float = 0.02
@@ -609,7 +612,6 @@ class BatchBacktester:
         """
         plan = self.plan(force_full=force_full)
         fps = self.compute_fingerprints()
-        total = plan.total
 
         # 分批次（batch_size 为 None 时一批完成；changed 为空时取 1 使 range 合法）
         changed = plan.changed

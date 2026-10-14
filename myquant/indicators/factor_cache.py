@@ -856,7 +856,7 @@ if __name__ == "__main__":
         cached = cache.get("sma", "TEST.SH", params={"period": 20}, data_fingerprint=fp)
         assert cached is not None, "L1 缓存应命中"
         pd.testing.assert_frame_equal(cached, test_result)
-        print(f"    ✓ set/get 正常，L1 命中")
+        print("    ✓ set/get 正常，L1 命中")
 
         # ── 测试 3: get_or_compute L3 未命中 ──
         print("\n[3] get_or_compute — L3 未命中（执行计算）")
@@ -877,7 +877,7 @@ if __name__ == "__main__":
         )
         assert hit3 == "l3", f"应 L3 未命中，got: {hit3}"
         assert compute_count["n"] == 1, "计算函数应被调用 1 次"
-        print(f"    ✓ L3 未命中，执行计算，结果已回填")
+        print("    ✓ L3 未命中，执行计算，结果已回填")
 
         # ── 测试 4: get_or_compute L1 命中 ──
         print("\n[4] get_or_compute — L1 命中")
@@ -892,7 +892,7 @@ if __name__ == "__main__":
         assert hit4 == "l1", f"应 L1 命中，got: {hit4}"
         assert compute_count["n"] == 1, "计算函数不应再次被调用"
         pd.testing.assert_frame_equal(result4, result3)
-        print(f"    ✓ L1 命中，未调用计算函数")
+        print("    ✓ L1 命中，未调用计算函数")
 
         # ── 测试 5: L2 磁盘缓存（新建禁用 L1 的实例） ──
         print("\n[5] L2 磁盘缓存命中测试")
@@ -910,7 +910,7 @@ if __name__ == "__main__":
         # Parquet 序列化不保留 DatetimeIndex.freq 属性（跨语言格式限制），
         # 数据内容完全一致，比较时跳过 freq 检查
         pd.testing.assert_frame_equal(result5, result3, check_freq=False)
-        print(f"    ✓ L2 磁盘缓存命中，未调用计算函数")
+        print("    ✓ L2 磁盘缓存命中，未调用计算函数")
 
         # ── 测试 6: 数据指纹变更导致缓存失效 ──
         print("\n[6] 数据指纹变更 — 缓存自动失效")
@@ -928,7 +928,7 @@ if __name__ == "__main__":
         )
         assert hit6 == "l3", f"指纹变更应导致 L3 未命中，got: {hit6}"
         assert compute_count["n"] == 2, "计算函数应被再次调用"
-        print(f"    ✓ 数据指纹变更，缓存未命中，重新计算")
+        print("    ✓ 数据指纹变更，缓存未命中，重新计算")
 
         # ── 测试 7: 参数变更导致缓存未命中 ──
         print("\n[7] 参数变更 — 缓存未命中")
@@ -941,7 +941,7 @@ if __name__ == "__main__":
             data_fingerprint=fp,
         )
         assert hit7 == "l3", f"参数变更应 L3 未命中，got: {hit7}"
-        print(f"    ✓ 参数变更，缓存未命中")
+        print("    ✓ 参数变更，缓存未命中")
 
         # ── 测试 8: 并行模式自动关闭 L1 ──
         print("\n[8] 并行模式 — L1 自动关闭")
@@ -961,11 +961,11 @@ if __name__ == "__main__":
             data_fingerprint=fp,
         )
         assert hit8 == "l2", f"并行模式下应 L2 命中，got: {hit8}"
-        print(f"    ✓ 并行模式 L1 自动关闭，走 L2 磁盘缓存")
+        print("    ✓ 并行模式 L1 自动关闭，走 L2 磁盘缓存")
 
         set_parallel_mode(False)
         assert is_parallel_mode() is False
-        print(f"    ✓ 并行模式已关闭，L1 恢复")
+        print("    ✓ 并行模式已关闭，L1 恢复")
 
         # ── 测试 9: invalidate 失效 ──
         print("\n[9] invalidate 缓存失效")
@@ -985,7 +985,7 @@ if __name__ == "__main__":
         print(f"    总请求: {stats['total_requests']}")
         print(f"    命中率: {stats['hit_rate']:.2%}")
         assert stats["total_requests"] > 0
-        print(f"    ✓ 统计信息正常")
+        print("    ✓ 统计信息正常")
 
         # ── 测试 11: 全局单例 ──
         print("\n[11] 全局单例测试")
@@ -993,7 +993,7 @@ if __name__ == "__main__":
         singleton1 = get_factor_cache(cache_dir=str(tmp_cache_dir / "global"))
         singleton2 = get_factor_cache()
         assert singleton1 is singleton2, "get_factor_cache 应返回同一实例"
-        print(f"    ✓ 全局单例正常")
+        print("    ✓ 全局单例正常")
         reset_factor_cache()
 
     finally:

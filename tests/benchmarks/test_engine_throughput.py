@@ -25,7 +25,6 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import pandas as pd
-import pytest
 
 # 路径配置
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent

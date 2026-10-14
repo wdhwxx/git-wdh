@@ -29,7 +29,8 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict
+
 
 # 顶部 sys.path 注入：CLI 直跑免设 PYTHONPATH（与监控可测量性统计.py 等对齐）
 def _bootstrap_root() -> Path:
@@ -48,7 +49,9 @@ _PROJECT_ROOT = _bootstrap_root()
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from myquant.acceptance.m1_acceptance import M1AcceptanceRunner  # noqa: E402  # 业务模块
+from myquant.acceptance.m1_acceptance import (
+    M1AcceptanceRunner,  # noqa: E402  # 业务模块
+)
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
 logger = logging.getLogger("验收_监控M1保命")

@@ -14,7 +14,6 @@ import types
 from datetime import datetime
 
 import pandas as pd
-import pytest
 
 from myquant.live.data_feed import MarketDataFeed, _live_jump_change_with_factor
 

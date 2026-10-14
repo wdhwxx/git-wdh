@@ -28,8 +28,8 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List, Optional
 
-from myquant.core.logger import get_logger
 from myquant.core.event_bus import Event, EventType
+from myquant.core.logger import get_logger
 from myquant.models.trade import Order, OrderSide, OrderStatus, OrderType
 
 logger = get_logger("live.emergency_liquidation")

@@ -36,10 +36,13 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 from myquant.core.logger import get_logger
+from myquant.data_access.cleaner import load_clean_config, run_clean_pipeline
+from myquant.data_access.cleaner.derived_metrics import (
+    compute_b_class_metrics,
+    compute_derived_metrics,
+)
 from myquant.database.connection import get_connection
 from myquant.database.queries import CleanDataQueries, DataQueries
-from myquant.data_access.cleaner import load_clean_config, run_clean_pipeline
-from myquant.data_access.cleaner.derived_metrics import compute_derived_metrics, compute_b_class_metrics
 
 logger = get_logger("full_clean_service")
 
@@ -798,7 +801,7 @@ class FullCleanService:
                 return {"status": "done", "reason": "all_completed"}
 
             backup_path = self.backup_db()
-            print(f"[3/6] 备份完成" + (f": {backup_path}" if backup_path else "（dry-run 跳过）"))
+            print("[3/6] 备份完成" + (f": {backup_path}" if backup_path else "（dry-run 跳过）"))
 
             print(f"[4/6] 开始并行清洗（{self.workers} 进程）...")
             tasks = [(s, str(self.db_path), self.clean_config) for s in todo]
@@ -1017,9 +1020,9 @@ def run_incremental_clean(
     from myquant.data_access.factory import create_default_fetcher
     from myquant.data_access.manager import DataManager
     from myquant.database import get_connection
-    from myquant.database.queries import DataQueries
-    from myquant.database.schema import table_exists, TABLE_NAMES
     from myquant.database.migrations import migrate_to_latest
+    from myquant.database.queries import DataQueries
+    from myquant.database.schema import TABLE_NAMES, table_exists
 
     root = Path(project_root) if project_root else PROJECT_ROOT
     db_path = Path(db_path) if db_path else root / "database" / "quant.db"

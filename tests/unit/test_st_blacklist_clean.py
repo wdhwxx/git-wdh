@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import pytest
 import yaml
@@ -25,7 +25,6 @@ from myquant.data_access.full_clean_service import (
     match_st_name,
     refresh_st_blacklist,
 )
-
 
 # ── load_st_blacklist ──
 

@@ -12,7 +12,6 @@ tests/unit/test_causality_slicing.py - P0-07 因果切片反红测试
   - 切片视图不含未来 bar（结构性证明：故意读 iloc[-1] 取到的是当前 bar）
 """
 
-from datetime import datetime
 
 import pandas as pd
 import pytest

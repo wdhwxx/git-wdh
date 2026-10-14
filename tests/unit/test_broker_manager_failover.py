@@ -29,7 +29,6 @@ from myquant.live.brokers.base_broker import BaseBroker, BrokerType
 from myquant.live.brokers.manager import BrokerManager, BrokerManagerError
 from myquant.models.trade import Order, OrderSide, OrderStatus, OrderType
 
-
 # ═══════════════════════════════════════════════
 #  FakeBroker - 可编程测试券商
 # ═══════════════════════════════════════════════

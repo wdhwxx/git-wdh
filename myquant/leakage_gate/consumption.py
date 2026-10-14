@@ -28,10 +28,11 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set
 
-from myquant.core.config_loader import ConfigLoader
 from myquant.leakage_gate.contract import _get_entry, _load_ledger, _load_registry
 from myquant.leakage_gate.gate import Violation, register_gate_check
-from myquant.leakage_gate.static_scan import extract_referenced_columns  # noqa: F401  # canonical 单实现（M1B-01）
+from myquant.leakage_gate.static_scan import (
+    extract_referenced_columns,  # noqa: F401  # canonical 单实现（M1B-01）
+)
 
 logger = logging.getLogger("myquant.leakage_gate.consumption")
 

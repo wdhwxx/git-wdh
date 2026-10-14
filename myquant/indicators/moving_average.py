@@ -12,14 +12,12 @@
 __version__ = "0.1.0"
 __author__ = "Pythonwdhmm"
 
-from collections import deque
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import numpy as np
 import pandas as pd
 
 from myquant.indicators import IndicatorBase, lookahead_check, register_indicator
-
 
 # ============================================================================
 # SMA - 简单移动平均（Simple Moving Average）

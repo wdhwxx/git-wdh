@@ -7,7 +7,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from myquant.utils.trade_calendar import TradeCalendarError, load_trade_calendar, sync_trade_calendar
+from myquant.utils.trade_calendar import (
+    TradeCalendarError,
+    load_trade_calendar,
+    sync_trade_calendar,
+)
 
 
 def main() -> int:

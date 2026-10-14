@@ -12,20 +12,18 @@ test_execution_stats.py - 执行链路延迟/滑点统计单元测试（B-4，�
 
 from __future__ import annotations
 
-import math
-
 import pytest
 
 from myquant.core.constants import SeverityLevel
 from myquant.monitoring.execution_stats import (
-    ExecutionStatsMonitor,
-    P99_MIN_SAMPLES,
-    SIDE_BUY,
-    SIDE_SELL,
     METRIC_ACK_P99,
     METRIC_SIGNAL_TO_FILL_P99,
     METRIC_SLIPPAGE_BUY_PCT,
     METRIC_SLIPPAGE_SELL_PCT,
+    P99_MIN_SAMPLES,
+    SIDE_BUY,
+    SIDE_SELL,
+    ExecutionStatsMonitor,
 )
 
 

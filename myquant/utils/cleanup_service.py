@@ -994,4 +994,4 @@ if __name__ == "__main__":
         logger.error("选项校验失败: %s", exc)
         raise SystemExit(1)
     print("\n".join(format_plan_summary(demo_plan)))
-    print(f"\n（演示结束：dry-run 仅扫描，未删除任何文件）")
+    print("\n（演示结束：dry-run 仅扫描，未删除任何文件）")

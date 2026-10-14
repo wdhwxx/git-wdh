@@ -94,7 +94,7 @@ class DataError(QuantBaseError):
 class DataNotFoundError(DataError):
     """数据未找到"""
     def __init__(self, symbol: str = "", period: str = "", **kwargs):
-        msg = f"数据未找到"
+        msg = "数据未找到"
         if symbol:
             msg += f" symbol={symbol}"
         if period:

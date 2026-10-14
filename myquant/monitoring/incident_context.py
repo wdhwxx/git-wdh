@@ -46,7 +46,6 @@ incident_context.py - 根因分析（单机版，C-7，回写#236）
 from __future__ import annotations
 
 import time
-import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from myquant.core.constants import DEFAULT_DEPENDENCY_MAP, MetricType, SeverityLevel
@@ -425,7 +424,7 @@ class IncidentContextEngine:
     ) -> None:
         """注入一条日志摘要（可注入）。"""
         if not message:
-            raise ValueError(f"log message 不能为空")
+            raise ValueError("log message 不能为空")
         rec: Dict[str, Any] = {
             "level": str(level), "message": str(message),
             "source": str(source), "ts": self._resolve_ts(ts),

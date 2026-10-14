@@ -23,7 +23,6 @@ from myquant.leakage_gate.gate import (
     set_config,
 )
 
-
 NOW = datetime(2026, 10, 10).replace(hour=0, minute=0, second=0, microsecond=0)
 
 

@@ -21,9 +21,9 @@ market_data.py - 行情数据测试 Fixture
 
 from __future__ import annotations
 
-import pytest
 from typing import Any, Dict, List
 
+import pytest
 
 # ═══════════════════════════════════════════
 #  Bar Fixtures

@@ -76,7 +76,9 @@ class TestFindMissingFinancialSymbols:
     def test_定位缺失标的并过滤排除规则(self, tmp_path: Path) -> None:
         """market_data 有、financial_data 无 → 仅返回清洗保留标的（科创板/B股被排除）。"""
         db = _make_db(tmp_path)
-        from myquant.data_access.financial_sync_service import _find_missing_financial_symbols
+        from myquant.data_access.financial_sync_service import (
+            _find_missing_financial_symbols,
+        )
 
         missing = _find_missing_financial_symbols(tmp_path, db_path=db)
         assert missing == ["601091.SH"]

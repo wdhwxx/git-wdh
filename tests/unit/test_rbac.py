@@ -25,33 +25,32 @@ import asyncio
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import List
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import pytest  # noqa: E402
 
+from myquant.api.dependencies.get_services import get_service_container  # noqa: E402
 from myquant.api.middleware.auth import (  # noqa: E402
     DEFAULT_ROLE,
-    MonitorRole,
     PERM_ACK_ALERTS,
     PERM_MODIFY_CONFIG,
-    PERM_RESOLVE_ALERTS,
     PERM_RESET_CIRCUIT,
+    PERM_RESOLVE_ALERTS,
     PERM_VIEW_ALERTS,
-    RbacGuard,
     ROLE_PERMISSIONS,
+    MonitorRole,
+    RbacGuard,
     current_role_can,
     normalize_role,
     role_can,
     set_current_role,
 )
-from myquant.api.dependencies.get_services import get_service_container  # noqa: E402
 from myquant.api.routes import create_app  # noqa: E402
-from myquant.database.connection import DatabaseConnection  # noqa: E402
 from myquant.core.audit_log import AuditLogStore  # noqa: E402
-
+from myquant.database.connection import DatabaseConnection  # noqa: E402
 
 # ═══════════════════════════════════════════════
 #  fakes / fixtures
@@ -246,7 +245,8 @@ class TestGatedPlaceholders:
         # 复位前先触发一次熔断（容器内注入一个 tripped 的熔断线），验证真实回滚链路
         from myquant.api.dependencies.get_services import get_service_container
         from myquant.monitoring.circuit_breaker import (
-            CircuitBreaker, reset_circuit_breaker_singleton,
+            CircuitBreaker,
+            reset_circuit_breaker_singleton,
         )
         reset_circuit_breaker_singleton()
         cb = CircuitBreaker(alert_manager=None, audit_store=temp_audit)

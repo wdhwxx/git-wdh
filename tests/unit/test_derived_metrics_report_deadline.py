@@ -8,9 +8,10 @@ P1-①（#83）发布日推算：财务数据按披露截止日而非报告期�
 
 from __future__ import annotations
 
-import pytest
-
-from myquant.data_access.cleaner.derived_metrics import _report_deadline, compute_b_class_metrics
+from myquant.data_access.cleaner.derived_metrics import (
+    _report_deadline,
+    compute_b_class_metrics,
+)
 
 
 def _fin(report_date: str, net_profit: float) -> dict:

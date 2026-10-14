@@ -266,7 +266,7 @@ class TestDecayCurve:
     def test_曲线三序列且JSON可序列化(self, clock_now: List[float]) -> None:
         mon = _make_monitor(clock_now, ic_threshold=0.5)
         _feed_aligned(mon, 20, _BASE, 20.0)
-        st1 = mon.evaluate()
+        mon.evaluate()
         _feed_opposite(mon, 20, _BASE + 500.0, 100.0)
         clock_now[0] = _BASE + 2_500.0
         st2 = mon.evaluate()

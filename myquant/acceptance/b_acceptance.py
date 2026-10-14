@@ -27,19 +27,22 @@ b_acceptance.py - B 包（保钱包）验收业务逻辑（B-10）
 
 from __future__ import annotations
 
-import logging
 import tempfile
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from myquant.core.constants import SeverityLevel
-from myquant.core.event_bus import Event, EventBus, EventType, OrderEvent
-from myquant.core.logger import get_logger
-from myquant.core.settings import get_monitoring_config
 from myquant.core.alert_store import AlertStore
-from myquant.monitoring.alerting import AlertManager
+from myquant.core.constants import SeverityLevel
+from myquant.core.event_bus import Event, EventBus, EventType
+from myquant.core.logger import get_logger
+from myquant.core.metrics_history import MetricsHistoryStore
+from myquant.core.settings import get_monitoring_config
 from myquant.monitoring.account_reconciler import AccountReconciler
+from myquant.monitoring.alerting import AlertManager
+from myquant.monitoring.center_provider import (
+    MonitorCenterDataProvider,  # G1 EX-15A：provider 下沉 monitoring（L5→L5 合法）
+)
 from myquant.monitoring.circuit_breaker import (
     CircuitBreaker,
     CircuitBreakerConfig,
@@ -47,9 +50,7 @@ from myquant.monitoring.circuit_breaker import (
 from myquant.monitoring.data_quality_explorer import DataFreshnessSli
 from myquant.monitoring.execution_stats import ExecutionStatsMonitor
 from myquant.monitoring.margin_monitor import MarginMonitor
-from myquant.core.metrics_history import MetricsHistoryStore
 from myquant.risk.rules import LimitUsageMonitor
-from myquant.monitoring.center_provider import MonitorCenterDataProvider  # G1 EX-15A：provider 下沉 monitoring（L5→L5 合法）
 
 logger = get_logger("acceptance.b_acceptance")
 
@@ -466,7 +467,7 @@ class BAcceptanceRunner:
         account_97 = {"total_assets": 100_000.0, "market_value": 48_500.0, "equity": 100_000.0}
         positions_97 = [{"symbol": "600000.SH", "market_value": 48_500.0}]
         mark1: int = self._alert_count()
-        result_97 = mon.check(account=account_97, positions=positions_97)
+        mon.check(account=account_97, positions=positions_97)
         alerts_97 = self._new_alerts_since(mark1)
         error_fired: bool = any(
             a.level == SeverityLevel.ERROR and a.category == "risk"
@@ -665,7 +666,7 @@ class BAcceptanceRunner:
         auto_liq_default_off: bool = cfg.auto_liquidate is False
 
         # reset(actor, reason) → 恢复开仓
-        reset_result = cb.reset(actor="ops", reason="验收：风险已解除")
+        cb.reset(actor="ops", reason="验收：风险已解除")
         restored_ok: bool = risk_mgr.can_open_position()
         audit_reset_ok: bool = any(
             r.get("kind") == "circuit" and r.get("action") == "reset"
@@ -721,7 +722,7 @@ class BAcceptanceRunner:
         )
 
         mark: int = self._alert_count()
-        result = sli.poll()
+        sli.poll()
         alerts = self._new_alerts_since(mark)
 
         # 滞后 90s > 60s 但 < 120s → WARNING(P2)
@@ -804,7 +805,6 @@ class BAcceptanceRunner:
         usage_thr_cfg = slo_margin.get("margin_usage_ratio_threshold", None)
         pending_cal: bool = strong_flat_cfg is None and usage_thr_cfg is None
 
-        audit_records: List[Dict[str, Any]] = []
 
         # 场景1：PENDING_CAL（None 阈值）→ 不告警不编造
         portfolio = _FakeMarginPortfolio(

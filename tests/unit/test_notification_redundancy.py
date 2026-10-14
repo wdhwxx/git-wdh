@@ -18,7 +18,7 @@ test_notification_redundancy.py - A-9 告警通道冗余单元测试
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from myquant.core.constants import SeverityLevel
 from myquant.monitoring.alerting import (
@@ -28,7 +28,6 @@ from myquant.monitoring.alerting import (
     AlertRule,
     configure_notification_channels,
 )
-
 
 # ═══════════════════════════════════════════
 #  Fake 通道

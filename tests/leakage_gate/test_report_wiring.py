@@ -23,7 +23,6 @@ from typing import Any, Dict, List
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from myquant.backtest.engine import BacktestScheduler
 from myquant.backtest.param_optimizer import (
@@ -33,10 +32,10 @@ from myquant.backtest.param_optimizer import (
 )
 from myquant.leakage_gate.gate import Violation, _decision_now
 from myquant.live.engine import create_live_engine
-from myquant.ml.training_pipeline import TrainingPipeline
-from myquant.models.backtest import BacktestConfig
 from myquant.ml.features import FeatureConfig
 from myquant.ml.model_registry import ModelRegistry
+from myquant.ml.training_pipeline import TrainingPipeline
+from myquant.models.backtest import BacktestConfig
 from myquant.strategies.ma_strategy import MACrossStrategy
 from tests.conftest import make_ohlcv_df
 
@@ -268,7 +267,6 @@ def test_p211_assert_pass_exemption_uses_decision_time() -> None:
     决策日当天），enabled=True 下门禁断言不因运行日期而误判豁免失效。
     以 _decision_now 贯通 assert_all_gates_pass 的 now 参数来源。
     """
-    from myquant.leakage_gate import GateConfig, set_config
     from myquant.leakage_gate.exemption import Exemption, ExemptionStore
 
     store = ExemptionStore()

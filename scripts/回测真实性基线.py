@@ -57,7 +57,11 @@ def _list_strategies() -> int:
     Returns:
         退出码（0=成功）。
     """
-    from myquant.strategies.registry import create_strategy, discover_strategies, list_strategies
+    from myquant.strategies.registry import (
+        create_strategy,
+        discover_strategies,
+        list_strategies,
+    )
 
     discover_strategies()
     names = list_strategies()
@@ -130,7 +134,11 @@ def _main() -> int:
     if args.strategy:
         targets.append((args.strategy, args.engine))
     else:
-        from myquant.strategies.registry import create_strategy, discover_strategies, list_strategies
+        from myquant.strategies.registry import (
+            create_strategy,
+            discover_strategies,
+            list_strategies,
+        )
 
         discover_strategies()
         for name in list_strategies():

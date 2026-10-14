@@ -52,8 +52,6 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Optional
-
 
 # ─────────────────────────────────────────────
 # 路径探测
@@ -158,7 +156,7 @@ def cmd_clear(project_root: Path, force: bool = False) -> int:
     )
     status = manager.get_cache_status()
 
-    print(f"\n  即将清空所有因子缓存:")
+    print("\n  即将清空所有因子缓存:")
     print(f"    L1 内存条目: {status['cache']['l1_size']}")
     print(f"    L2 磁盘文件: {status['cache']['l2_files']} ({status['l2_size_mb']:.2f} MB)")
 
@@ -343,7 +341,7 @@ def cmd_verify(project_root: Path) -> int:
     print()
     print(f"  校验完成: 一致 {matched}, 不一致 {mismatched}, 缺失/失败 {missing}")
     if mismatched > 0:
-        print(f"  建议: 运行 --sync 更新指纹并失效缓存")
+        print("  建议: 运行 --sync 更新指纹并失效缓存")
     print()
     return 0 if mismatched == 0 else 1
 

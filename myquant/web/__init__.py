@@ -18,10 +18,10 @@ TODO(后续迭代):
 """
 
 from myquant.web.dashboard import (
+    STREAMLIT_AVAILABLE,
     Dashboard,
     DataQualityExplorer,
     run_dashboard,
-    STREAMLIT_AVAILABLE,
 )
 
 __all__ = [

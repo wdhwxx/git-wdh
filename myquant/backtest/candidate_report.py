@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime
@@ -28,7 +27,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-from myquant.backtest.pdf_report import _ReportPdf, PdfReportGenerator
+from myquant.backtest.pdf_report import PdfReportGenerator, _ReportPdf
 from myquant.core.logger import get_logger
 
 logger = get_logger(__name__)

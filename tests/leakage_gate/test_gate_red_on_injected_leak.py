@@ -13,7 +13,6 @@ test_gate_red_on_injected_leak.py - 注入泄漏必报红（M0-08 同批 / M0-13
 
 import pytest
 
-import myquant.leakage_gate.contract as contract_module
 import myquant.leakage_gate.consumption as consumption_module
 import myquant.live.engine as live_engine_module
 from myquant.backtest.engine import BacktestScheduler
@@ -74,8 +73,8 @@ def _inject_leak(monkeypatch: pytest.MonkeyPatch):
 
 def test_assert_gates_red_on_injected_leak() -> None:
     """注入引用每股收益的策略 → 出口断言报红（R11/RL-13）。"""
-    from myquant.leakage_gate.contract import ensure_registered as c_reg
     from myquant.leakage_gate.consumption import ensure_registered as s_reg
+    from myquant.leakage_gate.contract import ensure_registered as c_reg
 
     c_reg()
     s_reg()

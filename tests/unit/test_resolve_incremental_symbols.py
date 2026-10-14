@@ -18,8 +18,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List
 
-import pytest
-
 from myquant.data_access.full_clean_service import (
     DEFAULT_EXCLUDE_RULES,
     resolve_incremental_symbols,

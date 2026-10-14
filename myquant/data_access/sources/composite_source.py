@@ -31,8 +31,7 @@ composite_source.py - 组合数据源（多源融合+自动降级）
 from __future__ import annotations
 
 import threading
-from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set
 
 from myquant.core.logger import get_logger
 
@@ -43,10 +42,7 @@ from .base import (
     DataSourceStatus,
     MarketDataResult,
     register_data_source,
-    get_all_data_sources,
-    get_healthy_data_sources,
 )
-
 
 # ─────────────────────────────────────────────
 # 组合数据源类

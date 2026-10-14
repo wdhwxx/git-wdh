@@ -24,7 +24,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from myquant.acceptance.d_acceptance import DEFAULT_REPORT_TITLE, DAcceptanceRunner  # noqa: E402
+from myquant.acceptance.d_acceptance import (  # noqa: E402
+    DEFAULT_REPORT_TITLE,
+    DAcceptanceRunner,
+)
 
 # 默认输出为项目根绝对路径（修复：原相对路径从 scripts/ 目录启动时
 # 会把报告写到 scripts/docs/监控档案/，与 docs/监控档案/ 正式落档分叉）

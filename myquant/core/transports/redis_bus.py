@@ -17,19 +17,18 @@ Usage:
 
 from __future__ import annotations
 
-import json
 import logging
 import threading
 import time
 from typing import Any, Callable, Dict, Optional
 
+from myquant.core.exceptions import TransportConnectionError, TransportError
 from myquant.core.transports.base import (
     Message,
     Transport,
     TransportConfig,
     TransportState,
 )
-from myquant.core.exceptions import TransportConnectionError, TransportError
 
 logger = logging.getLogger("myquant.transport.redis")
 

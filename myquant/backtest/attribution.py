@@ -532,7 +532,7 @@ def _run_self_test() -> int:
           and "caliber_note" in summary and summary["self_consistent"] is True,
           f"{list(summary.keys())}")
     try:
-        s_json = json.dumps(summary, ensure_ascii=False)
+        json.dumps(summary, ensure_ascii=False)
         check("6) 日报摘要 JSON 可序列化", True, "")
     except (TypeError, ValueError) as e:
         check("6) 日报摘要 JSON 可序列化", False, f"{e}")

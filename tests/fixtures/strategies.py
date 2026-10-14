@@ -20,14 +20,15 @@ strategies.py - 策略测试 Fixture
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import List
 
 import pytest
 
 from myquant.strategies.base import Signal, SignalType, StrategyContext
 from myquant.strategies.ma_strategy import MACrossStrategy
-from myquant.strategies.registry import register_strategy, list_strategies, create_strategy
-
+from myquant.strategies.registry import (
+    register_strategy,
+)
 
 # ═══════════════════════════════════════════
 #  策略实例 Fixtures

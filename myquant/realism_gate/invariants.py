@@ -25,7 +25,7 @@ RealismViolation 列表返回，由调用方（引擎 run() 收尾）决定 mark
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence
 
 from myquant.realism_gate.manifest import RealismViolation

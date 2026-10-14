@@ -30,7 +30,6 @@ from myquant.monitoring.alerting import (
 )
 from myquant.monitoring.metrics_collector import BuiltinMetrics, MetricsCollector
 
-
 # ═══════════════════════════════════════════
 #  Fake 通道：捕获告警，记录发送顺序
 # ═══════════════════════════════════════════

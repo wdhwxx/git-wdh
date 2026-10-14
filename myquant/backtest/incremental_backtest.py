@@ -29,10 +29,10 @@ import logging
 import os
 import tempfile
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
@@ -54,7 +54,9 @@ logger = logging.getLogger("myquant.backtest.incremental_backtest")
 DEFAULT_INITIAL_CAPITAL: float = 1_000_000.0
 DEFAULT_FREQUENCY: str = "1d"
 DEFAULT_DATA_SOURCE: str = "incremental"
-from myquant.core.constants import RESULTS_FORMAT_VERSION  # P3-D10-001 整改：双源收敛为单一权威（myquant/core/constants.py）
+from myquant.core.constants import (
+    RESULTS_FORMAT_VERSION,  # P3-D10-001 整改：双源收敛为单一权威（myquant/core/constants.py）
+)
 
 # 策略注册表：策略名 -> 策略类（扩展只需在此注册）
 STRATEGY_REGISTRY: Dict[str, type] = {
@@ -609,7 +611,7 @@ def _main() -> int:
     print(f"    ✓ 数据未变化，0 个重算，{r4.reused_count} 个全部复用")
 
     print("\n" + "=" * 64)
-    print(f"  自测通过: 全量 -> 增量1变更 -> 强制全量 -> 0变更 流程闭环")
+    print("  自测通过: 全量 -> 增量1变更 -> 强制全量 -> 0变更 流程闭环")
     print("=" * 64)
 
     import shutil

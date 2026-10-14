@@ -48,7 +48,7 @@ from __future__ import annotations
 import csv
 import io
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set
 
 from myquant.core.logger import get_logger
 

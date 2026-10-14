@@ -28,6 +28,8 @@ from typing import Any
 
 import pytest
 
+from myquant.core.alert_store import STATUS_ACKED, STATUS_RESOLVED, AlertStore
+from myquant.core.audit_log import _GENESIS_HASH, AuditLogStore
 from myquant.database.connection import DatabaseConnection
 from myquant.database.schema import (
     CREATE_AUDIT_ARCHIVE_MANIFEST_SQL,
@@ -37,8 +39,6 @@ from myquant.database.schema import (
     table_exists,
 )
 from myquant.monitoring.alerting import Alert, SeverityLevel
-from myquant.core.alert_store import AlertStore, STATUS_ACKED, STATUS_RESOLVED
-from myquant.core.audit_log import AuditLogStore, _GENESIS_HASH
 
 
 @pytest.fixture()
@@ -355,7 +355,6 @@ class TestAlertStoreIntegration:
     def test_without_audit_no_trail(self, tmp_conn: DatabaseConnection) -> None:
         store = AlertStore(connection=tmp_conn)
         store.save_alert(_make_alert("a3"))
-        from myquant.database.schema import table_exists
 
         # 未绑定审计不产生审计表写入（表存在但 0 行；此处直接验证无审计存储）
         audit = AuditLogStore(connection=tmp_conn)

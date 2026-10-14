@@ -19,9 +19,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from myquant.gui.batch_backtest_tab import (  # noqa: E402
-    BatchBacktestTab,
     DEFAULT_END_DATE,
     DEFAULT_START_DATE,
+    BatchBacktestTab,
 )
 
 

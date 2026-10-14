@@ -12,7 +12,6 @@ trade_calendar.py - A股真实交易日历（P2-① #83）
 from __future__ import annotations
 
 import csv
-import logging
 from datetime import date
 from pathlib import Path
 from typing import Optional, Set

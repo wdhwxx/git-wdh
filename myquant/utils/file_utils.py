@@ -743,7 +743,7 @@ if __name__ == "__main__":
 
     # 清理
     shutil.rmtree(test_dir, ignore_errors=True)
-    print(f"\n[8] 临时目录已清理")
+    print("\n[8] 临时目录已清理")
 
     print("\n" + "=" * 60)
     print("  ✓ file_utils.py 自测完成")

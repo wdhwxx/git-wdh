@@ -15,11 +15,11 @@ import pytest
 
 from myquant.core.constants import SeverityLevel
 from myquant.monitoring.execution_stats import (
-    ExecutionStatsMonitor,
     METRIC_ORDER_REJECT_RATE,
-    METRIC_ORDER_SUBMITTED_TOTAL,
     METRIC_ORDER_REJECTED_TOTAL,
+    METRIC_ORDER_SUBMITTED_TOTAL,
     SURGE_MIN_BASE_SAMPLES,
+    ExecutionStatsMonitor,
 )
 
 

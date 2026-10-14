@@ -42,14 +42,19 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from myquant.core.logger import setup_logging, get_logger
+from myquant.core.logger import get_logger, setup_logging
 from myquant.data_access.cleaner import (
     load_clean_config,
     run_clean_pipeline,
 )
+from myquant.data_access.factory import (
+    create_fetcher,
+    detect_tdx_available,
+    get_available_sources,
+)
+
 # M5修复：清洗元信息统一记录（与全量清洗同口径，写 clean_run_meta/dirty_data_stats）
 from myquant.data_access.full_clean_service import record_clean_meta
-from myquant.data_access.factory import create_fetcher, detect_tdx_available, get_available_sources
 from myquant.utils.file_utils import ensure_dir, get_project_path, write_csv, write_json
 
 logger = get_logger("run_data_clean")

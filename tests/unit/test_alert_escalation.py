@@ -29,10 +29,10 @@ from typing import Any, Dict, List
 
 import pytest
 
+from myquant.core.alert_store import AlertStore
 from myquant.core.constants import SeverityLevel
 from myquant.database.connection import DatabaseConnection
 from myquant.live.scheduler import LiveScheduler, attach_engine
-from myquant.core.alert_store import AlertStore
 from myquant.monitoring.alerting import (
     ALERT_LEVEL_CODE_MAP,
     DEFAULT_RUNBOOK_BY_CATEGORY,
@@ -41,7 +41,6 @@ from myquant.monitoring.alerting import (
     ConsoleAlertChannel,
     p0_p3_level,
 )
-
 
 # ═══════════════════════════════════════════
 #  Fixture：临时库连接 + AlertStore（不碰真实 quant.db）

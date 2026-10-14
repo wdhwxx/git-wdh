@@ -37,7 +37,6 @@ import numpy as np
 import pandas as pd
 
 from myquant.core.logger import get_logger
-from myquant.ml.features import FeatureConfig
 from myquant.ml.inference_service import InferenceService
 from myquant.ml.model_registry import ModelRegistry
 from myquant.ml.training_pipeline import TrainingPipeline

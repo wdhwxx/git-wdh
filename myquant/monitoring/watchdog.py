@@ -33,9 +33,7 @@ from collections import deque
 from typing import Any, Callable, Deque, Dict, List, Optional
 
 from myquant.core.constants import (
-    BROKER_PROBE_INTERVAL_SECONDS,  # G2-5 阶段二下沉 core，re-export 兼容旧引用
-    RUNBOOK_BROKER_DISCONNECT,      # G2-5 阶段二下沉 core，re-export 兼容旧引用
-    STALENESS_PROBE_INTERVAL_SECONDS,  # G2-5 阶段二下沉 core，re-export 兼容旧引用
+    RUNBOOK_BROKER_DISCONNECT,  # G2-5 阶段二下沉 core，re-export 兼容旧引用
     SeverityLevel,
 )
 from myquant.core.logger import get_logger
@@ -246,6 +244,7 @@ class StalenessDetector:
         防未来：本行使用的数据截至 now 时刻（last_bar_ts 为已发生 bar 时刻）。
         """
         from datetime import datetime
+
         from myquant.utils.time_utils import TZ_SHANGHAI
 
         now_ts = self._clock() if now is None else float(now)
@@ -726,6 +725,7 @@ class BrokerConnectionWatcher:
 def _run_self_test() -> int:
     """模块自测 demo：验证 StalenessDetector 核心判定（注入假时钟/假告警）。"""
     from datetime import datetime
+
     from myquant.utils.time_utils import TZ_SHANGHAI, TradingCalendar
 
     passed = 0

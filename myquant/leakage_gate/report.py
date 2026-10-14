@@ -33,7 +33,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence
 
 logger = logging.getLogger("myquant.leakage_gate.report")
 

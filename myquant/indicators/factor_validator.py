@@ -47,7 +47,7 @@ import numpy as np
 import pandas as pd
 
 from myquant.core.logger import get_logger
-from myquant.utils.math_utils import percentile, safe_divide
+from myquant.utils.math_utils import safe_divide
 
 logger = get_logger("indicators.factor_validator")
 

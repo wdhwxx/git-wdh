@@ -251,8 +251,8 @@ class InferenceService:
         if meta.feature_signature is not None:
             # F-01：签名校验（列集合 + 顺序硬校验，dtype 软校验）
             from myquant.ml.feature_contract import (
-                FeatureSignature,
                 FeatureContractError,
+                FeatureSignature,
                 validate_feature_signature,
             )
             try:

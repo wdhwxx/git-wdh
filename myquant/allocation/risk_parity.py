@@ -557,7 +557,7 @@ class RiskParityAllocator(AllocatorBase):
             return None
         for row in cov:
             if not isinstance(row, list) or len(row) != n:
-                logger.warning(f"[risk_parity] 协方差矩阵行维度不匹配")
+                logger.warning("[risk_parity] 协方差矩阵行维度不匹配")
                 return None
         return cov
 
@@ -922,7 +922,7 @@ class RiskBudgetReallocator:
             # 全部质量分为 0（无差异化依据）→ 不调整（不编造）
             return dict(weights)
         # 1. 按质量分比例分配
-        target = {s: round(total_w := (scores.get(s, 0.0) / total), 6) for s in names}
+        target = {s: round(_total_w := (scores.get(s, 0.0) / total), 6) for s in names}
         # 2. 上限/下限约束迭代重归一化（护栏：不超上限、不低于下限）
         for _ in range(REALLOC_MAX_ITER):
             clamped = {}

@@ -20,7 +20,9 @@ import enum
 import logging
 from typing import Any, Dict, List, Optional
 
-from myquant.risk.guardian import get_operation_guard  # G1 EX-12D：L4→L3 合法（准入守卫注册表访问器）
+from myquant.risk.guardian import (
+    get_operation_guard,  # G1 EX-12D：L4→L3 合法（准入守卫注册表访问器）
+)
 
 logger = logging.getLogger("live.run_mode")
 

@@ -316,7 +316,9 @@ def create_app(
     # 未配置守卫时 get_operation_guard() 返回未启用实例（仅审计留痕），
     # portfolio.transfer_cash 与 run_mode LIVE 切换经 guardian 访问器取用同一实例。
     try:
-        from myquant.api.middleware.auth import get_operation_guard as _api_operation_guard
+        from myquant.api.middleware.auth import (
+            get_operation_guard as _api_operation_guard,
+        )
         from myquant.risk.guardian import register_operation_guard
         register_operation_guard(_api_operation_guard())
     except Exception as e:  # noqa: BLE001
@@ -1280,7 +1282,9 @@ def create_app(
         伪造点位）。【防未来】右闭取当前时刻，只回放当日已落库点。
         """
         try:
-            from myquant.monitoring.metrics_collector import replay_intraday_equity_curve
+            from myquant.monitoring.metrics_collector import (
+                replay_intraday_equity_curve,
+            )
             store = _get_history_store()
             points = replay_intraday_equity_curve(store=store)
             return ApiResponse.success(

@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-
 #: 全局指标采集器（由 metrics_collector 懒创建时自注册；装配方保证先于使用方调用）
 _collector: Optional[Any] = None
 

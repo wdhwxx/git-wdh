@@ -25,14 +25,12 @@ test_qmt_broker_live.py - QMT 券商适配器 LIVE 模式单元测试
 
 from __future__ import annotations
 
-import time
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 import pytest
 
 from myquant.live.brokers.qmt_broker import QmtBroker
 from myquant.models.trade import Order, OrderSide, OrderStatus, OrderType
-
 
 # ═══════════════════════════════════════════
 #  fake SDK（模拟 xtquant，不实际连接 QMT）

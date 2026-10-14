@@ -7,7 +7,7 @@ test_core_registry.py - G2-1 core/registry 注册表单测
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 import pytest
 

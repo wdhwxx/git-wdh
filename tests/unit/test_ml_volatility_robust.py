@@ -27,17 +27,15 @@ test_ml_volatility_robust.py - F-10 波动率稳健化与自适应测试
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Sequence
+from typing import Any, List, Sequence
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from myquant.indicators import get_indicator
 from myquant.indicators.volatility import (
     EWMA_LAMBDA_HIGH,
     EWMA_LAMBDA_NORMAL,
-    EWMA_SIGMA_K,
     MAD_CONSTANT,
     ExtremeRegime,
     Volatility,
@@ -45,9 +43,7 @@ from myquant.indicators.volatility import (
 from myquant.ml.features import FeatureConfig, FeatureEngine
 from myquant.ml.model_registry import ModelRegistry
 from myquant.ml.training_pipeline import TrainingPipeline
-
 from tests.conftest import make_ohlcv_df
-
 
 # ═══════════════════════════════════════════════
 #  合成数据构造

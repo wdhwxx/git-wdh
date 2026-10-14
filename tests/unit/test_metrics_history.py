@@ -29,16 +29,15 @@ from typing import Any, Dict
 
 import pytest
 
-from myquant.database.connection import DatabaseConnection
-from myquant.database.schema import (
-    CREATE_METRICS_HISTORY_INDEX_SQL,
-    CREATE_METRICS_HISTORY_SQL,
-    TABLE_NAMES,
-    table_exists,
-)
 from myquant.core.metrics_history import (
     MAX_BATCH_SIZE,
     MetricsHistoryStore,
+)
+from myquant.database.connection import DatabaseConnection
+from myquant.database.schema import (
+    CREATE_METRICS_HISTORY_SQL,
+    TABLE_NAMES,
+    table_exists,
 )
 from myquant.live.scheduler import HealthPatrol
 

@@ -27,13 +27,17 @@ test_alert_store.py - BASE-1 告警持久化单元测试
 from __future__ import annotations
 
 import sqlite3
-import tempfile
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict
 
 import pytest
 
+from myquant.core.alert_store import (
+    STATUS_ACKED,
+    STATUS_OPEN,
+    STATUS_RESOLVED,
+    AlertStore,
+)
 from myquant.database.connection import DatabaseConnection
 from myquant.database.schema import (
     CREATE_ALERTS_INDEX_SQL,
@@ -41,18 +45,11 @@ from myquant.database.schema import (
     TABLE_NAMES,
     table_exists,
 )
-from myquant.core.alert_store import (
-    STATUS_ACKED,
-    STATUS_OPEN,
-    STATUS_RESOLVED,
-    AlertStore,
-)
 from myquant.monitoring.alerting import (
     Alert,
     AlertManager,
     SeverityLevel,
 )
-
 
 # ═══════════════════════════════════════════
 #  Fixture：临时库连接 + AlertStore

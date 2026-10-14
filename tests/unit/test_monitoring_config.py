@@ -17,13 +17,8 @@ test_monitoring_config.py - BASE-3 监控配置集中化单元测试
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
-import pytest
-
 from myquant.core.settings import DEFAULT_MONITORING, _build_monitoring_config
 from myquant.monitoring.alerting import AlertManager, configure_notification_channels
-
 
 # ═══════════════════════════════════════════
 #  1. _build_monitoring_config 纯函数

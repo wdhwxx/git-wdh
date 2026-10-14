@@ -12,29 +12,29 @@ models - 数据模型层
 
 __version__ = "0.1.0"
 
-from myquant.models.trade import (
-    OrderSide,
-    OrderType,
-    OrderStatus,
-    Order,
-    Position,
-    Trade,
-    OrderFactory,
-)
-from myquant.models.market_data import (
-    Tick,
-    Bar,
-    BarFrequency,
-    Snapshot,
-    MarketEvent,
-    MarketDataValidator,
-)
 from myquant.models.backtest import (
     BacktestConfig,
     BacktestResult,
+    EquityPoint,
     PerformanceMetrics,
     TradeRecord,
-    EquityPoint,
+)
+from myquant.models.market_data import (
+    Bar,
+    BarFrequency,
+    MarketDataValidator,
+    MarketEvent,
+    Snapshot,
+    Tick,
+)
+from myquant.models.trade import (
+    Order,
+    OrderFactory,
+    OrderSide,
+    OrderStatus,
+    OrderType,
+    Position,
+    Trade,
 )
 
 __all__ = [

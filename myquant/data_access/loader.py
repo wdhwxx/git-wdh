@@ -34,7 +34,7 @@ import logging
 import queue
 import threading
 import time
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
@@ -853,7 +853,6 @@ class OptimizedDataLoader:
 # ─────────────────────────────────────────────
 
 if __name__ == "__main__":
-    import os
     import tempfile
 
     print("=" * 60)
@@ -903,14 +902,14 @@ if __name__ == "__main__":
     print(f"    日期范围: {df1.index[0].strftime('%Y-%m-%d')} ~ {df1.index[-1].strftime('%Y-%m-%d')}")
     assert not df1.empty
     assert "close" in df1.columns
-    print(f"    ✓ 基本加载正常")
+    print("    ✓ 基本加载正常")
 
     # ── 测试 3: 防未来函数 ──
     print("\n[3] 防未来函数测试")
     df_end = loader.load_single("TEST001.SZ", "2022-01-01", "2023-06-30")
     assert df_end.index.max() <= pd.Timestamp("2023-06-30")
     print(f"    end_date=2023-06-30, 实际最大日期: {df_end.index.max().strftime('%Y-%m-%d')}")
-    print(f"    ✓ 防未来函数正常（不返回 end_date 之后数据）")
+    print("    ✓ 防未来函数正常（不返回 end_date 之后数据）")
 
     # ── 测试 4: 分块加载 ──
     print("\n[4] 分块加载测试")
@@ -926,7 +925,7 @@ if __name__ == "__main__":
     assert loader_chunk.stats.chunked_loads >= 1
     # 分块结果应与全量结果一致
     assert len(df_chunked) == len(df1)
-    print(f"    ✓ 分块加载正常，结果与全量一致")
+    print("    ✓ 分块加载正常，结果与全量一致")
 
     # ── 测试 5: 批量加载 + 预取 ──
     print("\n[5] 批量加载 + 预取测试")
@@ -943,7 +942,7 @@ if __name__ == "__main__":
         print(f"      {sym}: {len(df)} 根K线")
     assert len(batch_result) == 3
     print(f"    预取命中: {loader_batch.stats.prefetch_hits}")
-    print(f"    ✓ 批量加载 + 预取正常")
+    print("    ✓ 批量加载 + 预取正常")
 
     # ── 测试 6: 分批迭代 ──
     print("\n[6] 分批迭代测试")
@@ -991,7 +990,7 @@ if __name__ == "__main__":
             print(f"      {r['symbol']}: {r['bars']} bars, mean_close={r['mean_close']:.2f}")
     assert len(pipe_results) == 3
     assert all(r is not None for r in pipe_results)
-    print(f"    ✓ 流水线加载正常")
+    print("    ✓ 流水线加载正常")
 
     # ── 测试 8: 内存监控集成 ──
     print("\n[8] 内存监控集成测试")
@@ -1008,7 +1007,7 @@ if __name__ == "__main__":
     print(f"    峰值内存: {loader_mem.stats.peak_memory_mb:.1f}MB")
     # 阈值极低，应该触发了降级
     assert loader_mem.stats.memory_degradations >= 0  # 可能触发也可能不触发（取决于系统内存）
-    print(f"    ✓ 内存监控集成正常")
+    print("    ✓ 内存监控集成正常")
 
     # ── 测试 9: 统计信息 ──
     print("\n[9] 统计信息测试")
@@ -1021,7 +1020,7 @@ if __name__ == "__main__":
     print(f"    成功率: {stats.success_rate:.1%}")
     assert stats.total_symbols > 0
     assert stats.loaded_symbols > 0
-    print(f"    ✓ 统计信息正常")
+    print("    ✓ 统计信息正常")
     print()
     print(stats.summary())
 
@@ -1029,26 +1028,26 @@ if __name__ == "__main__":
     print("\n[10] 边界情况测试")
     # 空标的列表
     assert loader.load_batch([]) == {}
-    print(f"    ✓ 空标的列表返回空字典")
+    print("    ✓ 空标的列表返回空字典")
 
     # 不存在的标的
     df_nonexist = loader.load_single("NOTEXIST.SZ")
     assert df_nonexist.empty
-    print(f"    ✓ 不存在标的返回空 DataFrame")
+    print("    ✓ 不存在标的返回空 DataFrame")
 
     # 非法 symbol
     try:
         loader.load_single("")
         assert False, "应抛出 ValueError"
     except ValueError:
-        print(f"    ✓ 空 symbol 正确抛出 ValueError")
+        print("    ✓ 空 symbol 正确抛出 ValueError")
 
     # 非法参数
     try:
         OptimizedDataLoader(prefetch_count=-1)
         assert False, "应抛出 ValueError"
     except ValueError:
-        print(f"    ✓ 负数 prefetch_count 正确抛出 ValueError")
+        print("    ✓ 负数 prefetch_count 正确抛出 ValueError")
 
     # ── 清理 ──
     print("\n[清理] 清理临时数据")

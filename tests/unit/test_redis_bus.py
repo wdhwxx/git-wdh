@@ -13,10 +13,9 @@ Redis Pub/Sub 传输（myquant/core/transports/redis_bus.py）单元测试（G0-
 """
 from __future__ import annotations
 
-import json
 import sys
 import types
-from typing import Any, Dict, Optional
+from typing import Any
 
 import pytest
 

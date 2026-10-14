@@ -15,9 +15,8 @@ constants.py - 项目常量、状态码、时间单位、枚举类型
 
 from __future__ import annotations
 
-from enum import Enum, IntEnum, auto
+from enum import Enum, IntEnum
 from typing import Dict, List
-
 
 # ═══════════════════════════════════════════════
 #  枚举类型

@@ -17,11 +17,15 @@ from pathlib import Path
 import pytest
 
 import myquant.leakage_gate.consumption as consumption_module
+from myquant.leakage_gate.consumption import (
+    ensure_registered as consumption_ensure_registered,
+)
 from myquant.leakage_gate.contract import (
     _load_ledger,
+)
+from myquant.leakage_gate.contract import (
     ensure_registered as contract_ensure_registered,
 )
-from myquant.leakage_gate.consumption import ensure_registered as consumption_ensure_registered
 from myquant.leakage_gate.gate import (
     GateConfig,
     LeakageGateError,

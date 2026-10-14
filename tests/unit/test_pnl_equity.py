@@ -23,26 +23,25 @@ import asyncio
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from myquant.api.routes import create_app  # noqa: E402
 from myquant.api.dependencies.get_services import get_service_container  # noqa: E402
+from myquant.api.routes import create_app  # noqa: E402
+from myquant.core.field_crypto import FieldCrypto  # noqa: E402
+from myquant.core.metrics_history import MetricsHistoryStore  # noqa: E402
 from myquant.database.connection import DatabaseConnection  # noqa: E402
 from myquant.live.portfolio import LivePortfolio  # noqa: E402
-from myquant.core.field_crypto import FieldCrypto  # noqa: E402
 from myquant.monitoring.metrics_collector import (  # noqa: E402
     BuiltinMetrics,
     collect_pnl_snapshot,
     get_latest_pnl_snapshot,
     replay_intraday_equity_curve,
 )
-from myquant.core.metrics_history import MetricsHistoryStore  # noqa: E402
-
 
 # ═══════════════════════════════════════════════
 #  Fakes / Fixtures

@@ -28,15 +28,19 @@ test_data_manager.py - 数据管理层单元测试
 from __future__ import annotations
 
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Callable, Dict, List
 
 import pandas as pd
 import pytest
 
 from myquant.core.cache import MemoryCache
-from myquant.data_access import DataFetcher, DataManager, DataSourceBase, DataSourceStatus
+from myquant.data_access import (
+    DataFetcher,
+    DataManager,
+    DataSourceBase,
+    DataSourceStatus,
+)
 from myquant.data_access.manager import DatasetVersion
-
 
 # ═══════════════════════════════════════════
 #  Mock 数据源（用于测试，不依赖外部）
@@ -484,7 +488,8 @@ class TestDataFetcher:
         """订阅和取消订阅"""
         source = MockDataSource()
         fetcher = DataFetcher(source=source)
-        callback = lambda x: None
+        def callback(x):
+            return None
         result = fetcher.subscribe_realtime("000001.SZ", callback)
         assert result is True
         result2 = fetcher.unsubscribe_realtime("000001.SZ", callback)
@@ -615,7 +620,6 @@ class TestDatasetVersionManagement:
 
     def _make_manager(self, tmp_path=None):
         """创建带临时目录的 DataManager"""
-        import tempfile
         source = MockDataSource()
         fetcher = DataFetcher(source=source)
         manager = DataManager(fetcher=fetcher)
@@ -671,7 +675,6 @@ class TestDatasetVersionManagement:
 
     def test_create_and_list_version(self, tmp_path):
         """创建版本后可列出（使用临时目录）"""
-        import tempfile
         source = MockDataSource()
         fetcher = DataFetcher(source=source)
         manager = DataManager(fetcher=fetcher)
@@ -713,10 +716,10 @@ class TestRealTimePreparation:
         fetcher = DataFetcher(source=source, enable_cache=True)
         # 填充缓存
         fetcher.get_market_data("000001.SZ", "2024-01-01", "2024-01-31")
-        stats1 = fetcher.get_cache_stats()
+        fetcher.get_cache_stats()
         # 失效缓存（实盘新数据到达时）
         fetcher.invalidate_cache()
-        stats2 = fetcher.get_cache_stats()
+        fetcher.get_cache_stats()
         # 失效后缓存应清空或可重新获取
         result = fetcher.get_market_data("000001.SZ", "2024-01-01", "2024-01-31")
         assert result is not None

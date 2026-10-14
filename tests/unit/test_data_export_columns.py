@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any, List
 
 import pandas as pd
-import pytest
 
 from myquant.database.schema import CREATE_FINANCIAL_DATA_SQL, CREATE_MARKET_DATA_SQL
 

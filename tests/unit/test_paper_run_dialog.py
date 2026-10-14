@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
@@ -20,7 +19,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
-from myquant.gui.paper_run_dialog import PaperRunDialog, INITIAL_CAPITAL
+from myquant.gui.paper_run_dialog import PaperRunDialog
 
 
 @pytest.fixture(scope="session")

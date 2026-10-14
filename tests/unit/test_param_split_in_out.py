@@ -25,8 +25,6 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from typing import Any  # noqa: E402
 
-from myquant.execution.sim_broker import SimBroker  # noqa: E402
-
 from myquant.backtest.param_optimizer import (  # noqa: E402
     ParamGrid,
     ParamOptimizationResult,
@@ -35,6 +33,7 @@ from myquant.backtest.param_optimizer import (  # noqa: E402
     ParamTrial,
     evaluate_params,
 )
+from myquant.execution.sim_broker import SimBroker  # noqa: E402
 
 
 def _backtest_broker_factory(config: Any) -> Any:

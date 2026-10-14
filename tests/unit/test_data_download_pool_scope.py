@@ -16,7 +16,6 @@ import pytest
 
 from myquant.gui.data_download_dialog import _load_pool_codes, run_daily
 
-
 # ── _load_pool_codes ──
 
 
@@ -107,7 +106,6 @@ class _FakeFetcher:
 
 def test_run_daily_全市场范围_用get_stock_list(tmp_path: Path) -> None:
     """scope='full_market'：标的取全市场 get_stock_list()，不写 processed。"""
-    import myquant.gui.data_download_dialog as d
 
     manager = _FakeManager()
     fetcher = _FakeFetcher()
@@ -122,7 +120,6 @@ def test_run_daily_全市场范围_用get_stock_list(tmp_path: Path) -> None:
 
 def test_run_daily_全市场_缺fetcher抛错(tmp_path: Path) -> None:
     """scope='full_market' 但 fetcher=None → 明确报错（防静默空转）。"""
-    import myquant.gui.data_download_dialog as d
 
     manager = _FakeManager()
     with pytest.raises(ValueError, match="full_market"):

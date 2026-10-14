@@ -30,7 +30,7 @@ test_backtest.py - 回测引擎单元测试
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import List
 
 import numpy as np
 import pandas as pd
@@ -48,12 +48,9 @@ from myquant.models.backtest import (
     CommissionType,
     SlippageModel,
 )
-from myquant.models.market_data import Bar, BarFrequency, MarketEvent
 from myquant.models.trade import OrderSide, Trade
 from myquant.strategies.ma_strategy import MACrossStrategy
-
 from tests.conftest import make_ohlcv_df
-
 
 # ═══════════════════════════════════════════
 #  Fixture：行情数据构造工具
@@ -451,7 +448,7 @@ class TestMetricsCalculator:
 
     def test_win_rate_with_trades(self):
         """含成交的胜率计算"""
-        from myquant.models.backtest import EquityPoint, TradeRecord
+        from myquant.models.backtest import EquityPoint
         mc = MetricsCalculator()
         curve = [
             EquityPoint(timestamp=1700000000.0, equity=1_000_000.0, cash=1_000_000.0),

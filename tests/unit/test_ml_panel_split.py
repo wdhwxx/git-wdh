@@ -22,7 +22,7 @@ test_ml_panel_split.py - F-08 面板数据切分日历化测试
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, Tuple
 
 import numpy as np
 import pandas as pd
@@ -33,11 +33,8 @@ from myquant.ml.model_registry import ModelRegistry
 from myquant.ml.training_pipeline import (
     TrainingPipeline,
     panel_time_series_split,
-    time_series_split,
 )
-
 from tests.conftest import make_ohlcv_df
-
 
 # ═══════════════════════════════════════════════
 #  常量 / 合成数据构造

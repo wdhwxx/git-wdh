@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import tempfile
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -44,7 +44,6 @@ from myquant.ml.training_pipeline import (
     time_series_cv_split,
 )
 from tests.conftest import make_ohlcv_df
-
 
 # ═══════════════════════════════════════════════
 #  常量 / 合成数据构造

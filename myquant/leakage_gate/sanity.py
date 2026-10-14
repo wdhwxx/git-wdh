@@ -25,13 +25,12 @@ shuffle-label 基线只重排已发生标签，不引入未来数据。
 from __future__ import annotations
 
 import ast
-import hashlib
 import json
 import logging
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from myquant.leakage_gate.contract import _load_ledger
 from myquant.leakage_gate.gate import Violation, register_gate_check

@@ -37,8 +37,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple, Union
-
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple, Union
 
 # ─────────────────────────────────────────────
 # 颜色支持

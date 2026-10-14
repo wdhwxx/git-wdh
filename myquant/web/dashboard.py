@@ -52,21 +52,16 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
 from myquant.core.logger import get_logger
-from myquant.monitoring.data_quality_explorer import DataQualityExplorer  # #S2修复：从monitoring底层导入，消除API依赖Web的架构倒置
+
 # G1 EX-15A：MonitorCenterDataProvider 下沉 monitoring（L6→L5 合法），re-export 保持兼容
-from myquant.monitoring.center_provider import MonitorCenterDataProvider
 # G1 EX-15A：脱敏/提示常量随 provider 下沉，re-export 保持兼容（__main__ 自测用）
 from myquant.monitoring.center_provider import (
-    _ACCOUNT_KEY_PATTERNS,
-    _BALANCE_KEY_PATTERNS,
-    _BROKER_CONN_HINTS,
-    _CREDENTIAL_KEY_PATTERNS,
-    _ENGINE_HEARTBEAT_HINTS,
-    _MARKET_ACTIVITY_HINTS,
-    _lower_key,
+    MonitorCenterDataProvider,
     mask_sensitive_fields,
 )
-
+from myquant.monitoring.data_quality_explorer import (
+    DataQualityExplorer,  # #S2修复：从monitoring底层导入，消除API依赖Web的架构倒置
+)
 
 logger = get_logger("web.dashboard")
 
@@ -1183,13 +1178,12 @@ def _run_self_test() -> int:
     try:
         from pathlib import Path
 
-        from myquant.database.connection import DatabaseConnection
         from myquant.core.field_crypto import FieldCrypto
+        from myquant.core.metrics_history import MetricsHistoryStore
+        from myquant.database.connection import DatabaseConnection
         from myquant.monitoring.metrics_collector import (
             BuiltinMetrics as _B2,
-            _today_start_ts,
         )
-        from myquant.core.metrics_history import MetricsHistoryStore
 
         conn = DatabaseConnection(str(Path(tmpdir) / "b2.db"))
         store = MetricsHistoryStore(connection=conn)

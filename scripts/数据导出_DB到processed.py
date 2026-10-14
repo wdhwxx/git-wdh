@@ -48,7 +48,6 @@ from myquant.utils.data_versioner import (
     assert_versions_compatible,
 )
 
-
 #: 英文列名 → 中文显示名（导出到 processed 时表头全中文）
 #: 下游回测加载器 myquant/backtest/data_loader.py 读取时会自动映射回英文列名，不影响回测
 CN_COLUMN_MAP: Dict[str, str] = {
@@ -227,9 +226,9 @@ def export_all(
 
         total = len(all_symbols)
         print(f"  DB 全量: {scope_stats['original']} → 规则内: {scope_stats['after']}")
-        print(f"=" * 60)
-        print(f"  quant.db → processed 完整导出")
-        print(f"=" * 60)
+        print("=" * 60)
+        print("  quant.db → processed 完整导出")
+        print("=" * 60)
         print(f"  数据库: {db_path}")
         print(f"  输出目录: {output_dir}")
         print(f"  标的总数: {total}")
@@ -340,7 +339,7 @@ def verify_all(db_path: Path, output_dir: Path) -> Dict:
         errors = []
 
         print(f"\n{'=' * 60}")
-        print(f"  完整性校验")
+        print("  完整性校验")
         print(f"{'=' * 60}")
 
         for i, symbol in enumerate(all_symbols, 1):
@@ -357,7 +356,7 @@ def verify_all(db_path: Path, output_dir: Path) -> Dict:
                 print(f"  [{i}/{total}] 通过={passed} 失败={failed}")
 
         if errors:
-            print(f"\n  ❌ 校验失败的标的（前20个）:")
+            print("\n  ❌ 校验失败的标的（前20个）:")
             for symbol, msg in errors[:20]:
                 print(f"    {symbol}: {msg}")
 
@@ -390,7 +389,7 @@ def main():
     stats = export_all(db_path, output_dir, force=args.force)
 
     print(f"\n{'=' * 60}")
-    print(f"  导出完成")
+    print("  导出完成")
     print(f"{'=' * 60}")
     print(f"  总数: {stats['total']}")
     print(f"  新导出: {stats['exported']}")
@@ -399,12 +398,12 @@ def main():
     print(f"  总耗时: {stats['duration']:.0f} 秒 ({stats['duration']/60:.1f} 分钟)")
 
     if stats['errors']:
-        print(f"\n  ❌ 失败的标的（前10个）:")
+        print("\n  ❌ 失败的标的（前10个）:")
         for symbol, err in stats['errors'][:10]:
             print(f"    {symbol}: {err}")
 
     # 自动校验
-    print(f"\n开始完整性校验...")
+    print("\n开始完整性校验...")
     verify_result = verify_all(db_path, output_dir)
     print(f"\n校验结果: 通过={verify_result['passed']}/{verify_result['total']}, 失败={verify_result['failed']}")
 

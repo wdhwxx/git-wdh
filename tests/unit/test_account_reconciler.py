@@ -31,7 +31,6 @@ from myquant.core.event_bus import Event, EventBus, EventType
 from myquant.live.portfolio import LivePortfolio
 from myquant.monitoring.account_reconciler import AccountReconciler
 
-
 # ═══════════════════════════════════════════════
 #  测试桩
 # ═══════════════════════════════════════════════

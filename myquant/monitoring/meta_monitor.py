@@ -27,7 +27,6 @@ meta_monitor.py - 监控自身可观测性（BASE-5 元监控）
 from __future__ import annotations
 
 import json
-import logging
 import os
 import threading
 import time
@@ -627,10 +626,10 @@ class MetaMonitor:
         if self._meta_manager is None:
             try:
                 from myquant.monitoring.alerting import (
+                    AlertGovernor,
                     AlertManager,
                     ConsoleAlertChannel,
                     LogAlertChannel,
-                    AlertGovernor,
                 )
                 manager = AlertManager(dedup_window_seconds=self._cooldown_seconds)
                 manager.add_channel(ConsoleAlertChannel(name="meta-console"))
@@ -994,13 +993,13 @@ def _run_self_test() -> int:
         else:
             failures.append(f"{name}: {info}")
 
-    from myquant.core.event_bus import Event, EventBus
-    from myquant.monitoring.alerting import AlertManager, LogAlertChannel
-    from myquant.monitoring.metrics_collector import MetricsCollector
-    from myquant.core.metrics_history import MetricsHistoryStore
-
     import tempfile
     from pathlib import Path
+
+    from myquant.core.event_bus import Event, EventBus
+    from myquant.core.metrics_history import MetricsHistoryStore
+    from myquant.monitoring.alerting import AlertManager, LogAlertChannel
+    from myquant.monitoring.metrics_collector import MetricsCollector
 
     # 1. 全组件注入（不触全局单例；时序库用临时文件，不碰真实 quant.db）
     bus = EventBus(max_history=100)

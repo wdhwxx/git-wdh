@@ -26,7 +26,6 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import pandas as pd
-import pytest
 
 # 路径配置
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -43,9 +42,9 @@ from conftest import (  # noqa: E402
     INDICATOR_THRESHOLD_MS,
 )
 
-from myquant.indicators.moving_average import SMA, EMA, WMA, MACD  # noqa: E402
-from myquant.indicators.momentum import RSI, KDJ  # noqa: E402
-from myquant.indicators.volatility import BollingerBands, ATR  # noqa: E402
+from myquant.indicators.momentum import KDJ, RSI  # noqa: E402
+from myquant.indicators.moving_average import EMA, MACD, SMA, WMA  # noqa: E402
+from myquant.indicators.volatility import ATR, BollingerBands  # noqa: E402
 
 
 def _to_dataframe(bars: List[Dict[str, Any]]) -> pd.DataFrame:

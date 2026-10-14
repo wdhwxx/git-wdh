@@ -31,7 +31,6 @@ field_crypto.py - 监控关键字段加密（BASE-9 监控数据加密与访问�
 
 from __future__ import annotations
 
-import base64
 import logging
 import os
 from pathlib import Path

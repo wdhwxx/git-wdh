@@ -19,7 +19,6 @@ python scripts/监控周复盘.py --no-capacity       # 不统计容量趋势
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 

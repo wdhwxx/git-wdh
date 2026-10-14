@@ -23,12 +23,12 @@ from __future__ import annotations
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 
-from myquant.database.connection import DatabaseConnection
 from myquant.core.alert_store import AlertStore
+from myquant.database.connection import DatabaseConnection
 from myquant.monitoring.alerting import (
     GOVERNANCE_SUPPRESSED_BASELINE,
     GOVERNANCE_SUPPRESSED_DEPENDENCY,
@@ -42,7 +42,6 @@ from myquant.monitoring.alerting import (
     weekly_alert_stats,
 )
 from myquant.monitoring.dynamic_baseline import DynamicBaseline
-
 
 # ═══════════════════════════════════════════════
 #  夹具与工具

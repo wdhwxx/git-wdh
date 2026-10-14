@@ -37,7 +37,6 @@ from typing import Callable, Dict, List
 
 from myquant.core.audit_log import AuditLogStore
 from myquant.realism_gate.manifest import (
-    ManifestIncompleteError,
     RealismGateError,
     RealismManifest,
     RealismViolation,

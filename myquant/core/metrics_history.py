@@ -36,17 +36,19 @@ import time
 from abc import ABC, abstractmethod
 from collections import deque
 from pathlib import Path
-from typing import Any, Callable, Deque, Dict, List, Optional, Union
+from typing import Any, Deque, Dict, List, Optional, Union
 
+from myquant.core.field_crypto import (
+    _SENSITIVE_NAME_PATTERNS as _SENSITIVE_NAME_PATTERNS_DEFAULT,
+)
+from myquant.core.field_crypto import (
+    is_sensitive_name,
+    mask_value,
+)
 from myquant.database.connection import DatabaseConnection, get_connection
 from myquant.database.schema import (
     CREATE_METRICS_HISTORY_INDEX_SQL,
     CREATE_METRICS_HISTORY_SQL,
-)
-from myquant.core.field_crypto import (
-    _SENSITIVE_NAME_PATTERNS as _SENSITIVE_NAME_PATTERNS_DEFAULT,
-    is_sensitive_name,
-    mask_value,
 )
 
 logger = logging.getLogger("myquant.core.metrics_history")

@@ -34,7 +34,6 @@ test_data_clean.py - 数据清洗单元测试 (折中档位2 v1 + 阶段9极端�
 from __future__ import annotations
 
 import json
-import math
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List
@@ -42,21 +41,23 @@ from typing import Any, Dict, List
 import pytest
 
 from myquant.data_access.cleaner.bar_cleaner import (
-    BarCleaner,
     DEFAULT_BAR_CONFIG,
+    BarCleaner,
     clean_bar_records,
 )
 from myquant.data_access.cleaner.base_cleaner import CleanerRegistry
 from myquant.data_access.cleaner.pipeline import run_clean_pipeline
 from myquant.data_access.cleaner.quality_reporter import generate_quality_report
-from myquant.data_access.cleaner.rules_loader import DEFAULT_CLEAN_CONFIG, load_clean_config
+from myquant.data_access.cleaner.rules_loader import (
+    DEFAULT_CLEAN_CONFIG,
+    load_clean_config,
+)
 from myquant.data_access.cleaner.tick_cleaner import (
     DEFAULT_TICK_CONFIG,
     TickCleaner,
     clean_tick_records,
 )
 from myquant.data_access.full_clean_service import FullCleanService
-
 
 # ═══════════════════════════════════════════
 #  Bar Cleaner 测试 (基础 v1)

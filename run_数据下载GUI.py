@@ -69,6 +69,7 @@ def main() -> int:
         sys.path.insert(0, str(project_root))
 
     from PySide6.QtWidgets import QApplication
+
     from myquant.gui.data_download_dialog import DataDownloadDialog
 
     app = QApplication(sys.argv)

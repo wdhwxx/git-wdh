@@ -11,7 +11,6 @@ processed 数据用合成 parquet（中文表头），因子用 stub，零网络
 from __future__ import annotations
 
 import pandas as pd
-import pytest
 
 from myquant.backtest.data_loader import HistoricalDataProvider
 

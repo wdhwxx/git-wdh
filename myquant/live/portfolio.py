@@ -56,7 +56,9 @@ from typing import Any, Callable, Dict, List, Optional
 from myquant.core.constants import SeverityLevel
 from myquant.core.logger import get_logger
 from myquant.models.trade import OrderSide, Position, Trade
-from myquant.risk.guardian import get_operation_guard  # G1 EX-12C：L4→L3 合法（准入守卫注册表访问器）
+from myquant.risk.guardian import (
+    get_operation_guard,  # G1 EX-12C：L4→L3 合法（准入守卫注册表访问器）
+)
 
 logger = get_logger("live.portfolio")
 

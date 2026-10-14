@@ -492,8 +492,6 @@ def _run_self_test() -> int:
         def alert(self, **kwargs: Any) -> None:
             self.alerts.append(kwargs)
 
-    import numpy as np
-    import pandas as pd
 
     fake_metrics = _FakeMetrics()
     fake_alerts = _FakeAlerts()

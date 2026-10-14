@@ -382,7 +382,8 @@ if __name__ == "__main__":
     def _make_equity(n_points: int, base: float = 1.0, vol: float = 0.01,
                      start_date: str = "2023-01-02") -> List[EquityPoint]:
         """构造模拟净值曲线（确定性伪随机，用于测试）。"""
-        from datetime import datetime as _dt, timedelta as _td
+        from datetime import datetime as _dt
+        from datetime import timedelta as _td
         rng = _np.random.default_rng(42)
         returns = rng.normal(0.0002, vol, n_points - 1)
         equity = base * _np.cumprod(1.0 + returns)

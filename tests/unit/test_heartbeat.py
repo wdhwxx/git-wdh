@@ -25,20 +25,19 @@ from typing import Any, Dict
 
 import pytest
 
-from myquant.core.event_bus import Event, EventBus
-from myquant.monitoring.alerting import AlertManager, LogAlertChannel
-from myquant.monitoring.metrics_collector import MetricsCollector
+from myquant.core.event_bus import EventBus
 from myquant.core.metrics_history import MetricsHistoryStore
+from myquant.monitoring.alerting import AlertManager, LogAlertChannel
 from myquant.monitoring.meta_monitor import (
     DEFAULT_HEARTBEAT_CONSECUTIVE_TIMEOUT,
     ExternalHeartbeatGuard,
     FileHeartbeatCarrier,
-    HeartbeatCarrier,
     HeartbeatWriter,
     MetaMonitor,
     WebhookHeartbeatCarrier,
     get_heartbeat_carrier,
 )
+from myquant.monitoring.metrics_collector import MetricsCollector
 
 
 @pytest.fixture()

@@ -8,8 +8,6 @@ D-8 元监控与灾备 单测
 """
 import json
 
-import pytest
-
 from myquant.acceptance.disaster_drill import DisasterDrillRunner
 from myquant.monitoring.meta_monitor import (
     ExternalHeartbeatGuard,
@@ -52,7 +50,7 @@ class TestRabbitmqDurability:
         # 手动验证内容一致：调用底层持久化载体
         log = runner.work_dir / "durable_mq.log"
         # 通过完整演练产生日志，然后回读对比
-        res = runner.verify_rabbitmq_durability(n_messages=3)
+        runner.verify_rabbitmq_durability(n_messages=3)
         lines = [ln for ln in log.read_text(encoding="utf-8").splitlines() if ln.strip()]
         assert len(lines) == 3
         assert all(ln.startswith("msg-") for ln in lines)
@@ -97,9 +95,9 @@ class TestChannelFailover:
 class TestHeartbeatNoFalsePositive:
     def test_single_jitter_not_dead(self):
         """临界网络抖动（单次超时）→ degraded 不判死主进程（R-08）。"""
-        guard = ExternalHeartbeatGuard(
+        ExternalHeartbeatGuard(
             interval_seconds=1.0, consecutive_timeout=3, timeout_factor=2.0)
-        carrier = FileHeartbeatCarrier(directory=str(
+        FileHeartbeatCarrier(directory=str(
             DisasterDrillRunner().work_dir / "hb"))
         # 使用演练 runner 的方式验证
         runner = DisasterDrillRunner()

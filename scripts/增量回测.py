@@ -39,7 +39,7 @@
 import argparse
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 
 def find_project_root() -> Path:
@@ -173,7 +173,7 @@ def main() -> int:
     if args.demo:
         # 演示流程：首次全量 → 修改一标的 → 增量只重算变更
         bt1 = _make_backtester()
-        r1 = _run_once(timer, bt1, "首次运行", force_full=True)
+        _run_once(timer, bt1, "首次运行", force_full=True)
 
         # 模拟数据更新：修改最后一个标的最后一日收盘价
         demo_symbol = symbols[-1]

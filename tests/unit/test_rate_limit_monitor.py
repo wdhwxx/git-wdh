@@ -13,10 +13,10 @@ import pytest
 
 from myquant.core.constants import SeverityLevel
 from myquant.monitoring.rate_limit_monitor import (
-    ExchangeRateLimitMonitor,
+    ACTION_CANCEL,
     ACTION_ORDER,
     ACTION_QUERY,
-    ACTION_CANCEL,
+    ExchangeRateLimitMonitor,
 )
 
 

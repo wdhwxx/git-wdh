@@ -22,7 +22,6 @@ from myquant.allocation.risk_parity import (
     REALLOC_STATUS_PROPOSED,
     REALLOC_STATUS_REJECTED,
     REALLOC_STATUS_ROLLED_BACK,
-    ReallocationRecord,
     RiskBudgetReallocator,
 )
 from myquant.monitoring.action_engine import (
@@ -33,7 +32,6 @@ from myquant.monitoring.action_engine import (
     ReallocateRiskBudgetExecutor,
     get_action_executor,
 )
-
 
 # ── 测试辅助 ──────────────────────────────────────────────────
 

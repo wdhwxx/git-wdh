@@ -29,14 +29,14 @@ from typing import Any, Dict, List
 
 import pytest
 
+from myquant.core.alert_store import AlertStore
 from myquant.core.constants import SeverityLevel
 from myquant.core.event_bus import Event, EventBus, EventType
-from myquant.core.alert_store import AlertStore
 from myquant.monitoring.alerting import AlertManager
 from myquant.monitoring.incident_context import (
     CATEGORY_INCIDENT,
-    DEFAULT_DEPENDENCY_MAP,
     DEDUP_INCIDENT_PREFIX,
+    DEFAULT_DEPENDENCY_MAP,
     METRIC_INCIDENT_SUPPRESSED_TOTAL,
     METRIC_INCIDENT_TOTAL,
     REGISTERED_METRICS,

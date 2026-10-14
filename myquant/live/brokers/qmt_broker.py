@@ -1578,7 +1578,7 @@ class QmtBroker(BaseBroker):
             )
             trader = XtQuantTrader(self._qmt_path, self._qmt_session_id)
             account = StockAccount(self._account_id)
-            callback = _QmtCallbackHandler(self)
+            _QmtCallbackHandler(self)
 
             # 动态创建继承官方回调基类的处理器（满足协议且绑定 broker 引用）
             LiveCallbackCls = type(

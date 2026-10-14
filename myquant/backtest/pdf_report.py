@@ -39,12 +39,11 @@ from datetime import datetime
 from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
-
 from fpdf import FPDF
 
 from myquant.backtest.monte_carlo import MonteCarloAnalyzer, MonteCarloResult
 from myquant.core.logger import get_logger
-from myquant.models.backtest import BacktestResult, EquityPoint, TradeRecord
+from myquant.models.backtest import BacktestResult, EquityPoint
 
 logger = get_logger(__name__)
 

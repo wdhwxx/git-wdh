@@ -370,7 +370,7 @@ class MonteCarloAnalyzer:
         返回:
             (quantile_equity, percentiles): 分位路径矩阵 + 对应分位列表
         """
-        pcts = sorted(p for p in percentiles)
+        sorted(p for p in percentiles)
         result = self.analyze(equity_curve)
         return result.quantile_equity, result.quantile_percentiles
 

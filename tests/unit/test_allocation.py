@@ -29,7 +29,7 @@ test_allocation.py - 资产配置模块单元测试
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Dict, List
 
 import numpy as np
 import pandas as pd
@@ -43,7 +43,6 @@ from myquant.allocation import (
     RiskParityAllocator,
     TargetVolatilityAllocator,
 )
-
 
 # ═══════════════════════════════════════════
 #  辅助函数

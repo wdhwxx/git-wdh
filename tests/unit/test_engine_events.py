@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import time
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import pytest
 
@@ -40,7 +40,6 @@ from myquant.models.market_data import Bar, BarFrequency
 from myquant.models.trade import Order, OrderSide, OrderStatus, Position, Trade
 from myquant.monitoring.metrics_collector import BuiltinMetrics, MetricsCollector
 from myquant.strategies.base import Signal, SignalType
-
 
 # ═══════════════════════════════════════════
 #  通用 fake

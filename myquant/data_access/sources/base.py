@@ -29,7 +29,7 @@ import threading
 from abc import ABC, abstractmethod
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Callable, Dict, List, Optional, Set
 
 from myquant.core.logger import get_logger
 
@@ -296,7 +296,7 @@ class DataSourceBase(ABC):
                 results[symbol] = self.get_market_data(
                     symbol, start_date, end_date, period, adjust
                 )
-            except Exception as e:
+            except Exception:
                 # 单只失败不影响其他
                 results[symbol] = MarketDataResult(symbol, [], source=self.name)
         return results
@@ -357,13 +357,14 @@ class DataSourceBase(ABC):
 
         【防未来函数】end_date 之后的日期不返回
         """
-        from datetime import date, timedelta
+        from datetime import timedelta
         start = datetime.strptime(start_date, "%Y-%m-%d").date()
         end = datetime.strptime(end_date, "%Y-%m-%d").date()
 
         # 真实交易日历（缓存由 scripts/同步交易日历.py 维护）
         try:
             from pathlib import Path as _Path
+
             from myquant.utils.trade_calendar import load_trade_calendar
 
             project_root = _Path(__file__).resolve().parents[3]

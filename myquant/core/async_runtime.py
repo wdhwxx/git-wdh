@@ -18,7 +18,7 @@ import asyncio
 import logging
 import signal
 import threading
-from typing import Any, Callable, Coroutine, List, Optional, Set
+from typing import Any, Callable, Coroutine, Optional, Set
 
 logger = logging.getLogger("myquant.async_runtime")
 

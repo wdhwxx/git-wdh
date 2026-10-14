@@ -31,18 +31,18 @@ tdx_source.py - 通达信本地数据源
 
 from __future__ import annotations
 
-import os
 import struct
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
+
+from myquant.core.logger import get_logger
 
 from .base import (
     DataSourceBase,
     DataSourceStatus,
     MarketDataResult,
 )
-from myquant.core.logger import get_logger
 
 logger = get_logger("data_access.tdx_source")
 
@@ -373,7 +373,7 @@ class TdxDataSource(DataSourceBase):
                 period=period,
                 adjust=adjust,
             )
-        except Exception as e:
+        except Exception:
             self._record_failure()
             return MarketDataResult(symbol, [], source=self.name)
 

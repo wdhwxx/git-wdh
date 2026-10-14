@@ -18,16 +18,13 @@ myquant/ml/inference_service.py 短 TTL 结果缓存：
 from __future__ import annotations
 
 import time
-from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from myquant.ml.features import FeatureConfig, FeatureEngine, IncrementalFeatureSession
 from myquant.ml.inference_service import InferenceService
-
 from tests.conftest import make_ohlcv_df
 
 # ─────────────────────────────────────────────
@@ -183,7 +180,7 @@ class TestFallback:
         sess.update(df200)
         # 喂更短数据应自动重置 warmup
         df50, _ = _make_df(50)
-        inc = sess.update(df50)
+        sess.update(df50)
         assert sess.rows_fed == 50
 
 

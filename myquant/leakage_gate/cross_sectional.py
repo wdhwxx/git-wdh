@@ -34,7 +34,6 @@ import logging
 from pathlib import Path
 from typing import Any, List, Optional
 
-from myquant.leakage_gate.contract import _load_ledger
 from myquant.leakage_gate.gate import Violation, register_gate_check
 from myquant.leakage_gate.signal_words import is_full_sample_receiver
 
@@ -153,7 +152,7 @@ def validate_cross_sectional_panel(
     if date_col is None and isinstance(panel.index, pd.DatetimeIndex):
         date_col = "index"
     if date_col is None:
-        return [f"横截面面板缺少日期列（尝试 date/trade_date/日期/timestamp 均未找到）"]
+        return ["横截面面板缺少日期列（尝试 date/trade_date/日期/timestamp 均未找到）"]
 
     if date_col == "index":
         dates = panel.index

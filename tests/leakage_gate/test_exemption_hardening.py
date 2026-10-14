@@ -22,7 +22,6 @@ import pytest
 import myquant.leakage_gate.exemption as ex
 from myquant.leakage_gate.gate import Violation
 
-
 NOW = datetime(2026, 10, 10).replace(hour=0, minute=0, second=0, microsecond=0)
 
 

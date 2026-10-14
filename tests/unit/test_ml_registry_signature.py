@@ -27,7 +27,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Tuple
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -46,9 +46,7 @@ from myquant.ml.training_pipeline import (
     _max_drawdown,
     evaluate_model,
 )
-
 from tests.conftest import make_ohlcv_df
-
 
 # ═══════════════════════════════════════════════
 #  常量 / 合成数据 / fixtures

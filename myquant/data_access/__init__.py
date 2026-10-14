@@ -17,7 +17,23 @@ __version__ = "0.2.0"
 __author__ = "Pythonwdhmm"
 
 # ── 原有核心导出（保持向后兼容）──
+from .factory import (
+    create_default_fetcher,
+    create_fetcher,
+    detect_tdx_available,
+    get_available_sources,
+)
 from .fetcher import DataFetcher
+
+# ── V5回测性能优化新增 ──
+from .loader import (
+    DEFAULT_CHUNK_DAYS,
+    DEFAULT_CRITICAL_PCT,
+    DEFAULT_PREFETCH_COUNT,
+    DEFAULT_WARNING_PCT,
+    LoadStats,
+    OptimizedDataLoader,
+)
 from .manager import (
     DataManager,
     DatasetVersion,
@@ -25,27 +41,11 @@ from .manager import (
     DatasetVersionNotFoundError,
     DataVersionIntegrityError,
 )
-from .factory import (
-    create_default_fetcher,
-    create_fetcher,
-    get_available_sources,
-    detect_tdx_available,
-)
+from .sources import CompositeDataSource
 from .sources.base import (
     DataSourceBase,
     DataSourceStatus,
     MarketDataResult,
-)
-from .sources import CompositeDataSource
-
-# ── V5回测性能优化新增 ──
-from .loader import (
-    OptimizedDataLoader,
-    LoadStats,
-    DEFAULT_PREFETCH_COUNT,
-    DEFAULT_CHUNK_DAYS,
-    DEFAULT_WARNING_PCT,
-    DEFAULT_CRITICAL_PCT,
 )
 
 __all__ = [

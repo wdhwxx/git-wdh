@@ -35,7 +35,6 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Optional
 
 
 def find_project_root() -> Path:
@@ -121,14 +120,14 @@ def check_database_status(db_path: Path) -> int:
 
     try:
         from myquant.database.connection import DatabaseConnection
-        from myquant.database.schema import table_exists, TABLE_NAMES
         from myquant.database.migrations import MigrationManager
+        from myquant.database.schema import TABLE_NAMES, table_exists
 
         conn = DatabaseConnection(db_path)
         conn.connect()
 
         # 检查各表是否存在
-        print(f"  数据表检查：")
+        print("  数据表检查：")
         existing_count = 0
         for table_name in TABLE_NAMES.values():
             exists = table_exists(conn, table_name)
@@ -145,7 +144,7 @@ def check_database_status(db_path: Path) -> int:
             version = manager.current_version()
             print(f"  数据库版本：v{version}")
         except Exception:
-            print(f"  数据库版本：未初始化")
+            print("  数据库版本：未初始化")
 
         conn.close()
     except ImportError as e:
@@ -212,8 +211,8 @@ def run_database_init(args: argparse.Namespace) -> int:
     # 导入数据库层
     try:
         from myquant.database.connection import DatabaseConnection
-        from myquant.database.schema import create_all_tables, TABLE_NAMES
         from myquant.database.migrations import migrate_to_latest
+        from myquant.database.schema import TABLE_NAMES, create_all_tables
     except ImportError as e:
         print(f"[错误] 导入 myquant.database 失败：{e}")
         print("  请先运行：pip install -e \".[dev]\"")
@@ -249,8 +248,8 @@ def run_database_init(args: argparse.Namespace) -> int:
         print_banner("导入A股股票列表")
         try:
             from myquant.data_access import DataFetcher
-            from myquant.data_access.sources.tdx_source import TdxDataSource
             from myquant.data_access.sources.akshare_source import AkshareDataSource
+            from myquant.data_access.sources.tdx_source import TdxDataSource
 
             fetcher = DataFetcher()
             # 优先通达信本地

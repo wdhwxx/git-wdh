@@ -90,8 +90,8 @@ class TestGateImportable:
 
     def test_importable(self):
         from myquant.realism_gate.gate import (
-            RealismGateConfig, assert_realism_pass, register_realism_check,
-            reset_realism_checks, get_config, set_config,
+            assert_realism_pass,
+            register_realism_check,
         )
         assert callable(assert_realism_pass)
         assert callable(register_realism_check)
@@ -118,9 +118,9 @@ class TestChecksImportable:
 
     def test_checks_registration_on_import(self):
         """四检查器函数可调用（注册在模块导入时完成；此处验证函数本身可导入）。"""
-        from myquant.realism_gate.checks.market_rules import check_market_rules
         from myquant.realism_gate.checks.cost_model import check_cost_model
         from myquant.realism_gate.checks.data_pit import check_data_pit
+        from myquant.realism_gate.checks.market_rules import check_market_rules
         from myquant.realism_gate.checks.sample_pool import check_sample_pool
         assert callable(check_market_rules)
         assert callable(check_cost_model)
@@ -132,7 +132,10 @@ class TestReportImportable:
     """R-19 收录：report.py 被 tests import。"""
 
     def test_report_importable(self):
-        from myquant.realism_gate.report import write_blocked_artifact, write_manifest_to_results
+        from myquant.realism_gate.report import (
+            write_blocked_artifact,
+            write_manifest_to_results,
+        )
         assert callable(write_blocked_artifact)
         assert callable(write_manifest_to_results)
 
@@ -253,7 +256,7 @@ class TestAssertPass:
         m = RealismManifest()
         _fill_minimal(m)
         m.set_field("price_limit.pre_close_source", "invalid_value")
-        with pytest.raises(RealismGateError) as exc:
+        with pytest.raises(RealismGateError):
             assert_realism_pass(m)
 
 

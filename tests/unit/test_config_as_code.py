@@ -13,7 +13,6 @@ import json
 
 import pytest
 
-from myquant.core.constants import SeverityLevel
 from myquant.core.alert_store import AlertStore
 from myquant.monitoring.alerting import AlertManager
 from myquant.monitoring.config_as_code import (

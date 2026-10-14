@@ -38,7 +38,6 @@ from myquant.live.portfolio import LivePortfolio
 from myquant.live.state_store import StateStore
 from myquant.models.trade import Order, OrderSide, OrderStatus, OrderType
 
-
 # ═══════════════════════════════════════════════
 #  FakeBroker - 可编程测试券商（带券商端委托簿）
 # ═══════════════════════════════════════════════

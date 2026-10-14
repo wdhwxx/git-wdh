@@ -46,7 +46,7 @@ circuit_breaker.py - 熔断线（B-6，EVENT 触发 / R-02）
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from myquant.core.constants import SeverityLevel
@@ -719,9 +719,9 @@ def _run_self_test() -> int:
     import tempfile
     from pathlib import Path
 
+    from myquant.core.audit_log import AuditLogStore
     from myquant.core.event_bus import EventBus
     from myquant.database.connection import DatabaseConnection
-    from myquant.core.audit_log import AuditLogStore
     from myquant.risk.risk_manager import RiskManager
 
     passed = 0

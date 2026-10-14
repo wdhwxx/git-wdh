@@ -40,7 +40,7 @@ import os
 import subprocess
 import sys
 import threading
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -60,7 +60,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QDoubleSpinBox,
     QFormLayout,
-    QFrame,
     QGraphicsDropShadowEffect,
     QGroupBox,
     QHBoxLayout,

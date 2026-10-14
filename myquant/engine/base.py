@@ -20,7 +20,7 @@ __version__ = "0.1.0"
 __author__ = "Pythonwdhmm"
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from myquant.core.logger import get_logger
 from myquant.models.market_data import MarketEvent

@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import struct
 
-import pytest
-
 from myquant.data_access.sources.tdx_source import TdxDataSource
 
 

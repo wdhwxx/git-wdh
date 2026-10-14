@@ -27,10 +27,10 @@
 from __future__ import annotations
 
 import itertools
-from functools import partial
 import logging
 import time
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -39,11 +39,11 @@ import pandas as pd
 from myquant.backtest.data_loader import require_ohlcv
 from myquant.backtest.engine import BacktestScheduler, register_broker_factory
 from myquant.models.backtest import BacktestConfig
+from myquant.realism_gate.signature_guard import assert_uniform_signature
 from myquant.strategies.base import StrategyBase
 from myquant.strategies.ma_strategy import MACrossStrategy
 from myquant.utils.parallel import parallel_factor_context
 from myquant.utils.timer import format_duration
-from myquant.realism_gate.signature_guard import assert_uniform_signature
 
 logger = logging.getLogger("myquant.backtest.param_optimizer")
 

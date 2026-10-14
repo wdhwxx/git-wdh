@@ -44,8 +44,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from myquant.core.logger import get_logger
-from myquant.utils.file_utils import get_project_path
 from myquant.data_access.cleaner.base_cleaner import CleanRule
+from myquant.utils.file_utils import get_project_path
 
 logger = get_logger("data_clean.rules_loader")
 

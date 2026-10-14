@@ -21,8 +21,8 @@ TODO(后续迭代):
 """
 
 from myquant.allocation.base import (
-    AllocationResult,
     AllocationConstraints,
+    AllocationResult,
     AllocatorBase,
 )
 from myquant.allocation.equal_weight import EqualWeightAllocator

@@ -25,7 +25,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from myquant.monitoring.config_as_code import KNOWN_ITEMS, MonitoringConfigRegistry  # noqa: E402
+from myquant.monitoring.config_as_code import (  # noqa: E402
+    MonitoringConfigRegistry,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Deque, Dict, List, Optional, Set, Union
 
-from myquant.core.exceptions import EventError, EventHandlerError
+from myquant.core.exceptions import EventError
 
 logger = logging.getLogger("myquant.event_bus")
 
@@ -1709,7 +1709,7 @@ class EventBus:
         -------
         Event | None : 接收到的事件，超时返回 None
         """
-        type_name = event_type.value if isinstance(event_type, EventType) else event_type
+        event_type.value if isinstance(event_type, EventType) else event_type
         wait_event = threading.Event()
         result: Dict[str, Optional[Event]] = {"event": None}
 

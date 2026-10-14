@@ -36,7 +36,6 @@ from myquant.web.dashboard import (  # noqa: E402  # web 层 re-export 兼容性
     mask_sensitive_fields,
 )
 
-
 # ═══════════════════════════════════════════════
 #  fakes
 # ═══════════════════════════════════════════════

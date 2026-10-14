@@ -42,7 +42,6 @@ __author__ = "Pythonwdhmm"
 import time
 from typing import Any, Callable, ClassVar, Dict, List, Optional
 
-import numpy as np
 import pandas as pd
 
 from myquant.backtest.assembly import (  # re-export register_broker_factory（外部调用方经 engine 导入，P0-00A 迁至 assembly.py）
@@ -64,7 +63,7 @@ from myquant.models.backtest import BacktestConfig, BacktestResult, EquityPoint
 from myquant.models.market_data import Bar, MarketEvent
 from myquant.models.trade import OrderType
 from myquant.risk.rules import RiskContext  # KP-P3-07: 回测复用实盘风控上下文
-from myquant.strategies.base import Signal, SignalType, StrategyBase, StrategyContext
+from myquant.strategies.base import Signal, StrategyBase, StrategyContext
 
 logger = get_logger(__name__)
 
@@ -113,6 +112,7 @@ def _attach_realism_manifest(
     Raises:
         RealismGateError: enabled=True 且存在 critical 违规（入口阻断）。
     """
+    import myquant.realism_gate.checks  # noqa: F401 导入即注册检查器
     from myquant.realism_gate import (
         RealismGateConfig,
         RealismGateError,
@@ -121,7 +121,6 @@ def _attach_realism_manifest(
         assert_realism_pass,
         set_config,
     )
-    import myquant.realism_gate.checks  # noqa: F401 导入即注册检查器
 
     _kwargs: Dict[str, Any] = engine_kwargs or {}
     cfg_dict = config.to_dict() if hasattr(config, "to_dict") else {}
@@ -1069,8 +1068,10 @@ class BacktestEngine(BaseEngine):
             from myquant.realism_gate.invariants import (
                 TradeRecord,
                 build_position_timeline_bar_states,
-                build_portfolio_bar_states as _bp,
                 check_result_invariants,
+            )
+            from myquant.realism_gate.invariants import (
+                build_portfolio_bar_states as _bp,
             )
         except ImportError:
             logger.debug("realism_gate.invariants 未就绪，跳过 P1-15 校验")

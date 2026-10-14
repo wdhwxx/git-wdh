@@ -15,12 +15,12 @@
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import pytest
 
-from myquant.data_access.sources.broker_source import BrokerDataSource
 from myquant.data_access.sources.base import DataSourceStatus
+from myquant.data_access.sources.broker_source import BrokerDataSource
 
 
 class TestConstruction:

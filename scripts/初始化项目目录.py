@@ -379,7 +379,7 @@ def main() -> int:
 
     # 正常模式：创建目录
     try:
-        stats = initialize_directories(
+        initialize_directories(
             project_root=project_root,
             groups=groups,
             dry_run=args.dry_run,
@@ -423,7 +423,7 @@ def run_self_test() -> None:
     root = find_project_root()
     print(f"    项目根: {root}")
     assert (root / "pyproject.toml").exists(), "pyproject.toml 应存在"
-    print(f"    ✓ pyproject.toml 存在")
+    print("    ✓ pyproject.toml 存在")
 
     # 2. 获取全部目录列表（纯函数测试）
     print("\n[2] 获取全部目录列表")
@@ -432,7 +432,7 @@ def run_self_test() -> None:
     assert len(all_dirs) > 0, "目录列表不应为空"
     assert "cache/factor" in all_dirs
     assert "cache/fingerprint" in all_dirs
-    print(f"    ✓ 目录列表非空，包含 cache 子目录")
+    print("    ✓ 目录列表非空，包含 cache 子目录")
 
     # 3. 组筛选
     print("\n[3] 组筛选 (仅 cache 组)")
@@ -440,15 +440,15 @@ def run_self_test() -> None:
     print(f"    cache 组共 {len(cache_dirs)} 个目录")
     assert len(cache_dirs) == 6
     assert "logs" not in cache_dirs, "cache 组不应包含 logs"
-    print(f"    ✓ 组筛选正确")
+    print("    ✓ 组筛选正确")
 
     # 4. 未知组名校验
     print("\n[4] 未知组名校验")
     try:
         get_directories_for_groups(["nonexistent_group"])
         assert False, "应抛出 ValueError"
-    except ValueError as e:
-        print(f"    ✓ 正确抛出 ValueError")
+    except ValueError:
+        print("    ✓ 正确抛出 ValueError")
 
     # 5. 使用临时目录测试实际创建
     print("\n[5] 临时目录测试 — 创建 cache 组")
@@ -463,7 +463,7 @@ def run_self_test() -> None:
         for d in cache_dirs:
             assert (tmp_root / d).is_dir(), f"目录应存在: {d}"
             assert (tmp_root / d / ".gitkeep").exists(), f".gitkeep 应存在: {d}"
-        print(f"    ✓ 6 个目录及 .gitkeep 全部创建")
+        print("    ✓ 6 个目录及 .gitkeep 全部创建")
 
         # 6. 幂等验证
         print("\n[6] 幂等验证（重复执行）")
@@ -471,7 +471,7 @@ def run_self_test() -> None:
         print(f"    重复统计: {stats2}")
         assert stats2["created"] == 0, "重复执行不应有新建目录"
         assert stats2["skipped"] == 6, "重复执行应全部跳过"
-        print(f"    ✓ 幂等性验证通过（新建数=0）")
+        print("    ✓ 幂等性验证通过（新建数=0）")
 
         # 7. dry-run 验证
         print("\n[7] dry-run 验证（不实际创建）")
@@ -482,14 +482,14 @@ def run_self_test() -> None:
         )
         assert is_new is True, "dry-run 应报告为新建"
         assert not (tmp_root / new_dir).exists(), "dry-run 不应实际创建目录"
-        print(f"    ✓ dry-run 不实际创建目录")
+        print("    ✓ dry-run 不实际创建目录")
 
         # 8. 校验功能
         print("\n[8] 校验功能")
         existing, missing = verify_directories(tmp_root, groups=["cache"])
         print(f"    存在: {len(existing)}, 缺失: {len(missing)}")
         assert len(missing) == 0, f"不应有缺失目录: {missing}"
-        print(f"    ✓ 全部 cache 目录校验通过")
+        print("    ✓ 全部 cache 目录校验通过")
 
         # 9. 校验缺失检测
         print("\n[9] 缺失目录检测")

@@ -25,18 +25,16 @@ from typing import Any, Dict, List
 
 import pytest
 
-from myquant.database.connection import DatabaseConnection, DEFAULT_PRAGMAS
 from myquant.core.metrics_history import (
-    DEFAULT_DOWNSAMPLE_INTERVAL_SECONDS,
+    _EXPORTER_REGISTRY,
     DEFAULT_QUEUE_LIMIT,
     DownsamplingTask,
-    MAX_BATCH_SIZE,
     MetricExporter,
     MetricsHistoryStore,
     NullMetricExporter,
-    _EXPORTER_REGISTRY,
     get_exporter,
 )
+from myquant.database.connection import DEFAULT_PRAGMAS, DatabaseConnection
 
 
 @pytest.fixture()

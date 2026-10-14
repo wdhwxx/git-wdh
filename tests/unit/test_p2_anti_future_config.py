@@ -12,7 +12,6 @@ import types
 from pathlib import Path
 
 import pandas as pd
-import pytest
 
 from myquant.data_access.cleaner.derived_metrics import compute_derived_metrics
 from myquant.data_access.financial_sync_service import _load_financial_exclude_rules

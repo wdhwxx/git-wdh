@@ -42,13 +42,10 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 # L4修复：配置构建业务逻辑下沉 myquant.backtest.config_builder（入口薄化）
 from myquant.backtest.config_builder import (
-    apply_exclude_prefixes,
     build_backtest_config,
-    load_stock_pool_from_csv,
 )
 
 
@@ -269,7 +266,7 @@ def run_backtest(args: argparse.Namespace) -> int:
 
     # ── 5. 动态发现并实例化策略 ──
     try:
-        from myquant.strategies.registry import discover_strategies, create_strategy
+        from myquant.strategies.registry import create_strategy, discover_strategies
         discover_strategies()
         strategy = create_strategy(
             bt_config.strategy_name,
@@ -390,7 +387,7 @@ def run_backtest(args: argparse.Namespace) -> int:
         logger.info("防未来函数校验通过")
     except Exception as e:
         logger.error(f"防未来函数校验未通过: {e}")
-        print(f"[错误] 防未来函数校验未通过！回测结果不可信。")
+        print("[错误] 防未来函数校验未通过！回测结果不可信。")
         print(f"       {e}")
         return 3
 

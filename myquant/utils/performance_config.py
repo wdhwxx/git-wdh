@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from myquant.utils.memory_watcher import get_memory_watcher

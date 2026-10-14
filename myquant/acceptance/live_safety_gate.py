@@ -621,7 +621,11 @@ class LiveSafetyGateRunner:
         human 角色 reviewer 缺失则拒绝；审计保留（actor_type 记录）。"""
         from myquant.api.middleware.auth import OperationGuard
         from myquant.risk import RiskManager
-        from myquant.risk.guardian import RiskGuardian, get_operation_guard, register_operation_guard
+        from myquant.risk.guardian import (
+            RiskGuardian,
+            get_operation_guard,
+            register_operation_guard,
+        )
 
         with tempfile.TemporaryDirectory() as tmp:
             cfg_path = Path(tmp) / "admission.yaml"
@@ -1049,7 +1053,11 @@ class LiveSafetyGateRunner:
             from myquant.execution.sim_broker import SimBroker
             from myquant.models.backtest import BacktestConfig
             from myquant.strategies.base import (
-                Bar, Signal, SignalType, StrategyBase, StrategyContext,
+                Bar,
+                Signal,
+                SignalType,
+                StrategyBase,
+                StrategyContext,
             )
 
             # G1 EX-09A：装配撮合执行器工厂（scripts/验收_回测引擎V5.py 同源方式）
@@ -1448,9 +1456,9 @@ class LiveSafetyGateRunner:
         broker = QmtBroker(qmt_path="", mode="SIM", initial_capital=1_000_000.0)
         broker.connect()
         o = Order(symbol="000001.SZ", side=OrderSide.BUY, quantity=100, price=10.0)
-        r1 = broker.submit_order(o)
-        r2 = broker.submit_order(o)  # 同 order_id 重发
-        r3 = broker.submit_order(o)
+        broker.submit_order(o)
+        broker.submit_order(o)  # 同 order_id 重发
+        broker.submit_order(o)
         dedup = int(broker._stats.get("dedup_skipped", 0))
         one_order = len(broker.get_orders()) == 1
         return {

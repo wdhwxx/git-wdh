@@ -61,11 +61,9 @@ import pandas as pd
 
 from myquant.core.logger import get_logger
 from myquant.indicators.factor_preprocessor import (
-    PreprocessReport,
     preprocess_panel,
 )
 from myquant.indicators.factor_validator import (
-    FACTOR_ECONOMIC_LOGIC,
     FactorProfile,
     ic_weighted_weights,
     validate_factor_logic,
@@ -77,9 +75,12 @@ from myquant.indicators.tradability import (
 )
 from myquant.leakage_gate.cross_sectional import CrossSectionalAsOfError, validate_asof
 from myquant.models.market_data import Bar
-from myquant.models.trade import OrderSide, OrderType, Position
+from myquant.models.trade import Position
 from myquant.strategies.base import (
-    Signal, SignalType, StrategyBase, StrategyContext,
+    Signal,
+    SignalType,
+    StrategyBase,
+    StrategyContext,
 )
 from myquant.strategies.registry import register_strategy
 

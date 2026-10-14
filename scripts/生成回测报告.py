@@ -178,7 +178,7 @@ def main() -> int:
 
     # ── 4. 动态发现并实例化策略 ──
     try:
-        from myquant.strategies.registry import discover_strategies, create_strategy
+        from myquant.strategies.registry import create_strategy, discover_strategies
         discover_strategies()
         strategy = create_strategy(bt_config.strategy_name, **bt_config.params)
         print(f"[策略] 实例化完成: {strategy.name}")

@@ -678,7 +678,7 @@ if __name__ == "__main__":
         }, index=dates)
         df.index.name = "date"
         df.to_parquet(processed_dir / f"{symbol}.parquet")
-    print(f"    测试数据: 2 个标的 x 100 根K线")
+    print("    测试数据: 2 个标的 x 100 根K线")
     print(f"    临时目录: {tmp_root}")
 
     # ── 测试 2: 首次同步（全部为新增） ──
@@ -699,7 +699,7 @@ if __name__ == "__main__":
     assert result1.total_scanned == 2
     assert len(result1.changed_symbols) == 2  # 首次全部视为变更
     assert result1.fingerprints_updated == 2
-    print(f"    ✓ 首次同步正常")
+    print("    ✓ 首次同步正常")
 
     # ── 测试 3: 二次同步（数据未变更） ──
     print("\n[3] 二次同步（数据未变更，应无变更）")
@@ -710,7 +710,7 @@ if __name__ == "__main__":
     assert result2.total_scanned == 2
     assert len(result2.changed_symbols) == 0
     assert result2.unchanged_symbols == 2
-    print(f"    ✓ 未变更数据不触发缓存失效")
+    print("    ✓ 未变更数据不触发缓存失效")
 
     # ── 测试 4: 修改数据后同步（应检测到变更） ──
     print("\n[4] 修改数据后同步（应检测到变更）")
@@ -724,7 +724,7 @@ if __name__ == "__main__":
     print(f"    缓存失效: {result3.cache_invalidated} 个标的, {result3.cache_entries_removed} 条")
     assert "TEST001.SZ" in result3.changed_symbols
     assert "TEST002.SZ" not in result3.changed_symbols
-    print(f"    ✓ 变更检测正确（仅 TEST001.SZ 变更）")
+    print("    ✓ 变更检测正确（仅 TEST001.SZ 变更）")
 
     # ── 测试 5: 单标的同步 ──
     print("\n[5] 单标的同步测试")
@@ -733,7 +733,7 @@ if __name__ == "__main__":
     print(f"    变更: {len(result4.changed_symbols)}")
     assert result4.total_scanned == 1
     assert len(result4.changed_symbols) == 0  # TEST002 未变更
-    print(f"    ✓ 单标的同步正常")
+    print("    ✓ 单标的同步正常")
 
     # ── 测试 6: 缓存状态查询 ──
     print("\n[6] 缓存状态查询")
@@ -742,7 +742,7 @@ if __name__ == "__main__":
     print(f"    L2 文件数: {status['l2_file_count']}")
     print(f"    L2 大小: {status['l2_size_mb']} MB")
     assert status["fingerprint_store"]["symbol_count"] == 2
-    print(f"    ✓ 缓存状态查询正常")
+    print("    ✓ 缓存状态查询正常")
 
     # ── 测试 7: 指纹信息查询 ──
     print("\n[7] 指纹信息查询")
@@ -752,19 +752,19 @@ if __name__ == "__main__":
     print(f"    行数: {fp_info['row_count']}")
     print(f"    日期范围: {fp_info['date_range']}")
     print(f"    哈希: {fp_info['hash'][:16]}...")
-    print(f"    ✓ 指纹信息查询正常")
+    print("    ✓ 指纹信息查询正常")
 
     # ── 测试 8: 手动失效指定标的 ──
     print("\n[8] 手动失效指定标的缓存")
     removed = manager.invalidate_symbol("TEST001.SZ")
     print(f"    失效条目数: {removed}")
-    print(f"    ✓ 手动失效正常")
+    print("    ✓ 手动失效正常")
 
     # ── 测试 9: 清理过期缓存 ──
     print("\n[9] 清理过期缓存")
     cleaned = manager.cleanup_expired_cache()
     print(f"    清理文件数: {cleaned}")
-    print(f"    ✓ 过期缓存清理正常")
+    print("    ✓ 过期缓存清理正常")
 
     # ── 测试 10: 边界情况 ──
     print("\n[10] 边界情况测试")
@@ -772,12 +772,12 @@ if __name__ == "__main__":
     result_none = manager.sync_symbol("NOTEXIST.SZ")
     assert result_none.total_scanned == 1
     assert len(result_none.errors) == 1
-    print(f"    ✓ 不存在标的正确记录错误")
+    print("    ✓ 不存在标的正确记录错误")
 
     # 空列表
     result_empty = manager.sync_symbols([])
     assert result_empty.total_scanned == 0
-    print(f"    ✓ 空标的列表正常")
+    print("    ✓ 空标的列表正常")
 
     # 清理
     shutil.rmtree(tmp_root, ignore_errors=True)

@@ -11,7 +11,7 @@ TODO(后续迭代):
 """
 
 from myquant.gui.widgets.kline_item import KlineItem
-from myquant.gui.widgets.side_panel import SidePanel
 from myquant.gui.widgets.plot_helper import PlotHelper
+from myquant.gui.widgets.side_panel import SidePanel
 
 __all__ = ["KlineItem", "SidePanel", "PlotHelper"]

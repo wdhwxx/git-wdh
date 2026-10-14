@@ -19,7 +19,6 @@ from myquant.realism_gate import (
     CRITICAL_FIELDS,
     ManifestIncompleteError,
     RealismManifest,
-    RealismViolation,
 )
 
 
@@ -28,10 +27,9 @@ class TestManifestImportable:
 
     def test_importable(self):
         from myquant.realism_gate.manifest import (
-            RealismManifest,
-            RealismViolation,
-            RealismGateError,
             ManifestIncompleteError,
+            RealismGateError,
+            RealismManifest,
         )
         assert callable(RealismManifest)
         assert RealismGateError is not None

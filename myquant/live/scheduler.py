@@ -1910,8 +1910,8 @@ def attach_engine(
             # KP-P5-03: 监控告警闭环——HealthChecker 巡检非 healthy 经告警管理器 alert
             try:
                 from myquant.core.constants import SeverityLevel
-                from myquant.core.registry import get_component as _get_comp
                 from myquant.core.health_check import get_health_checker
+                from myquant.core.registry import get_component as _get_comp
                 _am_factory = _get_comp("alert_manager")
                 if _am_factory is None:
                     logger.warning("[attach] 告警管理器组件未注册（巡检健康告警跳过）")

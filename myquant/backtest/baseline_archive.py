@@ -29,7 +29,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -471,15 +470,16 @@ class BaselineArchiver:
         Raises:
             ValueError: 策略不存在 / 引擎不支持 / 回测失败。
         """
-        from myquant.core.config_loader import ConfigLoader
+        import argparse as _argparse
+
         from myquant.backtest.config_builder import build_backtest_config
-        from myquant.strategies.registry import discover_strategies, create_strategy
         from myquant.backtest.data_loader import HistoricalDataProvider
+        from myquant.backtest.engine import BacktestScheduler, register_broker_factory
+        from myquant.core.config_loader import ConfigLoader
         from myquant.core.lookahead_guard import get_lookahead_guard
         from myquant.leakage_gate import GateConfig as _LG_GateConfig
         from myquant.leakage_gate import set_config as _lg_set_config
-        from myquant.backtest.engine import BacktestScheduler, register_broker_factory
-        import argparse as _argparse
+        from myquant.strategies.registry import create_strategy, discover_strategies
 
         # 1. 加载配置（与 run_回测入口.py 同源）
         loader = ConfigLoader(base_dir=self.project_root)
@@ -658,7 +658,12 @@ def _run_self_test() -> int:
     Returns:
         通过的测试项数量。
     """
-    from myquant.models.backtest import BacktestConfig, BacktestResult, EquityPoint, TradeRecord
+    from myquant.models.backtest import (
+        BacktestConfig,
+        BacktestResult,
+        EquityPoint,
+        TradeRecord,
+    )
 
     passed = 0
     failures: List[str] = []

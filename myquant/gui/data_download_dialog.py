@@ -24,15 +24,17 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta
 from collections import deque
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Dict, List, Optional
 
+import yaml
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
+    QDateEdit,
     QDialog,
     QFrame,
     QGridLayout,
@@ -45,13 +47,10 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QRadioButton,
-    QDateEdit,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
-
-import yaml
 
 from myquant.core.logger import get_logger
 from myquant.data_access import (
@@ -105,8 +104,8 @@ MUTEX_GROUPS: List[List[str]] = [["full", "incremental"]]
 def _make_manager(fetcher, project_root: Path):
     """创建 DataManager（每个任务独立连接，任务结束关闭）"""
     from myquant.database import get_connection
-    from myquant.database.schema import table_exists, TABLE_NAMES
     from myquant.database.migrations import migrate_to_latest
+    from myquant.database.schema import TABLE_NAMES, table_exists
 
     db_path = project_root / "database" / "quant.db"
     conn = get_connection(db_path)
@@ -119,8 +118,9 @@ def _make_manager(fetcher, project_root: Path):
 
 def _save_financial_csv(data_list: List[dict], project_root: Path, is_history: bool = False) -> Path:
     """保存财务数据到 raw/financial（CSV），is_history=True 时文件名加 _history"""
-    from myquant.utils.file_utils import ensure_dir, write_csv
     from datetime import datetime as _dt
+
+    from myquant.utils.file_utils import ensure_dir, write_csv
     fin_dir = ensure_dir(project_root / "datasets" / "raw" / "financial")
     prefix = "financial_history" if is_history else "financial"
     output_path = fin_dir / f"{prefix}_{_dt.now().strftime('%Y%m%d')}.csv"
@@ -485,7 +485,6 @@ def _entry_finance_import(project_root: Path, progress_callback=None) -> dict:
     财务数据入库：CSV→financial_data表 + 因子计算→factor_data表 + 全中文报告。
     调用 myquant.data_access.financial_service.FinancialImportService。
     """
-    from myquant.data_access.financial_service import FinancialImportService
 
     # 定位最新财务历史 CSV
     fin_dir = project_root / "datasets" / "raw" / "financial"

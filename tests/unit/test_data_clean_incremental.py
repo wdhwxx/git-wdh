@@ -20,7 +20,6 @@ import pytest
 from myquant.data_access.manager import DataManager
 from myquant.data_access.sources.base import MarketDataResult
 
-
 # ── 工具：mock fetcher 与数据构造 ──
 
 

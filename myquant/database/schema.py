@@ -22,9 +22,6 @@ schema.py - 数据库表结构定义
 
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
-
-
 # ─────────────────────────────────────────────
 # 表名常量
 # ─────────────────────────────────────────────

@@ -20,7 +20,7 @@ import sqlite3
 import threading
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from myquant.core.logger import get_logger
 
@@ -125,8 +125,8 @@ class DatabaseConnection:
                         p.chmod(0o600)
             else:
                 logger.debug(
-                    f"[db] Windows 平台：库文件权限依赖 NTFS/加密卷配置 "
-                    f"（BASE-9 提示：建议 OS 级加密卷 BitLocker + 目录收紧）"
+                    "[db] Windows 平台：库文件权限依赖 NTFS/加密卷配置 "
+                    "（BASE-9 提示：建议 OS 级加密卷 BitLocker + 目录收紧）"
                 )
         except OSError as e:
             logger.warning(f"库文件权限收紧失败（不影响连接）: {e}")

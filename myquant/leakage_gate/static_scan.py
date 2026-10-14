@@ -40,7 +40,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from myquant.leakage_gate.contract import _get_entry, _load_ledger, _load_registry
+from myquant.leakage_gate.contract import _load_ledger
 from myquant.leakage_gate.gate import Violation, register_gate_check
 from myquant.leakage_gate.signal_words import is_full_sample_receiver
 
@@ -472,8 +472,8 @@ def _detect_r09(
                     rule_id="R09", severity=_BLOCKED_SEVERITY,
                     line=getattr(node, "lineno", 0),
                     message="财务 PIT join 用 report_date 做时点匹配（RL-02）：应按 eff_disclosure_date"
-                            f"（ann_date 优先 → report_deadline 推定 → report_date 兜底）对齐，"
-                            f"见 myquant/data_access/time_semantics.py（M1A-01/02 收敛）",
+                            "（ann_date 优先 → report_deadline 推定 → report_date 兜底）对齐，"
+                            "见 myquant/data_access/time_semantics.py（M1A-01/02 收敛）",
                 )
             )
             return  # 命中一次即可

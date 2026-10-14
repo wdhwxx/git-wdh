@@ -99,7 +99,7 @@ class TestGenerateFullReport:
 
 class TestGeneratePdf:
     def test_pdf_generated_when_reportlab_available(self, tmp_path: Path) -> None:
-        reportlab = pytest.importorskip("reportlab")
+        pytest.importorskip("reportlab")
         gen = CandidatePoolReportGenerator()
         out = tmp_path / "pool.pdf"
         gen.generate_pdf(_pool(), _meta(), out)

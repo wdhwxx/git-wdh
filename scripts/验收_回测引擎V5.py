@@ -41,6 +41,9 @@ from myquant.backtest.fee_common import FeeCalculator
 from myquant.backtest.mixed_engine import MixedBacktestEngine
 from myquant.backtest.vectorized_engine import VectorizedBacktestEngine
 from myquant.core.event_bus import Event, EventBus, EventType
+
+# G1 EX-09A：装配撮合执行器工厂（scripts 为合法装配层，SimBroker 引用合规）
+from myquant.execution.sim_broker import SimBroker
 from myquant.models.backtest import BacktestConfig
 from myquant.models.market_data import Bar
 from myquant.models.trade import OrderSide, Position
@@ -50,11 +53,8 @@ from myquant.strategies.base import (
     StrategyBase,
     StrategyContext,
 )
-from myquant.strategies.ma_strategy import MACrossStrategy
 from myquant.utils.memory_pool import EventObjectPool, ObjectPool, reset_event_pool
 
-# G1 EX-09A：装配撮合执行器工厂（scripts 为合法装配层，SimBroker 引用合规）
-from myquant.execution.sim_broker import SimBroker
 register_broker_factory(
     lambda cfg: SimBroker(
         initial_capital=cfg.initial_capital,
@@ -318,7 +318,7 @@ def _acceptance_performance(
           f"{'✅' if ok_vec else '❌'}（目标 ≤ {VEC_PERF_TARGET_SECONDS:.0f}s）")
     print(f"  mixed:       {mix_seconds:8.3f}s  "
           f"{'✅' if ok_mix else '❌'}（目标 ≤ {MIXED_PERF_TARGET_SECONDS:.0f}s）")
-    print(f"  目标: 20min → 2min（120s）; 验收阈值 120s 级")
+    print("  目标: 20min → 2min（120s）; 验收阈值 120s 级")
     print(f"  vectorized 成交数={len(vec_result.trades)}, mixed 成交数={len(mix_result.trades)}")
     print(f"  ▶ 验收A {'通过 ✅' if ok_all else '失败 ❌'}")
 

@@ -468,6 +468,7 @@ class WeeklyReviewReport:
 def _run_self_test() -> int:
     """__main__ 自测：临时库造数据 → 生成 → 校验关键断言。"""
     import tempfile
+
     from myquant.core.constants import SeverityLevel
     from myquant.database.connection import DatabaseConnection
     from myquant.monitoring.alerting import Alert

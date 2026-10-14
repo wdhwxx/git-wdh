@@ -27,7 +27,6 @@ scripts/验收_D包自治.py 为薄入口。
 from __future__ import annotations
 
 import json
-import logging
 import re
 import subprocess
 import sys

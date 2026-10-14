@@ -28,7 +28,7 @@ test_ml_feature_contract.py - F-01 训练-推理特征一致性单元测试
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any, Dict, List
+from typing import Any, List
 
 import numpy as np
 import pandas as pd
@@ -52,9 +52,7 @@ from myquant.ml.inference_service import (
 )
 from myquant.ml.model_registry import ModelRegistry, ModelVersion
 from myquant.ml.training_pipeline import TrainingPipeline
-
 from tests.conftest import make_ohlcv_df
-
 
 # ═══════════════════════════════════════════════
 #  Fixture：中文列行情数据

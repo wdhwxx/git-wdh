@@ -85,9 +85,9 @@ def _upgrade_v2(conn: DatabaseConnection) -> None:
     注意：已有数据库升级时只补建这两张新表，不动旧表（CREATE TABLE IF NOT EXISTS 幂等）。
     """
     from ..schema import (
+        CREATE_CLEAN_RUN_INDEX_SQL,
         CREATE_CLEAN_RUN_META_SQL,
         CREATE_DIRTY_DATA_STATS_SQL,
-        CREATE_CLEAN_RUN_INDEX_SQL,
         CREATE_DIRTY_INDEX_SQL,
     )
     for sql in [

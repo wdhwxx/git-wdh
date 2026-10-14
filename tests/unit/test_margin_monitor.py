@@ -22,8 +22,8 @@ from myquant.monitoring.margin_monitor import (
     DEDUP_FUNDING,
     DEDUP_STRONG_FLAT,
     DEDUP_USAGE,
-    MarginMonitor,
     REGISTERED_METRICS,
+    MarginMonitor,
 )
 
 

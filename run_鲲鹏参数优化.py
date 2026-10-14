@@ -30,13 +30,13 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # #P3-3修复：动态项目根，替换硬编码绝对路径
 
+from myquant.backtest.data_loader import HistoricalDataProvider
+from myquant.backtest.engine import run_backtest
 from myquant.models.backtest import (
     BacktestConfig,
     CommissionModel,
     SlippageModel,
 )
-from myquant.backtest.engine import run_backtest
-from myquant.backtest.data_loader import HistoricalDataProvider
 from myquant.strategies.kunpeng_strategy import KunpengStrategy
 from myquant.utils.parallel import ParallelManager
 
@@ -429,7 +429,7 @@ def main(args: Optional[argparse.Namespace] = None) -> int:
           f"| 收益(全) {best3['avg_return_all']:.2%}", flush=True)
 
     # 5. 基线对照
-    print(f"\n[基线] 当前配置参数评估 ...", flush=True)
+    print("\n[基线] 当前配置参数评估 ...", flush=True)
     base_rows = run_grid([BASELINE_PARAMS], data, commission, slippage, "基线",
                          start_date=start_date, end_date=end_date)
     base_row = base_rows[0]

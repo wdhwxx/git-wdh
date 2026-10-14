@@ -77,11 +77,14 @@ import math
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from myquant.core.constants import MetricType  # G2-1 下沉 core，re-export 兼容旧引用
 from myquant.core.logger import get_logger
-from myquant.core.registry import register_collector, register_component  # G2-5：+工厂注册（供 live/scheduler 经 L0 取用）
+from myquant.core.registry import (  # G2-5：+工厂注册（供 live/scheduler 经 L0 取用）
+    register_collector,
+    register_component,
+)
 
 logger = get_logger("monitoring.metrics")
 
@@ -1297,7 +1300,7 @@ class MetricsCollector:
             data_type = getattr(event, "data_type", "") or ""
             status = getattr(event, "status", "completed") or "completed"
             quality_grade = getattr(event, "quality_grade", "") or ""
-            bad_ratio = float(getattr(event, "bad_ratio", 0) or 0)
+            float(getattr(event, "bad_ratio", 0) or 0)
             cleaned_count = int(getattr(event, "cleaned_count", 0) or 0)
             bad_count = int(getattr(event, "bad_count", 0) or 0)
             total_count = int(getattr(event, "total_count", 0) or 0)
@@ -1761,8 +1764,8 @@ class MetricsCollector:
         int : 更新的指标数量（成功=1，异常=0）
         """
         try:
-            from myquant.core.event_bus import EventType
             from myquant.core.constants import TRADE_EXCEPTION_ALERT_LEVEL_MAP
+            from myquant.core.event_bus import EventType
 
             et = getattr(event, "event_type", None)
             et_name: str = et.value if isinstance(et, EventType) else str(et)

@@ -30,11 +30,9 @@ test_live_risk.py - 实盘风控单元测试
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
-import pytest
-
-from myquant.models.trade import Order, OrderSide, OrderType, OrderStatus
+from myquant.models.trade import Order, OrderSide, OrderStatus, OrderType
 from myquant.risk import RiskGuardian, RiskManager
 from myquant.risk.risk_manager import (
     DataQualityRiskConfig,
@@ -54,7 +52,6 @@ from myquant.risk.rules import (
     StopLossRule,
     TakeProfitRule,
 )
-
 
 # ═══════════════════════════════════════════
 #  辅助函数
@@ -743,7 +740,7 @@ class TestLiveEngine:
 
     def test_risk_config_exists(self):
         """风控配置存在"""
-        from myquant.live.engine import LiveEngine, RiskConfig
+        from myquant.live.engine import RiskConfig
         config = RiskConfig()
         assert config is not None
 

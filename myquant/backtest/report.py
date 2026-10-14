@@ -39,7 +39,7 @@ import pandas as pd
 from myquant.backtest.monte_carlo import MonteCarloAnalyzer, MonteCarloResult
 from myquant.backtest.pdf_report import PdfReportGenerator, downsample_equity_curve
 from myquant.core.logger import get_logger
-from myquant.models.backtest import BacktestResult, EquityPoint, TradeRecord
+from myquant.models.backtest import BacktestResult
 from myquant.realism_gate.report import write_manifest_to_results
 from myquant.utils.csv_utils import CSV_HEADER_MAPS, export_csv_cn
 

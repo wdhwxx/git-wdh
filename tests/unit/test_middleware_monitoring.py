@@ -20,17 +20,15 @@ test_middleware_monitoring.py - A-2 L1 中间件监控单元测试
 
 from __future__ import annotations
 
-import json
 from types import SimpleNamespace
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict, Optional
 
 import pytest
 
+from myquant.core.health_check import HealthStatus
 from myquant.core.transports.base import TransportConfig, TransportState
 from myquant.core.transports.rabbitmq_bus import RabbitMQTransport
-from myquant.core.health_check import HealthStatus
 from myquant.monitoring.metrics_collector import BuiltinMetrics, MetricsCollector
-
 
 # ═══════════════════════════════════════════
 #  通用 fake

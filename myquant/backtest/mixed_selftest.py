@@ -158,7 +158,7 @@ def run_mixed_selftest() -> int:
         initial_capital=1_000_000.0,
     )
     open_px = df["开盘价"].to_numpy()
-    close = df["收盘价"].to_numpy()
+    df["收盘价"].to_numpy()
 
     # 1. 目标持仓模式基本运行（t>=3 目标 1000 股）
     targets = [0.0, 0.0, 0.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0]

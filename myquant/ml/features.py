@@ -41,14 +41,13 @@ from __future__ import annotations
 
 import json
 from collections import deque
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 
 from myquant.core.logger import get_logger
-
 from myquant.models.backtest import CommissionModel, CommissionType, SlippageModel
 
 logger = get_logger("ml.features")

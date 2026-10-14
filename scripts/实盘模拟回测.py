@@ -17,18 +17,16 @@
 import sys
 import time
 from pathlib import Path
-from datetime import datetime
 
 # 项目根目录
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from myquant.live.engine import LiveEngine, RiskConfig
 from myquant.live.brokers import PaperBroker
+from myquant.live.engine import LiveEngine, RiskConfig
 from myquant.live.portfolio import LivePortfolio
-from myquant.strategies.base import StrategyBase, Signal, SignalType, StrategyContext
 from myquant.models.market_data import Bar
-
+from myquant.strategies.base import Signal, SignalType, StrategyBase, StrategyContext
 
 # ═══════════════════════════════════════════════
 #  配置参数
@@ -141,7 +139,7 @@ def fetch_historical_data(symbol: str, start_date: str, end_date: str) -> list:
     )
 
     if df is None or df.empty:
-        print(f"  [错误] 未获取到数据")
+        print("  [错误] 未获取到数据")
         return []
 
     # 转换为标准bar dict格式，按日期升序
@@ -279,7 +277,7 @@ def main():
         last_bar["date"] = "SETTLE"
         engine.on_market_data(CONFIG["symbol"], last_bar)
 
-    print(f"  结算完成")
+    print("  结算完成")
 
     # ── 5. 输出最终报告 ──
     print("\n" + "-" * 70)
@@ -289,21 +287,21 @@ def main():
     account = portfolio.get_account()
     stats = engine.stats
 
-    print(f"\n  【账户概览】")
+    print("\n  【账户概览】")
     print(f"    初始资金:     {account['initial_capital']:>12,.2f}")
     print(f"    最终总资产:   {account['total_assets']:>12,.2f}")
     print(f"    现金:         {account['cash']:>12,.2f}")
     print(f"    持仓市值:     {account['market_value']:>12,.2f}")
     print(f"    持仓数:       {account['position_count']:>12}")
 
-    print(f"\n  【盈亏统计】")
+    print("\n  【盈亏统计】")
     print(f"    已实现盈亏:   {account['realized_pnl']:>12,.2f}")
     print(f"    未实现盈亏:   {account['unrealized_pnl']:>12,.2f}")
     print(f"    总盈亏:       {account['total_pnl']:>12,.2f}")
     print(f"    总收益率:     {account['total_pnl_ratio']*100:>11.2f}%")
     print(f"    净值:         {account['equity']:>12.4f}")
 
-    print(f"\n  【交易统计】")
+    print("\n  【交易统计】")
     print(f"    总bar数:      {stats['total_bars']:>12}")
     print(f"    总信号数:     {stats['total_signals']:>12}")
     print(f"    买入信号:     {stats['buy_signals']:>12}")
@@ -316,7 +314,7 @@ def main():
     # 持仓明细
     positions = portfolio.get_all_positions()
     if positions:
-        print(f"\n  【当前持仓明细】")
+        print("\n  【当前持仓明细】")
         print(f"    {'标的':<12} {'数量':>8} {'成本':>8} {'现价':>8} {'市值':>12} {'盈亏':>10} {'收益率':>8}")
         print(f"    {'-'*70}")
         for p in positions:
@@ -325,7 +323,7 @@ def main():
 
     # 交易记录
     if trade_log:
-        print(f"\n  【交易记录】")
+        print("\n  【交易记录】")
         print(f"    {'日期':<12} {'类型':>6} {'价格':>8} {'持仓数':>8} {'总资产':>12}")
         print(f"    {'-'*50}")
         for t in trade_log:
@@ -334,7 +332,7 @@ def main():
 
     # 健康检查
     health = engine.health_check()
-    print(f"\n  【系统健康检查】")
+    print("\n  【系统健康检查】")
     print(f"    引擎状态: {health['status']}")
     print(f"    Broker连接: {health['broker']['connected'] if health['broker'] else 'N/A'}")
     print(f"    引擎运行: {health['engine']['state']}")

@@ -17,7 +17,6 @@ tests/unit/test_manifest_truthfulness.py - manifest 真实性反红测试（P0-0
     * slippage.* ← config.slippage（SlippageModel 真实实例，替换被忽略的 YAML）
 """
 
-import pytest
 
 from myquant.backtest.engine import BacktestScheduler
 from myquant.models.backtest import BacktestConfig, SlippageModel

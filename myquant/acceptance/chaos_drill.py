@@ -31,26 +31,25 @@ scripts/故障演练/季频故障演练.py 为薄入口。
 
 from __future__ import annotations
 
-import logging
 import tempfile
 import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
+from myquant.core.alert_store import STATUS_ACKED, STATUS_RESOLVED, AlertStore
 from myquant.core.logger import get_logger
-from myquant.core.alert_store import AlertStore, STATUS_ACKED, STATUS_RESOLVED
-from myquant.monitoring.alerting import AlertManager
 from myquant.core.measurability import (
-    CLASSIFICATION_FP,
     CLASSIFICATION_FN,
+    CLASSIFICATION_FP,
     CLASSIFICATION_TP,
     CLASSIFICATION_UNKNOWN,
     FI_CASES,
     FICase,
     MttxCalculator,
 )
+from myquant.monitoring.alerting import AlertManager
 
 logger = get_logger("acceptance.chaos_drill")
 
@@ -579,8 +578,8 @@ def build_builtin_cases(
     FI-01/02/03/04/07 走真实检测器/事件路径（A-4/A-5/A-6/A-8/BASE-8），
     FI-05/06 以真实 AlertManager 落库代表 A-7/A-9 捕获告警（隔离环境演示）。
     """
-    from myquant.core.event_bus import EventBus, EventType, OrderEvent
     from myquant.core.constants import SeverityLevel
+    from myquant.core.event_bus import EventBus, EventType, OrderEvent
     from myquant.monitoring.watchdog import (
         BrokerConnectionWatcher,
         EngineHeartbeatWatcher,
@@ -732,6 +731,7 @@ def build_builtin_cases(
 
     def inject_fi07() -> InjectOutcome:
         import tempfile as _tf
+
         from myquant.monitoring.meta_monitor import (
             ExternalHeartbeatGuard,
             FileHeartbeatCarrier,

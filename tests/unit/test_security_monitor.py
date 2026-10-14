@@ -12,13 +12,13 @@ import pytest
 
 from myquant.core.constants import SeverityLevel
 from myquant.monitoring.security_monitor import (
+    EVT_CREDENTIAL_CHANGE,
+    EVT_LOGIN_FAILED,
+    EVT_SECRET_EXPOSURE,
+    EVT_UNAUTHORIZED_ACCESS,
     SecurityMonitor,
     mask_secret,
     sha256_fingerprint,
-    EVT_LOGIN_FAILED,
-    EVT_UNAUTHORIZED_ACCESS,
-    EVT_CREDENTIAL_CHANGE,
-    EVT_SECRET_EXPOSURE,
 )
 
 #: 测试用伪造密钥（绝不可出现在任何告警 details/日志/落盘）

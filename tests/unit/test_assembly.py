@@ -9,8 +9,6 @@
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
-
 import pytest
 
 import myquant.backtest.assembly as assembly
@@ -111,7 +109,10 @@ def test_mixed_selftest_module_importable():
 
 def test_vectorized_selftest_module_importable():
     """vectorized_selftest.py 可导入（R-19 零覆盖收录；P0-00A 第三刀抽离的自测模块）。"""
-    from myquant.backtest.vectorized_selftest import _DummyVectorStrategy, run_vectorized_selftest
+    from myquant.backtest.vectorized_selftest import (
+        _DummyVectorStrategy,
+        run_vectorized_selftest,
+    )
     assert callable(run_vectorized_selftest)
     assert callable(_DummyVectorStrategy)
 

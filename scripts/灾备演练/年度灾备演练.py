@@ -25,7 +25,10 @@ while not (_REPO_ROOT / "myquant").is_dir() and _REPO_ROOT != _REPO_ROOT.parent:
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from myquant.acceptance.disaster_drill import DEFAULT_DRILL_HEADER, DisasterDrillRunner  # noqa: E402
+from myquant.acceptance.disaster_drill import (  # noqa: E402
+    DEFAULT_DRILL_HEADER,
+    DisasterDrillRunner,
+)
 
 # 默认输出为项目根绝对路径（修复：原相对路径从 scripts/ 子目录启动时
 # 会把报告写到 scripts/docs/监控档案/，与 docs/监控档案/ 正式落档分叉）

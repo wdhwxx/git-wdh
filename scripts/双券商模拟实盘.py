@@ -28,21 +28,19 @@
 """
 
 import sys
-import time
-from pathlib import Path
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
 
 # 项目根目录
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from myquant.live.brokers import BrokerManager, PtradeBroker, QmtBroker
 from myquant.live.engine import LiveEngine, RiskConfig
-from myquant.live.brokers import BrokerManager, QmtBroker, PtradeBroker
 from myquant.live.portfolio import LivePortfolio
-from myquant.strategies.base import StrategyBase, Signal, SignalType, StrategyContext
 from myquant.models.market_data import Bar
-
+from myquant.strategies.base import Signal, SignalType, StrategyBase, StrategyContext
 
 # ═══════════════════════════════════════════════
 #  配置参数
@@ -315,7 +313,7 @@ def main():
         if i == cut_idx and not failover_done:
             print(f"\n  ⚠️  [failover] 主券商 {mgr.primary_alias} 连接断开，触发主备切换...")
             qmt.disconnect()
-            new_primary = mgr.failover()
+            mgr.failover()
             failover_done = True
             print(f"  ✅ [failover] 主券商自动切换: → {mgr.primary_alias} "
                   f"(切换后继续交易)")
@@ -359,18 +357,18 @@ def main():
     pf_account = portfolio.get_account()
     mgr_pos = mgr.get_positions(merged=True)
 
-    print(f"\n  【双券商合并账户（BrokerManager 执行侧）】")
+    print("\n  【双券商合并账户（BrokerManager 执行侧）】")
     print(f"    现金:       {mgr_account['cash']:>14,.2f}")
     print(f"    可用资金:   {mgr_account['available_cash']:>14,.2f}")
     print(f"    持仓市值:   {mgr_account['market_value']:>14,.2f}")
     print(f"    总资产:     {mgr_account['total_assets']:>14,.2f}")
 
-    print(f"\n  【引擎 portfolio 账本（权威交易账本）】")
+    print("\n  【引擎 portfolio 账本（权威交易账本）】")
     print(f"    现金:       {pf_account.get('cash', 0):>14,.2f}")
     print(f"    持仓市值:   {pf_account.get('market_value', 0):>14,.2f}")
     print(f"    总资产:     {pf_account.get('total_assets', 0):>14,.2f}")
 
-    print(f"\n  【双券商合并持仓（按 symbol 聚合）】")
+    print("\n  【双券商合并持仓（按 symbol 聚合）】")
     if mgr_pos:
         print(f"    {'标的':<12} {'数量':>8} {'加权成本':>10} {'现价':>8} {'市值':>12}")
         print(f"    {'-'*56}")
@@ -378,7 +376,7 @@ def main():
             print(f"    {p.symbol:<12} {p.quantity:>8.0f} {p.avg_cost:>10.2f} "
                   f"{p.market_price:>8.2f} {p.market_value:>12,.2f}")
     else:
-        print(f"    （无持仓）")
+        print("    （无持仓）")
 
     # ── 6. 最终报告 + 链路验证 ──
     print("\n" + "-" * 74)
@@ -386,13 +384,13 @@ def main():
     print("-" * 74)
 
     stats = engine.stats
-    print(f"\n  【账户概览】")
+    print("\n  【账户概览】")
     print(f"    初始资金:     {CONFIG['initial_capital']:>12,.2f}")
     print(f"    最终总资产:   {pf_account.get('total_assets', 0):>12,.2f}")
     print(f"    现金:         {pf_account.get('cash', 0):>12,.2f}")
     print(f"    持仓市值:     {pf_account.get('market_value', 0):>12,.2f}")
 
-    print(f"\n  【交易统计】")
+    print("\n  【交易统计】")
     print(f"    总bar数:      {stats['total_bars']:>12}")
     print(f"    总信号数:     {stats['total_signals']:>12}")
     print(f"    买入信号:     {stats['buy_signals']:>12}")
@@ -402,7 +400,7 @@ def main():
     print(f"    风控拒绝:     {stats['risk_rejected']:>12}")
     print(f"    错误数:       {stats['errors']:>12}")
 
-    print(f"\n  【主备 failover】")
+    print("\n  【主备 failover】")
     print(f"    已触发:       {'是' if failover_done else '否'}")
     print(f"    当前主券商:   {mgr.primary_alias}")
     print(f"    切换后健康:   {mgr.health_check()['connected']} (主={mgr.primary_alias})")

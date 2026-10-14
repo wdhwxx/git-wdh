@@ -25,14 +25,14 @@
 from __future__ import annotations
 
 import csv
-import logging
 import sqlite3
 import time
-import yaml
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+
+import yaml
 
 from myquant.core.logger import get_logger
 from myquant.data_access.factory import create_default_fetcher

@@ -21,13 +21,15 @@ leakage_gate - 防泄漏门禁中心（L4 治理层落点，模块分层 L0）
 防未来函数：本包只记录已发生的校验结果，不预测未来。
 """
 
-from myquant.leakage_gate import consumption  # noqa: F401  # 导入即注册消费侧门禁（M0-07）
-from myquant.leakage_gate import contract  # noqa: F401  # 导入即注册契约检查（M0-06）
-from myquant.leakage_gate import static_scan  # noqa: F401  # 导入即注册静态扫描（阶段 1-B，M1B-01/02）
-from myquant.leakage_gate import cross_sectional  # noqa: F401  # 导入即注册横截面 as-of 校验（阶段 1-B，M1B-04）
-from myquant.leakage_gate import sanity  # noqa: F401  # 导入即注册特征白名单门禁（阶段 2，M2-04）
-from myquant.leakage_gate import report  # noqa: F401  # 泄漏审计报告产物（阶段 3，M3-01）
-from myquant.leakage_gate import exemption  # noqa: F401  # 豁免流（阶段 3，M3-02）
+from myquant.leakage_gate import (
+    consumption,  # noqa: F401  # 导入即注册消费侧门禁（M0-07）
+    contract,  # noqa: F401  # 导入即注册契约检查（M0-06）
+    cross_sectional,  # noqa: F401  # 导入即注册横截面 as-of 校验（阶段 1-B，M1B-04）
+    exemption,  # noqa: F401  # 豁免流（阶段 3，M3-02）
+    report,  # noqa: F401  # 泄漏审计报告产物（阶段 3，M3-01）
+    sanity,  # noqa: F401  # 导入即注册特征白名单门禁（阶段 2，M2-04）
+    static_scan,  # noqa: F401  # 导入即注册静态扫描（阶段 1-B，M1B-01/02）
+)
 from myquant.leakage_gate.gate import (
     GateConfig,
     LeakageGateError,

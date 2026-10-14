@@ -27,6 +27,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 
+
 # 顶部 sys.path 注入：CLI 直跑免设 PYTHONPATH（与同步股本变动.py 等对齐）
 def _bootstrap_root() -> Path:
     """向上探测项目根（pyproject.toml），失败即明确报错。"""

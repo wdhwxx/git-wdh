@@ -10,8 +10,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from myquant.data_access.cleaner.bar_cleaner import (
     BarCleaner,
     _factor_adjusted_jump_pct,

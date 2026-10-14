@@ -25,14 +25,14 @@ from __future__ import annotations
 import csv
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import pytest
 
-from myquant.database.connection import DatabaseConnection
 from myquant.core.audit_log import AuditLogStore
 from myquant.core.field_crypto import FieldCrypto, is_sensitive_name, mask_value
 from myquant.core.metrics_history import MetricsHistoryStore
+from myquant.database.connection import DatabaseConnection
 
 
 @pytest.fixture()

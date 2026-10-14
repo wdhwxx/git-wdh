@@ -16,8 +16,8 @@ R-19 零覆盖：显式 import 子模块；测试不触网、不写生产台账�
 
 import pytest
 
-from myquant.realism_gate.manifest import RealismManifest, RealismGateError
 from myquant.realism_gate import signature_guard as sg
+from myquant.realism_gate.manifest import RealismGateError, RealismManifest
 
 
 def _make_manifest(**overrides) -> RealismManifest:

@@ -17,10 +17,8 @@ test_regime_matcher.py - C-3 环境匹配度评分单元测试（回写#242）
 
 from __future__ import annotations
 
-import math
 from typing import Any, Dict, List, Optional, Tuple
 
-import numpy as np
 import pandas as pd
 import pytest
 

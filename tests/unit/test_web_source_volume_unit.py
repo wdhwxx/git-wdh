@@ -9,7 +9,6 @@ P1-④（#83）网源 volume 单位统一：全库口径=股。
 from __future__ import annotations
 
 import requests
-import pytest
 
 from myquant.data_access.sources.akshare_source import AkshareDataSource
 

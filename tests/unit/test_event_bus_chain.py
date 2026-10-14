@@ -30,7 +30,6 @@ from myquant.core.event_bus import (
     SystemErrorEvent,
 )
 
-
 # ═══════════════════════════════════════════
 #  1. ChainEvent 四元组 schema
 # ═══════════════════════════════════════════

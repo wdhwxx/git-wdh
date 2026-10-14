@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import pytest
 
+from myquant.realism_gate.checks import (
+    causality as _causality_imported,  # noqa: F401 导入即注册
+)
 from myquant.realism_gate.checks.causality import check_causality
 from myquant.realism_gate.gate import (
     RealismGateConfig,
@@ -26,7 +29,6 @@ from myquant.realism_gate.manifest import (
     RealismGateError,
     RealismManifest,
 )
-from myquant.realism_gate.checks import causality as _causality_imported  # noqa: F401 导入即注册
 
 # 越界秒级时间戳（与 test_slicing_failopen_guard 同口径）：
 # datetime.fromtimestamp 与 pd.Timestamp(unit='s') 均抛 OverflowError

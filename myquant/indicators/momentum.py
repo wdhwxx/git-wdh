@@ -22,7 +22,6 @@ import pandas as pd
 
 from myquant.indicators import IndicatorBase, lookahead_check, register_indicator
 
-
 # ============================================================================
 # ROC - 变动率指标（Rate of Change）
 # ============================================================================

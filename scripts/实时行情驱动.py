@@ -48,10 +48,10 @@
   - 交易时段外腾讯行情返回停牌价，策略可能无信号；mock 模式不受限。
 """
 
-import sys
-import time
 import argparse
 import signal
+import sys
+import time
 from pathlib import Path
 from typing import List, Optional
 
@@ -59,13 +59,12 @@ from typing import List, Optional
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from myquant.live.engine import LiveEngine, RiskConfig
+from myquant.live.brokers import BrokerManager, PaperBroker
 from myquant.live.data_feed import MarketDataFeed, MockRealtimeSource
-from myquant.live.brokers import PaperBroker, BrokerManager
+from myquant.live.engine import LiveEngine, RiskConfig
 from myquant.live.portfolio import LivePortfolio
-from myquant.strategies.base import StrategyBase, Signal, SignalType, StrategyContext
-from myquant.models.market_data import Bar, BarFrequency
-
+from myquant.models.market_data import Bar
+from myquant.strategies.base import Signal, SignalType, StrategyBase, StrategyContext
 
 # ═══════════════════════════════════════════════
 #  策略：短周期双均线（适配实时bar数量少）
@@ -191,13 +190,13 @@ def build_broker_manager(args: argparse.Namespace) -> BrokerManager:
     elif args.broker in ("qmt", "ptrade", "dual"):
         # 需券商终端环境；当前用 PaperBroker 作 SIM 模拟桩，标注清楚
         print(f"  [券商] ⚠️  {args.broker} 模式需券商终端环境（迅投QMT/恒生Ptrade客户端+SDK）")
-        print(f"         当前为 SIM 模拟桩（PaperBroker 替代），真实接入待环境就绪后完成")
+        print("         当前为 SIM 模拟桩（PaperBroker 替代），真实接入待环境就绪后完成")
         if args.broker == "dual":
             qmt_sim = PaperBroker(initial_capital=args.capital)
             ptrade_sim = PaperBroker(initial_capital=args.capital)
             mgr.register_broker(qmt_sim, alias="qmt_sim", role="primary")
             mgr.register_broker(ptrade_sim, alias="ptrade_sim", role="secondary")
-            print(f"         双券商模拟桩: qmt_sim(主) + ptrade_sim(备)")
+            print("         双券商模拟桩: qmt_sim(主) + ptrade_sim(备)")
         else:
             sim = PaperBroker(initial_capital=args.capital)
             mgr.register_broker(sim, alias=f"{args.broker}_sim", role="primary")
@@ -215,7 +214,6 @@ def setup_event_bus(feed: MarketDataFeed) -> Optional[dict]:
     try:
         from myquant.core.event_bus import get_event_bus, reset_event_bus
         from myquant.monitoring.alerting import AlertManager
-        from myquant.monitoring.metrics_collector import MetricsCollector
 
         reset_event_bus()
         bus = get_event_bus()
@@ -384,7 +382,7 @@ def main() -> bool:
     stats = engine.stats
     account = portfolio.get_account()
 
-    print(f"\n  【账户概览】")
+    print("\n  【账户概览】")
     print(f"    初始资金:     {args.capital:>14,.2f}")
     print(f"    最终总资产:   {account.get('total_assets', 0):>14,.2f}")
     print(f"    现金:         {account.get('cash', 0):>14,.2f}")
@@ -393,7 +391,7 @@ def main() -> bool:
     pnl_pct = (pnl / args.capital * 100) if args.capital > 0 else 0
     print(f"    盈亏:         {pnl:>14,.2f} ({pnl_pct:+.2f}%)")
 
-    print(f"\n  【交易统计】")
+    print("\n  【交易统计】")
     print(f"    总bar数:      {stats['total_bars']:>12}")
     print(f"    总信号数:     {stats['total_signals']:>12}")
     print(f"    买入信号:     {stats['buy_signals']:>12}")
@@ -405,7 +403,7 @@ def main() -> bool:
 
     # 事件总线联动报告
     if event_ctx:
-        print(f"\n  【事件总线联动（B项）】")
+        print("\n  【事件总线联动（B项）】")
         am = event_ctx["alert_manager"]
         mc = event_ctx["metrics"]
         try:
@@ -413,19 +411,19 @@ def main() -> bool:
             alerts = am.get_history()
             print(f"    告警数:       {len(alerts):>12}")
         except Exception:
-            print(f"    告警数:       （不可用）")
+            print("    告警数:       （不可用）")
         try:
             all_metrics = mc.to_dict()
             dirty_keys = [k for k in all_metrics if "dirty" in k.lower()]
             print(f"    脏数据指标:   {len(dirty_keys):>12} 项注册")
         except Exception:
-            print(f"    脏数据指标:   （不可用）")
+            print("    脏数据指标:   （不可用）")
         bridge = getattr(feed, "_event_bridge", None)
         if bridge:
             print(f"    已发布事件:   {bridge.published_count:>12}")
 
     # 行情源健康
-    print(f"\n  【行情源健康】")
+    print("\n  【行情源健康】")
     hc = feed.health_check()
     print(f"    状态:         {hc.get('status', 'N/A'):>12}")
     print(f"    后端:         {hc.get('realtime', {}).get('active_backend', 'N/A'):>12}")

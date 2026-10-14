@@ -95,7 +95,7 @@ def generate_quality_report(
     # #C11修复：excellent 不再强制 bad==0（真实行情完全无脏数据几乎不可能），
     # 改为 valid_rate >= 0.995（即脏数据占比≤0.5%）即可评为优秀。
     valid_rate = report["summary"]["valid_rate"]
-    bad = report["summary"]["bad_records"]
+    report["summary"]["bad_records"]
     if valid_rate >= 0.995:
         report["quality_status"] = "excellent"
     elif valid_rate >= 0.95:

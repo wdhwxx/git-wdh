@@ -364,8 +364,6 @@ def setup_monitoring_linkage() -> bool:
     """
     try:
         from myquant.core.event_bus import get_event_bus
-        from myquant.monitoring.alerting import get_alert_manager
-        from myquant.monitoring.metrics_collector import get_metrics_collector
 
         # G2-5 阶段二（装配责任上移）：导入监控模块以触发 core.registry 装配工厂注册
         # （meta_monitor/watchdog/weekly_review/action_engine 导入即 register_component；
@@ -374,13 +372,17 @@ def setup_monitoring_linkage() -> bool:
             build_action_engine,
             load_action_engine_config,
         )
+        from myquant.monitoring.alerting import get_alert_manager
         from myquant.monitoring.meta_monitor import get_meta_monitor  # noqa: F401
+        from myquant.monitoring.metrics_collector import get_metrics_collector
         from myquant.monitoring.watchdog import (  # noqa: F401
             get_broker_connection_watcher,
             get_engine_heartbeat_watcher,
             get_staleness_detector,
         )
-        from myquant.monitoring.weekly_review import get_weekly_review_report  # noqa: F401
+        from myquant.monitoring.weekly_review import (
+            get_weekly_review_report,  # noqa: F401
+        )
 
         bus = get_event_bus()
         alert_mgr = get_alert_manager()
@@ -865,7 +867,7 @@ def run_live_trading(args: argparse.Namespace) -> int:
         return 1
 
     live_cfg = config.get("live", {}) or {}
-    trade_mode = str(live_cfg.get("trade_mode", "paper")).lower()
+    str(live_cfg.get("trade_mode", "paper")).lower()
 
     # ── 2. 交易时间检查（安全机制：仅约束真钱实盘 LIVE 模式）──
     if not args.force and not args.dry_run and run_mode is RunMode.LIVE:

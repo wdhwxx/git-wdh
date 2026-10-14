@@ -16,15 +16,14 @@ test_baseline_archive.py - 基线净值档案模块单元测试（P0-00 子步�
 """
 
 import json
-import shutil
 from pathlib import Path
 
 import pytest
 
 from myquant.backtest.baseline_archive import (
-    BaselineArchiver,
     EQUITY_MAX_ABS_DIFF,
     TRADE_COUNT_DIFF_RATIO,
+    BaselineArchiver,
 )
 from myquant.models.backtest import (
     BacktestConfig,
