@@ -5294,3 +5294,18 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 **验收**：invariants 反红 15 passed；三引擎核心（engines_v5 + engine_events + consistency_v5 + invariants_red）100 passed；guard_mounting + kunpeng + R24 79 passed；**全量 pytest 4121 passed / 4 skipped / 0 failed**（与 P2 收官基线一致）。
 
 **纪律遵守**：常量提取（_EQUITY_TOL 沿用、symbol=`_PORTFOLIO_` 占位常量）；Google docstring + 全量类型注解（两个新纯函数 `-> List[BarState]`）；禁裸 except（DataFrame 反查包 `(KeyError, ValueError, IndexError)` 记 continue 不吞）；防未来（持仓时间线只依赖成交流与当日已收 bar 收盘价，不读未来）；R-24 抬 `backtest/engine.py` 1716→1837（+121 行 event invariants 接线功能必需，附注释）；治理冻结基线回写并注明功能必需；全量 pytest 0 failed 才提交；git 提交（commit message 引用 #371）。**P1-15 六条不变量三引擎（event/mixed/vectorized）全部对齐，回测真实性门禁 P0/P1/P2 至此无留尾巴施工项。**
+
+---
+
+## #372 · 2026-10-14 · P1-04 收口：回测入口收敛 + 引擎直构例外清单固化
+
+**现状核实**：P1-04 此前"只收敛了一半"——param_optimizer.py:240 / incremental_backtest.py:126 已走 create_engine，但 `scripts/生成回测报告.py:229` 仍 `BacktestEngine.from_data_provider` 直构（绕过 leakage_gate + realism_manifest + P1-11 出口审计），`scripts/双券商模拟实盘.py:264`、`实时行情驱动.py:280`、`实盘模拟回测.py:190` 仍 `LiveEngine(...)` 直构；且 `REALISM_EXEMPT_ENTRY` 白名单全仓零命中（方案 §4.4 要求的例外清单固化登记缺失）。
+
+**落地**：
+- **生成回测报告.py 收敛**：`BacktestEngine.from_data_provider(...) + engine.run()` 改为 `run_backtest(config, strategy, data_provider, mode="event")`——内部走 `BacktestScheduler.create_engine`（挂 leakage_gate `assert_all_gates_pass` + `_attach_realism_manifest` + P1-11 `_write_backtest_leakage_report`）；保持 mode="event" 真值基准语义，上方 `register_broker_factory` 的 SimBroker 工厂照常被 event 引擎消费（撮合行为不变）；脚本顶部不再 import 未用的 BacktestEngine。
+- **新增 `myquant/backtest/exempt_registry.py`**：`ExemptEntry` frozen dataclass（script/symbol/reason/covered_by）+ `REALISM_EXEMPT_ENTRIES` tuple，登记 3 个沙箱 LiveEngine 直构点（双券商并行/实时行情轮询/实盘模拟回测）——豁免理由为"脚本内手动装配 feed/broker/portfolio、不走生产 live_config.yaml，属 paper 沙箱回放语义"，兜底门禁为 live_safety_gate（生产唯一出口 create_live_engine 含 assert_all_gates_pass + 运行模式一致性 + LIVE 报备合规门禁）。L0 纯数据注册表，不 import 引擎/策略。
+- **新增 `tests/unit/test_exempt_registry.py`**：AST 扫描 scripts/ 下所有 .py 的 `LiveEngine(` / `BacktestEngine.from_data_provider` 直构点，断言每个命中点都在 REALISM_EXEMPT_ENTRIES 登记——新增未登记直构即判红（防门禁绕过通道静默敞口）。46 passed。
+
+**验收**：py_compile 2 文件 OK；exempt_registry AST 门禁 46 passed；**全量 pytest 4167 passed / 4 skipped / 0 failed**（基线 4121 + 新增 46，吻合）。
+
+**纪律遵守**：常量提取（_DIRECT_CONSTRUCT_SYMBOLS/_PROJECT_ROOT/_SCRIPTS_DIR 提模块顶部）；Google docstring + 全量类型注解（`-> list[str]`/`-> None`）；禁裸 except（ast.parse 包 SyntaxError 记 [] 不吞）；薄入口（生成回测报告.py 仅参数解析+调 run_backtest，业务逻辑在 myquant）；新增文件在蓝图 backtest/ 目录树内（exempt_registry.py 属 myquant/backtest/）；全量 pytest 0 failed 才提交；git 提交（commit message 引用 #372）。**P1-04 收口——回测唯一出口 create_engine 无绕过直构，实盘沙箱直构显式登记并由 AST 门禁守护。**

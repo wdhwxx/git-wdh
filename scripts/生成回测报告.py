@@ -213,7 +213,7 @@ def main() -> int:
 
     # ── 7. 创建回测引擎并运行（G1 EX-09A：装配撮合执行器工厂）──
     try:
-        from myquant.backtest.engine import BacktestEngine, register_broker_factory
+        from myquant.backtest.engine import register_broker_factory
         from myquant.execution.sim_broker import SimBroker
         register_broker_factory(
             lambda cfg: SimBroker(
@@ -226,11 +226,17 @@ def main() -> int:
                 lot_size=int(getattr(cfg, "lot_size", 0)),
             )
         )
-        engine = BacktestEngine.from_data_provider(
-            data_provider=data_provider, config=bt_config, strategy=strategy,
+        # P1-04：回测入口收敛到 BacktestScheduler.create_engine（挂 leakage_gate
+        # + realism_manifest + P1-11 出口审计）；保持 mode="event" 真值基准语义
+        # （消费上方 register_broker_factory 的 SimBroker，撮合行为不变）。
+        from myquant.backtest.engine import run_backtest
+        result = run_backtest(
+            config=bt_config,
+            strategy=strategy,
+            data_provider=data_provider,
+            mode="event",
         )
         print("[回测] 引擎创建完成，开始运行...")
-        result = engine.run()
     except Exception as e:
         logger.error(f"回测执行异常: {e}", exc_info=True)
         print(f"[错误] 回测执行失败: {e}")
