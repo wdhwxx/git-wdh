@@ -108,7 +108,7 @@ _UNPICKLABLE_MULTIPROCESSING_TYPES: Tuple[type, ...] = (
     multiprocessing.queues.Queue,
     multiprocessing.queues.SimpleQueue,
     multiprocessing.connection.Connection,
-    multiprocessing.connection.PipeConnection,
+    # Python 3.12 移除了 PipeConnection 别名，Pipe() 返回的就是 Connection 实例
 )
 """multiprocessing 通信对象：不可跨进程序列化（需重建）
 
