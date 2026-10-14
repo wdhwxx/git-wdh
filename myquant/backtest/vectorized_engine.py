@@ -132,6 +132,12 @@ class VectorizedBacktestEngine:
         engine = VectorizedBacktestEngine.from_data_provider(provider, config, strategy)
     """
 
+    # P2-02：费用摊薄口径（与 realism_gate manifest `fee_dilution_basis` 对齐）。
+    # 向量化按 bar 调仓，每 bar 的成交即一笔独立委托单、独立计最低佣金——
+    # 语义等价 event/mixed 的"逐订单"，不存在"把一笔订单摊到多个 bar"的错误。
+    # 该常量供 consistency_check 对拍披露费用口径，避免口径差异被误判为净值回归。
+    FEE_DILUTION_BASIS: str = "per_order"
+
     def __init__(
         self,
         config: Optional[BacktestConfig] = None,

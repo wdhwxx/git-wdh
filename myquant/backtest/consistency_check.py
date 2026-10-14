@@ -182,6 +182,8 @@ class PairComparison:
     ok: bool
     mismatch_dates: list[str] = field(default_factory=list)
     reason: str = ""
+    fee_basis_a: str = "per_order"
+    fee_basis_b: str = "per_order"
 
     def to_dict(self) -> dict[str, Any]:
         """导出为 JSON 可序列化字典。"""
@@ -199,6 +201,9 @@ class PairComparison:
             "ok": self.ok,
             "mismatch_dates": self.mismatch_dates,
             "reason": self.reason,
+            # P2-02：两引擎费用摊薄口径披露（口径一致才紧对拍有据）
+            "fee_basis_a": self.fee_basis_a,
+            "fee_basis_b": self.fee_basis_b,
         }
 
 
@@ -426,6 +431,9 @@ class ConsistencyChecker:
             engine = BacktestEngine(config=config, strategy=strategy, data=data)
 
         result = engine.run()
+        # P2-02：把本引擎的费用摊薄口径挂到结果上，供对拍披露/防误判
+        # （直构引擎未经 create_engine 装配，无 manifest，故从类常量直读）
+        result.extra["fee_dilution_basis"] = getattr(engine, "FEE_DILUTION_BASIS", "per_order")
         if not result.is_success:
             logger.warning(
                 "引擎 %s 回测未成功: status=%s, error=%s",
@@ -460,6 +468,9 @@ class ConsistencyChecker:
         dates_a, eq_a = self._equity_series(result_a)
         dates_b, eq_b = self._equity_series(result_b)
         tolerance = self._tolerance_for(engine_a, engine_b)
+        # P2-02：两引擎费用摊薄口径（直构引擎从 result.extra 读）
+        basis_a = result_a.extra.get("fee_dilution_basis", "per_order")
+        basis_b = result_b.extra.get("fee_dilution_basis", "per_order")
 
         def _failed(reason: str) -> PairComparison:
             """构造失败对拍结果（空曲线/无公共日期等边界）。"""
@@ -510,6 +521,12 @@ class ConsistencyChecker:
 
         ok = n_mismatch == 0
         reason = "" if ok else f"{n_mismatch}/{len(common_dates)} 个点超出双阈值容差带"
+        # P2-02：两引擎费用摊薄口径不一致 → 显式标注为"已知口径差异"，
+        # 避免未来 vectorized 算法变为 per_bar 时被误判为净值回归（口径差≠bug）。
+        if basis_a != basis_b:
+            note = f"⚠ 费用摊薄口径已知差异: {engine_a}={basis_a} vs {engine_b}={basis_b}"
+            reason = f"{reason}；{note}" if reason else note
+            ok = False  # 口径不一致本就该阻断"可信"宣传，不静默放过
         return PairComparison(
             name=name,
             engine_a=engine_a,
@@ -524,6 +541,8 @@ class ConsistencyChecker:
             ok=ok,
             mismatch_dates=mismatch_dates,
             reason=reason,
+            fee_basis_a=basis_a,
+            fee_basis_b=basis_b,
         )
 
     # ── 汇总校验 ────────────────────────────────────────────
@@ -569,6 +588,8 @@ class ConsistencyChecker:
                 "n_trades": len(res.trades),
                 "n_points": len(res.equity_curve),
                 "error": res.error_message,
+                # P2-02：费用摊薄口径披露（per_order/per_bar），对拍报告可审计
+                "fee_dilution_basis": res.extra.get("fee_dilution_basis", "per_order"),
             }
 
         comparisons: list[PairComparison] = []

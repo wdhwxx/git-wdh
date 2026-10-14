@@ -636,3 +636,49 @@ class TestLoadRealData:
         """symbols 为空时应抛 ValueError（防御式输入校验）。"""
         with pytest.raises(ValueError, match="symbols 不能为空"):
             load_real_data(symbols=[], start_date="2024-01-01", end_date="2024-03-01")
+
+
+# ═════════════════════════════════════════════
+#  8. fee_dilution_basis 费用口径披露（P2-02）
+# ═════════════════════════════════════════════
+
+class TestFeeDilutionBasis:
+    """P2-02：对拍结果披露两引擎费用摊薄口径，口径不一致时阻断并标注（防误判回归）。"""
+
+    @staticmethod
+    def _fake_result(basis: str) -> Any:
+        """构造最小假回测结果（仅含 compare_pair 读取的字段）。"""
+        from types import SimpleNamespace
+
+        curve = [
+            SimpleNamespace(date="2024-01-02", equity=1.0),
+            SimpleNamespace(date="2024-01-03", equity=1.0),
+        ]
+        return SimpleNamespace(extra={"fee_dilution_basis": basis}, equity_curve=curve)
+
+    def test_pair_dict_exposes_fee_basis(self) -> None:
+        """PairComparison.to_dict 应含 fee_basis_a/fee_basis_b 字段。"""
+        checker = ConsistencyChecker()
+        ra = self._fake_result("per_order")
+        rb = self._fake_result("per_order")
+        pair = checker.compare_pair(ra, rb, "mixed", "vectorized", "mixed_vs_vectorized")
+        d = pair.to_dict()
+        assert d["fee_basis_a"] == "per_order"
+        assert d["fee_basis_b"] == "per_order"
+
+    def test_basis_mismatch_blocks_and_notes(self) -> None:
+        """两引擎费用口径不一致 → ok=False 且 reason 含口径差异标注（不误判为净值 bug）。"""
+        checker = ConsistencyChecker()
+        ra = self._fake_result("per_order")
+        rb = self._fake_result("per_bar")
+        pair = checker.compare_pair(ra, rb, "mixed", "vectorized", "mixed_vs_vectorized")
+        assert pair.ok is False
+        assert "费用摊薄口径" in pair.reason
+        assert pair.fee_basis_a == "per_order"
+        assert pair.fee_basis_b == "per_bar"
+
+    def test_vectorized_default_basis_is_per_order(self) -> None:
+        """vectorized 引擎类常量 FEE_DILUTION_BASIS 应为 per_order（每 bar 调仓即一笔委托）。"""
+        from myquant.backtest.vectorized_engine import VectorizedBacktestEngine
+
+        assert VectorizedBacktestEngine.FEE_DILUTION_BASIS == "per_order"
