@@ -26,7 +26,7 @@ from __future__ import annotations
 import ast
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Sequence, Set
 
 from myquant.core.config_loader import ConfigLoader
 from myquant.leakage_gate.contract import _get_entry, _load_ledger, _load_registry
