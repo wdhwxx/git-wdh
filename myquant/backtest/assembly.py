@@ -21,7 +21,7 @@ backtest/assembly.py - 回测引擎装配模块（P0-00 子步骤 A 第一刀）
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from myquant.core.logger import get_logger
 from myquant.models.backtest import BacktestConfig

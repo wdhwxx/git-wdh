@@ -495,6 +495,32 @@ def _entry_finance_import(project_root: Path, progress_callback=None) -> dict:
         return {"total": 0, "success": 0, "failed": 1, "skipped": 0,
                 "error": "datasets/raw/financial/ 下未找到 financial_history_*.csv"}
 
+    from myquant.data_access.financial_service import FinancialImportService
+
+    def _adapt_cb(current: int, total: int, message: str) -> None:
+        if progress_callback:
+            progress_callback(current, total, {
+                "symbol": str(message)[:16], "status": "completed", "record_count": current,
+            })
+
+    svc = FinancialImportService(project_root)
+    try:
+        imp = svc.import_financial_csv(csv_files[-1], progress_callback=_adapt_cb)
+        fac = svc.compute_factors(lookback_days=1, progress_callback=_adapt_cb)
+        csv_out, html_out = svc.generate_report(imp, fac)
+        return {
+            "total": imp.symbol_count,
+            "success": imp.success_rows,
+            "failed": imp.error_rows,
+            "skipped": imp.skipped_rows,
+            "records": imp.success_rows,
+            "factor_values": fac.total_factor_values,
+            "report_csv": str(csv_out),
+            "report_html": str(html_out),
+        }
+    finally:
+        svc.close()
+
 
 def _entry_finance_sync(project_root: Path, progress_callback=None) -> dict:
     """
@@ -525,32 +551,6 @@ def _entry_finance_sync(project_root: Path, progress_callback=None) -> dict:
         "import": stats.import_stats,
         "missing_after": stats.missing_after,
     }
-
-
-
-    def _adapt_cb(current: int, total: int, message: str) -> None:
-        if progress_callback:
-            progress_callback(current, total, {
-                "symbol": str(message)[:16], "status": "completed", "record_count": current,
-            })
-
-    svc = FinancialImportService(project_root)
-    try:
-        imp = svc.import_financial_csv(csv_files[-1], progress_callback=_adapt_cb)
-        fac = svc.compute_factors(lookback_days=1, progress_callback=_adapt_cb)
-        csv_out, html_out = svc.generate_report(imp, fac)
-        return {
-            "total": imp.symbol_count,
-            "success": imp.success_rows,
-            "failed": imp.error_rows,
-            "skipped": imp.skipped_rows,
-            "records": imp.success_rows,
-            "factor_values": fac.total_factor_values,
-            "report_csv": str(csv_out),
-            "report_html": str(html_out),
-        }
-    finally:
-        svc.close()
 
 
 def _entry_tdx(project_root: Path, progress_callback=None) -> dict:
@@ -589,7 +589,13 @@ def _entry_web(project_root: Path, progress_callback=None, symbol: Optional[str]
             result = fetcher.get_market_data(symbol)
             ok = result is not None and result.count > 0
             if ok:
-                _save_parquet(result, project_root)
+                # #57/#86 口径：processed 写回统一走清洗管线（save_cleaned_incremental_parquet），
+                # 原 _save_parquet 已随 #57 删除，此处遗留调用点为悬空 NameError（F821 定性修复）
+                _mgr, _conn = _make_manager(fetcher, project_root)
+                try:
+                    _mgr.save_cleaned_incremental_parquet(symbol, records=result.data)
+                finally:
+                    _conn.close()
             if progress_callback:
                 progress_callback(1, 1, {
                     "symbol": symbol,
@@ -902,22 +908,29 @@ class DataDownloadDialog(QDialog):
         t = QLabel("数据源")
         t.setStyleSheet("color:#22D3EE; font-size:13px; font-weight:600;")
         cl.addWidget(t)
-        self.lbl_tdx = QLabel("—"); self.lbl_web = QLabel("—"); self.lbl_broker = QLabel("—")
+        self.lbl_tdx = QLabel("—")
+        self.lbl_web = QLabel("—")
+        self.lbl_broker = QLabel("—")
         self._marks: Dict[str, QLabel] = {}
         for key, name, val, mark in (
             ("tdx", "通达信", "D:\\TDX", "okMark"),
             ("web", "网页", "东财→新浪→腾讯", "okMark"),
             ("broker", "券商", "未配置", "offMark"),
         ):
-            row = QHBoxLayout(); row.setSpacing(6)
+            row = QHBoxLayout()
+            row.setSpacing(6)
             mk = QLabel("●" if mark == "okMark" else "○")
             mk.setObjectName(mark)
             mk.setStyleSheet(f"color:{'#22C55E' if mark == 'okMark' else '#64748B'}; font-size:10px;")
-            nm = QLabel(name); nm.setObjectName("infoName")
+            nm = QLabel(name)
+            nm.setObjectName("infoName")
             nm.setStyleSheet("color:#CBD5E1; font-size:12px;")
-            vl = QLabel(val); vl.setObjectName("infoVal")
+            vl = QLabel(val)
+            vl.setObjectName("infoVal")
             vl.setStyleSheet("color:#64748B; font-size:11px;")
-            row.addWidget(mk); row.addWidget(nm); row.addWidget(vl)
+            row.addWidget(mk)
+            row.addWidget(nm)
+            row.addWidget(vl)
             cl.addLayout(row)
             self._marks[key] = mk
         cl.addStretch()
@@ -934,18 +947,23 @@ class DataDownloadDialog(QDialog):
         t2 = QLabel("数据概览")
         t2.setStyleSheet("color:#818CF8; font-size:13px; font-weight:600;")
         cl2.addWidget(t2)
-        self.lbl_pq = QLabel("—"); self.lbl_raw = QLabel("—"); self.lbl_db = QLabel("—")
+        self.lbl_pq = QLabel("—")
+        self.lbl_raw = QLabel("—")
+        self.lbl_db = QLabel("—")
         for name, obj in (
             ("Parquet", self.lbl_pq),
             ("CSV", self.lbl_raw),
             ("DB", self.lbl_db),
         ):
-            row = QHBoxLayout(); row.setSpacing(6)
-            nm = QLabel(name); nm.setObjectName("infoName")
+            row = QHBoxLayout()
+            row.setSpacing(6)
+            nm = QLabel(name)
+            nm.setObjectName("infoName")
             nm.setStyleSheet("color:#94A3B8; font-size:12px;")
             obj.setObjectName("infoVal")
             obj.setStyleSheet("color:#22D3EE; font-size:15px; font-weight:600; font-family:Consolas;")
-            row.addWidget(nm); row.addWidget(obj)
+            row.addWidget(nm)
+            row.addWidget(obj)
             cl2.addLayout(row)
         cl2.addStretch()
         lay.addWidget(card2, 1)
@@ -1073,7 +1091,9 @@ class DataDownloadDialog(QDialog):
         t.setStyleSheet("color:#2fd4a7; font-weight:700; font-size:13px;")
         self.lbl_live = QLabel("○ idle")
         self.lbl_live.setObjectName("liveLabel")
-        hdr.addWidget(t); hdr.addStretch(); hdr.addWidget(self.lbl_live)
+        hdr.addWidget(t)
+        hdr.addStretch()
+        hdr.addWidget(self.lbl_live)
         lay.addLayout(hdr)
         self.txt_progress = QPlainTextEdit()
         self.txt_progress.setReadOnly(True)
@@ -1319,7 +1339,8 @@ class DataDownloadDialog(QDialog):
         sk = summary.get("skipped", 0)
         ps = summary.get("parquet_saved", 0)
         if "daily" in summary:  # 全部更新任务
-            d = summary["daily"]; fi = summary["finance"]
+            d = summary["daily"]
+            fi = summary["finance"]
             if "parquet_saved" in d:
                 # M5修复：复合任务中日线部分同样以 processed 实际写入数为主口径
                 self._append_log(

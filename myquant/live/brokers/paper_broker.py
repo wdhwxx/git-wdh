@@ -741,7 +741,7 @@ class PaperBroker(BaseBroker):
         else:
             return self.slippage_value * quantity
 
-    def _build_fee_calculator(self) -> "FeeCalculator":
+    def _build_fee_calculator(self) -> "FeeCalculator":  # noqa: F821  # 类型定义于 backtest.fee_common，L3 内不跨层 import；注解字符串不求值
         """P1-04：live 费用口径统一走回测 FeeCalculator（同一模型同一参数），
         杜绝 live/backtest 各写一份导致口径漂移。"""
         from myquant.backtest.fee_common import FeeCalculator

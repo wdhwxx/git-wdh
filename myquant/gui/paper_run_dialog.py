@@ -29,9 +29,9 @@ from myquant.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-from PySide6.QtCore import QObject, QRect, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QColor, QMouseEvent, QPixmap
-from PySide6.QtWidgets import (
+from PySide6.QtCore import QObject, QRect, Qt, QThread, QTimer, Signal  # noqa: E402
+from PySide6.QtGui import QColor, QMouseEvent, QPixmap  # noqa: E402
+from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
     QDialog,
     QFrame,

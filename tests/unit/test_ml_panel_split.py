@@ -28,7 +28,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from myquant.ml.features import FeatureConfig, FeatureEngine, PanelDataset
+from myquant.ml.features import (
+    FeatureConfig,
+    FeatureDataset,
+    FeatureEngine,
+    PanelDataset,
+)
 from myquant.ml.model_registry import ModelRegistry
 from myquant.ml.training_pipeline import (
     TrainingPipeline,

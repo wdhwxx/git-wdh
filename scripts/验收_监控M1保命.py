@@ -49,7 +49,7 @@ _PROJECT_ROOT = _bootstrap_root()
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from myquant.acceptance.m1_acceptance import (
+from myquant.acceptance.m1_acceptance import (  # noqa: E402
     M1AcceptanceRunner,  # noqa: E402  # 业务模块
 )
 

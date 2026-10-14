@@ -34,7 +34,7 @@ from __future__ import annotations
 import struct
 from datetime import date
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from myquant.core.logger import get_logger
 

@@ -174,11 +174,11 @@ def scan_data_quality(df: pd.DataFrame, symbol: str = "") -> Dict[str, int]:
         return result
     o = df["开盘价"]
     h = df["最高价"]
-    l = df["最低价"]
+    low = df["最低价"]
     c = df["收盘价"]
-    result["nan_price_rows"] = int((o.isna() | h.isna() | l.isna() | c.isna()).sum())
+    result["nan_price_rows"] = int((o.isna() | h.isna() | low.isna() | c.isna()).sum())
     result["ohlc_violation_rows"] = int(
-        ((h < l) | (h < o) | (h < c) | (l > o) | (l > c)).sum()
+        ((h < low) | (h < o) | (h < c) | (low > o) | (low > c)).sum()
     )
     return result
 

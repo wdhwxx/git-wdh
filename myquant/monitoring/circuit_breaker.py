@@ -788,7 +788,7 @@ def _run_self_test() -> int:
         check("禁开仓生效", not risk.can_open_position())
         check("撤全部挂单", broker.cancelled == ["o1", "o2"], f"{broker.cancelled}")
         check("触发为 CRITICAL 告警", SeverityLevel.CRITICAL in am.levels,
-              f"{[l.value for l in am.levels]}")
+              f"{[lvl.value for lvl in am.levels]}")
         check("审计有 circuit 记录",
               len(audit.query(kind="circuit", limit=50)) >= 3)
 

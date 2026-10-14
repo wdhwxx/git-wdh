@@ -73,7 +73,7 @@ logger = logging.getLogger("myquant.backtest.batch_backtest")
 DEFAULT_INITIAL_CAPITAL: float = 1_000_000.0
 DEFAULT_FREQUENCY: str = "1d"
 DEFAULT_DATA_SOURCE: str = "batch"
-from myquant.core.constants import (
+from myquant.core.constants import (  # noqa: E402
     RESULTS_FORMAT_VERSION,  # P3-D10-001 整改：双源收敛为单一权威（myquant/core/constants.py）
 )
 

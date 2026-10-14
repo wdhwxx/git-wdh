@@ -22,11 +22,16 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from myquant.live.brokers import PaperBroker
-from myquant.live.engine import LiveEngine, RiskConfig
-from myquant.live.portfolio import LivePortfolio
-from myquant.models.market_data import Bar
-from myquant.strategies.base import Signal, SignalType, StrategyBase, StrategyContext
+from myquant.live.brokers import PaperBroker  # noqa: E402
+from myquant.live.engine import LiveEngine, RiskConfig  # noqa: E402
+from myquant.live.portfolio import LivePortfolio  # noqa: E402
+from myquant.models.market_data import Bar  # noqa: E402
+from myquant.strategies.base import (  # noqa: E402
+    Signal,
+    SignalType,
+    StrategyBase,
+    StrategyContext,
+)
 
 # ═══════════════════════════════════════════════
 #  配置参数

@@ -253,7 +253,7 @@ class TestCallbacks:
         """clear_callbacks 应清空全部回调并重置水位记录。"""
         watcher = MemoryWatcher()
         watcher.register_callback(
-            MemoryLevel.WARNING, lambda l, i: None
+            MemoryLevel.WARNING, lambda level, info: None
         )
         watcher.clear_callbacks()
         watcher._maybe_trigger_callbacks(MemoryLevel.WARNING, {"percent": 75.0})
@@ -285,7 +285,7 @@ class TestStatsAndContext:
         with MemoryWatcher(warning_pct=70, critical_pct=85) as watcher:
             assert isinstance(watcher, MemoryWatcher)
             watcher.register_callback(
-                MemoryLevel.WARNING, lambda l, i: None
+                MemoryLevel.WARNING, lambda level, info: None
             )
         # 退出后回调已清理
         assert watcher._callbacks == {}

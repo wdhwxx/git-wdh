@@ -54,7 +54,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Optional, Set
 
 from myquant.api.models.schemas import (
     AlertAckData,

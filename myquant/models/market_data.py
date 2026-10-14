@@ -399,8 +399,8 @@ class Snapshot:
         return {
             "symbol": self.symbol,
             "timestamp": self.timestamp,
-            "bids": [(l.price, l.size) for l in self.bids],
-            "asks": [(l.price, l.size) for l in self.asks],
+            "bids": [(level.price, level.size) for level in self.bids],
+            "asks": [(level.price, level.size) for level in self.asks],
             "last_price": self.last_price,
             "volume": self.volume,
             "amount": self.amount,

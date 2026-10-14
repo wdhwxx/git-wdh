@@ -258,7 +258,7 @@ def cmd_check(project_root: Path, db_path: str | None) -> int:
             env={**os.environ, "PYTHONPATH": str(project_root),
                  "QUANT_DB_URL": f"sqlite:///{db_abs}"},
         )
-        heads = [l.strip().split()[0] for l in result.stdout.splitlines() if l.strip() and "(head)" in l]
+        heads = [line.strip().split()[0] for line in result.stdout.splitlines() if line.strip() and "(head)" in line]
         if ver in heads:
             print("  [状态] 已是最新版本，无需迁移")
         else:

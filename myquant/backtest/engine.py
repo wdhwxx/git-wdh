@@ -46,7 +46,7 @@ import pandas as pd
 
 from myquant.backtest.assembly import (  # re-export register_broker_factory（外部调用方经 engine 导入，P0-00A 迁至 assembly.py）
     get_broker_factory,
-    register_broker_factory,
+    register_broker_factory,  # noqa: F401  # re-export：外部经 engine 导入
 )
 from myquant.backtest.data_loader import DataProviderBase
 from myquant.backtest.metrics import MetricsCalculator

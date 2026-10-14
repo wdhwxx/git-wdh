@@ -60,7 +60,10 @@ except ImportError:  # pragma: no cover
     INDICATORS_AVAILABLE = False
     logger.warning("[ml] myquant.indicators 不可用，技术指标特征将跳过")
 
-from myquant.indicators.tradability import TradabilityConfig, filter_tradable
+from myquant.indicators.tradability import (  # noqa: E402
+    TradabilityConfig,
+    filter_tradable,
+)
 
 try:
     from myquant.models.market_data import Bar

@@ -26,6 +26,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import List
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices

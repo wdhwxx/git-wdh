@@ -15,7 +15,7 @@ test_tradability_filter.py - F-11 可交易性过滤测试
 
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 import pandas as pd

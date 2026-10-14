@@ -42,20 +42,25 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from myquant.core.logger import get_logger, setup_logging
-from myquant.data_access.cleaner import (
+from myquant.core.logger import get_logger, setup_logging  # noqa: E402
+from myquant.data_access.cleaner import (  # noqa: E402
     load_clean_config,
     run_clean_pipeline,
 )
-from myquant.data_access.factory import (
+from myquant.data_access.factory import (  # noqa: E402
     create_fetcher,
     detect_tdx_available,
     get_available_sources,
 )
 
 # M5修复：清洗元信息统一记录（与全量清洗同口径，写 clean_run_meta/dirty_data_stats）
-from myquant.data_access.full_clean_service import record_clean_meta
-from myquant.utils.file_utils import ensure_dir, get_project_path, write_csv, write_json
+from myquant.data_access.full_clean_service import record_clean_meta  # noqa: E402
+from myquant.utils.file_utils import (  # noqa: E402
+    ensure_dir,
+    get_project_path,
+    write_csv,
+    write_json,
+)
 
 logger = get_logger("run_data_clean")
 
@@ -262,6 +267,22 @@ def save_processed_data(
     except Exception as e:
         logger.error(f"保存清洗后数据失败: {e}")
         return None
+
+
+def _new_factor_cache_factory(project_root: Path):
+    """构造因子缓存工厂（G1 EX-07B：缓存实例由装配层注入，scripts 依赖 L2 合法方向）。
+
+    #258 装配注入同族实现（与 数据全量清洗.py/数据下载.py/缓存管理.py 一致）；
+    本脚本 #57 改造时遗漏该定义，F821 定性为真 NameError（run_cache_sync_for_symbol 执行时触发），补定义修复。
+    """
+    from myquant.indicators.factor_cache import FactorCache
+
+    def _factory():
+        return FactorCache(
+            cache_dir=str(project_root / "cache" / "factor"),
+            enable_l1=True,
+        )
+    return _factory
 
 
 def run_cache_sync_for_symbol(symbol: str, project_root: Path) -> dict:

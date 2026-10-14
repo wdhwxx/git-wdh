@@ -209,12 +209,12 @@ def _validate_single_bar(
         try:
             o = float(record.get("open", 0))
             h = float(record.get("high", 0))
-            l = float(record.get("low", 0))
+            low = float(record.get("low", 0))
             c = float(record.get("close", 0))
             # #C3修复：OHLC全0处理
             # 全0记录通常是停牌占位，默认允许（向后兼容）；
             # 可通过 allow_all_zero=False 拒绝（交易信号场景推荐）
-            all_zero = all(p == 0 for p in (o, h, l, c))
+            all_zero = all(p == 0 for p in (o, h, low, c))
             if all_zero:
                 if not config.get("allow_all_zero", True):
                     errors.append(format_error(
@@ -224,17 +224,17 @@ def _validate_single_bar(
                 # 全0记录跳过OHLC逻辑校验（无意义）
             else:
                 # 非全0记录：执行OHLC逻辑校验
-                if h < l:
-                    errors.append(format_error(ErrorCode.OHLC_HIGH_LOW, f"high({h}) < low({l})"))
+                if h < low:
+                    errors.append(format_error(ErrorCode.OHLC_HIGH_LOW, f"high({h}) < low({low})"))
                 if h < max(o, c):
                     errors.append(format_error(
                         ErrorCode.OHLC_HIGH_OPEN_CLOSE,
                         f"high({h}) < max(open={o}, close={c})"
                     ))
-                if l > min(o, c):
+                if low > min(o, c):
                     errors.append(format_error(
                         ErrorCode.OHLC_LOW_OPEN_CLOSE,
-                        f"low({l}) > min(open={o}, close={c})"
+                        f"low({low}) > min(open={o}, close={c})"
                     ))
         except (TypeError, ValueError):
             errors.append(format_error(ErrorCode.OHLC_PARSE_ERROR, "OHLC 字段包含无法转换的数值"))

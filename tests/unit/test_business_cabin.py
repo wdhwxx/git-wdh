@@ -34,7 +34,7 @@ from myquant.core.field_crypto import FieldCrypto  # noqa: E402
 from myquant.core.metrics_history import MetricsHistoryStore  # noqa: E402
 from myquant.database.connection import DatabaseConnection  # noqa: E402
 from myquant.live.portfolio import LivePortfolio  # noqa: E402
-from myquant.monitoring.center_provider import (
+from myquant.monitoring.center_provider import (  # noqa: E402
     MonitorCenterDataProvider,  # noqa: E402  # G1 EX-15A：provider 下沉 monitoring（直接覆盖）
 )
 from myquant.monitoring.metrics_collector import (  # noqa: E402

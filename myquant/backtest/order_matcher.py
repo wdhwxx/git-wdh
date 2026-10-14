@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -1161,14 +1161,14 @@ if __name__ == "__main__":
         )
         broker.connect()
         legacy_ok = True
-        for otype, side, px, o, h, l in [
+        for otype, side, px, o, h, low in [
             ("MARKET", "BUY", None, 10.0, 11.0, 9.5),
             ("LIMIT", "BUY", 10.5, 10.0, 11.0, 9.5),
             ("LIMIT", "SELL", 10.2, 10.0, 10.8, 9.8),
             ("LIMIT", "SELL", 10.2, 10.0, 10.1, 9.8),
         ]:
             order = _mk_order(otype, side, price=px)
-            bar = _mk_bar(o, h, l)
+            bar = _mk_bar(o, h, low)
             new_fill = matcher.match(order=order, bar=bar)
             # SimBroker 重新构造订单提交撮合
             b_order = Order(

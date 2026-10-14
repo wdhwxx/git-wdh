@@ -47,7 +47,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from myquant.utils.cleanup_service import (  # noqa: E402  P2-D6-001 整改：共享服务单源
+from myquant.utils.cleanup_service import (  # noqa: E402  # P2-D6-001 整改：共享服务单源
     CATEGORY_NAMES,
     CleanupOptions,
     execute_plan,

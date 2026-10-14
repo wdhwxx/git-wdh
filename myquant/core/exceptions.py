@@ -33,7 +33,7 @@ exceptions.py - 自定义异常体系
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 
 class QuantBaseError(Exception):

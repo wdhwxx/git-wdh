@@ -899,7 +899,7 @@ if __name__ == "__main__":
         content1 = all_log_path.read_text(encoding="utf-8")
         _ok("降级测试-WARNING 应出现" in content1, "WARNING 已落盘")
         _ok("降级测试-INFO 不应出现" not in content1, "INFO 被降级拦截")
-        print(f"    文件新增行数: {len([l for l in content1.splitlines() if '降级测试' in l])}")
+        print(f"    文件新增行数: {len([line for line in content1.splitlines() if '降级测试' in line])}")
 
         # ── 测试 2: 异步队列 + 采样输出 ──
         print("\n[2] 异步队列 + 采样测试")

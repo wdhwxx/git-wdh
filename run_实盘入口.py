@@ -64,12 +64,12 @@ import logging
 import signal as os_signal
 
 logger = logging.getLogger("run_live")
-import sys
-import threading
-import time
-from datetime import date, datetime
-from pathlib import Path
-from typing import Any, Dict, Optional
+import sys  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+from datetime import date, datetime  # noqa: E402
+from pathlib import Path  # noqa: E402
+from typing import Any, Dict, Optional  # noqa: E402
 
 # ═══════════════════════════════════════════════
 #  基础工具

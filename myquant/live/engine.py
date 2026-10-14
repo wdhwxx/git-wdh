@@ -2677,7 +2677,7 @@ class LiveEngine(BaseEngine):
 
 # 0.3/R-5 应急链解耦：券商装配工厂迁至 broker_factory.py（应急脚本 import 本模块
 # 会把应急链绑死在引擎上）；此处仅 re-import，调用点（create_live_engine 等）不变。
-from myquant.live.broker_factory import build_broker_from_config
+from myquant.live.broker_factory import build_broker_from_config  # noqa: E402
 
 
 def _require_auto_recover(state_cfg: Dict[str, Any]) -> bool:

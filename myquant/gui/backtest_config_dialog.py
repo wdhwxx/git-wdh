@@ -50,9 +50,9 @@ from myquant.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-from PySide6.QtCore import QDate, QObject, QRect, Qt, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QMouseEvent
-from PySide6.QtWidgets import (
+from PySide6.QtCore import QDate, QObject, QRect, Qt, QUrl, Signal  # noqa: E402
+from PySide6.QtGui import QColor, QDesktopServices, QMouseEvent  # noqa: E402
+from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
     QCheckBox,
     QComboBox,
@@ -75,7 +75,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from myquant.gui.batch_backtest_tab import BatchBacktestTab
+from myquant.gui.batch_backtest_tab import BatchBacktestTab  # noqa: E402
 
 # ─────────────────────────────────────────────
 # 回测子进程监视器（完成后弹提示）

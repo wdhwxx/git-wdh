@@ -41,7 +41,7 @@ from __future__ import annotations
 import copy
 import threading
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from myquant.core.logger import get_logger
 from myquant.data_access.cleaner.base_cleaner import CleanRule

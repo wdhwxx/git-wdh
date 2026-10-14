@@ -59,12 +59,17 @@ from typing import List, Optional
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from myquant.live.brokers import BrokerManager, PaperBroker
-from myquant.live.data_feed import MarketDataFeed, MockRealtimeSource
-from myquant.live.engine import LiveEngine, RiskConfig
-from myquant.live.portfolio import LivePortfolio
-from myquant.models.market_data import Bar
-from myquant.strategies.base import Signal, SignalType, StrategyBase, StrategyContext
+from myquant.live.brokers import BrokerManager, PaperBroker  # noqa: E402
+from myquant.live.data_feed import MarketDataFeed, MockRealtimeSource  # noqa: E402
+from myquant.live.engine import LiveEngine, RiskConfig  # noqa: E402
+from myquant.live.portfolio import LivePortfolio  # noqa: E402
+from myquant.models.market_data import Bar  # noqa: E402
+from myquant.strategies.base import (  # noqa: E402
+    Signal,
+    SignalType,
+    StrategyBase,
+    StrategyContext,
+)
 
 # ═══════════════════════════════════════════════
 #  策略：短周期双均线（适配实时bar数量少）

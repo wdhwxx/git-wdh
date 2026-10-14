@@ -44,7 +44,6 @@ from myquant.backtest.consistency_check import (
     ConsistencyReport,
     DemoThreeModeStrategy,
     PairComparison,
-    load_real_data,
 )
 from myquant.backtest.engine import BacktestEngine
 from myquant.backtest.engine_benchmark import (

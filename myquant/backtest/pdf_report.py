@@ -36,7 +36,7 @@ __author__ = "Pythonwdhmm"
 
 import os
 from datetime import datetime
-from typing import List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from fpdf import FPDF

@@ -16,6 +16,7 @@ test_signal_idempotency.py - 信号/订单幂等去重测试（任务43）
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from myquant.live.brokers.qmt_broker import QmtBroker
 from myquant.live.engine import LiveEngine, RiskConfig

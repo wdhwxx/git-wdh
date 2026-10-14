@@ -29,10 +29,10 @@ __all__ = [
 ]
 
 # 延迟导入，避免未安装依赖时报错
-def get_redis_transport(**kwargs: Any) -> "RedisTransport":
+def get_redis_transport(**kwargs: Any) -> "RedisTransport":  # noqa: F821  # 延迟导入模式，注解字符串不求值
     from myquant.core.transports.redis_bus import RedisTransport
     return RedisTransport(**kwargs)
 
-def get_rabbitmq_transport(**kwargs: Any) -> "RabbitMQTransport":
+def get_rabbitmq_transport(**kwargs: Any) -> "RabbitMQTransport":  # noqa: F821  # 延迟导入模式，注解字符串不求值
     from myquant.core.transports.rabbitmq_bus import RabbitMQTransport
     return RabbitMQTransport(**kwargs)

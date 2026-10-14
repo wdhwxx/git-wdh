@@ -1,4 +1,4 @@
-﻿# 文件名：myquant/data_access/manager.py
+# 文件名：myquant/data_access/manager.py
 """
 manager.py - 数据管理器（更新/校验/同步/自动维护）
 ===================================================
@@ -37,12 +37,12 @@ from myquant.core.logger import get_logger
 
 logger = get_logger("data_access.manager")
 
-from myquant.data_access.time_semantics import (
+from myquant.data_access.time_semantics import (  # noqa: E402
     eff_disclosure_date,
     match_latest_financial,
     next_day,
 )
-from myquant.utils.file_utils import (
+from myquant.utils.file_utils import (  # noqa: E402
     ensure_dir,
     file_lock,
     file_sha256,
@@ -53,9 +53,9 @@ from myquant.utils.file_utils import (
     write_json,
 )
 
-from .cleaner import load_clean_config, run_clean_pipeline
-from .fetcher import DataFetcher
-from .sources.base import MarketDataResult
+from .cleaner import load_clean_config, run_clean_pipeline  # noqa: E402
+from .fetcher import DataFetcher  # noqa: E402
+from .sources.base import MarketDataResult  # noqa: E402
 
 # ─────────────────────────────────────────────
 # 常量定义

@@ -37,7 +37,7 @@ from myquant.core.logger import get_logger
 
 logger = get_logger("data_access.sources.composite_source")
 
-from .base import (
+from .base import (  # noqa: E402
     DataSourceBase,
     DataSourceStatus,
     MarketDataResult,

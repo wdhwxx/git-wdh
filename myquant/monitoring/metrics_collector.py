@@ -2113,12 +2113,12 @@ def collect_pnl_snapshot(
     account_id = str(acct.get("account_id", "default"))
     values: Dict[str, float] = {}
     rows: List[Dict[str, Any]] = []
-    for metric_name, field in _PNL_FIELD_MAP.items():
-        val = acct.get(field, 0.0)
+    for metric_name, field_name in _PNL_FIELD_MAP.items():
+        val = acct.get(field_name, 0.0)
         try:
             val_f = float(val)
         except (TypeError, ValueError):
-            logger.error("[metrics] PnL 字段 %s 非法值 %r，记 0.0", field, val)
+            logger.error("[metrics] PnL 字段 %s 非法值 %r，记 0.0", field_name, val)
             val_f = 0.0
         values[metric_name] = val_f
         rows.append({
@@ -2196,7 +2196,7 @@ def get_latest_pnl_snapshot(
         "total_pnl": None,
     }
     latest_ts: float = 0.0
-    for metric_name, field in _PNL_FIELD_MAP.items():
+    for metric_name, field_name in _PNL_FIELD_MAP.items():
         try:
             rows = history.query(name=metric_name, labels=labels, order="desc", limit=1)
         except Exception as e:  # noqa: BLE001
@@ -2204,7 +2204,7 @@ def get_latest_pnl_snapshot(
             rows = []
         if rows:
             row = rows[0]
-            pnl[field] = row["value"]
+            pnl[field_name] = row["value"]
             latest_ts = max(latest_ts, float(row["timestamp"]))
 
     if pnl["realized_pnl"] is not None and pnl["unrealized_pnl"] is not None:

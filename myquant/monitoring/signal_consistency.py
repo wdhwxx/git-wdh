@@ -389,27 +389,27 @@ class SignalConsistencyChecker:
         # ── 逐 unit 错配判定 ──
         details: List[Dict[str, Any]] = []
         mismatched = 0
-        for b, l, align_by in units:
+        for b, lv, align_by in units:
             devs: List[str] = []
-            if b["side"] != l["side"]:
+            if b["side"] != lv["side"]:
                 devs.append(DEV_DIRECTION)
             # 价格：两侧都有价才比绝对差；一侧有价一侧缺价也判价格错配
-            if (b["price"] is None) != (l["price"] is None):
+            if (b["price"] is None) != (lv["price"] is None):
                 devs.append(DEV_PRICE)
-            elif b["price"] is not None and l["price"] is not None:
-                if abs(b["price"] - l["price"]) > self._price_tolerance:
+            elif b["price"] is not None and lv["price"] is not None:
+                if abs(b["price"] - lv["price"]) > self._price_tolerance:
                     devs.append(DEV_PRICE)
             # 时间漂移（signal_id 配对但两侧 ts 漂移超容差）
-            if abs(b["ts"] - l["ts"]) > self._time_tolerance:
+            if abs(b["ts"] - lv["ts"]) > self._time_tolerance:
                 devs.append(DEV_TIME)
 
             if devs:
                 mismatched += 1
                 details.append(self._make_detail(
-                    signal_id=b["signal_id"] or l["signal_id"],
+                    signal_id=b["signal_id"] or lv["signal_id"],
                     ts=b["ts"], symbol=b["symbol"],
-                    bt_side=b["side"], live_side=l["side"],
-                    bt_price=b["price"], live_price=l["price"],
+                    bt_side=b["side"], live_side=lv["side"],
+                    bt_price=b["price"], live_price=lv["price"],
                     dev_types=devs, align_by=align_by,
                 ))
 
@@ -420,10 +420,10 @@ class SignalConsistencyChecker:
                 bt_side=b["side"], live_side="", bt_price=b["price"], live_price=None,
                 dev_types=[DEV_MISSING_LIVE], align_by="unmatched",
             ))
-        for l in unmatched_live:
+        for lv in unmatched_live:
             details.append(self._make_detail(
-                signal_id=l["signal_id"], ts=l["ts"], symbol=l["symbol"],
-                bt_side="", live_side=l["side"], bt_price=None, live_price=l["price"],
+                signal_id=lv["signal_id"], ts=lv["ts"], symbol=lv["symbol"],
+                bt_side="", live_side=lv["side"], bt_price=None, live_price=lv["price"],
                 dev_types=[DEV_MISSING_BACKTEST], align_by="unmatched",
             ))
 
@@ -509,12 +509,12 @@ class SignalConsistencyChecker:
                 continue
             best_j = -1
             best_dt = math.inf
-            for j, l in enumerate(live):
+            for j, lv in enumerate(live):
                 if used_live[j]:
                     continue
-                if l["symbol"] != b["symbol"]:
+                if lv["symbol"] != b["symbol"]:
                     continue
-                dt = abs(l["ts"] - b["ts"])
+                dt = abs(lv["ts"] - b["ts"])
                 if dt <= self._time_tolerance and dt < best_dt:
                     best_dt = dt
                     best_j = j
@@ -524,7 +524,7 @@ class SignalConsistencyChecker:
                 used_live[best_j] = True
 
         unmatched_bt = [b for i, b in enumerate(bt) if not used_bt[i]]
-        unmatched_live = [l for j, l in enumerate(live) if not used_live[j]]
+        unmatched_live = [lv for j, lv in enumerate(live) if not used_live[j]]
         return units, unmatched_bt, unmatched_live
 
     # ── 明细构造 ──────────────────────────────────────────────────
