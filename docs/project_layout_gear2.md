@@ -5309,3 +5309,17 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 **验收**：py_compile 2 文件 OK；exempt_registry AST 门禁 46 passed；**全量 pytest 4167 passed / 4 skipped / 0 failed**（基线 4121 + 新增 46，吻合）。
 
 **纪律遵守**：常量提取（_DIRECT_CONSTRUCT_SYMBOLS/_PROJECT_ROOT/_SCRIPTS_DIR 提模块顶部）；Google docstring + 全量类型注解（`-> list[str]`/`-> None`）；禁裸 except（ast.parse 包 SyntaxError 记 [] 不吞）；薄入口（生成回测报告.py 仅参数解析+调 run_backtest，业务逻辑在 myquant）；新增文件在蓝图 backtest/ 目录树内（exempt_registry.py 属 myquant/backtest/）；全量 pytest 0 failed 才提交；git 提交（commit message 引用 #372）。**P1-04 收口——回测唯一出口 create_engine 无绕过直构，实盘沙箱直构显式登记并由 AST 门禁守护。**
+
+---
+
+## #373 · 2026-10-14 · P1-03 核验收口：fail-closed 配置缺失拒启已落地（误记修正）
+
+**现状核实**：总清单 L288 原标 P1-03 `[ ] 部分完成`（七-8："realism_gate 段缺失回落 enabled=False 仅审计不阻断，与方案 §4.3 配置缺失=阻断不符"）。逐行回代码核验：该卡实际已在 #354 完整落地——`engine.py:134` 在 `_attach_realism_manifest` 开头（try 块外，不会被软接线 except 吞）判 `if not isinstance(rg_raw, dict) or not rg_raw: raise RealismGateError("配置段缺失")`；`from_dict`（gate.py:106）对 enabled/audit_violations 严格类型校验（非 bool 即抛）；显式 `enabled=False` 为合法审计档不拒启（方案 §4.3 出口断言表）。
+
+**落地（本次无新代码，纯复核 + 误记修正）**：
+- 复核 `tests/unit/test_realism_gate.py::TestMisconfigurationFailClosed` 7 项：enabled 字符串/int 抛错、audit 字符串抛错、空 dict 默认值、合法 bool 通过、`realism_gate={}` 经 create_engine 拒启（match="配置段缺失"）、显式 enabled=False 审计档放行——复跑 7 passed。
+- 修正总清单 L288 误记：P1-03 由 `[ ] 部分完成` 改 `[x] 复核确认`；备注"测试实际在 test_realism_gate.py::TestMisconfigurationFailClosed，非七-8 所称 test_gate_misconfig.py（该文件不存在，系文档误记）"。
+
+**验收**：TestMisconfigurationFailClosed 7 passed；**全量 pytest 4167 passed / 4 skipped / 0 failed**（与 #372 基线持平，本次无代码改动）。
+
+**纪律遵守**：未新增/改动代码（纯文档复核）；幂等回写；全量 pytest 0 failed 才提交；git 提交（commit message 引用 #373）。**P1 高优先 18/18 全部清零——P1-03 确认无残留洞，回测真实性门禁 P0/P1/P2 全阶段收口。**
