@@ -5212,3 +5212,17 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 **验收**：新反红 12 passed；targeted 82 passed（realism_manifest + realism_gate + signature_guard + data_snapshot_pin + exemption_hardening）+ candidate_pool 12 passed 全绿；py_compile 7 文件全 OK；全量 pytest commit 前回填。
 
 **纪律遵守**：蓝图目录树先行登记（realism_gate/signature_guard.py 新行 + manifest.py 行追加 #366 标注 + tests/unit/test_signature_guard.py 新行）；L0 纯函数（signature_guard 仅依赖 manifest.RealismGateError，不 import backtest，R-02/R-16 分层合规，鸭子类型 dict 消费避免循环 import）；fail-closed（跨签名聚合即拒合并，宁可阻断不可跨配置混排）；向后兼容（无 manifest_signature 字段的旧数据/旧落盘放行，新 outcome 采集后自动守门）；签名采集失败不阻断回测主流程（留 None + warning）；import 分三组（标准库 logging/typing + 本地 manifest）；禁裸 except（param_optimizer 签名采集兜底带类型 + 注释）；全量 pytest 0 failed 才提交；git 提交（commit message 引用 #366）。**P1-16 完成（任务清单 ⬜ → ✅，M7 收官卡）**。
+
+---
+
+## #367 · 2026-10-14 · P1-12 配套：e2e 合成 provider 测试隔离真实目录快照校验
+
+**现状核实**：#364（P1-12 数据快照 pin）在 `engine._attach_realism_manifest` 对 `data=None`（from_data_provider 直构路径）调 `verify_sidecar()` 扫真实 `datasets/processed` 目录、与 sidecar 基线比指纹，漂移即 `snapshot_mismatch=True` → data_pit critical。本仓库生产数据**每日增量更新**，目录内容持续漂移，导致 `tests/unit/test_realism_gate_e2e.py` 里 3 个用合成 `_FakeProvider`（根本不读 processed 目录）的端到端用例被真实目录状态连带拦红——全量回归 4107 passed/3 failed。这是测试夹具与真实数据目录耦合的缺陷，非门禁逻辑 bug（门禁按设计正确捕获了漂移）。
+
+**落地**：
+- **tests/unit/test_realism_gate_e2e.py（改动）**：新增 autouse fixture `_isolate_real_data_snapshot`，把 `myquant.data_access.provider.verify_sidecar` patch 为"合成命中"结果（`fingerprint_hash/snapshot_id` 取模块常量 `_SYNTHETIC_SNAPSHOT_HASH/_SYNTHETIC_SNAPSHOT_ID`、`matched=True`）。from_data_provider 路径读到的是合成指纹，不再扫真实目录；生产真实回测路径不受影响（patch 仅作用于本测试进程）。内存数据路径（create_engine + data dict）本就 `snapshot_applicable=False`、不调 verify_sidecar，不受影响。
+- 业务代码 `engine.py` **零改动**——只解耦测试夹具，不动 P1-12 真实性门禁判据本身。
+
+**验收**：e2e 文件 9 passed（耗时 5.14s→1.02s，佐证不再扫真实目录几千 parquet 哈希）；**反证**：故意把真实 sidecar 指纹写坏（`matched=False`）时 e2e 仍 9 passed，证明隔离完全生效；事后删 sidecar 重新 first_pin 恢复正确基线（fp=42ca20c6）；全量 pytest **4110 passed / 4 skipped / 0 failed**。
+
+**纪律遵守**：不动业务代码（只改测试夹具，门禁判据保持 fail-closed）；autouse fixture 职责单一（仅快照隔离，检查器注册仍归 `_all_checks_registered`）；常量提取（`_SYNTHETIC_*` 测试指纹占位提模块顶部，不内联魔法值）；Google docstring + 全量类型注解（`-> Dict[str, object]` / `-> object`）；monkeypatch 由 fixture 注入（测试进程结束自动还原，不污染其他文件）；全量 pytest 0 failed 才提交；git 提交（commit message 引用 #367）。**e2e 与真实数据目录解耦完成——此后每日增量更新不再连带红合成测试。**
