@@ -34,6 +34,8 @@ from myquant.execution.state_machine import OrderStateMachine
 from myquant.models.backtest import CommissionModel, SlippageModel
 from myquant.models.market_data import Bar
 from myquant.models.trade import Order, OrderSide, Position, Trade
+# P2-01：event 引擎（SimBroker）费用改走 fee_common 唯一入口，与 mixed/vectorized 同口径
+from myquant.backtest.fee_common import FeeCalculator
 
 logger = get_logger(__name__)
 
@@ -97,6 +99,11 @@ class SimBroker(ExecutionInterface):
         self.trades: List[Trade] = []              # 成交记录
         self.commission_model = commission_model or CommissionModel()
         self.slippage_model = slippage_model or SlippageModel()
+        # P2-01：费用统一委托 fee_common.FeeCalculator（与 mixed/vectorized 同一唯一入口）
+        self.fee_calculator: FeeCalculator = FeeCalculator(
+            commission_model=self.commission_model,
+            slippage_model=self.slippage_model,
+        )
         self.enable_partial_fill = enable_partial_fill
         self.participation_rate = float(participation_rate)  # KP-P2-03: 成交量参与率
         self.price_limit_pct = float(price_limit_pct)   # KP-P2-02: 涨跌停幅度
@@ -311,9 +318,10 @@ class SimBroker(ExecutionInterface):
         pc = self._prev_close.get(order.symbol, 0.0)
         if pc <= 0 or self.price_limit_pct <= 0:
             return None
-        if order.side == OrderSide.BUY and bar.open >= pc * (1 + self.price_limit_pct):
+        # P2-04 盘中触板建模：用 high/low（非 open），盘中触涨停即拒买、触跌停即拒卖
+        if order.side == OrderSide.BUY and bar.high >= pc * (1 + self.price_limit_pct):
             return "涨停"
-        if order.side == OrderSide.SELL and bar.open <= pc * (1 - self.price_limit_pct):
+        if order.side == OrderSide.SELL and bar.low <= pc * (1 - self.price_limit_pct):
             return "跌停"
         return None
 
@@ -465,12 +473,15 @@ class SimBroker(ExecutionInterface):
 
         买入: 佣金(万2,最低5元) + 过户费(万0.1)
         卖出: 佣金(万2,最低5元) + 印花税(千1) + 过户费(万0.1)
+
+        P2-01：委托 fee_common.FeeCalculator 唯一入口（与 mixed/vectorized 同实现），
+        返回佣金+印花税+过户费合计；与 CommissionModel.calc_buy/calc_sell 数学等价。
         """
         amount = trade.notional  # 成交金额 = quantity * price
-        if trade.side == OrderSide.BUY:
-            return self.commission_model.calc_buy(amount)
-        else:
-            return self.commission_model.calc_sell(amount)
+        commission, stamp_tax, transfer_fee = self.fee_calculator.calc_commission_breakdown(
+            side=trade.side, notional=amount
+        )
+        return commission + stamp_tax + transfer_fee
 
     # ------------------------------------------------------------------
     # 持仓与资金更新

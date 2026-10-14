@@ -384,9 +384,12 @@ class OrderMatcher:
 
         规则（A股写实，与风控层 PriceLimitRule 一致）：
           - 停牌（volume=0）：买卖均不成交
-          - 涨停开盘（open >= pre_close×(1+limit_pct)）：买单不成交
-          - 跌停开盘（open <= pre_close×(1-limit_pct)）：卖单不成交
+          - 涨停触板（high >= pre_close×(1+limit_pct)）：买单不成交
+          - 跌停触板（low <= pre_close×(1-limit_pct)）：卖单不成交
           - pre_close<=0 时跳过涨跌停检查（数据不足）
+
+        P2-04：判据由"开盘 open"升级为"盘中 high/low 触板"——真实 A 股盘中触涨停
+        即买不进，仅按 open 会漏掉盘中冲高触板的情形；与 vectorized 向量化路径统一。
 
         Args:
             side: 订单方向。
@@ -416,10 +419,11 @@ class OrderMatcher:
                 pct = self.price_limit_pct_by_symbol.get(symbol, self.price_limit_pct)
             limit_up = bar.pre_close * (1.0 + pct)
             limit_down = bar.pre_close * (1.0 - pct)
-            if side == OrderSide.BUY and bar.open >= limit_up - _PRICE_EPSILON:
-                return f"涨停开盘({bar.open:.2f}>={limit_up:.2f})"
-            if side == OrderSide.SELL and bar.open <= limit_down + _PRICE_EPSILON:
-                return f"跌停开盘({bar.open:.2f}<={limit_down:.2f})"
+            # P2-04 盘中触板建模：用 high/low（非 open），盘中触涨停即拒买、触跌停即拒卖
+            if side == OrderSide.BUY and bar.high >= limit_up - _PRICE_EPSILON:
+                return f"涨停触板(high={bar.high:.2f}>={limit_up:.2f})"
+            if side == OrderSide.SELL and bar.low <= limit_down + _PRICE_EPSILON:
+                return f"跌停触板(low={bar.low:.2f}<={limit_down:.2f})"
 
         return None
 
@@ -635,8 +639,9 @@ class OrderMatcher:
             valid_pc = pc_arr > 0
             limit_up = pc_arr * (1.0 + self.price_limit_pct)
             limit_down = pc_arr * (1.0 - self.price_limit_pct)
-            limit_up_block = valid_pc & is_buy & (open_px >= limit_up - _PRICE_EPSILON)
-            limit_down_block = valid_pc & is_sell & (open_px <= limit_down + _PRICE_EPSILON)
+            # P2-04 盘中触板建模：用 high/low（非 open），与标量 _check_halt_and_limit 一致
+            limit_up_block = valid_pc & is_buy & (high_px >= limit_up - _PRICE_EPSILON)
+            limit_down_block = valid_pc & is_sell & (low_px <= limit_down + _PRICE_EPSILON)
             blocked = limit_up_block | limit_down_block
             if np.any(blocked):
                 fill_price[blocked] = np.nan

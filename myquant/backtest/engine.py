@@ -157,6 +157,8 @@ def _attach_realism_manifest(
         manifest.set_field("price_limit.enabled", bool(cfg_dict.get("price_limit", {}).get("enabled", True)))
         manifest.set_field("price_limit.pct_by_board", cfg_dict.get("price_limit", {}).get("pct_by_board", {}))
         manifest.set_field("price_limit.pre_close_source", cfg_dict.get("price_limit", {}).get("pre_close_source", "data_col"))
+        # P2-04：盘中触板建模已接线（撮合层/SimBroker 用 high/low 判涨跌停触板）
+        manifest.set_field("price_limit.intraday_touch_modeled", True)
         manifest.set_field("suspension.enabled", bool(cfg_dict.get("suspension", {}).get("enabled", True)))
         manifest.set_field("suspension.basis", cfg_dict.get("suspension", {}).get("basis", "volume_zero"))
         # ── P0-08 子项③（止血 B）：7 组硬编码乐观值改真实实例读取（S-11）──

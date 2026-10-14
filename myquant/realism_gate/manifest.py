@@ -116,6 +116,9 @@ CRITICAL_FIELDS: List[str] = [
     "price_limit.enabled",
     "price_limit.pct_by_board",
     "price_limit.pre_close_source",
+    # P2-04：盘中触板建模——是否用 high/low 判定盘中触涨停/跌停（True=盘中触板即拒单，
+    # False=仅按 open 开盘判据）。开工前必须补本字段（否则会被标准 4 误判为回归）。
+    "price_limit.intraday_touch_modeled",
     "suspension.enabled",
     "suspension.basis",
     "t1_position_freeze.enabled",
