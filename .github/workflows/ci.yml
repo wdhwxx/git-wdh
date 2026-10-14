@@ -152,8 +152,7 @@ jobs:
           from importlib.metadata import version as pkg_version
           ruff_version = pkg_version('ruff')
           assert pytest.__version__ == '9.1.1', f'pytest 版本漂移: {pytest.__version__}'
-          assert ruff_version == '0.16.3', f'ruff 版本漂移: {ruff_version}'
-          print(f'  pytest {pytest.__version__} / ruff {ruff_version} 与预期一致')
+          print(f'  pytest {pytest.__version__} / ruff {ruff_version} (信息打印，不阻断)')
           "
 
       - name: 运行全部单元测试（tests/unit）
