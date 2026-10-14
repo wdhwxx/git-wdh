@@ -152,6 +152,8 @@ jobs:
         run: pip install -e ".[dev,benchmark,gui,web]"
 
       - name: "关键工具版本断言（L5修复: 依赖未锁定，防版本漂移导致基线失真）"
+        env:
+          PYTHONIOENCODING: utf-8
         run: |
           python -c "
           import pytest
