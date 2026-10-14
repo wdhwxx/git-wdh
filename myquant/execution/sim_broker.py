@@ -34,8 +34,6 @@ from myquant.execution.state_machine import OrderStateMachine
 from myquant.models.backtest import CommissionModel, SlippageModel
 from myquant.models.market_data import Bar
 from myquant.models.trade import Order, OrderSide, Position, Trade
-# P2-01：event 引擎（SimBroker）费用改走 fee_common 唯一入口，与 mixed/vectorized 同口径
-from myquant.backtest.fee_common import FeeCalculator
 
 logger = get_logger(__name__)
 
@@ -99,8 +97,13 @@ class SimBroker(ExecutionInterface):
         self.trades: List[Trade] = []              # 成交记录
         self.commission_model = commission_model or CommissionModel()
         self.slippage_model = slippage_model or SlippageModel()
-        # P2-01：费用统一委托 fee_common.FeeCalculator（与 mixed/vectorized 同一唯一入口）
-        self.fee_calculator: FeeCalculator = FeeCalculator(
+        # P2-01：费用统一委托 fee_common.FeeCalculator（与 mixed/vectorized 同一唯一入口）。
+        # 延迟到构造函数内 import：避免执行层(sim_broker)顶层拉入 backtest→engine→risk
+        # 包链（backtest/__init__ 聚合 batch_backtest→mixed_engine→risk.rules），
+        # 守护 R5"应急链不依赖 risk/engine"红线；仅 SimBroker 真正构造时才加载。
+        from myquant.backtest.fee_common import FeeCalculator
+
+        self.fee_calculator = FeeCalculator(
             commission_model=self.commission_model,
             slippage_model=self.slippage_model,
         )

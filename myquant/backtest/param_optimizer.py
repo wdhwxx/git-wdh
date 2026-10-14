@@ -553,6 +553,40 @@ class ParamOptimizationResult:
             rows.append(row)
         return pd.DataFrame(rows)
 
+    def save_csv(self, output_path: str) -> str:
+        """P2-13：把千次实验聚合明细落盘为中文表头 CSV（一行一条参数组合）。
+
+        复用 to_dataframe + csv_utils.export_csv_cn，params 展开为 param_*→参数:*
+        中文列；失败组指标留空。父目录自动创建，编码 utf-8-sig（Excel 直开不乱码）。
+
+        Args:
+            output_path: 输出 CSV 路径。
+
+        Returns:
+            str: 实际写入路径。
+        """
+        from pathlib import Path
+
+        from myquant.utils.csv_utils import (
+            CSV_HEADER_MAPS,
+            PARAM_COLUMN_CN_PREFIX,
+            PARAM_COLUMN_PREFIX,
+            export_csv_cn,
+        )
+
+        df = self.to_dataframe()
+        if df.empty:
+            logger.warning("参数优化结果为空，未落盘: %s", output_path)
+            return str(Path(output_path))
+        out = export_csv_cn(
+            df,
+            output_path,
+            header_map=CSV_HEADER_MAPS["param_optimize"],
+            prefix_map={PARAM_COLUMN_PREFIX: PARAM_COLUMN_CN_PREFIX},
+        )
+        logger.info("参数优化千次实验明细已落盘: %s (%d 行)", out, len(df))
+        return str(out)
+
     def summary(self) -> str:
         """生成优化汇总报告文本（含最优参数与 Top 榜；分割模式输出 in/out 双列）。"""
         lines = ["策略参数优化报告"]

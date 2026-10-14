@@ -322,17 +322,21 @@ class MetricsCalculator:
         metrics.benchmark_return = bench_df['equity'].iloc[-1] / bench_df['equity'].iloc[0] - 1
         metrics.excess_return = metrics.total_return - metrics.benchmark_return
 
-        # Beta = Cov(策略, 基准) / Var(基准)
-        if bench.var() > 0:
-            metrics.beta = np.cov(ret, bench)[0, 1] / bench.var()
+        # Beta = Cov(策略, 基准) / Var(基准)；基准退化（零方差/样本不足）→ beta/alpha 置 None（不伪造）
+        if bench.var() > 0 and len(common_idx) >= 2:
+            metrics.beta = float(np.cov(ret, bench)[0, 1] / bench.var())
+        else:
+            metrics.beta = None
 
-        # Alpha = 策略年化收益 - 无风险利率 - Beta * (基准年化收益 - 无风险利率)
-        n_days = len(common_idx)
-        bench_annual = (1 + metrics.benchmark_return) ** (self.TRADING_DAYS_PER_YEAR / max(n_days, 1)) - 1
-        metrics.alpha = (
-            metrics.annualized_return - self.risk_free_rate
-            - metrics.beta * (bench_annual - self.risk_free_rate)
-        )
+        if metrics.beta is not None:
+            n_days = len(common_idx)
+            bench_annual = (1 + metrics.benchmark_return) ** (self.TRADING_DAYS_PER_YEAR / max(n_days, 1)) - 1
+            metrics.alpha = (
+                metrics.annualized_return - self.risk_free_rate
+                - metrics.beta * (bench_annual - self.risk_free_rate)
+            )
+        else:
+            metrics.alpha = None
 
         # 信息比率 = 超额收益均值 / 跟踪误差
         active_return = ret - bench

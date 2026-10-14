@@ -68,7 +68,7 @@ from myquant.backtest.metrics import MetricsCalculator
 from myquant.backtest.order_matcher import OrderMatcher
 from myquant.backtest.recorder import TradeRecorder
 from myquant.core.lookahead_guard import LookaheadGuard  # #H2修复：防未来函数校验器
-from myquant.models.backtest import BacktestConfig, BacktestResult, PerformanceMetrics
+from myquant.models.backtest import BacktestConfig, BacktestResult, PerformanceMetrics, EquityPoint
 from myquant.models.market_data import Bar, MarketEvent
 from myquant.models.trade import Order, OrderSide, OrderType, Position, Trade
 from myquant.risk.rules import StopLossRule  # KP-P3-07: 止损阈值与实盘同源
@@ -203,6 +203,7 @@ class MixedBacktestEngine:
         self._pending_buy_map: Dict[str, float] = {}
         self._signal_mode: str = SIGNAL_MODE_TARGET
         self._benchmark_data: Optional[pd.DataFrame] = None
+        self._benchmark_missing: bool = False  # P2-03：基准配置了但数据空 → alpha/beta 置 None
         self._event_count: int = 0
         self._running: bool = False
         self._stopped: bool = False
@@ -320,6 +321,11 @@ class MixedBacktestEngine:
                     # 与 engine.py 同构；hfq 触发虚假降级 → data_pit 误判）
                     adjust="raw",
                 )
+        # P2-03：基准配置了但加载为空 → 标记缺失，绩效侧 alpha/beta 置 None（不伪造）
+        if self.config.benchmark and (
+            self._benchmark_data is None or len(self._benchmark_data) == 0
+        ):
+            self._benchmark_missing = True
 
         self._initialized = True
         logger.info(
@@ -1342,10 +1348,19 @@ class MixedBacktestEngine:
         if self.recorder is not None and self.metrics_calc is not None:
             equity_curve = self.recorder.get_equity_curve()
             trades = self.recorder.get_trades()
+            # P2-03：从 equity_curve 各点 benchmark_equity 组装基准曲线；缺失则 None（不伪造）
+            benchmark_curve = None
+            if equity_curve and not self._benchmark_missing:
+                benchmark_curve = [
+                    EquityPoint(
+                        timestamp=ep.timestamp, date=ep.date, equity=ep.benchmark_equity
+                    )
+                    for ep in equity_curve
+                ]
             metrics = self.metrics_calc.calculate(
                 equity_curve=equity_curve,
                 trades=trades,
-                benchmark_curve=None,
+                benchmark_curve=benchmark_curve,
                 start_date=self.config.start_date,
                 end_date=self.config.end_date,
             )

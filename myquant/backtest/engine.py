@@ -60,7 +60,7 @@ from myquant.core.lookahead_guard import (
     get_lookahead_guard,  # #H2修复：scheduler 统一注入单例
 )
 from myquant.engine.base import BaseEngine
-from myquant.models.backtest import BacktestConfig, BacktestResult
+from myquant.models.backtest import BacktestConfig, BacktestResult, EquityPoint
 from myquant.models.market_data import Bar, MarketEvent
 from myquant.models.trade import OrderType
 from myquant.risk.rules import RiskContext  # KP-P3-07: 回测复用实盘风控上下文
@@ -1090,7 +1090,16 @@ class BacktestEngine(BaseEngine):
         if self.recorder and self.metrics_calc:
             equity_curve = self.recorder.get_equity_curve()
             trades = self.recorder.get_trades()
-            benchmark_curve = None  # 简化：基准曲线可从equity_curve提取
+            # P2-03 基准净值接线：从 equity_curve 各点 benchmark_equity 组装基准曲线，
+            # 激活 alpha/beta/excess/IR 计算；基准缺失时保持 None（metrics 置 None，不伪造）。
+            benchmark_curve = None
+            if equity_curve and not getattr(self, "_benchmark_missing", False):
+                benchmark_curve = [
+                    EquityPoint(
+                        timestamp=ep.timestamp, date=ep.date, equity=ep.benchmark_equity
+                    )
+                    for ep in equity_curve
+                ]
 
             metrics = self.metrics_calc.calculate(
                 equity_curve=equity_curve,

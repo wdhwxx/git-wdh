@@ -5226,3 +5226,20 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 **验收**：e2e 文件 9 passed（耗时 5.14s→1.02s，佐证不再扫真实目录几千 parquet 哈希）；**反证**：故意把真实 sidecar 指纹写坏（`matched=False`）时 e2e 仍 9 passed，证明隔离完全生效；事后删 sidecar 重新 first_pin 恢复正确基线（fp=42ca20c6）；全量 pytest **4110 passed / 4 skipped / 0 failed**。
 
 **纪律遵守**：不动业务代码（只改测试夹具，门禁判据保持 fail-closed）；autouse fixture 职责单一（仅快照隔离，检查器注册仍归 `_all_checks_registered`）；常量提取（`_SYNTHETIC_*` 测试指纹占位提模块顶部，不内联魔法值）；Google docstring + 全量类型注解（`-> Dict[str, object]` / `-> object`）；monkeypatch 由 fixture 注入（测试进程结束自动还原，不污染其他文件）；全量 pytest 0 failed 才提交；git 提交（commit message 引用 #367）。**e2e 与真实数据目录解耦完成——此后每日增量更新不再连带红合成测试。**
+
+---
+
+## #368 · 2026-10-14 · P2 三批九卡口径统一与清理
+
+**现状核实**：P2 共 14 张低优先口径卡，此前全部"未开工"。本批按用户授权按序完成三批 9 张：一批 P2-09/P2-12/P2-14（口径清理）、二批 P2-01/P2-04（口径统一）、三批 P2-03/P2-08/P2-13（功能补全）；P2-10（Sequence import）、P2-11（decision_time 真实决策日）此前已随 9342d62 / #358 交付。未做/暂缓：P2-02（需先加 fee_dilution_basis 字段配套）、P2-05（consistency_check 真实数据）、P2-06（fee_table 死代码有 TestFeeTable 27 项覆盖、兜底前提不成立）、P2-07（example 模板 + CI 死键断言）。
+
+**落地**：
+- **一批（commit aaaa36d）**：P2-09 `provider.py` L802-805 `_warnings` 提升到 `df.attrs["row_warnings"]` 再 drop 内部列（质量标记不再被无条件丢弃）；P2-12 `static_scan.py` 新增 `collect_consumers_by_column` AST 实测反向聚合 + 薄脚本 `scripts/台账consumers实测.py`（实测 OHLCV 六列 7 策略全消费、流通股本 multi_factor，与 yaml 人工填写吻合）；P2-14 `analyze_source` 加 `line_range` 参数 + `_find_class_range`，按匹配 class 行区间收窄扫描，消除 ma_strategy.py 同文件 rsrs/ma_cross 连带误伤。
+- **二批（commit 3892419）**：P2-01 `SimBroker._calc_commission` 委托 `fee_common.FeeCalculator`，与 mixed/vectorized 同一唯一入口；P2-04 涨跌停判据从 open 升级为 high/low 盘中触板建模（order_matcher 标量 `_check_halt_and_limit` + 向量化 `match_vectorized`、sim_broker `_price_limit_check`），新 manifest 字段 `price_limit.intraday_touch_modeled`（engine.py 写 True，manifest CRITICAL_FIELDS 登记，三处测试夹具补字段）。
+- **三批（本条目随附）**：P2-03 基准净值接线——engine/mixed_engine `on_stop` 从 equity_curve 各点 `benchmark_equity` 组装 `benchmark_curve` 激活 alpha/beta/IR，mixed_engine 加 `_benchmark_missing` 标记，vectorized_engine 保持 None 不伪造恒 1.0 占位，顺带修 metrics `_calc_benchmark_metrics` beta/alpha 退化置 None（防 NoneType 乘法崩溃）；P2-08 vectorized_engine `_aggregate_portfolio` 加 `_align_to_trade_calendar`，数据并集 ∪ 真实交易日历只补不删（`result.extra["calendar_source"]` 标注来源）；P2-13 `ParamOptimizationResult.save_csv(output_path)` 薄方法复用 `csv_utils.export_csv_cn` 中文表头落盘千次实验明细。
+- **治理冻结回写**：`test_architecture.py` ENTRY_ALLOWLIST 登记 `scripts/台账consumers实测.py`（R-23）；OVERSIZE_LINE_BASELINE `backtest/engine.py` 1705→1716（R-24，P2-03 benchmark_curve 组装 +11 行功能必需，附注释）。
+- **R5 红线修复**：P2-01 初版在 sim_broker.py 顶层 `from myquant.backtest.fee_common import FeeCalculator`，经 backtest/__init__→batch_backtest→engine→mixed_engine→risk.rules 把 risk 包拉入 live broker 链，撞 live_safety_gate `0.3-R5`（破坏装配后应急平仓须独立于 risk/engine）。改为延迟到 `SimBroker.__init__` 函数内 import（模块顶层不拉 backtest→risk 链，仅真正构造 SimBroker 时加载），R5 恢复绿。
+
+**验收**：一批 leakage_gate 154 passed / provider 29 passed；二批 backtest 267 passed；三批 vectorized 24 passed / param_optimizer 5 passed；architecture 35 passed/1 skipped；live_safety_gate 5 passed；**全量 pytest 4110 passed / 4 skipped / 0 failed**（基线持平）。
+
+**纪律遵守**：常量提取（calendar_source 字符串、fee_calculator 模型名）；Google docstring + 类型注解；禁裸 except（R5 子进程异常如实记录 detail 不吞）；薄入口业务逻辑归 myquant（`scripts/台账consumers实测.py` 仅委托 static_scan）；R5/R-23/R-24 治理冻结按惯例回写基线并注明"功能必需"；防未来（P2-08 日历只补不删、P2-03 不伪造 benchmark 占位、P2-13 落盘不绕过审计出口）；全量 pytest 0 failed 才提交；git 提交（commit message 引用 #368）。**P2 九卡交付，剩 P2-02/05/06/07 四张低优先可延后。**

@@ -44,6 +44,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import date as _date
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -411,6 +413,9 @@ class VectorizedBacktestEngine:
         equity_curve, trades = self._aggregate_portfolio(sub_initial)
 
         # 绩效计算
+        # P2-03：向量化路径每 symbol 独立回测再聚合，未加载基准指数数据（benchmark_equity
+        # 恒 1.0 占位）。此处保持 None，让 metrics 把 alpha/beta/excess 置 None——
+        # 绝不把恒 1.0 的占位曲线当真基准传入，否则会算出虚假的零基准超额收益。
         metrics = self.metrics_calc.calculate(
             equity_curve=equity_curve,
             trades=trades,
@@ -1078,6 +1083,11 @@ class VectorizedBacktestEngine:
             all_trades.extend(sr.trades)
 
         ordered_dates = sorted(all_dates)
+        # P2-08：日期轴对齐真实交易日历——区间内停牌/节假日补占位（组合按现金静止计
+        # equity=1.0），避免多标的日期轴取数据并集漏掉真实交易日；日历缓存不可用回退并集。
+        ordered_dates, calendar_source = self._align_to_trade_calendar(ordered_dates)
+        if self.result is not None and hasattr(self.result, "extra"):
+            self.result.extra["calendar_source"] = calendar_source
         initial = self.config.initial_capital
 
         equity_curve: List[EquityPoint] = []
@@ -1108,6 +1118,43 @@ class VectorizedBacktestEngine:
                 )
             )
         return equity_curve, all_trades
+
+    @staticmethod
+    def _align_to_trade_calendar(dates: List[str]) -> Tuple[List[str], str]:
+        """P2-08：把数据并集日期轴对齐到真实交易日历。
+
+        区间内停牌/节假日补占位日期（组合在该日现金静止、equity=1.0），避免多标的
+        日期轴取数据并集时漏掉真实交易日。真实日历缓存（data/trade_calendar.csv）
+        不可用或区间无覆盖时，原样返回数据并集并标注来源，不伪造日历。
+
+        Args:
+            dates: 数据并集日期（ISO 'YYYY-MM-DD'，调用方已排序）。
+
+        Returns:
+            Tuple[List[str], str]: (对齐后日期升序列表, 来源标签 'real_calendar'/'data_union')。
+        """
+        if not dates:
+            return dates, "data_union"
+        try:
+            from myquant.utils.trade_calendar import load_trade_calendar
+            proj_root = Path(__file__).resolve().parents[2]
+            cal = load_trade_calendar(proj_root)
+        except Exception:
+            return dates, "data_union"
+        if not cal:
+            return dates, "data_union"
+        try:
+            d0 = _date.fromisoformat(dates[0])
+            d1 = _date.fromisoformat(dates[-1])
+        except (ValueError, TypeError):
+            return dates, "data_union"
+        cal_dates = {d.isoformat() for d in cal if d0 <= d <= d1}
+        if not cal_dates:
+            return dates, "data_union"
+        # 只补不删：数据并集 ∪ 日历交易日（日历覆盖区间内补齐缺失交易日，
+        # 保留数据既有日期，避免误删测试夹具/停牌占位日导致日期轴缩水）。
+        merged = set(dates) | cal_dates
+        return sorted(merged), "real_calendar"
 
     # ─────────────────────────────────────────
     # 工具方法

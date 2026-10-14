@@ -80,7 +80,7 @@ def _fill_minimal(m: RealismManifest) -> None:
         "full_sample_declared": False, "guard_injected": True,
         "context_data_scoped": False, "assessed_at_run_end": True,
     })
-    m.update_group("price_limit", {"enabled": True, "pct_by_board": {}, "pre_close_source": "data_col"})
+    m.update_group("price_limit", {"enabled": True, "pct_by_board": {}, "pre_close_source": "data_col", "intraday_touch_modeled": True})
     m.update_group("suspension", {"enabled": True, "basis": "volume_zero"})
     m.set_field("t1_position_freeze.enabled", True)
     m.update_group("lot_size", {"enforced": True, "value": 100})

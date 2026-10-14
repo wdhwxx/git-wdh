@@ -227,6 +227,7 @@ ENTRY_ALLOWLIST: set[str] = {
     "scripts/验收_实盘安全门禁.py",  # 回写#287：实盘安全门禁验收薄入口（委托 myquant/acceptance/live_safety_gate.py）
     "scripts/回测真实性基线.py",  # 回写#298：回测真实性基线建档/校验薄入口（委托 myquant/backtest/baseline_archive.py）
     "scripts/豁免管理.py",  # 回写#365：P1-14 豁免流管理薄入口（list/grant/approve/revoke，委托 myquant/leakage_gate/exemption.py）
+    "scripts/台账consumers实测.py",  # 回写#P2-12：台账 consumers AST 实测薄入口（委托 leakage_gate.static_scan.collect_consumers_by_column）
     # 根目录入口（.py + .bat）
     "run_GUI入口.py", "run_全量清洗GUI.py", "run_回测入口.py", "run_回测配置GUI.py",
     "run_实盘入口.py", "run_批量回测.py", "run_数据下载GUI.py", "run_清理GUI.py",
@@ -284,7 +285,7 @@ OVERSIZE_LINE_BASELINE: dict[str, int] = {
     "web/dashboard.py": 1760, "ml/training_pipeline.py": 1672,  # 1651→1672（#358 P1-11 训练出口泄漏审计报告薄接线 +21 行功能必需）
     "monitoring/dynamic_baseline.py": 1546,  # 1552→1546（#260 去全局采集器兜底）
     "acceptance/live_safety_gate.py": 1749,  # 回写#296：实盘安全门禁验收（0.1~0.9 + LIVE 门槛 31 项）
-    "backtest/engine.py": 1705,  # 回写#349：核心引擎超 1500 入白名单（R-24 冻结基线；
+    "backtest/engine.py": 1716,  # 回写#349：核心引擎超 1500 入白名单（R-24 冻结基线；
                                 # 增量来源：三引擎共用 _attach_realism_manifest 模块级函数；
                                 # 1524→1531（#350 基准数据治理：基准加载 adjust="raw" 语义注释）；
                                 # 1531→1550（#354 P1-03 收尾：_attach 段缺失拒启——配置缺失=阻断，
@@ -295,7 +296,9 @@ OVERSIZE_LINE_BASELINE: dict[str, int] = {
                                 # _scan_entry_data_quality + 收尾 provider 累计回写（含真实覆盖率），
                                 # +82 行功能必需）；
                                 # 1681→1705（#364 P1-12 数据快照 pin：入口 fingerprint_hash/
-                                # snapshot_id 由硬编码 None 改真实 verify_sidecar 采集，+24 行功能必需））
+                                # snapshot_id 由硬编码 None 改真实 verify_sidecar 采集，+24 行功能必需）；
+                                # 1705→1716（#P2-03 基准净值接线：on_stop 从 equity_curve 各点
+                                # benchmark_equity 组装 benchmark_curve 激活 alpha/beta/IR，+11 行功能必需））
 }
 
 # R-19 零覆盖基线：✅ 已冻结（回写#256）。冻结集合 = 2026-10-08 实测引用级零覆盖业务模块 49 个
