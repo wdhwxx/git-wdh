@@ -44,6 +44,42 @@ from myquant.strategies.base import StrategyBase, StrategyContext
 
 SYMBOL: str = "000001.SZ"
 
+# 合成快照指纹占位（测试用）：from_data_provider 路径隔离真实 processed 目录后，
+# 写入的固定指纹值（生产路径由 verify_sidecar 真实扫描产出，见 engine._attach_realism_manifest）。
+_SYNTHETIC_SNAPSHOT_HASH: str = "test_synthetic_snapshot_hash"
+_SYNTHETIC_SNAPSHOT_ID: str = "test_synthetic_snapshot"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_real_data_snapshot(monkeypatch: pytest.MonkeyPatch) -> object:
+    """合成 provider 测试隔离真实 processed 目录的快照校验（P1-12 / #364）。
+
+    ``from_data_provider``（``data=None``）路径会调
+    ``myquant.data_access.provider.verify_sidecar()`` 扫真实
+    ``datasets/processed`` 目录、与 sidecar 基线比对指纹。本文件全部用
+    合成 ``_FakeProvider``（不读 processed 目录），而真实数据每日增量更新会使
+    目录内容漂移 → ``snapshot_mismatch`` 误判 critical、把合成合规用例拦红。
+
+    这里把 ``verify_sidecar`` patch 为"合成命中"结果，使本文件所有
+    from_data_provider 用例与真实数据目录状态解耦；生产真实回测路径不受
+    影响（该 patch 仅作用于本测试文件进程）。内存数据路径（create_engine +
+    data dict）本就 ``snapshot_applicable=False``，不调 verify_sidecar。
+    """
+
+    def _fake_verify_sidecar() -> Dict[str, object]:
+        return {
+            "fingerprint_hash": _SYNTHETIC_SNAPSHOT_HASH,
+            "snapshot_id": _SYNTHETIC_SNAPSHOT_ID,
+            "matched": True,
+            "first_pin": False,
+            "diff": {},
+        }
+
+    monkeypatch.setattr(
+        "myquant.data_access.provider.verify_sidecar", _fake_verify_sidecar
+    )
+    yield
+
 
 @pytest.fixture(autouse=True)
 def _all_checks_registered() -> object:
