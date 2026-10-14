@@ -334,6 +334,16 @@ def build_config_dict(
             "enabled": True,
             "strict_mode": True,
         },
+        # ★ 真实性门禁开关（P2-07：GUI 补 gate 段，与 config/backtest_config.yaml 对齐）
+        #   leakage_gate：未来函数/泄露审计；realism_gate：涨跌停/T+1/滑点真实性审计
+        "leakage_gate": {
+            "enabled": True,
+            "audit_violations": True,
+        },
+        "realism_gate": {
+            "enabled": True,
+            "audit_violations": True,
+        },
         # ★ 引擎模式（三模式调度：auto自动 / event / mixed / vectorized）
         "engine": {
             "mode": engine_mode,

@@ -794,6 +794,64 @@ def make_demo_data(
 
 
 # ═══════════════════════════════════════════════
+#  真实数据接入（P2-05：用生产 processed 数据替换 make_demo_data 合成行情）
+# ═══════════════════════════════════════════════
+
+# 默认 processed 数据目录（相对项目根）
+DEFAULT_PROCESSED_DIR: str = "./datasets/processed"
+
+
+def load_real_data(
+    symbols: Sequence[str],
+    start_date: str,
+    end_date: str,
+    processed_dir: str = DEFAULT_PROCESSED_DIR,
+) -> dict[str, pd.DataFrame]:
+    """从生产 processed 目录加载真实 OHLCV，供三引擎一致性对拍（P2-05）。
+
+    与 make_demo_data 的区别：消费真实历史 K 线（中文表头），而非确定性合成
+    行情；这样三引擎口径差异会落在真实分支上（费用基数 / 滑点 / 整手 / 日历）。
+
+    ★★★ 防未来函数 ★★★
+    - 逐标的经 HistoricalDataProvider.get_bars 加载，其内部严格按 end_date 截断
+      之后的数据（本函数只传 start/end，不预测未来）。
+
+    Args:
+        symbols: 标的代码序列。
+        start_date: 回测起始日期（YYYY-MM-DD）。
+        end_date: 回测截止日期（YYYY-MM-DD，防未来关键参数）。
+        processed_dir: processed 数据目录（默认 ./datasets/processed）。
+
+    Returns:
+        {symbol: DataFrame}，列为中文 OHLCV、index=日期升序；
+        无数据或加载为空的标的被跳过并记 warning。
+
+    Raises:
+        ValueError: symbols 为空、或最终无任一标的成功加载时抛出。
+    """
+    if not symbols:
+        raise ValueError("load_real_data: symbols 不能为空")
+    # 直接从 data_access.provider 导入（data_loader 仅 re-export，新代码走真实实现层）
+    from myquant.data_access.provider import HistoricalDataProvider
+
+    provider = HistoricalDataProvider(processed_dir=processed_dir)
+    data: dict[str, pd.DataFrame] = {}
+    for symbol in symbols:
+        df = provider.get_bars(symbol, start_date=start_date, end_date=end_date)
+        if df is None or df.empty:
+            logger.warning("真实数据加载为空，跳过该标的: %s（%s ~ %s）", symbol, start_date, end_date)
+            continue
+        data[symbol] = df
+    if not data:
+        raise ValueError(
+            f"load_real_data: 所有标的均未加载到真实数据（{list(symbols)}），"
+            f"检查 processed_dir={processed_dir} 与日期区间"
+        )
+    logger.info("真实数据加载完成: %d/%d 个标的（%s ~ %s）", len(data), len(symbols), start_date, end_date)
+    return data
+
+
+# ═══════════════════════════════════════════════
 #  模块自测
 # ═══════════════════════════════════════════════
 

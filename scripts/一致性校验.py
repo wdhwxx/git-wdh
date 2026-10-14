@@ -141,6 +141,16 @@ def setup_argument_parser() -> argparse.ArgumentParser:
         default=None,
         help="报告 JSON 输出路径（可选）",
     )
+    parser.add_argument(
+        "--real",
+        action="store_true",
+        help="P2-05：用生产 processed 真实数据对拍（默认用 make_demo_data 合成行情，供 CI/演示）",
+    )
+    parser.add_argument(
+        "--processed-dir",
+        default="./datasets/processed",
+        help="--real 模式下的 processed 数据目录（默认 ./datasets/processed）",
+    )
     return parser
 
 
@@ -222,19 +232,36 @@ def main() -> int:
         return 2
 
     # 2. 数据与策略
-    from myquant.backtest.consistency_check import ConsistencyChecker, make_demo_data
+    if args.real:
+        # P2-05：生产 processed 真实数据对拍（防未来：load_real_data 经 get_bars 按 end_date 截断）
+        from myquant.backtest.consistency_check import load_real_data
 
-    data = make_demo_data(symbols=symbols, n_bars=args.n_bars, seed=args.seed)
+        try:
+            data = load_real_data(
+                symbols=symbols,
+                start_date=args.start,
+                end_date=args.end,
+                processed_dir=args.processed_dir,
+            )
+        except ValueError as exc:
+            print(f"[错误] 真实数据加载失败: {exc}")
+            return 2
+    else:
+        from myquant.backtest.consistency_check import make_demo_data
+
+        data = make_demo_data(symbols=symbols, n_bars=args.n_bars, seed=args.seed)
     try:
         strategy = _build_strategy(args.strategy, params)
     except ValueError as exc:
         print(f"[错误] {exc}")
         return 2
 
+    data_source = "真实数据(processed)" if args.real else "合成行情(make_demo_data)"
     print("=" * 64)
     print("  三模式净值一致性校验入口")
     print(f"  项目根: {project_root}")
     print(f"  策略: {args.strategy} | 标的: {len(symbols)} 个 | 模式: {','.join(modes)}")
+    print(f"  数据源: {data_source}")
     if args.abs_tol is not None or args.rel_tol is not None:
         print(
             f"  全局双阈值: abs_tol={args.abs_tol} rel_tol={args.rel_tol}"
@@ -243,6 +270,8 @@ def main() -> int:
     print("=" * 64)
 
     # 3. 执行三模式一致性校验
+    from myquant.backtest.consistency_check import ConsistencyChecker
+
     checker = ConsistencyChecker(abs_tol=args.abs_tol, rel_tol=args.rel_tol)
     config_params = {
         "strategy_name": args.strategy,
@@ -267,12 +296,27 @@ def main() -> int:
 
     print(report.summary())
 
+    # P2-05 裁决规则（方案 §4.5 规则4）：overall_ok=False 不阻断回测本身，
+    # 但阻断"可信/可上线"宣传标记——真实数据三引擎口径不一致时，禁止对外宣称
+    # 本策略/系统三引擎口径一致、可上线。
+    if not report.overall_ok:
+        print("-" * 64)
+        print("  ❌ 三引擎净值对拍未通过（overall_ok=False）")
+        print("  → 不阻断本次回测，但【阻断『可信/可上线』宣传标记】：")
+        print("    真实数据下 event/mixed/vectorized 口径存在超阈值偏差，")
+        print("    在收敛偏差前，禁止将本策略标注为『口径一致/可上线/可信』。")
+        print("-" * 64)
+
     # 4. JSON 落盘
     if args.json_out:
         out_path = Path(args.json_out)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(report.to_dict(), f, ensure_ascii=False, indent=2)
+            payload = report.to_dict()
+            # P2-05：报告里显式标注可信宣传是否被阻断（WARNING 级，不阻断回测）
+            payload["trust_blocked"] = not report.overall_ok
+            payload["data_source"] = data_source
+            json.dump(payload, f, ensure_ascii=False, indent=2)
         print(f"[已保存] 一致性校验报告: {out_path}")
 
     return 0 if report.overall_ok else 1

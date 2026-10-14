@@ -228,6 +228,7 @@ ENTRY_ALLOWLIST: set[str] = {
     "scripts/回测真实性基线.py",  # 回写#298：回测真实性基线建档/校验薄入口（委托 myquant/backtest/baseline_archive.py）
     "scripts/豁免管理.py",  # 回写#365：P1-14 豁免流管理薄入口（list/grant/approve/revoke，委托 myquant/leakage_gate/exemption.py）
     "scripts/台账consumers实测.py",  # 回写#P2-12：台账 consumers AST 实测薄入口（委托 leakage_gate.static_scan.collect_consumers_by_column）
+    "scripts/配置死键扫描.py",  # 回写#P2-07：配置死键扫描薄入口（委托 leakage_gate.config_deadkey.scan_dead_keys）
     # 根目录入口（.py + .bat）
     "run_GUI入口.py", "run_全量清洗GUI.py", "run_回测入口.py", "run_回测配置GUI.py",
     "run_实盘入口.py", "run_批量回测.py", "run_数据下载GUI.py", "run_清理GUI.py",
@@ -281,7 +282,7 @@ OVERSIZE_LINE_BASELINE: dict[str, int] = {
     "live/scheduler.py": 2419, "monitoring/metrics_collector.py": 2273,  # 2382→2409（#265 阶段二 7 处装配点改经注册表，代码行增长）；metrics 2268→2273（#264 工厂注册代码）
     "monitoring/action_engine.py": 2307, "data_access/manager.py": 2200,  # 2170→2186→2200（#281 M1A-01/06 每股收益时点日基收敛+失败可观测化；M1A-10 available_time 增量派生+存量补列）
     "live/brokers/qmt_broker.py": 2170, "live/data_feed.py": 2147,
-    "gui/backtest_config_dialog.py": 1861, "risk/risk_manager.py": 2020,
+    "gui/backtest_config_dialog.py": 1871, "risk/risk_manager.py": 2020,
     "web/dashboard.py": 1760, "ml/training_pipeline.py": 1672,  # 1651→1672（#358 P1-11 训练出口泄漏审计报告薄接线 +21 行功能必需）
     "monitoring/dynamic_baseline.py": 1546,  # 1552→1546（#260 去全局采集器兜底）
     "acceptance/live_safety_gate.py": 1749,  # 回写#296：实盘安全门禁验收（0.1~0.9 + LIVE 门槛 31 项）

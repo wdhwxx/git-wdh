@@ -5243,3 +5243,19 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 **验收**：一批 leakage_gate 154 passed / provider 29 passed；二批 backtest 267 passed；三批 vectorized 24 passed / param_optimizer 5 passed；architecture 35 passed/1 skipped；live_safety_gate 5 passed；**全量 pytest 4110 passed / 4 skipped / 0 failed**（基线持平）。
 
 **纪律遵守**：常量提取（calendar_source 字符串、fee_calculator 模型名）；Google docstring + 类型注解；禁裸 except（R5 子进程异常如实记录 detail 不吞）；薄入口业务逻辑归 myquant（`scripts/台账consumers实测.py` 仅委托 static_scan）；R5/R-23/R-24 治理冻结按惯例回写基线并注明"功能必需"；防未来（P2-08 日历只补不删、P2-03 不伪造 benchmark 占位、P2-13 落盘不绕过审计出口）；全量 pytest 0 failed 才提交；git 提交（commit message 引用 #368）。**P2 九卡交付，剩 P2-02/05/06/07 四张低优先可延后。**
+
+---
+
+## #369 · 2026-10-14 · P2-05/P2-07 consistency 真实数据接入 + 配置死键门禁
+
+**现状核实**：P2-05 此前 `scripts/一致性校验.py:227` 用 `make_demo_data` 合成行情做 mixed vs vectorized 对拍，合成数据与生产真实行情口径脱节，校验结果不能代表真实回测的两引擎一致性；P2-07 第七节偏差反复出现"配置段已加 / 消费点死键"（yaml 写了键但代码零 .get 消费，配置白写行为不变），且 GUI `backtest_config_dialog.py` 只导出 lookahead_guard 段、缺 leakage_gate/realism_gate 开关，与生产 `config/backtest_config.yaml` 不对齐。
+
+**落地**：
+- **P2-05 真实数据接入**：`myquant/backtest/consistency_check.py` 在 `make_demo_data` 后新增模块级 `load_real_data(symbols, start_date, end_date, processed_dir=DEFAULT_PROCESSED_DIR)`——函数内延迟 import `HistoricalDataProvider`（直从 `myquant.data_access.provider`，不走 data_loader re-export），逐标的 `get_bars`（已按 end_date 防未来截断），空 DataFrame 跳过记 warning，全空抛 ValueError（fail-closed）；导出到 `backtest/__init__.py` consistency_check import 块。`scripts/一致性校验.py` 加 `--real` 开关 + `--processed-dir`（默认 ./datasets/processed）：--real 走 load_real_data，否则保持 make_demo_data（CI/演示兼容）；overall_ok=False 时输出醒目"❌ 阻断『可信/可上线』宣传标记"警告（方案 §4.5 规则 4：overall_ok=False 不阻断回测但阻断可信宣传）；JSON 落盘加 `trust_blocked`/`data_source` 字段。
+- **P2-07 配置死键门禁（新模块 `myquant/leakage_gate/config_deadkey.py`）**：`_collect_leaf_keys` 递归收 yaml 叶子键、白名单段（codes 股票列表/params 策略透传/price_columns 列映射/overrides/baselines）整段跳过；`_find_read_point` 在 myquant 全仓按词边界正则查键名字符串是否出现（宽松判消费点，覆盖 `.get("键")`/`["键"]`/`get_键()`/注释提及，避免 legend 误命中 end）；`scan_dead_keys` 主入口返 `DeadKeyReport`（total/consumed/dead/new_dead_keys/ok）。薄脚本 `scripts/配置死键扫描.py`（report 摘要，有新增死键退 1 作 CI 信号）。实测生产 `backtest_config.yaml`：54 叶子键 54 全消费、0 死键（干净）。
+- **P2-07 example 模板 + GUI gate 段**：对 7 个 `*.example.yaml` 跑同一扫描——生产配置 0 死键；example 模板报出预留键清单（live_config 23 / strategy_params 16 / monitoring 3，属"模板列了但未接线"的预留项，不阻断，作发现记录，避免范围蔓延到 live/策略审计）。`gui/backtest_config_dialog.py` lookahead_guard 段后补 `leakage_gate.{enabled,audit_violations}` + `realism_gate.{enabled,audit_violations}`（纯 config dict 补充，对齐生产 yaml，不碰交互 widget）。
+- **测试**：`tests/unit/test_backtest_consistency_v5.py` 加 TestLoadRealData 3 用例（mock provider：空 df 跳过/全空抛错/空 symbols 抛错）；`tests/unit/test_config_deadkey.py` 新建 5 用例（白名单段跳过/独特死键检出/ok 属性语义/缺配置 fail-closed/summary 可读）。
+
+**验收**：P2-05 实测 CLI `--real --symbols 000001.SZ --start 2024-01-01 --end 2024-03-01 --modes mixed,vectorized` exit=0，两引擎期末净值均 0.998356（共用 fee_common/order_matcher 精确一致，max_abs=0）；针对性 consistency 42 + deadkey 5 + architecture 35 passed/1 skipped 全绿；py_compile 3 文件 OK；**全量 pytest 4118 passed / 4 skipped / 0 failed**（基线 4110 + 新增 8 = P2-05 3 + P2-07 5，吻合）。
+
+**纪律遵守**：常量提取（DEFAULT_PROCESSED_DIR/WHITELIST_SEGMENTS/KNOWN_DEAD_KEYS 提模块顶部）；Google docstring + 全量类型注解（`-> DeadKeyReport`/`-> set[str]`）；禁裸 except（`_find_read_point` 读文件异常带 `(OSError, UnicodeDecodeError)` 记 continue 不吞）；薄入口业务逻辑归 myquant（scripts/配置死键扫描.py 仅委托 config_deadkey.scan_dead_keys）；R-23 登记 ENTRY_ALLOWLIST `scripts/配置死键扫描.py`；R-24 抬 `gui/backtest_config_dialog.py` 1861→1871（补 gate 段 +10 行功能必需，附注释）；防未来（load_real_data 已按 end_date 截断不读未来 bar，死键扫描只读不参与回测数据流）；治理冻结基线回写并注明功能必需；全量 pytest 0 failed 才提交；git 提交（commit message 引用 #369）。**P2-05/P2-07 交付——P2 仅余 P2-02/06 两张低优先（P2-06 fee_table 有 27 项覆盖、兜底前提不成立，建议暂缓）。**

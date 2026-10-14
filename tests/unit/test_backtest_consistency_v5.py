@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -41,6 +42,7 @@ from myquant.backtest.consistency_check import (
     ConsistencyChecker,
     ConsistencyReport,
     DemoThreeModeStrategy,
+    load_real_data,
     make_demo_data,
 )
 from myquant.models.backtest import BacktestConfig
@@ -563,3 +565,74 @@ class TestMakeDemoData:
         """n_bars < 20 应抛出 ValueError。"""
         with pytest.raises(ValueError):
             make_demo_data(n_bars=10)
+
+
+# ═════════════════════════════════════════════
+#  7. load_real_data 真实数据接入（P2-05）
+# ═════════════════════════════════════════════
+
+class TestLoadRealData:
+    """P2-05：从生产 processed 目录加载真实 OHLCV（mock provider，不读真实目录）。"""
+
+    def _fake_df(self, n: int = 30) -> pd.DataFrame:
+        """构造一个最小有效 OHLCV DataFrame（中文表头，对齐 provider 返回口径）。"""
+        idx = pd.date_range("2024-01-02", periods=n, freq="B")
+        close = 10.0 + np.arange(n) * 0.01
+        return pd.DataFrame(
+            {
+                "开盘价": close * 0.999,
+                "最高价": close * 1.01,
+                "最低价": close * 0.99,
+                "收盘价": close,
+                "成交量": 100_000.0,
+                "成交额": close * 100_000.0,
+            },
+            index=idx,
+        )
+
+    def test_loads_available_symbols(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """成功加载的标的进入返回 dict；空 DataFrame 标的被跳过。"""
+        fake_df = self._fake_df()
+
+        class _FakeProvider:
+            def __init__(self, processed_dir: str) -> None:
+                self.processed_dir = processed_dir
+
+            def get_bars(self, symbol: str, start_date: str = None, end_date: str = None):
+                # 000002.SZ 模拟无数据（与生产 processed 缺文件行为一致）
+                if symbol == "000002.SZ":
+                    return pd.DataFrame()
+                return fake_df
+
+        monkeypatch.setattr(
+            "myquant.data_access.provider.HistoricalDataProvider", _FakeProvider
+        )
+        data = load_real_data(
+            symbols=["000001.SZ", "000002.SZ"],
+            start_date="2024-01-01",
+            end_date="2024-03-01",
+        )
+        assert set(data.keys()) == {"000001.SZ"}
+        assert not data["000001.SZ"].empty
+
+    def test_all_empty_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """所有标的都无数据时应抛 ValueError（fail-closed，不静默返回空 dict）。"""
+        class _FakeProvider:
+            def __init__(self, processed_dir: str) -> None:
+                pass
+
+            def get_bars(self, symbol: str, start_date: str = None, end_date: str = None):
+                return pd.DataFrame()
+
+        monkeypatch.setattr(
+            "myquant.data_access.provider.HistoricalDataProvider", _FakeProvider
+        )
+        with pytest.raises(ValueError, match="未加载到真实数据"):
+            load_real_data(
+                symbols=["000001.SZ"], start_date="2024-01-01", end_date="2024-03-01"
+            )
+
+    def test_empty_symbols_raises(self) -> None:
+        """symbols 为空时应抛 ValueError（防御式输入校验）。"""
+        with pytest.raises(ValueError, match="symbols 不能为空"):
+            load_real_data(symbols=[], start_date="2024-01-01", end_date="2024-03-01")
