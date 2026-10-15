@@ -306,6 +306,70 @@ OVERSIZE_LINE_BASELINE: dict[str, int] = {
                                 # +121 行功能必需））
 }
 
+# ─────────────────────────────── R-26 结构冻结（PR1，回写#420，2026-10-15 实测标定） ───────────────────────────────
+# 三维度量口径（与现有语义矩阵一致，K-f 语境分类；实现见 _structure_metrics）：
+#   lines         : splitlines 行数（与 R-24 同口径）
+#   total_symbols : AST 遍历 FunctionDef/AsyncFunctionDef/ClassDef 计数，
+#                   排除 __main__ 自测块与 TYPE_CHECKING 块（继承 _imports 语境语义）
+#   fan_out       : 复用 _imports()，排除 main/typing 语境；模块归一为
+#                   myquant.X.*→X（内部顶层包）、外部库→首段；去重集合大小
+# 语义：白名单文件任一维度超基线即红（存量继续膨胀禁止）；任一维度超硬顶
+#       （STRUCTURE_HARD_CAP）即红且无豁免——硬顶是防 PR2 对价机制被滥用为
+#       无限抬升的死线；顶层包聚合任一维度超基线即红（防"横向分裂"：把白名单
+#       文件拆成多个各自低于基线的新文件而包级总量不降）。
+# 装配器类文件（R-16 装配器集中：live/engine、data_access/manager、web/dashboard 等）
+# fan_out 天然偏高，冻结值已含当前状态；豁免通道留给 PR2 对价机制，本规则无豁免。
+# 注意：web/dashboard.py 已由 R-24 基线 1760 瘦身至 1237（只减不增成果），
+#       R-26 冻结当前实测值，不允许回弹（R-24 仍以 1760 判红，两规则独立生效）。
+STRUCTURE_BASELINE: dict[str, dict[str, int]] = {
+    "acceptance/live_safety_gate.py": {"lines": 1757, "symbols": 83, "fan_out": 29},
+    "backtest/engine.py": {"lines": 1838, "symbols": 35, "fan_out": 13},
+    "core/event_bus.py": {"lines": 2379, "symbols": 109, "fan_out": 11},
+    "data_access/manager.py": {"lines": 2204, "symbols": 52, "fan_out": 13},
+    "gui/backtest_config_dialog.py": {"lines": 1870, "symbols": 45, "fan_out": 13},
+    "live/brokers/qmt_broker.py": {"lines": 2170, "symbols": 79, "fan_out": 8},
+    "live/data_feed.py": {"lines": 2151, "symbols": 80, "fan_out": 13},
+    "live/engine.py": {"lines": 3236, "symbols": 77, "fan_out": 17},
+    "live/scheduler.py": {"lines": 2419, "symbols": 84, "fan_out": 10},
+    "ml/training_pipeline.py": {"lines": 1672, "symbols": 54, "fan_out": 10},
+    "monitoring/action_engine.py": {"lines": 2307, "symbols": 86, "fan_out": 9},
+    "monitoring/alerting.py": {"lines": 3688, "symbols": 145, "fan_out": 17},
+    "monitoring/dynamic_baseline.py": {"lines": 1546, "symbols": 48, "fan_out": 9},
+    "monitoring/metrics_collector.py": {"lines": 2276, "symbols": 58, "fan_out": 8},
+    "risk/risk_manager.py": {"lines": 2020, "symbols": 65, "fan_out": 8},
+    "web/dashboard.py": {"lines": 1237, "symbols": 44, "fan_out": 12},
+}
+# 硬顶 = 标定日各维度最大值×1.2 取整（lines 3688→4425 / symbols 145→174 / fan_out 29→34）。
+# 与基线的区别：基线可经 PR2 对价机制抬升（功能必需 + 留痕）；硬顶不可逾越、无任何豁免通道。
+STRUCTURE_HARD_CAP: dict[str, int] = {"lines": 4425, "symbols": 174, "fan_out": 34}
+# 顶层包聚合基线（myquant/<pkg>/ 全文件，剔除 __init__.py 与 __pycache__；包口径同 R-25）。
+# lines/symbols 求和，fan_out 取包内文件依赖面并集。21 个顶层包（2026-10-15 实测标定）。
+# 正常增长通道：新建顶层包（R-25 登记，不在本表内不冻结）或拆分白名单文件（包级总量不变）；
+# 需突破既有包基线时走 PR2 对价机制，本规则无豁免。
+PACKAGE_STRUCTURE_BASELINE: dict[str, dict[str, int]] = {
+    "acceptance": {"lines": 5612, "symbols": 254, "fan_out": 37},
+    "allocation": {"lines": 2083, "symbols": 56, "fan_out": 9},
+    "api": {"lines": 3775, "symbols": 193, "fan_out": 26},
+    "backtest": {"lines": 20689, "symbols": 560, "fan_out": 37},
+    "core": {"lines": 12975, "symbols": 600, "fan_out": 40},
+    "data_access": {"lines": 17223, "symbols": 605, "fan_out": 34},
+    "database": {"lines": 3608, "symbols": 113, "fan_out": 17},
+    "engine": {"lines": 209, "symbols": 14, "fan_out": 4},
+    "execution": {"lines": 1085, "symbols": 59, "fan_out": 6},
+    "gui": {"lines": 6603, "symbols": 242, "fan_out": 28},
+    "indicators": {"lines": 5884, "symbols": 172, "fan_out": 17},
+    "leakage_gate": {"lines": 4466, "symbols": 149, "fan_out": 17},
+    "live": {"lines": 17309, "symbols": 652, "fan_out": 35},
+    "ml": {"lines": 5672, "symbols": 208, "fan_out": 27},
+    "models": {"lines": 1745, "symbols": 139, "fan_out": 6},
+    "monitoring": {"lines": 23932, "symbols": 880, "fan_out": 31},
+    "realism_gate": {"lines": 1864, "symbols": 50, "fan_out": 10},
+    "risk": {"lines": 4288, "symbols": 195, "fan_out": 12},
+    "strategies": {"lines": 6901, "symbols": 190, "fan_out": 21},
+    "utils": {"lines": 9637, "symbols": 368, "fan_out": 47},
+    "web": {"lines": 1237, "symbols": 44, "fan_out": 12},
+}
+
 # R-19 零覆盖基线：✅ 已冻结（回写#256）。冻结集合 = 2026-10-08 实测引用级零覆盖业务模块 49 个
 # （被 tests import 即视为覆盖；含 gui/strategies/allocation 等业务模块，剔除 __init__.py）。
 # 冻结后"新增零覆盖即红"；存量零覆盖只减不增（收敛由 G1/G2 或 G0-9 补测清单推进）。
@@ -446,6 +510,52 @@ def _imports(path_str: str) -> tuple[tuple[str, int, str], ...]:
             if mod:
                 out.append((mod, node.lineno, ctx(node.lineno)))
     return tuple(out)
+
+
+@functools.lru_cache(maxsize=None)
+def _structure_metrics(rel: str) -> tuple[int, int, frozenset]:
+    """R-26 三维度量（与标定脚本 calibrate_r26.py 同口径）。
+
+    返回 (lines, total_symbols, fan_out_set)。lines 用 splitlines 行数（与 R-24 一致）；
+    total_symbols 遍历 FunctionDef/AsyncFunctionDef/ClassDef，排除 __main__ 自测块与
+    TYPE_CHECKING 块；fan_out 复用 _imports() 排除 main/typing 语境，模块归一为
+    myquant.X.*→X、外部库→首段，取去重集合。
+    """
+    path = str(MYQUANT / rel)
+    src = _read_text(path)
+    lines = len(src.splitlines())
+    tree = _parse(path)
+    if tree is None:
+        return lines, 0, frozenset()
+    main_r = sorted(
+        (n.lineno, n.end_lineno or n.lineno)
+        for n in ast.walk(tree) if _is_main_guard(n)
+    )
+    typing_r = sorted(
+        (n.lineno, n.end_lineno or n.lineno)
+        for n in ast.walk(tree)
+        if isinstance(n, ast.If) and isinstance(n.test, ast.Name)
+        and n.test.id == "TYPE_CHECKING"
+    )
+
+    def _in(rng: list[tuple[int, int]], lineno: int) -> bool:
+        return any(s <= lineno <= e for s, e in rng)
+
+    symbols = sum(
+        1 for n in ast.walk(tree)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        and not _in(main_r, n.lineno) and not _in(typing_r, n.lineno)
+    )
+    fan: set[str] = set()
+    for mod, _ln, ctx in _imports(path):
+        if ctx in ("main", "typing"):
+            continue
+        if mod.startswith("myquant."):
+            parts = mod.split(".")
+            fan.add(parts[1] if len(parts) > 1 else mod)
+        else:
+            fan.add(mod.split(".")[0])
+    return lines, symbols, frozenset(fan)
 
 
 def _layer_of_module(module: str) -> str | None:
@@ -1081,6 +1191,77 @@ class TestR25RegisteredPackage:
             "MODULE_LAYER 登记了但文件系统不存在的幽灵包（登记表失真，须删除该登记）：\n"
             + "\n".join(f"  myquant.{pkg}/" for pkg in ghosts)
         )
+
+
+class TestR26StructureFreeze:
+    """R-26：结构冻结——白名单文件三维度量 + 顶层包聚合只减不增（PR1，回写#420）。
+
+    度量口径（与现有语义矩阵一致，K-f 语境分类；实现见 _structure_metrics）：
+      lines         : splitlines 行数（与 R-24 同口径）
+      total_symbols : AST 遍历 FunctionDef/AsyncFunctionDef/ClassDef，
+                      排除 __main__ 自测块与 TYPE_CHECKING 块
+      fan_out       : import 依赖面（排除 main/typing 语境），
+                      myquant.X.*→X、外部库→首段，去重集合大小
+    语义：白名单文件任一维度超基线即红（存量继续膨胀禁止，比纯行数难作弊——
+          压缩行不影响符号数、搬代码不降低依赖面）；任一维度超硬顶
+          （STRUCTURE_HARD_CAP）即红且无豁免——硬顶是防 PR2 对价机制被滥用为
+          无限抬升的死线；顶层包聚合任一维度超基线即红（防"横向分裂"：把白名单
+          文件拆成多个各自低于基线的新文件而包级总量不降，配合 R-22/R-25 闭环）。
+    装配器类文件（R-16 装配器集中）fan_out 天然偏高，冻结值已含当前状态；
+    豁免通道留给 PR2 对价机制，本规则无豁免。
+    基线 = 2026-10-15 实测标定（先测量再冻结；标定脚本 calibrate_r26.py）。
+    """
+
+    def test_whitelisted_not_rising(self):
+        over = []
+        for rel, base in sorted(STRUCTURE_BASELINE.items()):
+            p = MYQUANT / rel
+            if not p.exists():
+                continue
+            lines, symbols, fan = _structure_metrics(rel)
+            for name, val, b in (("lines", lines, base["lines"]),
+                                 ("symbols", symbols, base["symbols"]),
+                                 ("fan_out", len(fan), base["fan_out"])):
+                if val > b:
+                    over.append(f"{rel}: {name} {val} > 基线 {b}")
+        assert not over, "白名单文件结构指标上涨（结构冻结，只减不增）：\n" + "\n".join(over)
+
+    def test_hard_cap_no_exemption(self):
+        over = []
+        for rel in sorted(STRUCTURE_BASELINE):
+            p = MYQUANT / rel
+            if not p.exists():
+                continue
+            lines, symbols, fan = _structure_metrics(rel)
+            for name, val, cap in (("lines", lines, STRUCTURE_HARD_CAP["lines"]),
+                                   ("symbols", symbols, STRUCTURE_HARD_CAP["symbols"]),
+                                   ("fan_out", len(fan), STRUCTURE_HARD_CAP["fan_out"])):
+                if val > cap:
+                    over.append(f"{rel}: {name} {val} > 硬顶 {cap}（无豁免通道）")
+        assert not over, "白名单文件结构指标超硬顶（硬顶不可逾越）：\n" + "\n".join(over)
+
+    def test_packages_not_rising(self):
+        over = []
+        for pkg, base in sorted(PACKAGE_STRUCTURE_BASELINE.items()):
+            pdir = MYQUANT / pkg
+            if not pdir.is_dir():
+                continue
+            files = [p for p in pdir.rglob("*.py")
+                     if "__pycache__" not in p.parts and p.name != "__init__.py"]
+            lines = symbols = 0
+            fan_union: set[str] = set()
+            for p in files:
+                rel = p.relative_to(MYQUANT).as_posix()
+                n_lines, n_symbols, n_fan = _structure_metrics(rel)
+                lines += n_lines
+                symbols += n_symbols
+                fan_union |= set(n_fan)
+            for name, val, b in (("lines", lines, base["lines"]),
+                                 ("symbols", symbols, base["symbols"]),
+                                 ("fan_out", len(fan_union), base["fan_out"])):
+                if val > b:
+                    over.append(f"{pkg}: {name} {val} > 基线 {b}")
+        assert not over, "顶层包结构指标上涨（防横向分裂，只减不增）：\n" + "\n".join(over)
 
 
 class TestP104ExemptRegistry:

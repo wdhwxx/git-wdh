@@ -135,6 +135,9 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+        with:
+          # 全历史检出：R-26/PR2 git 反查账本依赖完整历史（浅克隆会挂，fetch-depth 默认 1）
+          fetch-depth: 0
 
       - name: 设置Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -220,6 +223,9 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+        with:
+          # 全历史检出：R-26/PR2 git 反查账本依赖完整历史（浅克隆会挂，fetch-depth 默认 1）
+          fetch-depth: 0
 
       - name: 设置Python环境
         uses: actions/setup-python@v5
