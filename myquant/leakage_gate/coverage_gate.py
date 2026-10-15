@@ -367,7 +367,10 @@ T2_FILES: frozenset[str] = frozenset({
     "web/dashboard.py",
 })
 # C-6 仅源码断言守护的模块数上限（只减不增；替代不成立的 --cov-omit 方案，保持缺口可见）
-SOURCE_ASSERT_ONLY_MAX: int = 4
+# 历史值：4（v1.2 §5.2 目标初值）→ 33（#386 2026-10-15 按 CI 实测冻结后转阻断；
+#   v1.2 的 4 是乐观目标，P1 逻辑"先实测后冻结再阻断"——33 为当前"仅字符串引用、
+#   零 import 引用"模块实计数，阻断新增（超过 33 即红），后续 P3 补测逐步降数）
+SOURCE_ASSERT_ONLY_MAX: int = 33
 # C-7 运行时跳过预算（pytest.skip 实际触发数，只减不增；防 fail-open 回潮）
 # 历史值：4（v1.2 建议初值）→ 10（#379b2 2026-10-15，CI run 38666307281 实测 8 留 2 余量）
 #        → 5（#385 2026-10-15 收紧，CI run 38673852582 实测 5：R-05 白名单 1 + reportlab 依赖缺失 1
@@ -510,7 +513,7 @@ class CoverageGateReport:
         if self.assert_only_count > SOURCE_ASSERT_ONLY_MAX:
             lines.append(
                 f"  ⚠ C-6 仅源码断言守护模块 {self.assert_only_count} 个 > 上限 "
-                f"{SOURCE_ASSERT_ONLY_MAX}（P2-4 精化口径后启用阻断）"
+                f"{SOURCE_ASSERT_ONLY_MAX}（阻断：#386 转阻断）"
             )
         if self.violations:
             lines.append(f"  ❌ 违反判据 {len(self.violations)} 项:")
@@ -747,11 +750,17 @@ def evaluate(
             report.violations.append(
                 f"C-5 {rel} 语句数 {stmts} > 冻结值 {ceiling}（存量语句只增不减）"
             )
-    # ── C-6 仅源码断言守护的模块数（P2-4 精化口径后启用阻断；首版仅报告）──
+    # ── C-6 仅源码断言守护的模块数（只减不增；#386 转阻断）──
     # v1.2 §6.3 P2-4：C-6 冻结为 SOURCE_ASSERT_ONLY_MAX 且只减不增；P1 首版先报告
-    # 实际计数（避免未精化口径导致首发即红），P2-4 给缺口模块补行为级测试后转阻断。
+    # 实际计数（避免未精化口径导致首发即红），#386 按 CI 实测冻结 33 后转阻断：
+    # 超过上限（新增"仅字符串守护、零行为测试"模块）即红，存量缺口保持可见。
     assert_only = _find_source_assert_only_modules(root)
     report.assert_only_count = len(assert_only)
+    if report.assert_only_count > SOURCE_ASSERT_ONLY_MAX:
+        report.violations.append(
+            f"C-6 仅源码断言守护模块 {report.assert_only_count} 个 > 上限 "
+            f"{SOURCE_ASSERT_ONLY_MAX}（新增模块缺行为测试）"
+        )
     # ── C-7 运行时跳过预算（只减不增）──
     report.skipped = _parse_skipped(junit_xml)
     if report.skipped > SKIP_BUDGET:

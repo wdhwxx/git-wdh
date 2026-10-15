@@ -5509,6 +5509,24 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 
 **纪律遵守**：改基线独立 commit + 理由；收紧值以 CI 权威口径为据（用户建议 2~3 基于本地 1 会令 CI 立即红，已按 §5.4 契约纠正）；只减不增棘轮；一次一项；git 提交（commit message 引用 #385）。
 
+---
+
+## #386 · 2026-10-15 · P2-4 C-6 转阻断（§5.3 改基线独立 commit）
+
+**核验修正（v1.2 名单与实际判据脱节）**：实际执行 `_find_source_assert_only_modules`（C-6 判据=测试中"零 import 引用、仅字符串路径引用"的模块）得 **33 个**模块，v1.2 §5.2 列出的 4 个模块（chaos_drill/disaster_drill/core/logger/core/measurability）**均不在名单**——实际核验发现 test_chaos_drill.py（11 项）、test_disaster_drill.py、test_logger.py（18 项）早已存在且有真实 import 行为测试；**唯一真缺口 = core/measurability.py**（P0-8 度量核心，仅有字符串引用）。按实际核验补测，不盲从报告名单。
+
+**落地**：
+1. **补行为测试** `tests/unit/test_measurability.py`（新建，21 项）：TP/FP/FN 分类口径（P0-8 ①）、MTTx 计时与非法序列拒绝（P0-8 ②）、FI 用例库完整性（R-01）。验收：47 passed（measurability 21 + chaos 11 + disaster 15）。
+2. **C-6 转阻断（§5.3 独立 commit + 理由）**：`SOURCE_ASSERT_ONLY_MAX` **4→33**（CI 实测冻结——v1.2 的 4 是乐观目标，按 P1"先实测后冻结再阻断"逻辑执行，避免首发即红；注释登记历史 4→33）；evaluate 中 C-6 违反（>33）由"仅报告"转 **violations 阻断**（新增"仅字符串守护、零行为测试"模块即红，存量缺口保持可见，后续 P3 逐项补测降数）。
+
+**验收**：本地判据预演全过（33≤33，C-6 阻断生效不再仅报告）；test_coverage_gate 41 passed；ruff 0 违规；核心集 4194 项（待 CI 复验，预期全绿）。
+
+**纪律遵守**：改基线独立 commit + 理由；核验以实际代码判据为准（发现报告名单与实现脱节即修正，不盲从）；一次一项；git 提交（commit message 引用 #386）。
+
+
+
+
+
 
 
 
