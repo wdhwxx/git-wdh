@@ -42,6 +42,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -380,6 +381,14 @@ SOURCE_ASSERT_ONLY_MAX: int = 33
 #            fpdf 为运行依赖必装；剩 R-05 白名单 1 + live_config 生产配置未入库 3，全确定性设计性）
 SKIP_BUDGET: int = 4
 
+# ── P4 常态治理（v1.2 §6.5）：季度上调棘轮 ─────────────────
+# 基线（COVERAGE_BASELINE/FILE_FLOOR 等）须每季度至少上调/复核一次，
+# 否则 C-8 告警（非阻断，防棘轮松动）。92 天 ≈ 一个季度。
+QUARTERLY_REVIEW_DAYS: int = 92
+# 最后基线上调/复核日期（每次 §5.3 改基线后更新）：2026-10-15 = P3 批量收紧
+# FILE_FLOOR 6 项（#393/#395/#397/#399/#401）+ C-7 收紧（#404）+ C-6 冻结（#386）
+BASELINE_LAST_RAISED: str = "2026-10-15"
+
 
 def tier_of(rel_path: str) -> str | None:
     """返回文件所属分层（T0/T1/T2/T3）；无法归层返回 None。
@@ -491,6 +500,8 @@ class CoverageGateReport:
     unmapped_files: list[str] = field(default_factory=list)
     skipped: int = 0
     assert_only_count: int = 0
+    warnings: list[str] = field(default_factory=list)  # C-8 季度治理告警（非阻断）
+    quarterly_review_due: bool = False
     report_only: bool = False
 
     @property
@@ -769,6 +780,19 @@ def evaluate(
     if report.skipped > SKIP_BUDGET:
         report.violations.append(
             f"C-7 运行时跳过 {report.skipped} 个 > 预算 {SKIP_BUDGET}（fail-open 回潮）"
+        )
+    # ── C-8 季度治理检查（P4 §6.5：基线须每季度上调/复核一次，否则告警非阻断）──
+    try:
+        last_raise = date.fromisoformat(BASELINE_LAST_RAISED)
+        days_since = (date.today() - last_raise).days
+    except (ValueError, TypeError):
+        days_since = QUARTERLY_REVIEW_DAYS + 1
+    if days_since > QUARTERLY_REVIEW_DAYS:
+        report.quarterly_review_due = True
+        report.warnings.append(
+            f"C-8 距上次基线上调/复核已 {days_since} 天 > {QUARTERLY_REVIEW_DAYS} 天："
+            "季度治理到期，请按 v1.2 §6.5 上调 COVERAGE_BASELINE/FILE_FLOOR 并复核 "
+            "FILE_STMT_CEILING（改基线须 §5.3 独立 commit）"
         )
 
     return report

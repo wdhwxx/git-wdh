@@ -242,6 +242,40 @@ def test_c7_pass_when_within_budget(tmp_path: Path, relaxed_baselines: None) -> 
     assert report.ok
 
 
+# ── 8.5 C-8 季度治理检查（P4 §6.5，告警非阻断）─────────────
+def test_c8_warns_when_review_overdue(tmp_path: Path, relaxed_baselines: None,
+                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    files = {"myquant/backtest/engine.py": _mk_file(100, 90)}
+    totals = {"num_statements": 100, "covered_lines": 90, "percent_covered": 90.0}
+    cov = _write_fake_coverage(tmp_path, files, totals)
+    monkeypatch.setattr(cg, "BASELINE_LAST_RAISED", "2020-01-01")  # 早已超季度
+    report = cg.evaluate(cov, project_root=PROJECT_ROOT)
+    assert report.ok  # C-8 告警非阻断
+    assert report.quarterly_review_due is True
+    assert any(w.startswith("C-8") for w in report.warnings)
+
+
+def test_c8_silent_within_quarter(tmp_path: Path, relaxed_baselines: None,
+                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    files = {"myquant/backtest/engine.py": _mk_file(100, 90)}
+    totals = {"num_statements": 100, "covered_lines": 90, "percent_covered": 90.0}
+    cov = _write_fake_coverage(tmp_path, files, totals)
+    monkeypatch.setattr(cg, "BASELINE_LAST_RAISED", "2099-01-01")  # 未来=未到期
+    report = cg.evaluate(cov, project_root=PROJECT_ROOT)
+    assert report.quarterly_review_due is False
+    assert report.warnings == []
+
+
+def test_c8_bad_date_warns(tmp_path: Path, relaxed_baselines: None,
+                           monkeypatch: pytest.MonkeyPatch) -> None:
+    files = {"myquant/backtest/engine.py": _mk_file(100, 90)}
+    totals = {"num_statements": 100, "covered_lines": 90, "percent_covered": 90.0}
+    cov = _write_fake_coverage(tmp_path, files, totals)
+    monkeypatch.setattr(cg, "BASELINE_LAST_RAISED", "not-a-date")
+    report = cg.evaluate(cov, project_root=PROJECT_ROOT)
+    assert report.quarterly_review_due is True  # 非法日期按到期处理（fail-safe）
+
+
 # ── 9. fail-closed 与报告模式 ────────────────────────────
 def test_fail_closed_when_json_missing(tmp_path: Path) -> None:
     report = cg.evaluate(tmp_path / "missing.json", project_root=PROJECT_ROOT)
