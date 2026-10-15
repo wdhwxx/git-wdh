@@ -12,9 +12,6 @@ test_trade_calendar_gate.py - 交易日历安全门测试（KP-P3-10 / T-16）
 from __future__ import annotations
 
 import datetime as dt
-from pathlib import Path
-
-import pytest
 
 from myquant.models.trade import Order, OrderSide, OrderType
 from myquant.risk.rules import RiskContext, TradingHoursRule
@@ -62,15 +59,23 @@ class TestTradingHoursRuleTradingDay:
 
 
 class TestEntryTradingDay:
-    def test_实盘入口_交易日判定接真实日历(self) -> None:
-        """DoD：真实日历已知交易日 True；周日 False。"""
-        from myquant.utils.trade_calendar import load_trade_calendar
+    def test_实盘入口_交易日判定_有缓存用真实日历(self, monkeypatch) -> None:
+        """DoD：有真实日历缓存时，缓存内已知交易日 True、缓存外周日 False。"""
         from run_实盘入口 import _is_trading_day
 
-        cal = load_trade_calendar(Path(".").resolve())
-        if not cal:
-            pytest.skip("交易日历缓存为空（CI 无网络/无本地数据）")
-        assert cal  # 缓存存在且非空
-        trading = sorted(cal)[-1]  # 最近已知交易日
-        assert _is_trading_day(trading) is True
-        assert _is_trading_day(dt.date(2026, 10, 4)) is False  # 2026-10-04 周日
+        cal = {dt.date(2026, 10, 14), dt.date(2026, 10, 15)}  # 已知交易日（周三/周四）
+        monkeypatch.setattr(
+            "myquant.utils.trade_calendar.load_trade_calendar", lambda _root: cal
+        )
+        assert _is_trading_day(dt.date(2026, 10, 14)) is True
+        assert _is_trading_day(dt.date(2026, 10, 4)) is False  # 2026-10-04 周日，不在缓存
+
+    def test_实盘入口_交易日判定_无缓存回退工作日近似(self, monkeypatch) -> None:
+        """DoD：无日历缓存回退周一至周五近似（KP-P3-10）。"""
+        from run_实盘入口 import _is_trading_day
+
+        monkeypatch.setattr(
+            "myquant.utils.trade_calendar.load_trade_calendar", lambda _root: None
+        )
+        assert _is_trading_day(dt.date(2026, 10, 12)) is True   # 周一
+        assert _is_trading_day(dt.date(2026, 10, 11)) is False  # 周日

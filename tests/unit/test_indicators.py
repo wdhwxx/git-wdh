@@ -202,13 +202,11 @@ class TestSMA:
         assert len(result) == len(small_df)
 
     def test_empty_dataframe(self, empty_df):
-        """空 DataFrame 不崩溃"""
+        """空 DataFrame 不崩溃（列存在时确定性返回空结果）"""
+        # P2-2 定性：原 try/except skip 多余——_validate_data 通过（中文列存在），rolling 空序列确定性返回空
         sma = SMA(window=5)
-        try:
-            result = sma.calculate(empty_df)
-            assert len(result) == 0
-        except Exception:
-            pytest.skip("空数据处理因实现而异，不强制要求")
+        result = sma.calculate(empty_df)
+        assert len(result) == 0
 
     def test_single_row(self, single_row_df):
         """单行数据不崩溃"""

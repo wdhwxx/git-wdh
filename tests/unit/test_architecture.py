@@ -627,7 +627,7 @@ class TestR05StrategyNoIO:
     )
     def test_no_io(self, py: Path):
         if _rel(py) in STRATEGY_IO_ALLOWLIST:
-            pytest.skip("存量冻结（R-05 白名单，P1 清理）")
+            pytest.skip("存量冻结（R-05 白名单，P1 清理）")  # P2-2 定性：设计性跳过，存量 IO 白名单冻结，清理在 P1 计划内
         bad = [f"L{ln} {m.split('.')[0]}" for m, ln, _c in _imports(str(py))
                if m.split(".")[0] in STRATEGY_FORBIDDEN_IMPORTS]
         assert not bad, f"{_rel(py)} 策略层禁止 IO：{bad}"
@@ -928,8 +928,7 @@ class TestR19ZeroReference:
         return refs
 
     def test_report_zero_coverage(self):
-        if not ZERO_COVERAGE_BASELINE:
-            pytest.skip("覆盖率基线未冻结（需 pytest-cov 校准，见 G0-9）；本规则当前仅报告")
+        # ZERO_COVERAGE_BASELINE 已冻结（49 个零覆盖模块，R-19 转 CI 阻断），此规则不再报告模式
         refs = self._tests_imported_modules()
         current_zero = {
             p.relative_to(PROJECT_ROOT).as_posix()

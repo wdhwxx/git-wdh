@@ -5477,6 +5477,28 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 
 **纪律遵守**：一次一项；只改点名范围（test_database.py）；契约漂移按 fail-closed 报红并修测试对齐实现；蓝图回写 #383；git 提交（commit message 引用 #383）。
 
+---
+
+## #384 · 2026-10-15 · P2-2 运行时 skip 逐条定性（设计性 vs 掩盖性，v1.2 §6.3 P2-2）
+
+**现状核实**：全库运行时 `pytest.skip(` 调用点共 **7 处**（v1.2 报告记 6 处 + 新增 test_trade_calendar_gate.py 1 处；test_database 9 处已在 #383 清零）。逐条读实现确认行为后定性：
+
+| 位置 | 定性 | 处置 |
+|---|---|---|
+| test_architecture.py:630（R-05 白名单） | **设计性**：存量 IO 白名单冻结（P1 清理计划内） | 保留 + 注释登记 |
+| test_architecture.py:932（R-19 零覆盖） | **死代码**：ZERO_COVERAGE_BASELINE 已冻结 49 个模块（R-19 转 CI 阻断），`if not ...` 永不真 | 删除 if/skip |
+| test_exception_swallowing.py:29（无 fastapi） | **设计性**：fastapi 在 pyproject web extras，CI 装 dev+benchmark+gui+web 故 CI 真跑；仅本地无 web extras 时跳过 | 保留 + 注释登记 |
+| test_backtest.py:711（HistoricalDataProvider） | **掩盖性（契约漂移）**：测试传 `data_dir=` 而实现参数为 `processed_dir=` → TypeError 被 skip 吞掉（同 #383 型）；且实现 `_scan_directory` 对不存在目录仅 warning 不抛 → 构造确定成功 | 改 `processed_dir=` + 去 try/except fail-closed |
+| test_data_manager.py:686（list_dataset_versions） | **掩盖性（实为多余）**：`_read_version_index` 无 index.json 确定性返回空索引 → 返回 [] 不抛异常 | 去 try/except fail-closed |
+| test_indicators.py:211（SMA 空 DataFrame） | **掩盖性（实为多余）**：`_validate_data` 中文列存在通过，rolling 空序列确定性返回空结果 | 去 try/except fail-closed |
+| test_trade_calendar_gate.py:72（实盘入口交易日判定） | **环境依赖盲区**：load_trade_calendar 依赖项目根 data/trade_calendar.csv，CI 无缓存永远 skip | 重构为 monkeypatch 双路径确定性验证（有缓存用真实日历 / 无缓存回退工作日近似） |
+
+**验收**：相关 6 文件 337 passed / 1 skipped（仅 R-05 设计性 skip）；test_data_manager + test_trade_calendar_gate 74 passed；ruff 0 违规（清 3 个 F401 未使用 import）；核心集整体复验（本记录同 commit 后跑）；C-7 实际跳过数降至 ≤2（预算 10）。CI 复验（下个 run）。
+
+**纪律遵守**：一次一项；只改点名范围（tests/unit 6 文件）；按实现行为定性的证据链完整（读实现确认，非猜测）；设计性保留登记、掩盖性改红；v1.2 报告追加 §12 实施进度台账；git 提交（commit message 引用 #384）。
+
+
+
 
 
 

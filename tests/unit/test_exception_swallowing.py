@@ -26,7 +26,7 @@ class TestCreateAppNoFastapi:
     def test_无fastapi_启动raise(self, monkeypatch) -> None:
         """DoD：无 fastapi 时 create_app 显式 raise RuntimeError（不静默降级）。"""
         if not FASTAPI_AVAILABLE:
-            pytest.skip("本环境无 fastapi，无法验证降级路径")
+            pytest.skip("本环境无 fastapi，无法验证降级路径")  # P2-2 定性：设计性跳过——fastapi 在 web extras（pyproject），CI 装 dev+benchmark+gui+web 故 CI 真跑；仅本地无 web extras 时跳过
         monkeypatch.setattr("myquant.api.routes.FASTAPI_AVAILABLE", False)
         with pytest.raises(RuntimeError, match="fastapi未安装"):
             create_app()

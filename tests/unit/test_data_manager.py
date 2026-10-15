@@ -31,7 +31,6 @@ import time
 from typing import Callable, Dict, List
 
 import pandas as pd
-import pytest
 
 from myquant.core.cache import MemoryCache
 from myquant.data_access import (
@@ -678,12 +677,9 @@ class TestDatasetVersionManagement:
         source = MockDataSource()
         fetcher = DataFetcher(source=source)
         manager = DataManager(fetcher=fetcher)
-        # 版本管理可能需要数据目录，验证接口不崩溃
-        try:
-            versions = manager.list_dataset_versions("000001.SZ")
-            assert isinstance(versions, list)
-        except Exception:
-            pytest.skip("版本管理需要数据目录环境")
+        # P2-2 定性：原 try/except skip 多余——list_dataset_versions 对无版本索引确定性返回空列表
+        versions = manager.list_dataset_versions("000001.SZ")
+        assert isinstance(versions, list)
 
 
 # ═══════════════════════════════════════════

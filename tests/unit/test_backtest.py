@@ -702,13 +702,11 @@ class TestDataProvider:
         assert hasattr(DataProviderBase, "get_available_symbols")
 
     def test_historical_provider_instantiation(self):
-        """HistoricalDataProvider 可实例化（需数据目录）"""
-        # 不指定数据目录时应能创建对象（可能扫描为空）
-        try:
-            provider = HistoricalDataProvider(data_dir="/tmp/nonexistent_quant_data")
-            assert provider is not None
-        except Exception:
-            pytest.skip("HistoricalDataProvider 构造因环境而异")
+        """HistoricalDataProvider 可实例化（数据目录不存在也不抛异常）"""
+        # P2-2 定性：原 try/except skip 掩盖契约漂移——实现构造参数为 processed_dir（data_dir 为旧签名）
+        # 实现 _scan_directory 对不存在目录仅 warning + 空缓存，构造确定成功 → fail-closed 硬断言
+        provider = HistoricalDataProvider(processed_dir="/tmp/nonexistent_quant_data")
+        assert provider is not None
 
     def test_historical_provider_inherits_base(self):
         """HistoricalDataProvider 继承 DataProviderBase"""
