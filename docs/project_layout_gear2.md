@@ -5535,6 +5535,24 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 
 **纪律遵守**：一次一项；核验以实现事实为准（发现过时断言即修，不按"固定 reportlab"的旧选项——那会给废弃依赖装环境）；git 提交（commit message 引用 #387）。
 
+---
+
+## #388 · 2026-10-15 · P2-6 benchmarks 趋势化（绝对阈值→硬件无关相对指标）
+
+**改造**（v1.2 §6.3 P2-6 / G-3：绝对毫秒墙钟阈值在慢机/负载下随机红）：
+1. `tests/benchmarks/_benchmark_utils.py`：新增 `RATIO_LIMIT=5.0` 相对基线倍数上限；`BenchmarkResult` 增 `baseline_ms`/`ratio_to_baseline`，**passed 判定 = 本次 mean_ms ÷ 上一轮基线 median_ms ≤ 5.0×**（硬件无关：正常负载/换机 2~3 倍波动不红，5 倍以上才视为回归）；**无基线（首次/换机首跑）passed=True 仅建基线不红**；`threshold_ms` 保留为兼容参数（不再阻断）。
+2. **趋势报告非阻断**：每次运行自动追加 `docs/benchmarks/trend.jsonl`（name/mean/median/p95/p99/baseline/ratio/timestamp，UTF-8 JSONL），供趋势分析；`load_latest_baseline()`/`append_trend()` 模块函数。
+3. `conftest.py`：绝对常量（INDICATOR_THRESHOLD_MS=200 / EXECUTION_LATENCY_MS=5 / ENGINE_THROUGHPUT_MIN=500）标注为"参考值，不再参与判定"。
+4. `test_engine_throughput.py`：唯一绝对断言（`throughput >= ENGINE_THROUGHPUT_MIN`）改相对（`ratio ≤ RATIO_LIMIT`）。
+
+**验收**：test_execution_latency 首建基线 7 passed；有基线后相对判定显示（倍数 0.62×~3.29×，全 PASS）；trend.jsonl 自动落盘（中文名正确）；ruff 0 违规。benchmarks 仍不在 CI testpaths（裸 pytest 不跑，V-7 保持）。
+
+**纪律遵守**：一次一项；只改 benchmarks 范围（测试设施，非业务）；相对口径避免"绝对阈值随机红"；git 提交（commit message 引用 #388）。
+
+
+
+
+
 
 
 

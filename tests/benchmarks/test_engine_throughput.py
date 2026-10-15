@@ -34,8 +34,12 @@ BENCH_DIR = Path(__file__).resolve().parent
 if str(BENCH_DIR) not in sys.path:
     sys.path.insert(0, str(BENCH_DIR))
 
-from _benchmark_utils import BenchmarkRunner, make_synthetic_bars  # noqa: E402
-from conftest import BENCH_ITERATIONS, BENCH_WARMUP, ENGINE_THROUGHPUT_MIN  # noqa: E402
+from _benchmark_utils import (  # noqa: E402
+    RATIO_LIMIT,
+    BenchmarkRunner,
+    make_synthetic_bars,
+)
+from conftest import BENCH_ITERATIONS, BENCH_WARMUP  # noqa: E402
 
 from myquant.backtest.engine import BacktestEngine  # noqa: E402
 from myquant.models.backtest import BacktestConfig  # noqa: E402
@@ -76,9 +80,11 @@ def test_engine_throughput_5k():
     # 计算 bars/sec
     throughput = n_bars / (result.mean_ms / 1000.0)
     print(result.format())
-    print(f"    吞吐量:   {throughput:.1f} bars/sec (阈值 > {ENGINE_THROUGHPUT_MIN})")
-    assert throughput >= ENGINE_THROUGHPUT_MIN, (
-        f"引擎吞吐量 {throughput:.1f} bars/sec 低于阈值 {ENGINE_THROUGHPUT_MIN}"
+    # P2-6 相对化：吞吐量换算自耗时，判定改为相对基线倍数（硬件无关，替代绝对 bars/sec）
+    if result.baseline_ms is not None:
+        print(f"    吞吐量:   {throughput:.1f} bars/sec (相对基线判定, ratio={result.ratio_to_baseline:.2f}× ≤ {RATIO_LIMIT:.1f}×)")
+    assert result.ratio_to_baseline is None or result.ratio_to_baseline <= RATIO_LIMIT, (
+        f"引擎吞吐量退化 {result.ratio_to_baseline:.2f}× 超相对基线上限 {RATIO_LIMIT:.1f}×"
     )
 
 

@@ -18,10 +18,19 @@
 
 from __future__ import annotations
 
+import json
 import statistics
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+
+# P2-6（v1.2 §6.3）：绝对毫秒墙钟阈值→硬件无关相对指标。
+# 判定口径 = 相对基线倍数（本次 mean_ms / 上一轮基线 median_ms），上限 RATIO_LIMIT：
+#   - 无基线（首次运行/换机首跑）：passed=True 仅建基线，不阻断；
+#   - 有基线：ratio ≤ RATIO_LIMIT 通过（正常负载/换机 2~3 倍波动不红，5 倍以上视为回归）。
+# 每次运行自动追加趋势记录（docs/benchmarks/trend.jsonl），结果仅报告非阻断。
+RATIO_LIMIT: float = 5.0
 
 
 @dataclass
@@ -39,6 +48,8 @@ class BenchmarkResult:
     max_ms: float = 0.0
     ops_per_sec: float = 0.0
     threshold_ms: Optional[float] = None
+    baseline_ms: Optional[float] = None
+    ratio_to_baseline: Optional[float] = None
     passed: bool = True
 
     def __post_init__(self) -> None:
@@ -52,8 +63,13 @@ class BenchmarkResult:
             self.min_ms = min(ms)
             self.max_ms = max(ms)
             self.ops_per_sec = self.iterations / self.total_time if self.total_time > 0 else 0
-            if self.threshold_ms is not None:
-                self.passed = self.mean_ms <= self.threshold_ms
+            # P2-6 相对化判定（threshold_ms 保留为兼容参数，仅参考不再阻断）
+            if self.baseline_ms is not None and self.baseline_ms > 0:
+                self.ratio_to_baseline = self.mean_ms / self.baseline_ms
+                self.passed = self.ratio_to_baseline <= RATIO_LIMIT
+            else:
+                # 首建基线（无上一轮数据）：不阻断，只记录
+                self.passed = True
 
     def format(self) -> str:
         """格式化输出"""
@@ -68,9 +84,17 @@ class BenchmarkResult:
             f"    最小/最大: {self.min_ms:.4f} / {self.max_ms:.4f} ms",
             f"    吞吐量:   {self.ops_per_sec:.1f} ops/sec",
         ]
-        if self.threshold_ms is not None:
+        if self.baseline_ms is not None:
             status = "PASS" if self.passed else "FAIL"
-            lines.append(f"    阈值:     {self.threshold_ms} ms (均值) → {status}")
+            ratio = f"{self.ratio_to_baseline:.2f}" if self.ratio_to_baseline is not None else "N/A"
+            lines.append(
+                f"    相对基线: {self.baseline_ms:.4f} ms → 倍数 {ratio}×"
+                f" (上限 {RATIO_LIMIT:.1f}×) → {status}"
+            )
+        elif self.threshold_ms is not None:
+            lines.append(
+                f"    绝对阈值: {self.threshold_ms} ms (兼容参数，首建基线不判定，仅参考)"
+            )
         return "\n".join(lines)
 
 
@@ -87,10 +111,59 @@ def _percentile(data: List[float], p: float) -> float:
     return sorted_data[f] + (sorted_data[c] - sorted_data[f]) * (k - f)
 
 
+def _trend_path() -> Path:
+    """趋势报告默认落点（项目根/docs/benchmarks/trend.jsonl）。"""
+    return Path(__file__).resolve().parent.parent.parent / "docs" / "benchmarks" / "trend.jsonl"
+
+
+def load_latest_baseline(path: Path, name: str) -> Optional[float]:
+    """从趋势文件中读取该基准项最近一轮的 median_ms 作为相对基线。
+
+    Args:
+        path: 趋势文件（JSONL，每行一条趋势记录）。
+        name: 基准项名称。
+
+    Returns:
+        float | None: 最近一轮 median_ms；文件缺失或无该名称记录返回 None。
+    """
+    if not path.is_file():
+        return None
+    latest: Optional[float] = None
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if rec.get("name") == name and isinstance(rec.get("median_ms"), (int, float)):
+            latest = float(rec["median_ms"])
+    return latest
+
+
+def append_trend(path: Path, result: BenchmarkResult) -> None:
+    """追加一条趋势记录（JSONL；供 docs/benchmarks/ 趋势报告，非阻断）。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record: Dict[str, Any] = {
+        "name": result.name,
+        "mean_ms": result.mean_ms,
+        "median_ms": result.median_ms,
+        "p95_ms": result.p95_ms,
+        "p99_ms": result.p99_ms,
+        "baseline_ms": result.baseline_ms,
+        "ratio_to_baseline": result.ratio_to_baseline,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
 class BenchmarkRunner:
     """性能基准运行器"""
 
-    def __init__(self, warmup: int = 3, iterations: int = 50) -> None:
+    def __init__(self, warmup: int = 3, iterations: int = 50,
+                 trend_path: Optional[Path] = None) -> None:
         """
         Parameters
         ----------
@@ -98,9 +171,12 @@ class BenchmarkRunner:
             预热次数（不计入统计）
         iterations : int
             正式测量次数
+        trend_path : Path | None
+            趋势报告路径（None 用默认 docs/benchmarks/trend.jsonl）
         """
         self.warmup = warmup
         self.iterations = iterations
+        self.trend_path: Path = trend_path if trend_path is not None else _trend_path()
         self.results: List[BenchmarkResult] = []
 
     def run(
@@ -120,7 +196,7 @@ class BenchmarkRunner:
         func : Callable
             被测函数（无参数）
         threshold_ms : float | None
-            均值阈值（ms），超过则 FAIL
+            兼容参数（历史调用保留；P2-6 起判定改为相对基线倍数，见 RATIO_LIMIT）
         setup : Callable | None
             每次迭代前的准备函数（不计入耗时）
         """
@@ -140,13 +216,16 @@ class BenchmarkRunner:
             t1 = time.perf_counter()
             durations.append(t1 - t0)
 
+        baseline = load_latest_baseline(self.trend_path, name)
         result = BenchmarkResult(
             name=name,
             iterations=self.iterations,
             durations=durations,
             threshold_ms=threshold_ms,
+            baseline_ms=baseline,
         )
         self.results.append(result)
+        append_trend(self.trend_path, result)
         return result
 
     def report(self) -> str:
