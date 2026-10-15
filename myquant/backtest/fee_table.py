@@ -526,7 +526,7 @@ def estimate_max_error(
 # 自测 Demo
 # ─────────────────────────────────────────────
 
-def _run_self_test() -> int:
+def _run_self_test() -> int:  # pragma: no cover — 仅 python -m 自测路径，不计入门禁覆盖
     """运行 fee_table 模块自测。
 
     Returns:
@@ -727,6 +727,6 @@ def _run_self_test() -> int:
     return 0
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover — 仅 python -m 自测路径
     # 自测 Demo：运行全部校验项
     raise SystemExit(_run_self_test())
