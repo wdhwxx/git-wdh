@@ -9,7 +9,7 @@
 
 装配链路（H1/H2修复，对齐蓝图 docs/project_layout_gear2.md live/ 模块）:
     ConfigLoader加载配置
-      → myquant.live.engine.create_live_engine（一键装配工厂）
+      → myquant.live.engine_assembly.create_live_engine（一键装配工厂，回写#422 拆包直连）
           ├─ MarketDataFeed       实时行情接入（流式清洗）
           ├─ 券商适配器            paper/sim/qmt/ptrade（build_broker_from_config）
           ├─ LivePortfolio        实时持仓管理
@@ -905,7 +905,9 @@ def run_live_trading(args: argparse.Namespace) -> int:
 
     # ── 6. 一键装配实盘引擎（H1/H2修复：create_live_engine 工厂）──
     try:
-        from myquant.live.engine import create_live_engine
+        from myquant.live.engine_assembly import (
+            create_live_engine,  # 回写#422：装配层迁出，调用点直连
+        )
         engine = create_live_engine(
             config,
             engine_id=args.engine_id,
@@ -951,7 +953,9 @@ def run_live_trading(args: argparse.Namespace) -> int:
         print(f"  [健康] 健康探针注册失败（不影响交易主链路）: {e}")
 
     # ── 6.6 启动自检断言（0.8：装配=0 根因治理；能力缺失→拒启，外部依赖→降级）──
-    from myquant.live.engine import startup_assertions
+    from myquant.live.engine_assembly import (
+        startup_assertions,  # 回写#422：装配层迁出，调用点直连
+    )
 
     _sa_problems = startup_assertions(engine, config, run_mode)
     if _sa_problems:

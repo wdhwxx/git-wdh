@@ -31,7 +31,9 @@ from myquant.backtest.param_optimizer import (
     ParamSpec,
 )
 from myquant.leakage_gate.gate import Violation, _decision_now
-from myquant.live.engine import create_live_engine
+from myquant.live.engine_assembly import (
+    create_live_engine,  # 回写#422：装配层迁出，调用点直连
+)
 from myquant.ml.features import FeatureConfig
 from myquant.ml.model_registry import ModelRegistry
 from myquant.ml.training_pipeline import TrainingPipeline

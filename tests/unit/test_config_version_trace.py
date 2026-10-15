@@ -23,7 +23,9 @@ def _base_config(version):
 
 def test_create_live_engine_sets_config_version():
     """create_live_engine 装配后 engine._config_version 取自 live_config.config_version。"""
-    from myquant.live.engine import create_live_engine
+    from myquant.live.engine_assembly import (
+        create_live_engine,  # 回写#422：装配层迁出，调用点直连
+    )
 
     eng = create_live_engine(_base_config("v2.3.1"))
     assert eng._config_version == "v2.3.1"
@@ -31,7 +33,9 @@ def test_create_live_engine_sets_config_version():
 
 def test_create_live_engine_default_config_version_empty():
     """无 config_version 字段时默认空串（不崩）。"""
-    from myquant.live.engine import create_live_engine
+    from myquant.live.engine_assembly import (
+        create_live_engine,  # 回写#422：装配层迁出，调用点直连
+    )
 
     eng = create_live_engine(_base_config(None))
     assert getattr(eng, "_config_version", "") == ""
@@ -39,7 +43,9 @@ def test_create_live_engine_default_config_version_empty():
 
 def test_save_state_extra_includes_config_version(monkeypatch):
     """_save_state 快照 extra 携带 config_version（配置变更版本可审计）。"""
-    from myquant.live.engine import create_live_engine
+    from myquant.live.engine_assembly import (
+        create_live_engine,  # 回写#422：装配层迁出，调用点直连
+    )
     from myquant.live.state_store import StateStore
 
     eng = create_live_engine(_base_config("v9"))

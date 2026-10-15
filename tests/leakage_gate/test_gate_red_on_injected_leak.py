@@ -14,7 +14,7 @@ test_gate_red_on_injected_leak.py - 注入泄漏必报红（M0-08 同批 / M0-13
 import pytest
 
 import myquant.leakage_gate.consumption as consumption_module
-import myquant.live.engine as live_engine_module
+import myquant.live.engine_assembly as live_engine_module  # 回写#422：装配层迁出，模块别名归位真实模块
 from myquant.backtest.engine import BacktestScheduler
 from myquant.leakage_gate.gate import (
     GateConfig,

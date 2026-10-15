@@ -37,7 +37,7 @@ class ExemptEntry:
 #: 3 个实盘演示/沙箱脚本直构 ``LiveEngine``：它们不走生产 ``live_config.yaml``，
 #: 而是脚本内手动装配 MarketDataFeed / BrokerManager / LivePortfolio / 策略后直构
 #: 引擎，属"沙箱演示"语义（paper/回放），不进入生产实盘报备链路。生产实盘唯一
-#: 出口仍是 ``myquant.live.engine.create_live_engine``（含 assert_all_gates_pass
+#: 出口仍是 ``myquant.live.engine_assembly.create_live_engine``（回写#422 装配层迁出直连；含 assert_all_gates_pass
 #: 出口强制 + 运行模式一致性 + LIVE 报备合规门禁）。
 #:
 #: 历史直构点 ``scripts/生成回测报告.py BacktestEngine.from_data_provider`` 已于

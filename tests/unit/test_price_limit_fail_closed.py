@@ -13,7 +13,9 @@ test_price_limit_fail_closed.py - 涨跌停硬拦截 fail-closed 测试（KP-P3-
 
 from __future__ import annotations
 
-from myquant.live.engine import create_live_engine
+from myquant.live.engine_assembly import (
+    create_live_engine,  # 回写#422：装配层迁出，调用点直连
+)
 from myquant.models.trade import Order, OrderSide, OrderStatus, OrderType
 from myquant.risk.rules import PriceLimitRule, RiskContext
 

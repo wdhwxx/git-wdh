@@ -16,7 +16,9 @@ import logging
 import pytest
 
 from myquant.live.brokers.paper_broker import PaperBroker
-from myquant.live.engine import create_live_engine
+from myquant.live.engine_assembly import (
+    create_live_engine,  # 回写#422：装配层迁出，调用点直连
+)
 from myquant.live.portfolio import LivePortfolio
 
 

@@ -10,7 +10,7 @@
 
 与实盘链路的关系（蓝图 myquant/live/ 段）：
   run_实盘入口.py 解析 mode → apply_mode_to_config() 写回配置 →
-  myquant.live.engine.create_live_engine 装配前 check_mode_consistency() 拦截。
+  myquant.live.engine_assembly.create_live_engine 装配前 check_mode_consistency() 拦截。
   未来实盘切割：`--mode sim`（券商同源仿真）→ `--mode live --confirm-live`（真钱）。
 """
 

@@ -101,7 +101,9 @@ def test_load_rejects_future_schema_version():
 
 def test_create_live_engine_auto_recover_required():
     """auto_recover_on_start 缺失 → ValueError（显式必填）。"""
-    from myquant.live.engine import create_live_engine
+    from myquant.live.engine_assembly import (
+        create_live_engine,  # 回写#422：装配层迁出，调用点直连
+    )
 
     cfg = yaml_load()
     cfg.setdefault("state_store", {}).pop("auto_recover_on_start", None)
@@ -111,7 +113,9 @@ def test_create_live_engine_auto_recover_required():
 
 def test_create_live_engine_auto_recover_honored():
     """auto_recover_on_start 显式 true/false 生效。"""
-    from myquant.live.engine import create_live_engine
+    from myquant.live.engine_assembly import (
+        create_live_engine,  # 回写#422：装配层迁出，调用点直连
+    )
 
     cfg = yaml_load()
     cfg.setdefault("state_store", {})["auto_recover_on_start"] = True

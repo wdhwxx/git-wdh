@@ -1319,7 +1319,9 @@ Pythonwdhmm/
 
     │   ├── broker_factory.py         # ✨【回写#289】券商适配器装配工厂（原 engine.py:2669 迁入，0.3/R-5 应急链解耦）：build_broker_from_config（paper/sim/qmt/ptrade，exec 参数与回测一致）；只依赖 myquant.live.brokers，**不依赖 engine/risk/guardian/circuit_breaker/门禁**——应急链（一键平仓）import 本模块不会把应急平仓绑死在引擎上；引擎侧 re-import 保持调用不变
 
-    │   ├── engine.py                 # 实盘引擎继承BaseEngine，协调数据、策略、执行、风控；✨【回写#166】config_version 落快照+启动日志（KP-P5-07：create_live_engine 装配 engine._config_version）；✨【回写#167】auto_recover_on_start 显式必填（KP-P5-08：_require_auto_recover 缺失即 ValueError）✨【回写#139】on_market_data 增 (symbol,date) bar级去重（KP-P3-02：_seen_bars集合，同根bar二次推送直接丢弃不达撮合，stats.bar_dedup_skipped计数，启动clear）；✨【回写#142】成交/订单关系账接线（KP-P4-02：可选 trade_ledger 注入，on_order_update 逐笔订单、on_trade 逐笔成交同步落库，长期归档）；✨【回写#146】on_market_data 捕获行情前收字段注入风控上下文（KP-P3-04：_prev_close_map，_build_risk_context extra 注入 prev_close）；✨【回写#149】定时券商账本对账（KP-P3-08：_setup_scheduler 注册 _broker_accountability_patrol，sync_from_broker 超阈 diff → CRITICAL+pause）；✨【回写#152】_on_force_close 消费 executed（KP-M02：dry-run 恒未真实执行 → 显式 CRITICAL 需人工 confirm 平仓）；✨【回写#207】A-3 引擎统一埋点——_publish_engine_event 统一出口（总线未装配跳过/publish_chain 失败记 warning 不阻断交易/event_ts=业务发生时刻防未来）；_process_signal 发布 SignalEvent（signal_id 归一化后）；_submit_order 发布 ORDER_SUBMIT/ORDER_REJECTED（拒单原因取券商返回 result.extra 回退原单）/SystemErrorEvent（提交异常 component=engine.submit）；on_order_update 按 FILLED/PARTIAL_FILLED/CANCELLED/REJECTED 发布订单级 OrderEvent；on_trade 发布成交级 ORDER_FILLED（trade_id）+ PositionUpdateEvent（apply_trade 后均价 avg_cost）+ 异常 SystemErrorEvent（component=engine.trade）；链路贯穿：order_id 与 signal_id 幂等同源（Signal.to_order）；✨【回写#255】P0-2：build_risk_manager_from_config 移出至 risk/risk_manager.py（顶部改从 risk 导入，消除 L4 侧定义）；✨【回写#276】M0-09：create_live_engine create_strategy 后挂 assert_all_gates_pass（实盘出口同拦，v3.0 §5.4）；✨【回写#287】0.1 create_live_engine 装配 CircuitBreaker（engine_id 隔离 + engine._circuit_breaker 挂载）；✨【回写#288】0.2 pause(reason)/resume(reason) 与风控同步（pause_for_engine/resume_engine_holds 隔离复位，_pause_source 记录）+ attach_engine 传 pause_on_critical=(trade_mode=="live")；✨【回写#289】0.3 build_broker_from_config 迁出至 broker_factory.py（应急链解耦，顶部 re-import）
+    │   ├── engine.py                 # 实盘引擎继承BaseEngine，协调数据、策略、执行、风控；✨【回写#166】config_version 落快照+启动日志（KP-P5-07：create_live_engine 装配 engine._config_version）；✨【回写#167】auto_recover_on_start 显式必填（KP-P5-08：_require_auto_recover 缺失即 ValueError）✨【回写#139】on_market_data 增 (symbol,date) bar级去重（KP-P3-02：_seen_bars集合，同根bar二次推送直接丢弃不达撮合，stats.bar_dedup_skipped计数，启动clear）；✨【回写#142】成交/订单关系账接线（KP-P4-02：可选 trade_ledger 注入，on_order_update 逐笔订单、on_trade 逐笔成交同步落库，长期归档）；✨【回写#146】on_market_data 捕获行情前收字段注入风控上下文（KP-P3-04：_prev_close_map，_build_risk_context extra 注入 prev_close）；✨【回写#149】定时券商账本对账（KP-P3-08：_setup_scheduler 注册 _broker_accountability_patrol，sync_from_broker 超阈 diff → CRITICAL+pause）；✨【回写#152】_on_force_close 消费 executed（KP-M02：dry-run 恒未真实执行 → 显式 CRITICAL 需人工 confirm 平仓）；✨【回写#207】A-3 引擎统一埋点——_publish_engine_event 统一出口（总线未装配跳过/publish_chain 失败记 warning 不阻断交易/event_ts=业务发生时刻防未来）；_process_signal 发布 SignalEvent（signal_id 归一化后）；_submit_order 发布 ORDER_SUBMIT/ORDER_REJECTED（拒单原因取券商返回 result.extra 回退原单）/SystemErrorEvent（提交异常 component=engine.submit）；on_order_update 按 FILLED/PARTIAL_FILLED/CANCELLED/REJECTED 发布订单级 OrderEvent；on_trade 发布成交级 ORDER_FILLED（trade_id）+ PositionUpdateEvent（apply_trade 后均价 avg_cost）+ 异常 SystemErrorEvent（component=engine.trade）；链路贯穿：order_id 与 signal_id 幂等同源（Signal.to_order）；✨【回写#255】P0-2：build_risk_manager_from_config 移出至 risk/risk_manager.py（顶部改从 risk 导入，消除 L4 侧定义）；✨【回写#276】M0-09：create_live_engine create_strategy 后挂 assert_all_gates_pass（实盘出口同拦，v3.0 §5.4）；✨【回写#287】0.1 create_live_engine 装配 CircuitBreaker（engine_id 隔离 + engine._circuit_breaker 挂载）；✨【回写#288】0.2 pause(reason)/resume(reason) 与风控同步（pause_for_engine/resume_engine_holds 隔离复位，_pause_source 记录）+ attach_engine 传 pause_on_critical=(trade_mode=="live")；✨【回写#289】0.3 build_broker_from_config 迁出至 broker_factory.py（应急链解耦，顶部 re-import）；✨【回写#422】装配层迁出至 engine_assembly.py（create_live_engine/startup_assertions/_assert_live_watchdog_gate/_write_live_leakage_report/_require_auto_recover，顶部 re-import 保持调用点不变；LiveEngine/RiskConfig 在装配层函数内延迟导入打破 engine↔assembly 环）
+
+    │   ├── engine_assembly.py        # ✨【回写#422】实盘装配层（原 engine.py 拆出，拆包瘦身 PR2）：create_live_engine（H2 一键装配工厂，配置→完整实盘链路）+ startup_assertions（0.8 启动自检断言）+ _assert_live_watchdog_gate（0.5 LIVE 看门狗启动门）+ _write_live_leakage_report（P1-11 泄漏审计报告）+ _require_auto_recover（KP-P5-08 显式必填）；LiveEngine/RiskConfig 函数内延迟导入（from myquant.live.engine，避免环）；只被 engine.py re-export + run_实盘入口.py/live_safety_gate.py/测试调用；零行为修改（纯搬移 + import 调整）
 
     │   │                             # 【任务27】接入 BrokerManager 多券商管理器：set_broker自动包装(单券商向后兼容)/set_broker_manager(多券商并行)
 
@@ -5780,3 +5782,20 @@ d. **门禁基线实测同步（只减不增方向）**：`data_feed.py` 行数/
 **验收**：py_compile 全过；全量 pytest 通过；覆盖率门禁重跑通过；ruff 通过；architecture-gate 本地复现通过；R-24/R-26/C-5 基线下调后余量恢复。
 
 **纪律遵守**：先更新蓝图目录树再创建文件（治理规则 1.2/2.2）；新增文件已登记；无蓝图外文件；git 提交（commit message 引用 #421）。
+
+
+---
+
+## #422 · 2026-10-15 · 拆包瘦身 PR2：live/engine.py 装配层迁出 engine_assembly.py
+
+**背景**：PR1（#421 data_feed 拆包）验证通过后，按计划拆 engine.py（3236 行，全项目第 3 大文件）的装配层（约 434 行），进一步恢复 R-24/R-26/C-5 三套门禁余量。
+
+**落地**：
+a. **新增 `myquant/live/engine_assembly.py`**（蓝图目录树 live/ 段已同步登记）：`create_live_engine`（H2 一键装配工厂）/`startup_assertions`（0.8 启动自检）/`_assert_live_watchdog_gate`（0.5 LIVE 看门狗启动门）/`_write_live_leakage_report`（P1-11 审计报告）/`_require_auto_recover`（KP-P5-08）。**防环关键**：`LiveEngine`/`RiskConfig` 在 create_live_engine 函数内延迟导入（from myquant.live.engine），避免 engine↔assembly 模块级环。
+b. **engine.py 保留**：`LiveEngine`/`RiskConfig`/`EngineState` 核心类；顶部 `from myquant.live.engine_assembly import create_live_engine, startup_assertions, _assert_live_watchdog_gate` re-import **保持调用点不变**（run_实盘入口.py / live_safety_gate.py / test_accountability_sync.py 零改动）；`build_broker_from_config` re-import 随工厂一并迁出（其唯一调用点在 create_live_engine）。
+c. **零行为修改**：纯搬移 + import 调整，不触碰任何执行逻辑、防未来注释原样保留。
+d. **门禁基线实测同步（只减不增方向）**：engine.py 行数/语句/符号下降 → R-24 lines、R-26 三维、C-5 语句冻结值按实测下调；R-26 包级聚合（live 包）重标定。未抬任何基线。
+
+**验收**：py_compile 全过；全量 pytest 通过；覆盖率门禁重跑通过；ruff 通过；architecture-gate 本地复现通过；R-24/R-26/C-5 基线下调后余量恢复；CI 全绿。
+
+**纪律遵守**：先更新蓝图目录树再创建文件（治理规则 1.2/2.2）；新增文件已登记；无蓝图外文件；git 提交（commit message 引用 #422）。

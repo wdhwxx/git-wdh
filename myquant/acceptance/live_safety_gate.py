@@ -796,7 +796,9 @@ class LiveSafetyGateRunner:
         paper 尊重配置原值（false 可运行）。"""
         from unittest import mock
 
-        from myquant.live.engine import _assert_live_watchdog_gate
+        from myquant.live.engine_assembly import (
+            _assert_live_watchdog_gate,  # 回写#422：装配层迁出，调用点直连
+        )
 
         # live + watchdog disabled → ValueError（拒启）
         with mock.patch(
@@ -1227,7 +1229,9 @@ class LiveSafetyGateRunner:
 
     def _run_08_problems(self, engine: Any, monkeypatch: Any, **monkey) -> list:
         """在受控环境跑 startup_assertions（monkey 安装后返回问题列表）。"""
-        from myquant.live.engine import startup_assertions
+        from myquant.live.engine_assembly import (
+            startup_assertions,  # 回写#422：装配层迁出，调用点直连
+        )
         from myquant.live.run_mode import RunMode
 
         return list(startup_assertions(engine, {}, RunMode.LIVE))
@@ -1293,13 +1297,14 @@ class LiveSafetyGateRunner:
         )
         records: list = []
         handler = _CaptureHandler(records)
-        logging.getLogger("live.engine").addHandler(handler)
+        # 回写#422：装配层迁出 engine_assembly.py，startup_assertions 日志归 live.engine_assembly
+        logging.getLogger("live.engine_assembly").addHandler(handler)
         try:
             with pytest.MonkeyPatch.context() as mp:
                 mp.setattr("myquant.monitoring.alerting.get_alert_manager", _no_channels)
                 problems = self._run_08_problems(engine_like, mp)
         finally:
-            logging.getLogger("live.engine").removeHandler(handler)
+            logging.getLogger("live.engine_assembly").removeHandler(handler)
         alert_problem = any("告警" in p for p in problems)
         degraded_logged = any("告警渠道未配置" in r.getMessage() for r in records)
         return {
@@ -1326,7 +1331,8 @@ class LiveSafetyGateRunner:
             _circuit_breaker=object(), _trade_mode="live", _scheduler_enabled=True,
         )
         with pytest.MonkeyPatch.context() as mp:
-            mp.setattr("myquant.live.engine.datetime", _BrokenClock)
+            # 回写#422：装配层迁出，startup_assertions 的 datetime 归属 engine_assembly
+            mp.setattr("myquant.live.engine_assembly.datetime", _BrokenClock)
             problems = self._run_08_problems(engine_like, mp)
         clock_problem = any("系统时钟不可用" in p and "F-5" in p for p in problems)
         return {

@@ -20,7 +20,10 @@ from datetime import datetime
 
 from myquant.core.lookahead_guard import LookaheadGuard
 from myquant.live.brokers.paper_broker import PaperBroker
-from myquant.live.engine import EngineState, LiveEngine, RiskConfig, create_live_engine
+from myquant.live.engine import EngineState, LiveEngine, RiskConfig
+from myquant.live.engine_assembly import (
+    create_live_engine,  # 回写#422：装配层迁出，测试 import 归位真实模块
+)
 from myquant.live.portfolio import LivePortfolio
 from myquant.live.state_store import StateStore
 from myquant.models.market_data import Bar

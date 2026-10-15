@@ -138,18 +138,19 @@ _EXC = [
     # EX-13C/E/K 已随 #264 注册表化消除（scheduler 经 core.registry 取 alert_manager/metrics_collector/account_reconciler 工厂，L4→L0 合法）
     # EX-13B/D/H/I 已随 #265 阶段二消除（meta_monitor/watchdog/weekly_review/action_engine 类实例化装配注册表化，L4→L0 合法）
     # 实盘安全门禁第0阶段施工例外（回写#287/#290/#294，蓝图已登记）：
-    ("EX-14A", "myquant/live/engine.py", "myquant.monitoring",
-     "永久", "2099-12-31", "runtime", "0.1 熔断入进程：create_live_engine 装配 CircuitBreaker（施工清单§2，装配责任集中在引擎装配段）"),
-    ("EX-14B", "myquant/live/engine.py", "myquant.monitoring.circuit_breaker",
-     "永久", "2099-12-31", "runtime", "0.1 熔断入进程：直接 import circuit_breaker 子模块实例化熔断器"),
+    # 回写#422：EX-14A/B/E/F 随拆包迁至 engine_assembly.py（装配代码迁出 engine.py，豁免随代码迁移）
+    ("EX-14A", "myquant/live/engine_assembly.py", "myquant.monitoring",
+     "永久", "2099-12-31", "runtime", "0.1 熔断入进程：create_live_engine 装配 CircuitBreaker（施工清单§2，装配责任集中在引擎装配段；拆包#422 自 engine.py 迁入）"),
+    ("EX-14B", "myquant/live/engine_assembly.py", "myquant.monitoring.circuit_breaker",
+     "永久", "2099-12-31", "runtime", "0.1 熔断入进程：直接 import circuit_breaker 子模块实例化熔断器（拆包#422 自 engine.py 迁入）"),
     ("EX-14C", "myquant/acceptance/live_safety_gate.py", "myquant.api.middleware.auth",
      "永久", "2099-12-31", "runtime", "验收层直接断言 OperationGuard 审计留痕（0.4/0.9 验收，验收层可访问任何层）"),
     ("EX-14D", "myquant/live/brokers/base_broker.py", "myquant.api.middleware.auth",
      "永久", "2099-12-31", "runtime", "0.9 提交边界硬闸：_gate_reject 经 get_operation_guard() 留审计（薄闸审计是 broker 基类永久契约）"),
-    ("EX-14E", "myquant/live/engine.py", "engine",
-     "永久", "2099-12-31", "assembly", "R-16 装配例外：0.1 熔断入进程在 create_live_engine 直接实例化 CircuitBreaker（施工清单§2 落点即引擎装配段，蓝图#287）；非跨层 import 例外（不参与 R-02 ghost 检查）"),
-    ("EX-14F", "myquant/live/engine.py", "myquant.monitoring.alerting",
-     "永久", "2099-12-31", "runtime", "0.8 启动自检断言：告警渠道配置非空检查经 get_alert_manager()（外部依赖降级检查，蓝图#295）"),
+    ("EX-14E", "myquant/live/engine_assembly.py", "engine_assembly",
+     "永久", "2099-12-31", "assembly", "R-16 装配例外：0.1 熔断入进程在 create_live_engine 直接实例化 CircuitBreaker（施工清单§2 落点即引擎装配段，蓝图#287；拆包#422 自 engine.py 迁入）；非跨层 import 例外（不参与 R-02 ghost 检查）"),
+    ("EX-14F", "myquant/live/engine_assembly.py", "myquant.monitoring.alerting",
+     "永久", "2099-12-31", "runtime", "0.8 启动自检断言：告警渠道配置非空检查经 get_alert_manager()（外部依赖降级检查，蓝图#295；拆包#422 自 engine.py 迁入）"),
 ]
 EXCEPTIONS: dict[tuple[str, str], dict] = {
     (f, t): {"id": i, "task": tk, "expires": date.fromisoformat(e), "kind": k, "why": w}
@@ -279,14 +280,14 @@ CONFIG_KEY_REQUIRED: set[str] = {
 #   risk_manager 1901→2020（0.7 三条异常交易规则 + anomaly_rules 参数）
 #   acceptance/live_safety_gate.py 1756→1749（0.1~0.9 + LIVE 门槛验收累计，#287~#296；入白名单）
 OVERSIZE_LINE_BASELINE: dict[str, int] = {
-    "monitoring/alerting.py": 3688, "live/engine.py": 3236, "core/event_bus.py": 2379,  # engine 2858→2869（#275 M0-09 出口强制挂载 +11 行治理注入）；alerting 3675→3681→3688（#264 工厂注册代码；P0-2 ruff --fix 导入排序微增）；event_bus 2383→2379（#261 事件池注入化）；live/engine 3063→3065→3109→3111（#355 P1-07③ 空值 fail-closed；#358 P1-11 实盘出口泄漏审计报告；P0-2 ruff --fix 微增）；3111→3178（#413 T2-1 on_init 时序重排+warmup replay 参数；#414 T2-2 信号 id 持久化恢复）；3178→3228（#415 T1-2 启动持仓断言 fail-closed）；3228→3231（#416 T3-1 复权口径 hfq 显式传参）；3231→3236（#417 T1-2 仅 live 模式 fail-closed，paper 告警放行）
+    "monitoring/alerting.py": 3688, "live/engine.py": 2802, "core/event_bus.py": 2379,  # engine 2858→2869（#275 M0-09 出口强制挂载 +11 行治理注入）；alerting 3675→3681→3688（#264 工厂注册代码；P0-2 ruff --fix 导入排序微增）；event_bus 2383→2379（#261 事件池注入化）；live/engine 3063→3065→3109→3111（#355 P1-07③ 空值 fail-closed；#358 P1-11 实盘出口泄漏审计报告；P0-2 ruff --fix 微增）；3111→3178（#413 T2-1 on_init 时序重排+warmup replay 参数；#414 T2-2 信号 id 持久化恢复）；3178→3228（#415 T1-2 启动持仓断言 fail-closed）；3228→3231（#416 T3-1 复权口径 hfq 显式传参）；3231→3236（#417 T1-2 仅 live 模式 fail-closed，paper 告警放行）；3236→2802（#422 拆包瘦身：装配层迁出 engine_assembly.py，实测同步）
     "live/scheduler.py": 2419, "monitoring/metrics_collector.py": 2276,  # 2382→2409（#265 阶段二 7 处装配点改经注册表，代码行增长）；metrics 2268→2273→2276（#264 工厂注册代码；P0-2 ruff --fix 微增）
     "monitoring/action_engine.py": 2307, "data_access/manager.py": 2204,  # 2170→2186→2200→2204（#281 M1A-01/06 每股收益时点日基收敛+失败可观测化；M1A-10 available_time 增量派生+存量补列；P0-2 ruff --fix 微增）
     "live/brokers/qmt_broker.py": 2170, "live/data_feed.py": 1605,  # 2151→1605（#421 拆包瘦身：行情源层迁出 realtime_sources.py）
     "gui/backtest_config_dialog.py": 1871, "risk/risk_manager.py": 2020,
     "web/dashboard.py": 1760, "ml/training_pipeline.py": 1672,  # 1651→1672（#358 P1-11 训练出口泄漏审计报告薄接线 +21 行功能必需）
     "monitoring/dynamic_baseline.py": 1546,  # 1552→1546（#260 去全局采集器兜底）
-    "acceptance/live_safety_gate.py": 1757,  # 回写#296：实盘安全门禁验收（0.1~0.9 + LIVE 门槛 31 项）；P0-2 ruff --fix 微增 1749→1757
+    "acceptance/live_safety_gate.py": 1763,  # 回写#296：实盘安全门禁验收（0.1~0.9 + LIVE 门槛 31 项）；P0-2 ruff --fix 微增 1749→1757；1757→1759（#422 验收桩 patch 目标迁移 +2 行功能必需）；1759→1763（#422 ruff --fix 展开 import 块 +4 行格式化）
     "backtest/engine.py": 1838,  # 回写#349：核心引擎超 1500 入白名单（R-24 冻结基线；P0-2 ruff --fix re-export 行回补 1837→1838
                                 # 增量来源：三引擎共用 _attach_realism_manifest 模块级函数；
                                 # 1524→1531（#350 基准数据治理：基准加载 adjust="raw" 语义注释）；
@@ -322,14 +323,14 @@ OVERSIZE_LINE_BASELINE: dict[str, int] = {
 # 注意：web/dashboard.py 已由 R-24 基线 1760 瘦身至 1237（只减不增成果），
 #       R-26 冻结当前实测值，不允许回弹（R-24 仍以 1760 判红，两规则独立生效）。
 STRUCTURE_BASELINE: dict[str, dict[str, int]] = {
-    "acceptance/live_safety_gate.py": {"lines": 1757, "symbols": 83, "fan_out": 29},
+    "acceptance/live_safety_gate.py": {"lines": 1763, "symbols": 83, "fan_out": 29},  # 1757→1759（#422 验收桩 patch 目标迁移 +2 行）；1759→1763（#422 ruff --fix 展开 import 块 +4 行）
     "backtest/engine.py": {"lines": 1838, "symbols": 35, "fan_out": 13},
     "core/event_bus.py": {"lines": 2379, "symbols": 109, "fan_out": 11},
     "data_access/manager.py": {"lines": 2204, "symbols": 52, "fan_out": 13},
     "gui/backtest_config_dialog.py": {"lines": 1870, "symbols": 45, "fan_out": 13},
     "live/brokers/qmt_broker.py": {"lines": 2170, "symbols": 79, "fan_out": 8},
     "live/data_feed.py": {"lines": 1605, "symbols": 55, "fan_out": 11},  # 2151/80/13→1605/55/11（#421 拆包瘦身实测同步）
-    "live/engine.py": {"lines": 3236, "symbols": 77, "fan_out": 17},
+    "live/engine.py": {"lines": 2802, "symbols": 72, "fan_out": 15},  # 3236/77/17→2802/72/15（#422 拆包瘦身实测同步：装配层迁出 engine_assembly.py）
     "live/scheduler.py": {"lines": 2419, "symbols": 84, "fan_out": 10},
     "ml/training_pipeline.py": {"lines": 1672, "symbols": 54, "fan_out": 10},
     "monitoring/action_engine.py": {"lines": 2307, "symbols": 86, "fan_out": 9},
@@ -347,7 +348,7 @@ STRUCTURE_HARD_CAP: dict[str, int] = {"lines": 4425, "symbols": 174, "fan_out": 
 # 正常增长通道：新建顶层包（R-25 登记，不在本表内不冻结）或拆分白名单文件（包级总量不变）；
 # 需突破既有包基线时走 PR2 对价机制，本规则无豁免。
 PACKAGE_STRUCTURE_BASELINE: dict[str, dict[str, int]] = {
-    "acceptance": {"lines": 5612, "symbols": 254, "fan_out": 37},
+    "acceptance": {"lines": 5618, "symbols": 254, "fan_out": 37},  # 5612→5614（#422 live_safety_gate 验收桩 +2 行功能必需）；5614→5618（#422 ruff --fix 展开 import 块 +4 行）
     "allocation": {"lines": 2083, "symbols": 56, "fan_out": 9},
     "api": {"lines": 3775, "symbols": 193, "fan_out": 26},
     "backtest": {"lines": 20691, "symbols": 560, "fan_out": 37},  # 20689→20691（#420 T3-3 风控参数对齐 + lot_size 死代码 +2 行功能必需）
@@ -359,7 +360,7 @@ PACKAGE_STRUCTURE_BASELINE: dict[str, dict[str, int]] = {
     "gui": {"lines": 6603, "symbols": 242, "fan_out": 28},
     "indicators": {"lines": 5884, "symbols": 172, "fan_out": 17},
     "leakage_gate": {"lines": 4466, "symbols": 149, "fan_out": 17},
-    "live": {"lines": 17361, "symbols": 652, "fan_out": 35},  # 17309→17361（#421 拆包后重标定：新增 realtime_sources.py 头部开销）
+    "live": {"lines": 17424, "symbols": 652, "fan_out": 35},  # 17309→17361（#421 拆包后重标定：新增 realtime_sources.py 头部开销）；17361→17423（#422 拆包后重标定：新增 engine_assembly.py 头部开销）；17423→17424（#422 engine_assembly TYPE_CHECKING 块实测重标定）
     "ml": {"lines": 5672, "symbols": 208, "fan_out": 27},
     "models": {"lines": 1745, "symbols": 139, "fan_out": 6},
     "monitoring": {"lines": 23932, "symbols": 880, "fan_out": 31},
