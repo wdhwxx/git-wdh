@@ -225,7 +225,7 @@ FILE_STMT_CEILING: dict[str, int] = {
     "leakage_gate/config_deadkey.py": 72,
     "leakage_gate/consumption.py": 84,
     "leakage_gate/contract.py": 99,
-    "leakage_gate/coverage_gate.py": 227,  # 冻结 commit 更新：223→227（基线冻结注释所致，§5.3 独立 commit 已登记）
+    "leakage_gate/coverage_gate.py": 229,  # 冻结 commit 更新：227→229（#386 P2-4 C-6 转阻断实现新增 2 语句，§5.3 独立 commit 已登记）
     "leakage_gate/cross_sectional.py": 138,
     "leakage_gate/exemption.py": 143,
     "leakage_gate/gate.py": 106,

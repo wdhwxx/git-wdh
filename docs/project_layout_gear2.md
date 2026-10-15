@@ -5549,6 +5549,22 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 
 **纪律遵守**：一次一项；只改 benchmarks 范围（测试设施，非业务）；相对口径避免"绝对阈值随机红"；git 提交（commit message 引用 #388）。
 
+---
+
+## #389 · 2026-10-15 · P2-4 附带修复：C-5 冻结值 227→229（§5.3 独立 commit）
+
+**CI 拦截**：run 38679696373（#386）coverage-gate 报 **C-5** `leakage_gate/coverage_gate.py 语句数 229 > 冻结值 227`——#386 给本文件新增 C-6 转阻断实现（violations 逻辑 2 语句），存量语句棘轮正确拦截（本地判据预演未检出因本地 coverage.json 落后于改动，CI 用最新代码重扫）。
+
+**落地（§5.3 改基线独立 commit + 理由）**：`FILE_STMT_CEILING["leakage_gate/coverage_gate.py"]` 227→229（C-6 转阻断合法语句增长，非塞业务绕门禁；注释登记 227→229）。
+
+**验收**：本地判据预演全过；#389 CI 复验（预期全绿）。
+
+**纪律遵守**：改基线独立 commit + 理由；棘轮拦截即修（不绕过）；git 提交（commit message 引用 #389）。
+
+
+
+
+
 
 
 
