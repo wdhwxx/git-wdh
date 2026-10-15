@@ -652,6 +652,10 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+        # 全量克隆：gitleaks 对 push 事件扫描 before^..after 范围，
+        # 浅克隆（默认 fetch-depth:1）缺 before 的父提交 → "unknown revision" 失败（#410）
+        with:
+          fetch-depth: 0
 
       - name: 设置Python环境
         uses: actions/setup-python@v5
