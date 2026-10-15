@@ -781,7 +781,7 @@ class MarketDataFeed:
         backoff_cap: int = 60,
         local_history_dir: Optional[str] = None,
         factor_svc: Optional[Any] = None,
-        adjust_out: str = "hfq",
+        adjust_out: str = "raw",
     ):
         """
         初始化实时行情接入
@@ -812,8 +812,8 @@ class MarketDataFeed:
         factor_svc : Any | None
             复权因子服务（方案B #82），hfq/qfq 现算与除权跳变豁免用；None 懒加载默认 DB 服务
         adjust_out : str
-            对外输出口径："hfq"（默认，后复权×因子，与回测一致，除权日不跳变）/
-            "qfq"（前复权÷因子）/ "raw"（事实价原样，仅下单层用，指标层禁止静默落 raw）
+            对外输出口径："raw"（默认，事实价原样）/ "hfq"（后复权×因子，指标层用）/
+            "qfq"（前复权÷因子）。T3-1：live 引擎装配处显式传 hfq，默认 raw 保持向后兼容。
         """
         self._source = source
         self._local_history_dir = local_history_dir
@@ -825,7 +825,7 @@ class MarketDataFeed:
         # S2(#83)：复权现算——factor_svc 可选（None 懒加载默认 DB 服务）；
         #   adjust_out="qfq" 时对分发 bar 按最新因子现算前复权，"raw" 原样透传
         self._factor_svc = factor_svc
-        self._adjust_out = str(adjust_out or "hfq").lower()
+        self._adjust_out = str(adjust_out or "raw").lower()
         self._factor_lookup_cache: Dict[str, Dict[str, float]] = {}
 
         # 实时模式判定

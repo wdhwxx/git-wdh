@@ -2172,13 +2172,18 @@ class LiveEngine(BaseEngine):
 
         if portfolio_count == 0 and broker_count > 0:
             symbols = [p.symbol for p in broker_positions[:10]]
-            raise RuntimeError(
-                f"[engine] T1-2 启动断言失败：portfolio 空仓（{portfolio_count}）"
-                f"但 broker 有持仓（{broker_count}，如 {symbols}）——"
-                f"快照丢失或账本漂移，拒绝启动以防止重复开仓。"
-                f"请人工核对：① 快照目录 {getattr(self._state_store, '_versions_dir', '?')}；"
-                f"② broker 实际持仓；③ 必要时手动恢复后再启动。"
+            msg = (
+                f"[engine] T1-2 启动断言：portfolio 空仓（{portfolio_count}）"
+                f"但 broker 有持仓（{broker_count}，如 {symbols}）——快照丢失/账本漂移"
             )
+            # 仅 live 真实交易模式 fail-closed（保命）；paper/sim 模拟盘只告警放行
+            if getattr(self, "_trade_mode", "paper") == "live":
+                raise RuntimeError(
+                    msg + "，live 模式拒绝启动以防重复开仓。"
+                    "请人工核对：① 快照目录；② broker 实际持仓；③ 手动恢复后再启动。"
+                )
+            else:
+                logger.warning(msg + "，paper/sim 模式告警放行（模拟盘无真实资金风险）")
 
         # 正常对账同步（有持仓时 sync 一次，确保 portfolio 与 broker 一致）
         if broker_count > 0 or portfolio_count > 0:
