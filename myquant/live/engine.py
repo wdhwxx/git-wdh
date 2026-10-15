@@ -705,6 +705,12 @@ class LiveEngine(BaseEngine):
                 except Exception as e:  # noqa: BLE001 - 解冻失败不阻断引擎启动
                     logger.warning(f"[engine] 启动 T+1 解冻失败（不阻断启动）: {e}")
 
+            # ── T1-2：启动持仓断言（fail-closed，保命项）──
+            # 启动时先从 broker 拉真实持仓对账；若 portfolio 空仓但 broker 有持仓，
+            # 说明快照丢失/漂移，引擎会误以为空仓而重复开仓——直接拒绝启动，人工介入。
+            # 全新启动（portfolio 空 AND broker 也空）正常放行。
+            self._assert_startup_positions()
+
             # 连接data_feed
             if hasattr(self._data_feed, 'connect'):
                 self._data_feed.connect()
@@ -2140,6 +2146,50 @@ class LiveEngine(BaseEngine):
             logger.info("[engine] 调度器已启动（巡检/日报/守护/快照）")
         except Exception as e:
             logger.warning(f"[engine] 调度器挂载失败（不影响交易主链路）: {e}")
+
+    def _assert_startup_positions(self) -> None:
+        """T1-2：启动持仓断言（fail-closed，保命项）。
+
+        启动时（broker 已 connect、行情订阅之前）强制对账一次：
+          - 若 portfolio 空仓但 broker 返回有持仓 → 快照丢失/漂移，
+            引擎会误以为空仓而重复开仓 → 抛 RuntimeError 拒绝启动。
+          - portfolio 空 AND broker 也空 → 全新启动，正常放行。
+          - portfolio 有持仓 AND broker 有持仓 → 快照已恢复，正常 sync 对账。
+
+        防未来：只读 broker/portfolio 【已发生】的持仓事实，不生成任何信号。
+        """
+        broker = self._broker_manager or self._broker
+        if broker is None or self._portfolio is None:
+            return  # 无 broker 场景（纯回测/干跑）跳过
+
+        portfolio_count = len(self._portfolio.get_all_positions())
+        try:
+            broker_positions = broker.get_positions()
+        except Exception as e:  # noqa: BLE001 - broker 读持仓失败不硬阻断，但告警
+            logger.warning(f"[engine] T1-2 启动断言：broker 持仓读取失败（放行但告警）: {e}")
+            return
+        broker_count = len(broker_positions)
+
+        if portfolio_count == 0 and broker_count > 0:
+            symbols = [p.symbol for p in broker_positions[:10]]
+            raise RuntimeError(
+                f"[engine] T1-2 启动断言失败：portfolio 空仓（{portfolio_count}）"
+                f"但 broker 有持仓（{broker_count}，如 {symbols}）——"
+                f"快照丢失或账本漂移，拒绝启动以防止重复开仓。"
+                f"请人工核对：① 快照目录 {getattr(self._state_store, '_versions_dir', '?')}；"
+                f"② broker 实际持仓；③ 必要时手动恢复后再启动。"
+            )
+
+        # 正常对账同步（有持仓时 sync 一次，确保 portfolio 与 broker 一致）
+        if broker_count > 0 or portfolio_count > 0:
+            try:
+                diff = self._portfolio.sync_from_broker(broker)
+                logger.info(
+                    f"[engine] T1-2 启动对账完成: portfolio={portfolio_count} -> "
+                    f"{len(self._portfolio.get_all_positions())} 只, diff={diff}"
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"[engine] T1-2 启动对账失败（不阻断）: {e}")
 
     def _broker_accountability_patrol(self) -> None:
         """
