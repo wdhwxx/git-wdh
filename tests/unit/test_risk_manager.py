@@ -24,6 +24,8 @@ P3-4（v1.2 §6.4 ROI 4）：risk/risk_manager.py 覆盖率补测（56.3%→75%�
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 
 from myquant.core.event_bus import (
@@ -42,6 +44,18 @@ from myquant.risk.risk_manager import (
     build_risk_manager_from_config,
 )
 from myquant.risk.rules import RiskContext
+
+
+# 固定 rules.py 内部墙钟（2026-10-15 周四 10:30 盘中）→ 测试时间无关
+# （交易时段规则 datetime.now() 依赖墙钟，CI 不同时区/时段运行会 REJECT，见 #398 CI windows 腿 5 fail）
+@pytest.fixture(autouse=True)
+def _freeze_rules_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FixedDateTime(datetime):  # type: ignore[misc]
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[override]
+            return cls(2026, 10, 15, 10, 30, 0)
+
+    monkeypatch.setattr("myquant.risk.rules.datetime", _FixedDateTime)
 
 # ─────────────────────────────────────────────
 # 基础数据类
@@ -198,7 +212,11 @@ def _normal_context() -> RiskContext:
         peak_assets=100000.0,
         day_start_assets=100000.0,
         current_price={"000001.SZ": 10.0, "600519.SH": 100.0},
-        extra={"prev_close": {"000001.SZ": 10.0, "600519.SH": 100.0}},
+        extra={
+            "prev_close": {"000001.SZ": 10.0, "600519.SH": 100.0},
+            # 显式盘中时刻（交易时段规则支持注入，避免依赖墙钟）
+            "current_time": "10:30:00",
+        },
     )
 
 
@@ -248,7 +266,10 @@ class TestCheckOrder:
         rm.pause("暂停")
         rm.check_order(_buy_order(), _normal_context())
         assert rm.event_count >= 1
-        assert rm.get_recent_events(5)[0].event_type == RiskEventType.ORDER_REJECTED
+        # 按类型过滤断言（事件按 timestamp 倒序，同秒内排序不稳，不依赖 [0]）
+        rejected = rm.get_events(event_type=RiskEventType.ORDER_REJECTED)
+        assert rejected
+        assert rejected[0].rule_name == "risk_status_paused"
 
 
 # ─────────────────────────────────────────────
