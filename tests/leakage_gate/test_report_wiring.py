@@ -104,19 +104,25 @@ def _training_data(n: int = 300) -> pd.DataFrame:
 
 
 def _latest_report(d: Path, etype: str) -> Dict[str, Any]:
-    """取隔离目录中指定实验类型的最新一份报告（无则断言失败）。"""
+    """取隔离目录中指定实验类型的最新一份报告（无则断言失败）。
+
+    按文件 mtime 取最新：glob 枚举顺序是未定义行为（NTFS/ext4 不同），
+    不能依赖 matched[-1]——否则全量会话（unit 先跑、leakage_gate 后跑，
+    共享会话隔离目录）会串读到其他测试留下的报告（CI ubuntu 实测：
+    cv_reg_anchor 报告被 training 出口测试读到）。
+    """
     reps = [
-        json.loads(p.read_text(encoding="utf-8"))
+        (p, json.loads(p.read_text(encoding="utf-8")))
         for p in d.glob("leakage_report_*.json")
     ]
     matched = [
-        r for r in reps if r.get("meta", {}).get("experiment_type") == etype
+        (p, r) for p, r in reps if r.get("meta", {}).get("experiment_type") == etype
     ]
     assert matched, (
         f"无 {etype!r} 报告，目录现有类型: "
-        f"{[r.get('meta', {}).get('experiment_type') for r in reps]}"
+        f"{[r.get('meta', {}).get('experiment_type') for _, r in reps]}"
     )
-    return matched[-1]
+    return max(matched, key=lambda pr: pr[0].stat().st_mtime)[1]
 
 
 # ═══════════════════════════════════════════════
