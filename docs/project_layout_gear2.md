@@ -5561,6 +5561,29 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 
 **纪律遵守**：改基线独立 commit + 理由；棘轮拦截即修（不绕过）；git 提交（commit message 引用 #389）。
 
+---
+
+## #390 · 2026-10-15 · C-5 §5.3: backtest/pdf_report.py 333→345（#391 PDF 字体修复）
+
+**背景**：#391 的 PDF 中文字体跨平台修复（候选扩展 + DejaVu 兜底 + _load_font 兜底注册）新增 12 语句（本地实测 345），C-5 冻结随 §5.3 独立 commit 上调（333→345），避免 #391 首发即被棘轮拦截。
+
+**纪律遵守**：改基线独立 commit + 理由；注释登记 333→345；git 提交（commit message 引用 #390）。
+
+---
+
+## #391 · 2026-10-15 · P2-5 尾巴：PDF 缺中文字体真缺陷修复（掩盖性 skip 第 6 处）
+
+**CI 拦截（run 38680229516 / #387）**：ubuntu 单元测试腿 `test_candidate_report::test_pdf_generated_when_fpdf2_available` 真跑失败——`fpdf.errors.FPDFException: Undefined font: cjk`。根因：`_FONT_CANDIDATES` 仅 Windows 路径（C:\Windows\Fonts\...），CI ubuntu 无任何候选 → `_load_font` 返回 False → 所有 `set_font("cjk")` 崩。**旧 reportlab importorskip 掩盖的第 6 处真缺陷**（本地 Windows 有 simhei 所以一直没暴露，CI 从未真跑过 PDF 路径）。
+
+**落地（三层保障）**：
+1. `_FONT_CANDIDATES` 跨平台化：Windows 4 条保留 + Debian/Ubuntu Noto CJK 3 路径 + wqy + macOS PingFang/STHeiti（共 10 条）。
+2. **Unicode 兜底**：`_load_font` CJK 全失败时注册 DejaVu Sans（Linux 广泛预装）/arial 为 "cjk"（新 `_FALLBACK_FONT_CANDIDATES`）——中文渲染缺字形方块但 PDF 生成不崩。**修正探索**：最初尝试 set_font("cjk")→helvetica 映射兜底，实测 helvetica 是 Latin-1 core 字体、中文内容在 cell() 的 normalize_text 直接抛 FPDFUnicodeEncodingException——core 字体不能作中文兜底，改为 Unicode 字体注册。
+3. `.github/workflows/ci.yml` ubuntu 腿新增 `sudo apt-get install -y fonts-noto-cjk`（CI 有真实 CJK，PDF 中文可读）。
+
+**验收**：本地 test_candidate_report 6 passed；兜底路径验证（清空 CJK 候选 → _load_font=False + set_font("cjk") 不崩）；核心集 4215 passed/1 skipped（仅 R-05）；ruff 0 违规。
+
+**纪律遵守**：核验以 CI 实测为准（掩盖性 skip 藏真缺陷再次应验）；一次一项；git 提交（commit message 引用 #391）。
+
 
 
 

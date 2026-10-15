@@ -93,12 +93,28 @@ _SYMBOLS_APPENDIX_COLS: int = 5
 _SYMBOLS_PER_CELL: int = 2
 _SYMBOLS_COL_GAP: float = 3.0
 
-# 中文字体候选（单 TTF 优先，Windows 系统字体，本地离线）
+# 中文字体候选（跨平台：Windows 系统字体 + Linux/macOS 常见 CJK，本地离线）
+# #390 修复（#387 CI 暴露）：原仅 Windows 路径，CI ubuntu 无任何候选 → 真跑即崩
+# （Undefined font: cjk，旧 reportlab importorskip 掩盖 5 个月）。
 _FONT_CANDIDATES: List[str] = [
     r"C:\Windows\Fonts\simhei.ttf",      # 黑体
     r"C:\Windows\Fonts\Deng.ttf",        # 等线
     r"C:\Windows\Fonts\msyh.ttc",        # 微软雅黑（TTC 集合）
     r"C:\Windows\Fonts\simsun.ttc",      # 宋体（TTC 集合）
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",   # Debian/Ubuntu noto-cjk
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",   # 部分发行版路径
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",        # 其他布局
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",             # 文泉驿（备用）
+    "/System/Library/Fonts/PingFang.ttc",                       # macOS
+    "/System/Library/Fonts/STHeiti Light.ttc",                  # macOS 备用
+]
+
+# Unicode 兜底字体候选（无 CJK 时注册为 "cjk"：中文方块占位但不崩；#390）
+_FALLBACK_FONT_CANDIDATES: List[str] = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+    "C:\\Windows\\Fonts\\arial.ttf",   # Windows 一定有（Latin-1 无中文但 Unicode 注册不崩）
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
 ]
 
 
@@ -639,13 +655,30 @@ class PdfReportGenerator:
 
     @staticmethod
     def _load_font(pdf: _ReportPdf) -> bool:
-        """加载中文字体（系统字体，本地离线）；返回是否成功"""
+        """加载中文字体（系统字体，本地离线）；返回是否成功。
+
+        #390 兜底（#387 CI 暴露）：CJK 候选全失败时注册 DejaVu Sans
+        （Unicode 字体，Linux 广泛预装）为 "cjk"——中文渲染为缺字形方块，
+        但 PDF 生成不崩（core 字体 helvetica 对中文必抛编码异常，不能作兜底）。
+        """
         for path in _FONT_CANDIDATES:
             if os.path.exists(path):
                 try:
                     pdf.add_font("cjk", "", path)
+                    pdf._cjk_ok = True
                     return True
                 except Exception as exc:  # TTC 或字体解析失败时尝试下一个
                     logger.warning(f"字体加载失败 {path}: {exc}")
                     continue
+        # 兜底：DejaVu Sans（Unicode 字体，无 CJK 码位 → 方块占位，不崩）
+        for path in _FALLBACK_FONT_CANDIDATES:
+            if os.path.exists(path):
+                try:
+                    pdf.add_font("cjk", "", path)
+                    pdf._cjk_ok = False
+                    return False
+                except Exception as exc:
+                    logger.warning(f"兜底字体加载失败 {path}: {exc}")
+                    continue
+        pdf._cjk_ok = False
         return False

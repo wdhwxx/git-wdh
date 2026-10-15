@@ -156,6 +156,13 @@ jobs:
         # 并连带 needs:[lint,test] 的 backtest-smoke/docker-build/live-config-check/data-clean 4 job 全阻塞
         run: pip install -e ".[dev,benchmark,gui,web]"
 
+      - name: 安装 CJK 中文字体（ubuntu 腿，PDF 报告中文渲染；#390）
+        # #387 CI 暴露：test_candidate_report PDF 真跑后 Undefined font: cjk——
+        # 原 _FONT_CANDIDATES 仅 Windows 路径，CI ubuntu 无中文字体。安装
+        # fonts-noto-cjk 使 PDF 中文真实可读（跨平台候选 + set_font 兜底双保障）。
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+
       - name: "关键工具版本断言（L5修复: 依赖未锁定，防版本漂移导致基线失真）"
         env:
           PYTHONIOENCODING: utf-8
