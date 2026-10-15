@@ -108,3 +108,18 @@ markers = [
     "slow: 慢速测试（全量回测，默认跳过）",
     "benchmark: 性能基准测试（默认跳过）",
 ]
+
+# ===== 覆盖率采集口径（P1，v1.2 §5.4 契约）=====
+# 采集：pytest-cov --cov=myquant --cov-report=json；source 固定 myquant。
+# omit：T3 报告级（迁移脚本、自测模块）不参与 C-1~C-4 判定（V-9 分层清单独立于本配置，
+# coverage_gate.py 仍可单独报告 T3）。权威平台 = CI ubuntu-latest / Python 3.12。
+[tool.coverage.run]
+source = ["myquant"]
+omit = [
+    "myquant/database/migrations/*",
+    "myquant/**/*_selftest.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true

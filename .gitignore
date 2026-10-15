@@ -99,6 +99,8 @@ results/**/*
 .coverage
 .coverage.*
 coverage.xml
+coverage.json
+test-results.xml
 htmlcov/
 *.tmp
 *.bak

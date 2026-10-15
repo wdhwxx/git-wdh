@@ -170,7 +170,7 @@ Pythonwdhmm/
 
 ├── .dockerignore                       # ✨【回写#164】根级镜像构建排除（KP-M01：排除 .env*/database/logs/outputs/datasets/实盘状态/实盘信号/backups/.git 等，保留 .env.example）
 
-├── pyproject.toml                    # 项目元信息、依赖分组（gui/web/live/dev/benchmark），3个插件入口点
+├── pyproject.toml                    # 项目元信息、依赖分组（gui/web/live/dev/benchmark），3个插件入口点；✨【回写#379】增补 [tool.coverage.run]（source=myquant，omit=数据库迁移+*_selftest，P1-8 口径契约）+ [tool.coverage.report]（show_missing/skip_covered）
 ├── requirements.lock                 # ✨【回写#170】哈希锁文件(KP-M03：uv pip compile --generate-hashes 全量 sha256，--require-hashes 校验完整性)
 ├── requirements.lock                 # ✨【回写#170】哈希锁文件(KP-M03：uv pip compile --generate-hashes 全量 sha256，--require-hashes 校验完整性)
 
@@ -437,7 +437,7 @@ Pythonwdhmm/
 
 │   └── workflows/
 
-│       └── ci.yml                    # ✨【V5·P3】CI流水线（重写为7-job）：lint → test（全量tests/u；✨【回写#157】lint 增 BLE001 专项护栏（KP-P1-07：新增裸 except 阻断）nit，gui extras 已装、offscreen 跑 GUI 测试）→ consistency-check（三模式一致性）→ backtest-smoke（回测冒烟）→ docker-build（构建镜像）→ live-config-check（实盘配置检查）→ data-clean（数据清洗单元测试）；任一job失败即阻断合并；✨【回写#166】live-config-check 增 example vs 生产键级 diff + docker-build 镜像打 git sha tag（KP-P5-07）；✨【回写#170】增 security-scan job（KP-M03：pip-audit 依赖漏洞 + gitleaks 密钥扫描）；✨【回写#278】增 leakage-gate-check job（M0-18：防泄漏门禁台账校验——代码真消费配置 + 测试断言配置，参照 run_回测入口.py:312-318 真消费模式；强制项缺失即红）
+│       └── ci.yml                    # ✨【V5·P3】CI流水线（重写为7-job）：lint → test（全量tests/u；✨【回写#157】lint 增 BLE001 专项护栏（KP-P1-07：新增裸 except 阻断）nit，gui extras 已装、offscreen 跑 GUI 测试）→ consistency-check（三模式一致性）→ backtest-smoke（回测冒烟）→ docker-build（构建镜像）→ live-config-check（实盘配置检查）→ data-clean（数据清洗单元测试）；任一job失败即阻断合并；✨【回写#166】live-config-check 增 example vs 生产键级 diff + docker-build 镜像打 git sha tag（KP-P5-07）；✨【回写#170】增 security-scan job（KP-M03：pip-audit 依赖漏洞 + gitleaks 密钥扫描）；✨【回写#278】增 leakage-gate-check job（M0-18：防泄漏门禁台账校验——代码真消费配置 + 测试断言配置，参照 run_回测入口.py:312-318 真消费模式；强制项缺失即红）；✨【回写#379】test job ubuntu 腿改跑门禁核心集（unit+leakage_gate+realism_gate+scripts）并 --cov=myquant 产 coverage.json + 上传 artifact coverage-data-ubuntu（windows 腿仍只跑 tests/unit，权威口径=ubuntu/Py3.12，§5.4 契约）；新增 13 号 job coverage-gate-check（needs:[lint,test]，下载 artifact 后 python scripts/覆盖率门禁.py --report-only，报告模式首轮自产基线，下一提交冻结转阻断）
 
 │
 
@@ -518,7 +518,7 @@ Pythonwdhmm/
 │   ├── 财务CSV更新.py              # ✨【回写#74】财务CSV增量同步薄入口：参数(--all/--symbols/--start-date/--end-date/--no-import)+路径探测+调用FinancialSyncService；默认只拉financial_data缺失的清洗保留标的（增量优先，当前=601091.SH类新股）→与本地最新CSV合并去重→落盘→自动入库；全市场重拉与GUI行为一致；输出下一步建议（重跑全量清洗）
 
 │   ├── 静态扫描.py                 # ✨【回写#283】防泄漏静态 AST 扫描薄入口（M1B-07）：参数解析+路径探针+委托 myquant/leakage_gate/static_scan.py main_cli；--all 全量扫描 myquant+scripts / 传 paths 只扫变更文件 / --json 结构化输出；0=无阻断、1=阻断/参数错误；被 .pre-commit-config.yaml leakage-static-scan hook 与 CI static-scan-check job 调用
-│   ├── 覆盖率门禁.py                # ✨【回写#377】覆盖率门禁薄入口（§7.1 待建）：参数解析+路径探针+委托 myquant/leakage_gate/coverage_gate.py；被 CI coverage-gate-check job 调用
+│   ├── 覆盖率门禁.py                # ✨【回写#379】覆盖率门禁薄入口（P1 已落地，v1.2 §6.2 P1-5）：argparse(--json/--junit/--root/--report-only)+sys.path 注入+委托 myquant/leakage_gate/coverage_gate.evaluate；退出码 0=通过或报告模式、1=违反；被 CI coverage-gate-check job 调用
 │   └── 验收_回测引擎V5.py             # ✨【V5·P1】引擎验收入口：执行统一验收清单（事件/向量化/混合引擎正确性+三模式一致性+回归+性能基准），输出验收报告
 
 │   ├── kunpeng_param_scan.py       # ✨【回写#34补录】鲲鹏策略参数网格扫描工作脚本（两阶段：信号参数扫描→出场+仓位扫描，真实数据 vectorized，输出 results/param_scan/scan_results.json；既有工作脚本补录，非薄入口，无调用方，建议后续薄化或并入 参数优化.py）
@@ -841,7 +841,7 @@ Pythonwdhmm/
 │   │   ├── test_data_clean_dialog.py  # ✨【回写#266】数据清洗对话框单元测试（G0-9：match_rule/split_rules/load_all_symbols/offscreen构建，7项）
 │   │   ├── test_batch_backtest_tab.py # ✨【回写#266】批量回测标签页单元测试（G0-9：构造校验/默认值/sizeHint，4项）
 │   │   ├── test_cleanup_dialog.py     # ✨【回写#266】项目清理对话框单元测试（G0-9：offscreen构建/标题，1项）
-│   │   ├── test_coverage_gate.py # ✨【回写#377】覆盖率门禁测试（§7.1 待建，v1.2 §5.2/§8）：分层覆盖率 T0/T1/T2 下限 + 基线只增不减 + 关键文件 FILE_FLOOR + 新增文件 NEW_FILE_FLOOR + 分层清单与全量清单 diff 为空（V-9 口径自洽）
+│   │   ├── test_coverage_gate.py # ✨【回写#379】覆盖率门禁测试（P1 已落地，41 项）：tier_of 分层归属参数化 30 例 + V-9 分层清单 vs 全量清单 diff 空 + C-1a/C-1b/C-2/C-3 边界 + C-4 新增文件反红 + C-5 语句棘轮反红 + C-7 跳过预算红/绿 + fail-closed + report_only 标记；import 用全路径形式（R-19 引用级解析可识别）
 │   │   └── test_backtest_config_dialog.py  # ✨【回写#266】回测配置对话框单元测试（G0-9：offscreen构建/旧看板清理，2项）
 
 │   ├── fixtures/                     # 按领域拆分fixture，避免conftest膨胀
@@ -987,7 +987,7 @@ Pythonwdhmm/
     │   ├── sanity.py                 # ✨【回写#284】模型层统计门禁中枢（阶段 2，轨道 E，M2-01~06，v3.0 §6.6）：M2-01 shuffle-label 探测（run_shuffle_label_baseline 打乱标签基线分布+阈值=mean+k*std，check_shuffle_label 真实指标显著>噪声上界→告警/拦截）+ M2-02 validate_train_temporal（特征最近时间 ≤ train_end_time 且 > train_start_time，epoch 秒口径与 _ts_to_str 一致）+ M2-03 validate_feature_label_alignment（特征 available_time ≤ 标签 decision_time）+ M2-04 check_feature_whitelist 挂"feature_whitelist"门禁（features.py BAR_CN_COLUMN_MAP 新增 severity=阻断 列如每股收益→R11 出口报红；AST 读文件非 import）+ M2-05/06 SeedSidecar（随机种子 sidecar 记录在案、种子不一致→SeedSidecarError 阻断）+ check_training_sanity 汇总（供 training_pipeline run() 薄接线）
     │   ├── report.py                 # ✨【回写#285】泄漏审计报告产物（阶段 3，M3-01，v3.0 §6.7）：每次回测/训练/参数优化产出 leakage_report.json（门禁统计 gate.collect_gate_stats + 违规明细 + 消费侧列引用与 severity 命中 + 截断重算 + sanity + 数据版本 sidecar 摘要 + lookahead_guard 统计 + 复权降级标的清单）；L0 纯构建器（复权降级/数据版本/lookahead 由 L3/L4 调用方注入，避免 L0→L3/L4 跨层 import）；write/load/summarize + 保留期 REPORT_RETENTION_DAYS=30；与 scripts/清理历史回测输出.py 衔接（cleanup_service 纳入 leakage_report_*.json + PERIOD_FILE_PATTERN 前缀，按回测期归组清理）
     │   ├── exemption.py              # ✨【回写#285】豁免流实现（阶段 3，M3-02，v3.0 §6.7）：Exemption（豁免 ID/原因/有效期 valid_from~valid_until/审批人/target=rule_id+strategy）+ ExemptionStore（JSON 台账 + grant 落 audit_log 哈希链 + revoke/list_active/list_expired）+ covers/suppress（仅"未过期"豁免压制对应违规）；gate.py assert_all_gates_pass 集成 suppress_violations——过期豁免不压制 → 违规保留 → 门禁中心自动拦截（验收 M3-02）；L0 纯模块，Violation 鸭子类型消费避免循环 import；✨【回写#365】P1-14 豁免流加固：ALLONED_RULE_IDS 白名单（grant 校验防 typo）+ NON_EXEMPTABLE_RULE_IDS={"gate-error"}（门禁自检故障不可豁免）+ MAX_EXEMPTION_DAYS=90（长期全局豁免拒）+ 审批状态机 pending→approved→revoked（仅 approved 且未过期压制；grant 强制 pending 并清空 approver）+ approve/revoke（approver 与 actor 分离双审计落 audit_log；revoke 软删除留痕）+ 模块级默认库指向 database/exemptions.json 受控持久化（重启不丢）
-    │   ├── coverage_gate.py          # ✨【回写#377】覆盖率门禁（§7.1 待建，v1.2 §5/§8）：分层覆盖率检查（T0/T1/T2 分层下限 + COVERAGE_BASELINE 只增不减）+ 关键文件 FILE_FLOOR + 新增文件 NEW_FILE_FLOOR + 分层清单输出（V-9 口径自洽）；挂 "coverage" 门禁，出口断言阻断
+    │   ├── coverage_gate.py          # ✨【回写#379】覆盖率门禁（P1 已落地，v1.2 §5/§6.2）：分层常量（_T0_DIR_PREFIXES/_T1_DIR_PREFIXES/_T2_DIR_PREFIXES）+ tier_of 纯函数（未知目录→UNMAPPED 暴露 V-9）+ 基线常量（COVERAGE_BASELINE/COVERED_LINES_BASELINE 占位待 CI 冻结 + FILE_STMT_CEILING 197 项 + T2_FILES 48 项 + FILE_FLOOR 14 项 + NEW_FILE_FLOOR + SOURCE_ASSERT_ONLY_MAX + SKIP_BUDGET）+ build_tier_manifest（V-9 数据源）+ evaluate（C-1a~C-7 判据，fail-closed；C-6 首版仅报告 P2-4 转阻断；_normalize_file_key 平台无关路径归一化）
 
     │
 
@@ -5386,3 +5386,23 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 **验收**：蓝图检索 `测试覆盖_回归门禁` 命中目录树登记 2 行（目录+报告）；回写记录 #377 落盘；本次无 .py 改动——§7.3 所述"回写完成前新增 .py 仍属违规"红线解除，P1 覆盖率门禁可进入施工。
 
 **纪律遵守**：先更新蓝图再创建文件（登记先行）；幂等回写；未动任何业务代码/配置/测试；git 提交（commit message 引用 #377）。
+
+---
+
+## #379 · 2026-10-15 · P1 覆盖率门禁落地（重测基线，v1.2 §6.2 P1-1~P1-10）
+
+**现状核实**：#377 已在蓝图登记三个待建文件位（coverage_gate.py / 覆盖率门禁.py / test_coverage_gate.py），P1 前置条件（P0-0 CI 接线 #20 全绿）满足；v1.2 §6.2 P1-1~P1-10 全部未落地（门禁代码、CI job、口径契约均缺）。
+
+**落地（蓝图登记先行 → 施工 → 回写）**：
+- `myquant/leakage_gate/coverage_gate.py`（业务核心，新建）：分层常量（T0/T1/T2 前缀 + T0 精确文件）+ `tier_of()` 纯函数（顶层/子包 `__init__.py` 归所在目录层；T3=数据库迁移、`*_selftest.py`、顶层包元数据；未知目录→UNMAPPED 暴露 V-9）+ 基线常量（COVERAGE_BASELINE=62.0、COVERED_LINES_BASELINE=38300 占位待 CI 冻结；FILE_STMT_CEILING=197 项 T0/T1 语句数；T2_FILES=48 项存量注册；FILE_FLOOR=14 项关键文件；NEW_FILE_FLOOR、SOURCE_ASSERT_ONLY_MAX=4、SKIP_BUDGET=4）+ `build_tier_manifest()`（V-9 数据源）+ `evaluate()`（C-1a~C-7，fail-closed；C-6 首版仅报告，P2-4 精化口径后转阻断；`_normalize_file_key` 平台无关路径归一化）。
+- `scripts/覆盖率门禁.py`（薄入口，新建）：argparse(--json/--junit/--root/--report-only) + sys.path 注入 + 委托 evaluate；退出码 0=通过或报告模式、1=违反；登记进 test_architecture.py ENTRY_ALLOWLIST（R-23）。
+- `tests/unit/test_coverage_gate.py`（41 项，新建）：tier_of 参数化 30 例 + V-9 清单 diff 空 + C-1a/C-1b/C-2/C-3 边界 + C-4/C-5 反红 + C-7 红/绿 + fail-closed + report_only；import 用全路径形式使 R-19 引用级解析可识别。
+- `pyproject.toml`：增补 `[tool.coverage.run]`（source=["myquant"]，omit 迁移+selftest）+ `[tool.coverage.report]`（P1-8 口径契约）。
+- `.github/workflows/ci.yml`：test job ubuntu 腿改跑门禁核心集（unit+leakage_gate+realism_gate+scripts）+ `--cov=myquant --cov-report=json:coverage.json` + 上传 artifact coverage-data-ubuntu；windows 腿仍只跑 tests/unit（§5.4 权威口径=ubuntu）；新增 13 号 job coverage-gate-check（needs:[lint,test]，report-only 模式首轮自产基线）。
+- `tests/unit/test_architecture.py`：ENTRY_ALLOWLIST 登记 `scripts/覆盖率门禁.py`（R-23，蓝图 #377 已先行登记）。
+
+**验收**：本地核心集全量回归 4188→全绿（架构门禁 R-19/R-23 修复后复验通过）；test_coverage_gate.py 41 passed + test_architecture.py 全过（76 passed/1 skipped）；ruff 0 违规；判据预演（report-only）全过——总量 63.7%（38991/61191）、T0 71.5 / T1 63.8 / T2 55.1（分层下限 68/60/52 全过）、C-1a/C-1b/C-3/C-4/C-5/C-7 无违规、C-6 仅报告（33>4，P2-4 转阻断）；V-9 分层清单 260 文件 vs 全量清单 diff 空。
+
+**纪律遵守**：蓝图优先（#377 登记先行，本批为落地回写）；薄入口（业务全部在 myquant，scripts 仅参数+委托）；全量类型注解；禁裸 except；logging 不用 print（CLI main 例外）；改后回写蓝图；一次一项做完（P1 独立提交，RUFF_BASELINE 131→0 / 冗余 noqa / Gitee 同步为后续独立项）；git 提交（commit message 引用 #379）。
+
+

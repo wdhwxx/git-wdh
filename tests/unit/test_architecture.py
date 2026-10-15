@@ -210,6 +210,7 @@ RAW_ALLOWLIST = {"myquant/data_access/financial_sync_service.py"}
 ENTRY_ALLOWLIST: set[str] = {
     # scripts/（相对项目根，含子目录）
     "scripts/kunpeng_param_scan.py", "scripts/一致性校验.py", "scripts/一键平仓.py",
+    "scripts/覆盖率门禁.py",  # ✨【回写#379】P1 覆盖率门禁薄入口（蓝图 #377 登记待建 → P1 落地）
     "scripts/仿真准入评估.py", "scripts/候选池交叉验证.py", "scripts/初始化项目目录.py",
     "scripts/参数优化.py", "scripts/双券商模拟实盘.py", "scripts/同步交易日历.py",
     "scripts/同步股本变动.py", "scripts/垃圾数据清理.py", "scripts/增量回测.py",
