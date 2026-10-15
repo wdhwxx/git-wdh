@@ -104,7 +104,7 @@ FILE_FLOOR: dict[str, float] = {
     "backtest/order_matcher.py": 48.0,
     "data_access/manager.py": 48.0,
     "core/event_bus.py": 52.0,
-    "risk/risk_manager.py": 56.0,
+    "risk/risk_manager.py": 75.0,  # #399 §5.3: P3-4 补测后 56→75（实际 88%）
     "live/scheduler.py": 59.0,
     "live/brokers/qmt_broker.py": 60.0,
     "monitoring/alerting.py": 68.0,
