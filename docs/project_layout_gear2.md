@@ -5584,6 +5584,54 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 
 **纪律遵守**：核验以 CI 实测为准（掩盖性 skip 藏真缺陷再次应验）；一次一项；git 提交（commit message 引用 #391）。
 
+---
+
+## P3 高风险补测（v1.2 §6.4 ROI 前 5 项，#392~#401）· 2026-10-15
+
+**总览**：按 v1.2 §6.4 ROI 排序逐项补测，每项 = 功能 commit（#392/#394/#396/#398/#400，偶数）+ FILE_FLOOR 收紧 commit（#393/#395/#397/#399/#401，§5.3 独立 commit + 理由）。所有新测试文件与官方 `python -m` demo 均标 `# pragma: no cover`（demo 属开发设施不计入门禁覆盖）。全部 5 项实测达标：fee_common 99%/fee_table 100%、rsrs 98%、light_lookahead_guard 98%、risk_manager 88%、data_feed 66%。**用户已全权授权批量施工**，一次一项做完套验证再继续；本地核心集 4564 passed/1 skipped（仅 R-05 设计性）。
+
+## #392 · 2026-10-15 · P3-5 backtest 费用计算覆盖补测（fee_common/fee_table）
+
+**落地**：新增 `tests/unit/test_fee_common.py`（47 项）+ `test_fee_table.py`（51 项）。**实测语义修正**：FIXED 佣金模式实际是 `max(rate, min_commission)`（最低佣金 5 元封底）——测试按实现断言，不以旧假设定性。实测 fee_common 99%（199 语句 2 miss）、fee_table 100%；98 passed；ruff 0 违规。`fee_common.py`/`fee_table.py` 官方 demo `_run_self_test` + `__main__` 加 `# pragma: no cover`。
+
+## #393 · 2026-10-15 · C-3 §5.3: FILE_FLOOR 收紧（P3-5 达标）
+
+**落地（§5.3 独立 commit + 理由）**：`fee_table.py` 44→85（实际 100%）、新增 `fee_common.py` 85（实际 99%）。按实测就近下取整冻结，只增不减棘轮。
+
+## #394 · 2026-10-15 · P3-3 rsrs 指标覆盖补测
+
+**落地**：新增 `tests/unit/test_rsrs.py`（41 项）：calculate 闭式 OLS 向量化与 naive 等价（atol 1e-10）/ 首个有效位置 77（period+norm_window-1）/ 信号逻辑 / 流式与批量一致 / classify_regime 5 档 / regime_from_series 校验。**实测 98%**（170 语句 4 miss）。`rsrs.py` `__main__` 加 pragma。
+
+## #395 · 2026-10-15 · C-3 §5.3: FILE_FLOOR 收紧（P3-3 达标）
+
+**落地（§5.3 独立 commit + 理由）**：`indicators/rsrs.py` 43→80（实际 98%）。
+
+## #396 · 2026-10-15 · P3-2 light_lookahead_guard 覆盖补测
+
+**落地**：新增 `tests/unit/test_light_lookahead_guard.py`（64 项）：_to_seconds 全部输入族 / 四类校验收口 / strict 立即抛 / 单例。**实测 98%**。`light_lookahead_guard.py` `__main__` 加 pragma。
+
+## #397 · 2026-10-15 · C-3 §5.3: FILE_FLOOR 收紧（P3-2 达标）
+
+**落地（§5.3 独立 commit + 理由）**：`core/light_lookahead_guard.py` 34→70（实际 98%）。
+
+## #398 · 2026-10-15 · P3-4 risk_manager 覆盖补测
+
+**落地**：新增 `tests/unit/test_risk_manager.py`（63 项）：枚举与事件/RiskConfig 字段与 to_dict/SymbolStatus 记录暂停复位/构造（默认/自定义/max_events）/状态机（pause/resume/resume 清数据质量暂停）/check_order（通过计数/PAUSED 拒买放卖/rate_limit/cash/事件记录）/check_positions（止损/止盈/非法跳过/回撤自动暂停）/熔断与引擎暂停独立回滚/数据质量全链路（CRITICAL 全局暂停/ERROR 高占比单标暂停+WARNING/低占比仅警告/单标暂停拦买/流水线 poor 暂停与 good 自动恢复/failed 警告/状态查询/重置）/事件总线订阅退订/规则库管理/异常交易（pending 注入/撤单计数/日报/日重置）/事件过滤与汇总/工厂函数。**实测 88%**（574 语句 69 miss）；63 passed。
+
+## #399 · 2026-10-15 · C-3 §5.3: FILE_FLOOR 收紧（P3-4 达标）
+
+**落地（§5.3 独立 commit + 理由）**：`risk/risk_manager.py` 56→75（实际 88%）。
+
+## #400 · 2026-10-15 · P3-1 data_feed 覆盖补测（全库最大模块 882 语句）
+
+**落地**：新增 `tests/unit/test_data_feed.py`（83 项）：模块工具（_make_bar 周期格式化/_infer_market/_to_standard_symbol/_to_tencent_code/_period_from_frequency/_factor_on_or_before as_of 截断/_live_jump_change_with_factor 除权跳变豁免/_quote_to_bar）、MockRealtimeSource（确定性价格路径/时钟推进/自定义 base）、RealtimeBarAggregator（周期切换产新 bar/同周期增量更新/reset）、RealtimeQuoteFetcher（_parse_tencent_line 正常/畸形/零价/未来时间回退/tencent 失败降级 akshare）、MarketDataFeed 全链路（构造/connect 全后端/disconnect/订阅管理/回调注册/attach_event_bus/poll_once 快照→聚合→清洗→缓存→分发→统计/本地 parquet 缺失/流式清洗脏数据与跳变告警/_clean_bars 异常回退/_update_cache qfq 现算与 history 100 截断/_dispatch/start-stop 生命周期/health_check down-healthy-degraded/stats 只读副本）。**实测 66%**（882 语句 300 miss：网络后端真路径/退避/事件桥发布段为桩外实现）；83 passed。
+
+## #401 · 2026-10-15 · C-3 §5.3: FILE_FLOOR 收紧（P3-1 达标）
+
+**落地（§5.3 独立 commit + 理由）**：`live/data_feed.py` 28.0→60.0（实际 66%）。
+
+**P3 纪律遵守**：一次一项；实测覆盖按 CI 口径包级 `--cov=myquant`（点路径 --cov 撞 numpy ImportError 坑）；按实现语义定性（发现旧假设与实现脱节即修正）；demo pragma 不计入门禁；FILE_FLOOR 全按 §5.3 独立 commit + 理由；git 提交（commit message 均引用编号）。
+
 
 
 
