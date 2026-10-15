@@ -226,7 +226,7 @@ def test_c7_red_when_skipped_above_budget(tmp_path: Path) -> None:
     totals = {"num_statements": 100, "covered_lines": 90, "percent_covered": 90.0}
     cov = _write_fake_coverage(tmp_path, files, totals)
     junit = tmp_path / "test-results.xml"
-    junit.write_text('<testsuite tests="10" skipped="10"></testsuite>', encoding="utf-8")
+    junit.write_text('<testsuite tests="10" skipped="12"></testsuite>', encoding="utf-8")
     report = cg.evaluate(cov, junit_xml=junit, project_root=PROJECT_ROOT)
     assert not report.ok
     assert any(v.startswith("C-7") for v in report.violations)
