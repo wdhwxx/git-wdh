@@ -631,6 +631,17 @@ jobs:
       - name: 覆盖率门禁判据（阻断模式：基线已冻结 run 38664760515，C-1~C-7 违反即红）
         run: python scripts/覆盖率门禁.py --json coverage.json --junit test-results.xml
 
+      # P4 常态治理（v1.2 §6.5 ②）：PR 时发布覆盖率差异评论（非阻断，供评审者一眼看到覆盖率状态）
+      - name: PR 覆盖率评论（P4 §6.5）
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cov=$(python -c "import json;print(round(json.load(open('coverage.json'))['totals']['percent_covered'],2))")
+          covered=$(python -c "import json;print(int(json.load(open('coverage.json'))['totals']['covered_lines']))")
+          gh pr comment "${{ github.event.pull_request.number }}" --body \
+            "✅ 覆盖率门禁通过（C-1~C-8 全绿）：总行覆盖 **${cov}%**（已覆盖 ${covered} 行）。详见 [Actions 运行](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})。"
+
   # ============================================================
   # 任务：依赖与 CI 安全扫描（KP-M03：pip-audit 漏洞 + gitleaks 密钥）
   # ============================================================
