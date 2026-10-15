@@ -5405,4 +5405,20 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 
 **纪律遵守**：蓝图优先（#377 登记先行，本批为落地回写）；薄入口（业务全部在 myquant，scripts 仅参数+委托）；全量类型注解；禁裸 except；logging 不用 print（CLI main 例外）；改后回写蓝图；一次一项做完（P1 独立提交，RUFF_BASELINE 131→0 / 冗余 noqa / Gitee 同步为后续独立项）；git 提交（commit message 引用 #379）。
 
+---
+
+## #379b · 2026-10-15 · P1 基线冻结（CI 权威实测，§5.3 独立 commit + 理由）
+
+**现状核实**：#379 施工后 CI run 38664760515（14 job）全绿，coverage-gate-check job 报告模式首轮自产权威基线（ubuntu/Py3.12、覆盖集=unit+leakage_gate+realism_gate+scripts、排除 benchmarks）。
+
+**落地（§5.3 改基线须独立 commit + 理由）**：
+- `myquant/leakage_gate/coverage_gate.py`：COVERAGE_BASELINE 62.0→**63.0**（CI 实测 63.4894% 就近下取整）、COVERED_LINES_BASELINE 38300→**38800**（CI 实测 38,853 下取整留 53 行余量）；FILE_STMT_CEILING["leakage_gate/coverage_gate.py"] 223→**227**（冻结注释所致，门禁自锁死解围，理由随 commit 登记）。
+- `.github/workflows/ci.yml`：coverage-gate-check job 移除 `--report-only`，C-1~C-7 违反即红（转真正阻断；C-6 仍仅报告，P2-4 精化口径后启用）。
+
+**验收**：本地阻断模式判据预演全过（总量 63.7% / 38995 ≥ 63.0 / 38800；T0 71.5 / T1 63.8 / T2 55.1 全过下限；C-5 227 ≤ 227）；test_coverage_gate.py 41 passed；ruff 0 违规。CI 复验（下个 run）。
+
+**纪律遵守**：改基线独立 commit（本记录同 commit）；冻结值来自 CI 权威平台实测；只增不减棘轮语义保持；一次一项（冻结为 P1 收尾，RUFF_BASELINE 131→0 为下一独立项）。
+
+
+
 

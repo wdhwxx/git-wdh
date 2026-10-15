@@ -622,8 +622,8 @@ jobs:
         with:
           name: coverage-data-ubuntu
 
-      - name: 覆盖率门禁判据（报告模式：输出判据预演，基线冻结后转阻断）
-        run: python scripts/覆盖率门禁.py --json coverage.json --junit test-results.xml --report-only
+      - name: 覆盖率门禁判据（阻断模式：基线已冻结 run 38664760515，C-1~C-7 违反即红）
+        run: python scripts/覆盖率门禁.py --json coverage.json --junit test-results.xml
 
   # ============================================================
   # 任务：依赖与 CI 安全扫描（KP-M03：pip-audit 漏洞 + gitleaks 密钥）

@@ -85,10 +85,11 @@ _T2_DIR_PREFIXES: tuple[str, ...] = ("api/", "web/", "gui/", "utils/", "acceptan
 # T3 报告级：database/migrations/、*_selftest.py、性能基准（仅报告 + 迁移冒烟门禁 P1-7）
 
 # ── 基线常量（v1.2 §5.3/§8.2；改基线须独立 commit，见模块 docstring）────
-# C-1b 总覆盖率下限（v1 学习期额度；CI 实测后替换）
-COVERAGE_BASELINE: float = 62.0
-# C-1a 绝对覆盖行数下限（CI 口径；实测 38,864 → 占位 38,300，留 ~564 行余量）
-COVERED_LINES_BASELINE: int = 38300
+# C-1b 总覆盖率下限（CI 权威实测冻结：run 38664760515 ubuntu/Py3.12 实测 63.49%，
+# 就近下取整 63.0；§5.3 基线只增不减，改基线须独立 commit + 理由）
+COVERAGE_BASELINE: float = 63.0
+# C-1a 绝对覆盖行数下限（CI 实测 38,853 → 下取整 38,800，留 53 行余量防波动）
+COVERED_LINES_BASELINE: int = 38800
 # C-2 分层下限（实测 71.2/62.9/55.3 − 3~4pp 余量）
 TIER_FLOOR: dict[str, float] = {"T0": 68.0, "T1": 60.0, "T2": 52.0}
 # C-3 关键文件覆盖率下限（v1.2 §5.2 表，只增不减；取实测就近下取整）。
@@ -224,7 +225,7 @@ FILE_STMT_CEILING: dict[str, int] = {
     "leakage_gate/config_deadkey.py": 72,
     "leakage_gate/consumption.py": 84,
     "leakage_gate/contract.py": 99,
-    "leakage_gate/coverage_gate.py": 223,
+    "leakage_gate/coverage_gate.py": 227,  # 冻结 commit 更新：223→227（基线冻结注释所致，§5.3 独立 commit 已登记）
     "leakage_gate/cross_sectional.py": 138,
     "leakage_gate/exemption.py": 143,
     "leakage_gate/gate.py": 106,
