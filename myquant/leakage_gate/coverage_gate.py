@@ -130,7 +130,7 @@ FILE_STMT_CEILING: dict[str, int] = {
     "backtest/batch_report.py": 261,
     "backtest/candidate_pool.py": 74,
     "backtest/candidate_report.py": 205,
-    "backtest/config_builder.py": 68,
+    "backtest/config_builder.py": 71,  # 68→71（2026-10-15 实测同步：历史功能改造增长未同步 C-5）
     "backtest/consistency_check.py": 285,
     "backtest/dashboard_serializer.py": 238,
     "backtest/data_loader.py": 5,
@@ -244,9 +244,9 @@ FILE_STMT_CEILING: dict[str, int] = {
     "live/brokers/paper_broker.py": 347,
     "live/brokers/ptrade_broker.py": 58,
     "live/brokers/qmt_broker.py": 981,
-    "live/data_feed.py": 882,
+    "live/data_feed.py": 885,  # 882→885（2026-10-15 实测同步：历史功能改造增长未同步 C-5）
     "live/emergency_liquidation.py": 170,
-    "live/engine.py": 1197,
+    "live/engine.py": 1250,  # 1197→1250（+53，#413-#417 T2-1/T2-2/T1-2/T3-1 功能改造，与 R-24 行数 3111→3236 同步，§5.3）
     "live/kill_switch_signal.py": 147,
     "live/portfolio.py": 419,
     "live/run_mode.py": 114,
