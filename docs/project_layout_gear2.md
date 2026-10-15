@@ -5632,6 +5632,38 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 
 **P3 纪律遵守**：一次一项；实测覆盖按 CI 口径包级 `--cov=myquant`（点路径 --cov 撞 numpy ImportError 坑）；按实现语义定性（发现旧假设与实现脱节即修正）；demo pragma 不计入门禁；FILE_FLOOR 全按 §5.3 独立 commit + 理由；git 提交（commit message 均引用编号）。
 
+---
+
+## P2-5 尾巴 / P4 常态治理（#403~#408）· 2026-10-15
+
+**总览**：P3 全绿后收口剩余尾巴。CI run 38691176364 windows 腿暴露 test_risk_manager 时间敏感缺陷（交易时段规则墙钟依赖）→ #403 修复；CI run 38692592422 全绿（skipped=4，reportlab skip 已消除）→ #404 收紧 C-7 5→4；P4 常态治理四项落地：#406 C-8 季度治理检查（①+③）+ #408 PR 覆盖率评论（②）；④ benchmarks 相对化由 P2-6（#388）完成。
+
+## #403 · 2026-10-15 · P3-4 修复：test_risk_manager 时间敏感缺陷（CI windows 腿 5 fail）
+
+**CI 拦截（run 38691176364 windows 腿）**：`check_order` 交易时段规则（TradingHoursRule）`datetime.now()` 依赖墙钟——CI 跑时北京 15:18 已收盘 → trading_hours REJECT，5 项失败（本地盘中跑通过故未检出；与 pnl_equity 跨午夜坑同类的环境不对称时间敏感）。
+
+**落地**：①模块级 autouse fixture 固定 `myquant.risk.rules.datetime.now()` → 2026-10-15(周四) 10:30 盘中（交易日+交易时段双确定，任意时区/时刻/周末运行均绿）；②`_normal_context` extra 注入 `current_time='10:30:00'`（交易时段规则显式注入通道，双保险）；③`test_rejected_records_event` 改按事件类型过滤断言（get_events 按 timestamp 倒序，同秒内排序不稳，不依赖 [0] 位置）。
+
+**验收**：本地 63 passed + ruff 0；data_feed 83 passed 不受影响。CI run 38692592422 全绿。
+
+## #404 · 2026-10-15 · C-7 §5.3: SKIP_BUDGET 收紧 5→4（P2-5 尾巴收口）
+
+**落地（§5.3 独立 commit + 理由）**：CI run 38692592422（#403 全绿）ubuntu 权威腿实测 skipped=4——reportlab 过时断言已消除（#387/#391），剩 R-05 白名单 1 + live_config 生产配置未入库 3，全确定性设计性。按 CI 实测收紧，只减不增棘轮。
+
+## #406 · 2026-10-15 · P4-1/P4-3：C-8 季度治理检查（基线每季度上调/复核，超期告警非阻断）
+
+**落地（v1.2 §6.5 ①+③）**：coverage_gate.py 新增 C-8——`QUARTERLY_REVIEW_DAYS=92` + `BASELINE_LAST_RAISED`（登记 2026-10-15：P3 批量收紧 FILE_FLOOR 6 项 + C-6 冻结 + C-7 收紧）+ `CoverageGateReport.warnings/quarterly_review_due` 字段 + evaluate 内超期告警（**非阻断**：历史仓库首跑不红，warning 只进报告）。test_coverage_gate.py 新增 3 用例：超期告警非阻断/季度内静默/非法日期按到期处理（fail-safe）。44 passed；ruff 0。
+
+## #407 · 2026-10-15 · C-5 §5.3: coverage_gate.py 语句数冻结 229→242（C-8 实现）
+
+**落地（§5.3 独立 commit + 理由）**：#406 的 C-8 实现新增 13 语句，按实测 242 就近冻结上调，避免 #406 首发即被棘轮拦截。
+
+## #408 · 2026-10-15 · P4-2：CI PR 覆盖率差异评论（v1.2 §6.5 ②）
+
+**落地**：coverage-gate-check job 末尾新增 step——PR 事件时用 gh CLI 发布覆盖率评论（总行覆盖 % + 已覆盖行数 + Actions 链接），非阻断，供评审者一眼看到覆盖率状态。**P4-4（benchmarks 相对化）由 P2-6 #388 完成，无新增工作。**
+
+**P4 纪律遵守**：一次一项；改基线独立 commit + 理由（#407）；C-8 告警非阻断避免首跑即红；git 提交（commit message 均引用编号）。
+
 
 
 
