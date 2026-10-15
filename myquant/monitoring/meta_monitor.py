@@ -178,7 +178,7 @@ class WebhookHeartbeatCarrier(HeartbeatCarrier):
             )
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:  # noqa: S310
                 return resp.status < 400
-        except Exception as e:  # noqa: BLE001（网络失败记 warning，不阻断主流程）
+        except Exception as e:  # noqa: BLE001  # 网络失败记 warning，不阻断主流程（#380 规范 noqa 格式）
             logger.warning(f"Webhook 心跳发送失败: {e}")
             return False
 

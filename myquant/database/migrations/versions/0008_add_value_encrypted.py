@@ -45,7 +45,7 @@ def downgrade() -> None:
     if "value_encrypted" in cols:
         try:
             op.execute("ALTER TABLE metrics_history DROP COLUMN value_encrypted")
-        except Exception:  # noqa: BLE001（旧版 SQLite 不支持 DROP COLUMN）
+        except Exception:  # noqa: BLE001  # 旧版 SQLite 不支持 DROP COLUMN（#380 规范 noqa 格式）
             # 不静默：明确提示降级路径（数据量小可整表重建）
             raise RuntimeError(
                 "当前 SQLite 不支持 DROP COLUMN；如需回滚请整表重建 metrics_history"

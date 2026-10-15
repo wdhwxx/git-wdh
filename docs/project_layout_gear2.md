@@ -5431,6 +5431,22 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 
 **纪律遵守**：改基线独立 commit + 理由；基线只减不增；一次一项（清 4 条冗余 noqa / Gitee 同步为后续独立项）；git 提交（commit message 引用 #380）。
 
+---
+
+## #381 · 2026-10-15 · 冗余 noqa 复核与无效格式清理
+
+**现状核实**：交接清单列"F821 剩余 4 条 noqa 是冗余死代码（paper_broker:744 / qmt_broker:1361 / transports/__init__:32,36，谓 future annotations 下 F821 不再触发）"；另有 2 条无效 noqa 格式 warning（meta_monitor.py:181、0008_add_value_encrypted.py:48，全角括号贴码导致解析失败）。
+
+**落地（实测复核为准，不盲从交接结论）**：
+- **4 条 F821 noqa 实测非冗余**：删除后 ruff 0.16.3 全量检查 F821 立即回潮（该版本对字符串注解 `-> "FeeCalculator"` 仍做未定义名称检查，即使文件有 `from __future__ import annotations`）→ 全部恢复保留，注释追加 #380 复核登记。
+- **2 条无效 noqa 格式规范化**：meta_monitor.py:181 / 0008_add_value_encrypted.py:48 改为 `# noqa: BLE001  # 中文说明`（双井号 + 半角），消除 ruff invalid directive warning。
+
+**验收**：`ruff check .` 全量 0 违规、0 warning（exit 0）；行为零改动（纯注释/格式）。CI 复验（下个 run）。
+
+**纪律遵守**：以实测证据推翻交接误判并登记；不因任务名"清冗余"强行删非冗余 noqa；一次一项；git 提交（commit message 引用 #381）。
+
+
+
 
 
 
