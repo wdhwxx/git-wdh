@@ -409,7 +409,9 @@ class LiveEngine(BaseEngine):
             )
 
         # 2.6) 幂等去重（任务43）：已处理信号 ID 集合（确定性，防桥接重发）
-        self._processed_signal_ids: Set[str] = set()
+        # T2-2：set → Dict[signal_id, unix_ts]，时间戳用于持久化后按交易日窗口裁剪，
+        #       避免每次启动 clear 导致重启重复下单（旧快照里的已处理 id 被恢复）。
+        self._processed_signal_ids: Dict[str, float] = {}
 
         # #T-04(KP-P3-02)：bar 级去重集合——键 (symbol, formatted_date)，
         # 同一根 bar 二次推送直接丢弃且不成交（不依赖墙钟单调，防同日重复撮合）
@@ -1523,7 +1525,7 @@ class LiveEngine(BaseEngine):
                 f"{signal.symbol} {signal.signal_type.value}"
             )
             return
-        self._processed_signal_ids.add(signal.signal_id)
+        self._processed_signal_ids[signal.signal_id] = time.time()
 
         # A-3 引擎统一埋点：策略信号事件（signal_id 已归一化，监控模式同样发布——
         # 信号已生成是已发生事实；链路 id 贯穿：signal_id 即后续 order_id 幂等源）
@@ -1893,6 +1895,9 @@ class LiveEngine(BaseEngine):
             self._state_recovered = True
             # KP-P3-03：恢复后对账（快照订单 vs 券商在途订单差集，未领回挂单取消）
             self._reconcile_restored_orders(snapshot.state.get("orders") or [])
+            # T2-2：恢复已处理信号 id（最近 5 个交易日 ≈ 7 自然日窗口），
+            # 防止重启后同一信号被重复下单。过期 id 丢弃防无限膨胀。
+            self._restore_processed_signal_ids(snapshot.state)
             logger.info(
                 f"[engine] 崩溃恢复完成: 快照v{snapshot.version} "
                 f"tag={snapshot.tag!r} result={result}"
@@ -1941,6 +1946,43 @@ class LiveEngine(BaseEngine):
             )
             self.pause(reason="未领回订单超阈（双账本漂移风险）")
 
+    # T2-2 恢复窗口：最近 5 个交易日 ≈ 7 个自然日（含周末/节假日余量）
+    _PROCESSED_SIGNAL_WINDOW_SEC: float = 7.0 * 86400.0
+
+    def _restore_processed_signal_ids(self, snapshot_state: Dict[str, Any]) -> None:
+        """从快照恢复已处理信号 id（T2-2）。
+
+        读取快照 extra.processed_signal_ids（[[signal_id, unix_ts], ...]），
+        只保留最近 ``_PROCESSED_SIGNAL_WINDOW_SEC`` 内的 id，过期丢弃。
+        恢复后同一信号重启不重复下单；读取失败/无数据时保持空集，不阻塞启动。
+        """
+        try:
+            extra = (snapshot_state or {}).get("extra") or {}
+            raw = extra.get("processed_signal_ids")
+            if raw is None:
+                # 旧快照无此字段：不覆盖（start 已先 clear，此处保持空集即可）
+                return
+            cutoff = time.time() - self._PROCESSED_SIGNAL_WINDOW_SEC
+            restored: Dict[str, float] = {}
+            for item in raw:
+                try:
+                    if not isinstance(item, (list, tuple)) or len(item) < 2:
+                        continue
+                    sid, ts = str(item[0]), float(item[1])
+                    if sid and ts >= cutoff:
+                        restored[sid] = ts
+                except (TypeError, ValueError):
+                    # 单条脏数据跳过，不影响其余 id 恢复
+                    continue
+            self._processed_signal_ids = restored
+            if restored:
+                logger.info(
+                    f"[engine] T2-2 已恢复已处理信号 id: {len(restored)} 条"
+                    f"（窗口 {self._PROCESSED_SIGNAL_WINDOW_SEC/86400:.0f} 天）"
+                )
+        except Exception as e:  # noqa: BLE001 - 恢复失败不阻断启动
+            logger.warning(f"[engine] T2-2 已处理信号 id 恢复失败（不阻断）: {e}")
+
     def _save_state(self, tag: str = "") -> None:
         """保存实盘状态快照（H2修复；停止时/定时快照调用）"""
         if self._state_store is None:
@@ -1955,6 +1997,11 @@ class LiveEngine(BaseEngine):
                     "monitor_only": self._monitor_only,
                     # KP-P5-07: config_version 落快照 metadata（配置变更版本可审计）
                     "config_version": getattr(self, "_config_version", ""),
+                    # T2-2：已处理信号 id 持久化（[signal_id, unix_ts]），
+                    # 重启后恢复最近窗口内的 id，防重启重复下单。
+                    "processed_signal_ids": [
+                        [sid, float(ts)] for sid, ts in self._processed_signal_ids.items()
+                    ],
                 },
             )
             snapshot = self._state_store.save(state, tag=tag or "auto")

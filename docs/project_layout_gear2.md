@@ -5741,3 +5741,23 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 **验收**：py_compile 全过；monitor-only 90s 实跑日志 `RSRS预计算完成: 3189 只股票`（原 0），预热完成 3195 只、无 Traceback；`pytest test_live_warmup / test_engine_events / test_live_concurrency / test_live_bar_dedup` **37 passed / 0 failed**。证据：`evidence/T2-1_monitor90s_v2.log`。
 
 **纪律遵守**：未新增文件（纯改既有 engine.py 启动段与默认值）；未改策略逻辑、未改股票池构建规则；按 path:line 复核；git 提交（commit message 引用 #413）。
+
+
+---
+
+## #414 · 2026-10-15 · 回测实盘一致性 T2-2：_processed_signal_ids 持久化（重启重复下单根因）
+
+**现状核实**：核查报告 v1.0 §四标注——`live/engine.py:674` 每次 start 都 `_processed_signal_ids.clear()` → 每天重启一次，同一信号（同策略/标的/bar/方向）重发一次、重复下单。signal_id 是 SHA-256 前 24 位哈希（base.py:106），无法反解日期。
+
+**落地（复用 StateStore 快照机制，不新增文件）**：
+- **类型**：`engine.py:414` `Set[str]` → `Dict[str, float]`（signal_id → unix 时间戳），去重判断 `in` 兼容，写入 `.add(x)` → `dict[x]=time.time()`。
+- **保存**：`_save_state` extra 新增 `processed_signal_ids: [[sid, ts], ...]`，随停止快照（shutdown）/定时快照落盘到 `datasets/live_state/rsrs_live_demo/`。
+- **恢复**：新增 `_restore_processed_signal_ids(snapshot_state)`，在 `_recover_state` 恢复持仓/资金后调用：
+  - 窗口常量 `_PROCESSED_SIGNAL_WINDOW_SEC = 7 天`（≈5 个交易日，含周末/节假日余量）；
+  - 逐条 try-except 容错（脏数据/非数字 ts/短数组跳过，不影响其余 id）；
+  - 旧快照无此字段（None）不覆盖；空列表正确清空。
+- **顺序**：start 里 clear(676) → `_recover_state`(686) 内调恢复，先清空再从快照填回，逻辑自洽。
+
+**验收**：py_compile 全过；`test_signal_idempotency + test_live_warmup + test_engine_events + test_live_safety_gate` **47 passed / 0 failed**；独立单测三场景全过（① 近期 id 保留/10 天前过期过滤/脏数据跳过；② 旧快照无字段不覆盖；③ 空列表正确清空）。
+
+**纪律遵守**：未新增文件（纯改 engine.py）；未改去重判等逻辑、未改 signal_id 生成规则；复用既有 StateStore.save/load_latest 通道；按 path:line 复核。
