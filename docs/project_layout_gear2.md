@@ -5419,6 +5419,20 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 
 **纪律遵守**：改基线独立 commit（本记录同 commit）；冻结值来自 CI 权威平台实测；只增不减棘轮语义保持；一次一项（冻结为 P1 收尾，RUFF_BASELINE 131→0 为下一独立项）。
 
+---
+
+## #380 · 2026-10-15 · RUFF_BASELINE 131→0 收紧（ruff 清零棘轮）
+
+**现状核实**：P0-2 基线重基后 RUFF_BASELINE 停在 131（门禁允许 0~131 回潮，与"清零"声明矛盾）；本地全量 ruff 0.16.3 实测 131 个违规已全部修复/规范化 noqa（E402×50 规范化 noqa、F821×45 修 3 真 bug + noqa、E702/E741/F401/F402 清零）——当前 `ruff check .` 0 违规。
+
+**落地**：`.github/workflows/ci.yml` env `RUFF_BASELINE: "131"` → **"0"**（新增任何违规即红，基线棘轮收紧到零容忍；BLE001_BASELINE 476 独立保持不动）。
+
+**验收**：本地 `ruff check .` All checks passed（exit 0）；仅 2 条无效 # noqa 格式 warning（meta_monitor.py:181、0008_add_value_encrypted.py:48，不阻断，随 #381 冗余 noqa 清理一并处置）。CI 复验（下个 run）。
+
+**纪律遵守**：改基线独立 commit + 理由；基线只减不增；一次一项（清 4 条冗余 noqa / Gitee 同步为后续独立项）；git 提交（commit message 引用 #380）。
+
+
+
 
 
 
