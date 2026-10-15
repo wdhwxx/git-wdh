@@ -350,7 +350,7 @@ PACKAGE_STRUCTURE_BASELINE: dict[str, dict[str, int]] = {
     "acceptance": {"lines": 5612, "symbols": 254, "fan_out": 37},
     "allocation": {"lines": 2083, "symbols": 56, "fan_out": 9},
     "api": {"lines": 3775, "symbols": 193, "fan_out": 26},
-    "backtest": {"lines": 20689, "symbols": 560, "fan_out": 37},
+    "backtest": {"lines": 20691, "symbols": 560, "fan_out": 37},  # 20689→20691（#420 T3-3 风控参数对齐 + lot_size 死代码 +2 行功能必需）
     "core": {"lines": 12975, "symbols": 600, "fan_out": 40},
     "data_access": {"lines": 17223, "symbols": 605, "fan_out": 34},
     "database": {"lines": 3608, "symbols": 113, "fan_out": 17},

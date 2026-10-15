@@ -417,7 +417,13 @@ class TestFeedPollOnce:
         assert feed.poll_once() == {}
 
     def test_realtime_mock_full_flow(self) -> None:
-        src = MockRealtimeSource(symbols=["000001.SZ"], base_prices={"000001.SZ": 10.0})
+        # 固定整分钟 start_ts（2025-01-01 00:00:00 UTC）消除分钟边界 flaky：
+        # 默认 start_ts=now-600s 秒位随机，poll 推进 1s 恰跨分钟时聚合器误判新周期，
+        # 导致第二次 poll 产出新 bar 使 assert new_bars2 == {} 偶发失败（CI 间歇红）。
+        src = MockRealtimeSource(
+            symbols=["000001.SZ"], base_prices={"000001.SZ": 10.0},
+            start_ts=1735689600.0,
+        )
         feed = MarketDataFeed(source="realtime_mock", frequency="1m", mock_source=src)
         feed.connect()
         received: list = []
