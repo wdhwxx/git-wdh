@@ -107,9 +107,9 @@ class TestStampAndTransfer:
         assert bd.stamp_tax == 0.0
 
     def test_stamp_tax_sell_rate(self, default_calc: FeeCalculator) -> None:
-        """卖出印花税 = 金额 × 0.001"""
+        """卖出印花税 = 金额 × 0.0005（万5）"""
         bd = default_calc.calc_fee(OrderSide.SELL, 100_000.0)
-        assert bd.stamp_tax == pytest.approx(100.0, abs=1e-9)
+        assert bd.stamp_tax == pytest.approx(50.0, abs=1e-9)
 
     def test_transfer_fee_both_side(self, default_calc: FeeCalculator) -> None:
         """过户费 = 金额 × 0.00001（买卖相同）"""
@@ -160,7 +160,7 @@ class TestCalcFee:
     def test_calc_fee_sell_total(self, default_calc: FeeCalculator) -> None:
         """卖出总佣金 = 佣金 + 印花税 + 过户费"""
         bd = default_calc.calc_fee(OrderSide.SELL, 100_000.0)
-        assert bd.total_commission == pytest.approx(121.0, abs=1e-9)
+        assert bd.total_commission == pytest.approx(71.0, abs=1e-9)
 
     def test_calc_fee_total_cost(self, default_calc: FeeCalculator) -> None:
         """总成本 = 佣金 + 印花税 + 过户费 + 滑点"""
@@ -174,7 +174,7 @@ class TestCalcFee:
         from myquant.backtest.fee_common import calculate_fee
 
         bd = calculate_fee(OrderSide.SELL, 100_000.0)
-        assert bd.total_commission == pytest.approx(121.0, abs=1e-9)
+        assert bd.total_commission == pytest.approx(71.0, abs=1e-9)
 
 
 # ═══════════════════════════════════════════════

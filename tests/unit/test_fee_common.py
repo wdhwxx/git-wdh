@@ -179,7 +179,7 @@ class TestCalcCommissionBreakdown:
         calc = FeeCalculator()
         comm, stamp, transfer = calc.calc_commission_breakdown(side="SELL", notional=100000.0)
         assert comm == pytest.approx(20.0)
-        assert stamp == pytest.approx(100.0)  # 千1
+        assert stamp == pytest.approx(50.0)  # 万5
         assert transfer == pytest.approx(1.0)
 
     def test_min_commission_floor(self) -> None:
@@ -270,8 +270,8 @@ class TestCalcFee:
     def test_sell_full_breakdown(self) -> None:
         calc = FeeCalculator()
         fee = calc.calc_fee(side="SELL", notional=100000.0, price=10.0, quantity=10000)
-        assert fee.stamp_tax == pytest.approx(100.0)
-        assert fee.total_commission == pytest.approx(121.0)
+        assert fee.stamp_tax == pytest.approx(50.0)
+        assert fee.total_commission == pytest.approx(71.0)
 
     def test_zero_price_ignores_slippage(self) -> None:
         calc = FeeCalculator()
@@ -291,7 +291,7 @@ class TestCalcCommissionBreakdownVectorized:
         )
         assert comm[0] == pytest.approx(5.0)   # 最低佣金
         assert comm[1] == pytest.approx(20.0)
-        assert stamp[1] == pytest.approx(100.0)
+        assert stamp[1] == pytest.approx(50.0)
         assert transfer[0] == pytest.approx(0.01)
 
     def test_mixed_side_array(self) -> None:
@@ -300,7 +300,7 @@ class TestCalcCommissionBreakdownVectorized:
             side=np.array(["BUY", "SELL"]),
             notional=np.array([100000.0, 100000.0]),
         )
-        assert stamp.tolist() == pytest.approx([0.0, 100.0])
+        assert stamp.tolist() == pytest.approx([0.0, 50.0])
 
     def test_empty_array(self) -> None:
         calc = FeeCalculator()
@@ -506,7 +506,7 @@ class TestModuleLevelFunctions:
     def test_calculate_fee(self) -> None:
         fee = calculate_fee(side="SELL", notional=200000.0, price=25.0, quantity=8000)
         assert fee.commission == pytest.approx(40.0)
-        assert fee.stamp_tax == pytest.approx(200.0)
+        assert fee.stamp_tax == pytest.approx(100.0)
         assert fee.slippage == pytest.approx(40.0)
 
     def test_calculate_fee_vectorized(self) -> None:

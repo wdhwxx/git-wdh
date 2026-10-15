@@ -92,7 +92,7 @@ ENGINE_MODES: Tuple[str, ...] = ("auto", "vectorized", "mixed", "event")
 # 交易成本/绩效口径默认值（对齐 Tab3 与引擎内置默认；百分比为界面数值）
 DEFAULT_COMMISSION_PCT: float = 0.02  # 佣金率（%，买卖同值）
 DEFAULT_MIN_COMMISSION: float = 5.0  # 最低佣金（元）
-DEFAULT_STAMP_TAX_PCT: float = 0.1  # 印花税（%，仅卖出）
+DEFAULT_STAMP_TAX_PCT: float = 0.05  # 印花税（%，仅卖出；2023-08-28起万5=0.05%）
 DEFAULT_TRANSFER_FEE_PCT: float = 0.001  # 过户费（%，买卖双向）
 DEFAULT_SLIPPAGE_PCT: float = 0.02  # 滑点（%，固定 bps 模型）
 DEFAULT_BENCHMARK: str = "000300.SH"  # 基准指数代码
@@ -163,7 +163,7 @@ class BatchRunOptions:
     cache_dir: Optional[Path] = None
     commission_rate: float = 0.0002
     min_commission: float = 5.0
-    stamp_tax: float = 0.001
+    stamp_tax: float = 0.0005
     transfer_fee: float = 0.00001
     slippage_pct: float = 0.02
     benchmark: str = DEFAULT_BENCHMARK
@@ -783,7 +783,7 @@ class BatchBacktestTab(QWidget):
         self._spin_stamp_tax.setSingleStep(0.01)
         self._spin_stamp_tax.setValue(DEFAULT_STAMP_TAX_PCT)
         self._spin_stamp_tax.setSuffix(" %")
-        self._spin_stamp_tax.setToolTip("印花税（仅卖出，默认千1）")
+        self._spin_stamp_tax.setToolTip("印花税（仅卖出，默认万5=0.05%）")
         self._spin_transfer_fee = QDoubleSpinBox()
         self._spin_transfer_fee.setRange(0.0, 0.05)
         self._spin_transfer_fee.setDecimals(4)
@@ -1141,7 +1141,7 @@ def _main() -> int:
     if opts.adjust != "raw" or opts.log_level != "INFO" or not opts.incremental:
         print("[FAIL] 复权/日志/增量默认值异常")
         return 1
-    if tab._spin_min_commission.value() != 5.0 or tab._spin_stamp_tax.value() != 0.1:
+    if tab._spin_min_commission.value() != 5.0 or tab._spin_stamp_tax.value() != 0.05:
         print("[FAIL] 成本默认值异常")
         return 1
     print("[6] 新控件默认值: 佣金"

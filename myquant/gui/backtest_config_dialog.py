@@ -216,7 +216,7 @@ def build_config_dict(
     max_total_position_pct: float = 0.95,
     # ★ 交易成本参数
     commission_rate: float = 0.0002,
-    stamp_tax_rate: float = 0.001,
+    stamp_tax_rate: float = 0.0005,
     slippage_value: float = 0.0002,
     # ★ 引擎与性能优化参数（P2 全套开关，与 example.yaml 的 engine/performance 段一致）
     engine_mode: str = "auto",
@@ -950,7 +950,7 @@ class BacktestConfigDialog(QDialog):
         self.spin_stamp_tax.setRange(0, 1.0)
         self.spin_stamp_tax.setDecimals(3)
         self.spin_stamp_tax.setSingleStep(0.01)
-        self.spin_stamp_tax.setValue(0.1)  # 千1 = 0.1%
+        self.spin_stamp_tax.setValue(0.05)  # 万5 = 0.05%（2023-08-28起由千1减半）
         self.spin_stamp_tax.setSuffix(' %')
         form_c.addRow('印花税率（卖出）', self.spin_stamp_tax)
         self.spin_slippage = QDoubleSpinBox()

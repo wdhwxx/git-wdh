@@ -48,14 +48,14 @@ from tests.conftest import make_ohlcv_df
 SIM_BROKER_CFG: Dict[str, Any] = {
     "commission_rate": 0.0002,        # 佣金费率（万2，买卖双向）
     "min_commission": 5.0,            # 单笔最低佣金（元）
-    "stamp_tax_rate": 0.001,          # 印花税率（千1，仅卖出）
+    "stamp_tax_rate": 0.0005,        # 印花税率（万5=0.05%，仅卖出；2023-08-28起减半）
     "transfer_fee_rate": 0.00001,     # 过户费率（万0.1，买卖双向）
     "slippage_mode": "ratio",         # 滑点模式：ratio=按比例
     "slippage_value": 0.0002,         # 滑点数值（万2）
 }
 # 默认双边往返成本率（手工可复算）：
-#   佣金 0.0002×2 + 印花税 0.001 + 过户费 0.00001×2 + 滑点 2/10000×2
-ROUNDTRIP_DEFAULT: float = 0.00182
+#   佣金 0.0002×2 + 印花税 0.0005 + 过户费 0.00001×2 + 滑点 2/10000×2
+ROUNDTRIP_DEFAULT: float = 0.00132
 
 
 class _ConstModel:
@@ -94,10 +94,10 @@ def _default_cost() -> TradeCost:
 # ═══════════════════════════════════════════════
 
 def test_tradecost_roundtrip_rate_numeric() -> None:
-    """默认双边往返成本率数值对拍（0.00182，手工可复算）。"""
+    """默认双边往返成本率数值对拍（0.00132，手工可复算；印花税2023-08-28起减半）。"""
     cost = TradeCost(CommissionModel(), SlippageModel())
     assert cost.roundtrip_rate() == pytest.approx(ROUNDTRIP_DEFAULT)
-    assert cost.roundtrip_rate() == pytest.approx(0.00182)
+    assert cost.roundtrip_rate() == pytest.approx(0.00132)
 
 
 def test_tradecost_from_sim_broker_cfg_parity() -> None:
@@ -111,7 +111,7 @@ def test_tradecost_from_sim_broker_cfg_parity() -> None:
     assert cost.commission.buy_rate == pytest.approx(0.0002)
     assert cost.commission.sell_rate == pytest.approx(0.0002)
     assert cost.commission.min_commission == pytest.approx(5.0)
-    assert cost.commission.stamp_tax == pytest.approx(0.001)
+    assert cost.commission.stamp_tax == pytest.approx(0.0005)
     assert cost.commission.transfer_fee == pytest.approx(0.00001)
     assert cost.slippage.fixed_bps == pytest.approx(0.0002 * 10000.0)  # 2.0 基点
     assert cost.roundtrip_rate() == pytest.approx(ROUNDTRIP_DEFAULT)

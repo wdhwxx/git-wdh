@@ -37,14 +37,14 @@ class CommissionModel:
 
     交易成本标准:
       - 佣金：万2（0.0002），最低5元，买卖双向
-      - 印花税：千1（0.001），仅卖出
+      - 印花税：万5（0.0005），仅卖出；2023-08-28 起由千1减半（财政部/税务总局2023年第39号公告）
       - 过户费：万0.1（0.00001），买卖双向
     """
     type: CommissionType = CommissionType.RATIO
     buy_rate: float = 0.0002       # 买入佣金率：万2
     sell_rate: float = 0.0002      # 卖出佣金率：万2
     min_commission: float = 5.0    # 最低佣金：5元
-    stamp_tax: float = 0.001       # 印花税：千1（仅卖出）
+    stamp_tax: float = 0.0005      # 印花税：万5（0.05%，仅卖出；2023-08-28 起由千1减半）
     transfer_fee: float = 0.00001  # 过户费：万0.1（买卖双向）
 
     def calc_buy(self, amount: float) -> float:

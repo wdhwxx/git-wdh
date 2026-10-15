@@ -161,7 +161,7 @@ def build_backtest_config(
         buy_rate=sim_broker_cfg.get("commission_rate", 0.0002),
         sell_rate=sim_broker_cfg.get("commission_rate", 0.0002),
         min_commission=sim_broker_cfg.get("min_commission", 5.0),
-        stamp_tax=sim_broker_cfg.get("stamp_tax_rate", 0.001),
+        stamp_tax=sim_broker_cfg.get("stamp_tax_rate", 0.0005),
         transfer_fee=sim_broker_cfg.get("transfer_fee_rate", 0.00001),
     )
 

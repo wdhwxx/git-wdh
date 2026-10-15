@@ -96,7 +96,7 @@ def _make_trades() -> list[TradeRecord]:
             quantity=1000,
             price=11.0,
             timestamp=_BASE_TS + 2 * _DAY,
-            commission=16.11,  # 佣金 + 印花税 + 过户费混合 = 5.0 + 11.0 + 0.11
+            commission=10.61,  # 佣金 + 印花税 + 过户费混合 = 5.0 + 5.5 + 0.11（印花税万5）
             slippage=2.2,
             pnl=980.0,
             pnl_pct=0.098,
@@ -223,7 +223,7 @@ class TestBuildDashboardJson:
         assert cfg["benchmark"] == "000300.SH"
         assert cfg["fee"]["commission_rate"] == 0.0002
         assert cfg["fee"]["min_commission"] == 5.0
-        assert cfg["fee"]["stamp_tax_rate"] == 0.001
+        assert cfg["fee"]["stamp_tax_rate"] == 0.0005
         assert cfg["fee"]["transfer_fee_rate"] == 0.00001
         assert cfg["fee"]["slippage_bps"] == 2.0
 
@@ -266,7 +266,7 @@ class TestCostSplit:
     def test_sell_has_stamp_tax_and_transfer(self) -> None:
         data = build_dashboard_json(_make_result())
         sell = data["trades"][1]
-        assert sell["stamp_tax"] == round(1000 * 11.0 * 0.001, 2)  # 11 元
+        assert sell["stamp_tax"] == round(1000 * 11.0 * 0.0005, 2)  # 5.5 元
         assert sell["transfer_fee"] == round(1000 * 11.0 * 0.00001, 2)
 
     def test_split_total_matches_engine_commission(self) -> None:

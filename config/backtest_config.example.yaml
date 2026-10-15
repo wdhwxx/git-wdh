@@ -92,7 +92,7 @@ strategy:
 sim_broker:
   commission_rate: 0.0002            # 佣金费率（万2，买卖双向）
   min_commission: 5.0                 # 单笔最低佣金（元）
-  stamp_tax_rate: 0.001              # 印花税率（千1，仅卖出收取，A股标准）
+  stamp_tax_rate: 0.0005             # 印花税率：万5（0.05%），仅卖出收取；2023-08-28 起由千1减半（财政部/税务总局2023年第39号公告）
   transfer_fee_rate: 0.00001         # 过户费率（万0.1，买卖双向，沪市）
   slippage_mode: "ratio"              # 滑点模式：ratio=按比例 / fixed=按固定金额
   slippage_value: 0.0002              # 滑点数值（ratio模式为万2，与实盘冲击成本一致）

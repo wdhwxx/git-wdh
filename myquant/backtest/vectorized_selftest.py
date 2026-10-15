@@ -286,7 +286,7 @@ def run_vectorized_selftest() -> int:
         sell_notional = 1000.0 * open_px[7]
         expect_sell_comm = (
             max(sell_notional * 0.0002, 5.0)
-            + sell_notional * 0.001  # 印花税仅卖出
+            + sell_notional * 0.0005  # 印花税仅卖出（万5，2023-08-28起减半）
             + sell_notional * 0.00001  # 过户费
         )
         expect_sell_slip = open_px[7] * 2.0 / 10000.0 * 1000.0

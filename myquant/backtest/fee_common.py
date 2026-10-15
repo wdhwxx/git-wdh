@@ -19,7 +19,7 @@ backtest/fee_common.py - 全局唯一费用计算入口
 
 A股交易成本标准（交接文档7.1节）:
   - 佣金  : 万2（0.0002），最低 5 元，买卖双向
-  - 印花税: 千1（0.001），仅卖出
+  - 印花税: 万5（0.0005），仅卖出；2023-08-28 起由千1减半
   - 过户费: 万0.1（0.00001），买卖双向
   - 滑点  : 万2（0.0002），买卖双向
 
@@ -855,15 +855,15 @@ def _run_self_test() -> int:  # pragma: no cover — 仅 python -m 自测路径�
         f"明细和={sell_total}, calc_sell={model.calc_sell(100000.0)}",
     )
 
-    # 3. 印花税仅卖出（买入为 0，卖出 = 金额 × 千1）
+    # 3. 印花税仅卖出（买入为 0，卖出 = 金额 × 万5）
     check(
         "买入印花税为 0",
         buy_breakdown[1] == 0.0,
         f"买入印花税={buy_breakdown[1]}",
     )
     check(
-        "卖出印花税 = 金额 × 千1",
-        abs(sell_breakdown[1] - 100000.0 * 0.001) < _FEE_EPSILON,
+        "卖出印花税 = 金额 × 万5",
+        abs(sell_breakdown[1] - 100000.0 * 0.0005) < _FEE_EPSILON,
         f"卖出印花税={sell_breakdown[1]}",
     )
 

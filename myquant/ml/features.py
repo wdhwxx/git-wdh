@@ -129,7 +129,7 @@ class TradeCost:
 
     roundtrip_rate() 返回一笔「买入→卖出」往返的交易成本率（按成交金额比例）：
       佣金（买卖双向） + 印花税（仅卖出） + 过户费（买卖双向） + 滑点（买卖双向）
-      = 0.0002*2 + 0.001 + 0.00001*2 + 2/10000*2 = 0.00182（A股写实默认口径）
+      = 0.0002*2 + 0.0005 + 0.00001*2 + 2/10000*2 = 0.00132（A股写实默认口径；印花税2023-08-28起减半）
 
     最低佣金（min_commission，5 元）是撮合层的金额维度约束；标签层是收益率维度、
     无单笔金额信息，按费率近似（与 config_builder 同源参数，口径对拍测试锁定）。
@@ -176,7 +176,7 @@ class TradeCost:
                 buy_rate=cfg.get("commission_rate", 0.0002),
                 sell_rate=cfg.get("commission_rate", 0.0002),
                 min_commission=cfg.get("min_commission", 5.0),
-                stamp_tax=cfg.get("stamp_tax_rate", 0.001),
+                stamp_tax=cfg.get("stamp_tax_rate", 0.0005),
                 transfer_fee=cfg.get("transfer_fee_rate", 0.00001),
             ),
             slippage=SlippageModel(type="fixed_bps", fixed_bps=fixed_bps),

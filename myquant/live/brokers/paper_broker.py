@@ -31,7 +31,7 @@ paper_broker.py - 本地模拟券商（Paper Trading）
 
 交易成本标准（A股写实）:
   - 佣金：万2（0.0002），最低5元，买卖双向
-  - 印花税：千1（0.001），仅卖出
+  - 印花税：万5（0.0005），仅卖出；2023-08-28 起由千1减半
   - 过户费：万0.1（0.00001），买卖双向
   - 滑点：万2（0.0002），买卖双向
 
@@ -94,7 +94,7 @@ class PaperBroker(BaseBroker):
         initial_capital: float = 1_000_000.0,
         commission_rate: float = 0.0002,
         min_commission: float = 5.0,
-        stamp_tax_rate: float = 0.001,
+        stamp_tax_rate: float = 0.0005,
         transfer_fee_rate: float = 0.00001,
         slippage_mode: str = "ratio",
         slippage_value: float = 0.0002,
@@ -114,7 +114,7 @@ class PaperBroker(BaseBroker):
         min_commission : float
             单笔最低佣金（元），默认5元
         stamp_tax_rate : float
-            印花税率（千1=0.001），仅卖出
+            印花税率（万5=0.0005），仅卖出；2023-08-28 起由千1减半
         transfer_fee_rate : float
             过户费率（万0.1=0.00001），买卖双向
         slippage_mode : str

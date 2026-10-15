@@ -162,7 +162,7 @@ class QmtBroker(BaseBroker):
     min_commission : float
         单笔最低佣金（元），默认 5 元
     stamp_tax_rate : float
-        印花税率（千1=0.001），仅卖出
+        印花税率（万5=0.0005），仅卖出；2023-08-28 起由千1减半
     transfer_fee_rate : float
         过户费率（万0.1=0.00001），买卖双向
     slippage_mode : str
@@ -201,7 +201,7 @@ class QmtBroker(BaseBroker):
         initial_capital: float = 1_000_000.0,
         commission_rate: float = 0.00025,
         min_commission: float = 5.0,
-        stamp_tax_rate: float = 0.001,
+        stamp_tax_rate: float = 0.0005,
         transfer_fee_rate: float = 0.00001,
         slippage_mode: str = "ratio",
         slippage_value: float = 0.0002,

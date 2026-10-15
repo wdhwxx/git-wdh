@@ -157,7 +157,7 @@ class TestBacktestConfig:
         assert cfg.commission.buy_rate == 0.0002
         assert cfg.commission.sell_rate == 0.0002
         assert cfg.commission.min_commission == 5.0
-        assert cfg.commission.stamp_tax == 0.001
+        assert cfg.commission.stamp_tax == 0.0005
 
     def test_slippage_model_default(self):
         """默认滑点模型"""
@@ -195,19 +195,19 @@ class TestCommissionModel:
 
     def test_calc_sell_includes_stamp_tax(self):
         """卖出佣金含印花税+过户费"""
-        cm = CommissionModel(sell_rate=0.0002, stamp_tax=0.001,
+        cm = CommissionModel(sell_rate=0.0002, stamp_tax=0.0005,
                              min_commission=5.0, transfer_fee=0.00001)
-        # 100000元 * (0.0002佣金 + 0.001印花税 + 0.00001过户费) = 121元
+        # 100000元 * (0.0002佣金 + 0.0005印花税 + 0.00001过户费) = 71元
         commission = cm.calc_sell(100000.0)
-        assert abs(commission - 121.0) < 1e-6
+        assert abs(commission - 71.0) < 1e-6
 
     def test_calc_sell_min_commission(self):
         """卖出最低佣金（印花税+过户费另计）"""
-        cm = CommissionModel(sell_rate=0.0002, stamp_tax=0.001,
+        cm = CommissionModel(sell_rate=0.0002, stamp_tax=0.0005,
                              min_commission=5.0, transfer_fee=0.00001)
-        # 佣金: max(0.2, 5)=5 + 印花税1 + 过户费0.01 = 6.01
+        # 佣金: max(0.2, 5)=5 + 印花税0.5 + 过户费0.01 = 5.51
         commission = cm.calc_sell(1000.0)
-        assert abs(commission - 6.01) < 1e-6
+        assert abs(commission - 5.51) < 1e-6
 
     def test_transfer_fee(self):
         """过户费"""

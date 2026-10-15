@@ -5703,3 +5703,19 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 
 
 
+
+---
+
+## #412 · 2026-10-15 · 回测实盘一致性 T0-2：印花税率减半（千1→万5，2023-08-28 政策）
+
+**现状核实**：核查报告 v1.0 §五标注 SUSPECTED——代码忠实实现千1（0.001），但财政部/税务总局 2023 年第 39 号公告规定自 2023-08-28 起证券交易印花税减半至 0.5‰（万5=0.0005，卖方单边）；回测窗口 2024-01 起整段落在减半之后，全库 57 处印花税表述无一更新。已联网坐实（fgk.chinatax.gov.cn / szs.mof.gov.cn 官方公告）。
+
+**落地（税率单点收敛，机械改动）**：
+- **生产配置 5 处 yaml**：`config/backtest_config.yaml:3239`、`config/backtest_kunpeng.yaml:3234`、`config/live_config.yaml:47`、`config/backtest_config.example.yaml:95`、`config/live_config.example.yaml:57` 显式 `stamp_tax_rate: 0.001` → `0.0005`（原 yaml 显式覆盖代码默认值，必须连配置一起改）。
+- **生产代码默认值 16 处**：`models/backtest.py:47` CommissionModel.stamp_tax、`core/constants.py:142` STAMP_TAX_RATE、`backtest/config_builder.py:164`、`backtest/engine.py:192` manifest 兜底、`live/broker_factory.py:48`、`live/brokers/paper_broker.py:97`、`live/brokers/qmt_broker.py:204`、`ml/features.py:179`、两个 run_鲲鹏脚本 get 默认值、GUI 默认百分比 0.1%→0.05%（batch_backtest_tab.py:95/166、backtest_config_dialog.py:219/953）、vectorized_selftest.py:289、fee_common.py:866 自检断言。
+- **注释/docstring 同步**：所有"千1"表述改为"万5（0.05%），2023-08-28 起由千1减半，依据财政部/税务总局2023年第39号公告"；ml/features.py 往返成本算式 0.00182→0.00132。
+- **测试期望值同步**：8 个测试文件 13 处硬编码期望值按新税率重算（10万卖：佣金20+印花税50+过户1=71元；1000×11卖：印花税5.5元；往返成本率0.00132）。
+
+**验收**：16 个改动 py 文件 py_compile 全过；全量 `pytest tests/unit/` **4390 passed / 1 skipped / 0 failed**（168s）；证据日志留存 `docs/回测实盘一致性/evidence/T0-2_pytest_full.log`。
+
+**纪律遵守**：未新增文件（纯改既有文件默认值+注释+测试期望值，不涉及目录树变更）；未动佣金/过户费/滑点；按 path:line 复核每处；git 提交（commit message 引用 #412）。

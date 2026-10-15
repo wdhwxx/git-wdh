@@ -189,7 +189,7 @@ def _attach_realism_manifest(
         manifest.set_field("commission.buy_rate", float(cfg_dict.get("commission", {}).get("buy_rate", 0.0003)))
         manifest.set_field("commission.sell_rate", float(cfg_dict.get("commission", {}).get("sell_rate", 0.0003)))
         manifest.set_field("commission.min_commission", float(cfg_dict.get("commission", {}).get("min_commission", 5.0)))
-        manifest.set_field("commission.stamp_tax", float(cfg_dict.get("commission", {}).get("stamp_tax", 0.001)))
+        manifest.set_field("commission.stamp_tax", float(cfg_dict.get("commission", {}).get("stamp_tax", 0.0005)))
         manifest.set_field("commission.transfer_fee", float(cfg_dict.get("commission", {}).get("transfer_fee", 0.00002)))
         manifest.set_field("fee_base_includes_slippage", False)
         manifest.set_field("fee_dilution_basis", "per_order")

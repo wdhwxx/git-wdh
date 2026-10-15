@@ -102,7 +102,7 @@ def load_commission_slippage(cfg: Dict[str, Any]) -> Tuple[CommissionModel, Slip
         buy_rate=float(sb.get("commission_rate", 0.0002)),
         sell_rate=float(sb.get("commission_rate", 0.0002)),
         min_commission=float(sb.get("min_commission", 5.0)),
-        stamp_tax=float(sb.get("stamp_tax_rate", 0.001)),
+        stamp_tax=float(sb.get("stamp_tax_rate", 0.0005)),
         transfer_fee=float(sb.get("transfer_fee_rate", 1.0e-05)),
     )
     value = float(sb.get("slippage_value", 0.0002))
