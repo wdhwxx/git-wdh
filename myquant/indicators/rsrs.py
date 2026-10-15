@@ -581,7 +581,7 @@ def regime_from_series(
 # 自测 Demo
 # ─────────────────────────────────────────────
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover — 仅 python -m 自测路径，不计入门禁覆盖
     print("=" * 60)
     print("  rsrs.py — 闭式OLS纯向量化 自测 Demo")
     print("=" * 60)
