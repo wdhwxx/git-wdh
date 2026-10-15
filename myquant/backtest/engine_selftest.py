@@ -168,6 +168,8 @@ if __name__ == "__main__":
             slippage_model=config.slippage,
             price_limit_pct=float(config.price_limit_pct),
             enforce_limit=bool(config.enforce_limit),
+            enable_t1=bool(config.enable_t1),
+            lot_size=int(config.lot_size),  # T3-3：显式传整手约束，不再落默认 0（死代码）
             is_suspended=None,
         )
 
