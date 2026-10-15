@@ -1329,7 +1329,9 @@ Pythonwdhmm/
 
     │   │                             # 【回写#135】启动时对存量持仓做一次 T+1 解冻初始化（start() 调 broker_manager.settle_t1_all()，释放重启前残留内存冻结）
 
-    │   ├── data_feed.py              # 实时行情接入订阅重连分发；流式清洗(单条校验+跳变检测) + attach_event_bus事件总线联动 + 脏数据钩子；✨【回写#83】S2 live复权口径统一：_fetch_from_akshare 改拉不复权raw（adjust=""，与腾讯快照/本地历史同口径）/新增 adjust_out 参数（"qfq"按最新因子现算÷因子）+_stream_clean 除权跳变因子豁免（_live_jump_change_with_factor）+_clean_bars 注入 factor_lookup（config副本不污染共享配置）；✨【回写#139】_make_bar 的 timestamp 改 bar 周期归属时间 bar_date_to_epoch(formatted_date)（KP-P3-02，弃用墙钟 time.time()，避免同根bar因墙钟时刻不同被误判不同bar）
+    │   ├── data_feed.py              # 实时行情接入订阅重连分发；流式清洗(单条校验+跳变检测) + attach_event_bus事件总线联动 + 脏数据钩子；✨【回写#83】S2 live复权口径统一：_fetch_from_akshare 改拉不复权raw（adjust=""，与腾讯快照/本地历史同口径）/新增 adjust_out 参数（"qfq"按最新因子现算÷因子）+_stream_clean 除权跳变因子豁免（_live_jump_change_with_factor）+_clean_bars 注入 factor_lookup（config副本不污染共享配置）；✨【回写#139】_make_bar 的 timestamp 改 bar 周期归属时间 bar_date_to_epoch(formatted_date)（KP-P3-02，弃用墙钟 time.time()，避免同根bar因墙钟时刻不同被误判不同bar）；✨【回写#421】行情源层拆出至 realtime_sources.py（MockRealtimeSource/RealtimeBarAggregator/RealtimeQuoteFetcher + 行情代码工具 + 相关常量），本文件保留 MarketDataFeed/_RealtimeEventBridge/复权口径（_make_bar/_factor_on_or_before/_live_jump_change_with_factor），顶部 re-import 保持调用不变
+
+    │   ├── realtime_sources.py       # ✨【回写#421】实时行情源层（原 data_feed.py 拆出，拆包瘦身 PR1）：MockRealtimeSource（确定性模拟源）/RealtimeBarAggregator（快照→周期bar聚合）/RealtimeQuoteFetcher（腾讯主源+akshare备源+mock 自动降级）+ 行情代码工具（_infer_market/_to_standard_symbol/_to_tencent_code/_period_from_frequency/_quote_to_bar）+ 常量（QUOTE_FIELDS/FREQUENCY_PERIOD_MAP/FUTURE_TOLERANCE_SEC/_TENCENT_IDX_*）；只被 data_feed.py 单向依赖（无反向 import 环）；业务逻辑归 myquant、脚本薄入口纪律不涉及
 
     │   ├── portfolio.py              # 实时持仓、市值、可用冻结资金；✨【回写#141】账实对账 ReconciliationDiff + reconcile_vs_broker（KP-P4-01：本地 vs 券商只读 diff，现金容差0.01+持仓数量差）+ sync_from_broker 改先 diff 后重建，超阈值 critical 告警+__reconciliation_diff__ 回调，禁静默 clear 覆盖；✨【回写#149】增 diff_vs_broker 只读差异入口（KP-P3-08 风控基准券商权威账本）；✨【回写#186】KP-M04(T-30)：transfer_cash 高危写操作准入守卫（未审批拒绝，默认仅审计留痕）；✨【回写#211】A-7 对账容差改读锁定配置(=0)+差异 CRITICAL 告警含明细+事件驱动核对闭环；✨【回写#221】B-1 对账扩展——事件回调注入 AccountReconciler 时异步投递实时核对（未注入走 A-7 同步兜底保既有零破坏）；set_account_reconciler/account_reconciler 注入点；PnL 防脏门 record_pnl_snapshot（冻结返 None+pnl_block 审计，一致返快照）
 
@@ -5761,3 +5763,20 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 **验收**：py_compile 全过；`test_signal_idempotency + test_live_warmup + test_engine_events + test_live_safety_gate` **47 passed / 0 failed**；独立单测三场景全过（① 近期 id 保留/10 天前过期过滤/脏数据跳过；② 旧快照无字段不覆盖；③ 空列表正确清空）。
 
 **纪律遵守**：未新增文件（纯改 engine.py）；未改去重判等逻辑、未改 signal_id 生成规则；复用既有 StateStore.save/load_latest 通道；按 path:line 复核。
+
+
+---
+
+## #421 · 2026-10-15 · 拆包瘦身 PR1：live/data_feed.py 行情源层迁出 realtime_sources.py
+
+**背景**：R-24 行数冻结 / R-26 结构冻结（三维）/ C-5 语句棘轮三套门禁叠压下，`live/data_feed.py`（2151 行）与 `live/engine.py`（3236 行）处于零余量冻结态。用户拍板"写纪律文档只是记账，拆包才是治本"；本回写为拆包第一刀（PR1），PR2（engine.py 工厂层迁出）待 PR1 验证后另行开展。
+
+**落地**：
+a. **新增 `myquant/live/realtime_sources.py`**（蓝图目录树 live/ 段已同步登记）：行情源层三件套 `MockRealtimeSource` / `RealtimeBarAggregator` / `RealtimeQuoteFetcher` + 行情代码工具（`_infer_market`/`_to_standard_symbol`/`_to_tencent_code`/`_period_from_frequency`/`_quote_to_bar`）+ 常量（`QUOTE_FIELDS`/`FREQUENCY_PERIOD_MAP`/`FUTURE_TOLERANCE_SEC`/`_TENCENT_IDX_*`）；只依赖 stdlib + `myquant.core.logger`/`date_utils`（延迟导入），**无反向 import 环**。
+b. **`data_feed.py` 保留**：`MarketDataFeed` / `_RealtimeEventBridge` + 复权口径（`_make_bar`/`_factor_on_or_before`/`_live_jump_change_with_factor`）；顶部 `from myquant.live.realtime_sources import ...` re-import **保持调用不变**（范式同回写#289 broker_factory 迁出）。
+c. **零行为修改**：纯搬移 + import 调整，不触碰任何执行逻辑、防未来注释原样保留。
+d. **门禁基线实测同步（只减不增方向）**：`data_feed.py` 行数/语句/符号下降 → R-24 lines、R-26 三维、C-5 语句冻结值按实测下调；R-26 包级聚合（live 包）重标定。未抬任何基线。
+
+**验收**：py_compile 全过；全量 pytest 通过；覆盖率门禁重跑通过；ruff 通过；architecture-gate 本地复现通过；R-24/R-26/C-5 基线下调后余量恢复。
+
+**纪律遵守**：先更新蓝图目录树再创建文件（治理规则 1.2/2.2）；新增文件已登记；无蓝图外文件；git 提交（commit message 引用 #421）。

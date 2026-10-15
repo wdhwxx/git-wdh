@@ -282,7 +282,7 @@ OVERSIZE_LINE_BASELINE: dict[str, int] = {
     "monitoring/alerting.py": 3688, "live/engine.py": 3236, "core/event_bus.py": 2379,  # engine 2858→2869（#275 M0-09 出口强制挂载 +11 行治理注入）；alerting 3675→3681→3688（#264 工厂注册代码；P0-2 ruff --fix 导入排序微增）；event_bus 2383→2379（#261 事件池注入化）；live/engine 3063→3065→3109→3111（#355 P1-07③ 空值 fail-closed；#358 P1-11 实盘出口泄漏审计报告；P0-2 ruff --fix 微增）；3111→3178（#413 T2-1 on_init 时序重排+warmup replay 参数；#414 T2-2 信号 id 持久化恢复）；3178→3228（#415 T1-2 启动持仓断言 fail-closed）；3228→3231（#416 T3-1 复权口径 hfq 显式传参）；3231→3236（#417 T1-2 仅 live 模式 fail-closed，paper 告警放行）
     "live/scheduler.py": 2419, "monitoring/metrics_collector.py": 2276,  # 2382→2409（#265 阶段二 7 处装配点改经注册表，代码行增长）；metrics 2268→2273→2276（#264 工厂注册代码；P0-2 ruff --fix 微增）
     "monitoring/action_engine.py": 2307, "data_access/manager.py": 2204,  # 2170→2186→2200→2204（#281 M1A-01/06 每股收益时点日基收敛+失败可观测化；M1A-10 available_time 增量派生+存量补列；P0-2 ruff --fix 微增）
-    "live/brokers/qmt_broker.py": 2170, "live/data_feed.py": 2151,  # 2147→2151（#416 T3-1 _maybe_adjust_bar 加 hfq 分支）
+    "live/brokers/qmt_broker.py": 2170, "live/data_feed.py": 1605,  # 2151→1605（#421 拆包瘦身：行情源层迁出 realtime_sources.py）
     "gui/backtest_config_dialog.py": 1871, "risk/risk_manager.py": 2020,
     "web/dashboard.py": 1760, "ml/training_pipeline.py": 1672,  # 1651→1672（#358 P1-11 训练出口泄漏审计报告薄接线 +21 行功能必需）
     "monitoring/dynamic_baseline.py": 1546,  # 1552→1546（#260 去全局采集器兜底）
@@ -328,7 +328,7 @@ STRUCTURE_BASELINE: dict[str, dict[str, int]] = {
     "data_access/manager.py": {"lines": 2204, "symbols": 52, "fan_out": 13},
     "gui/backtest_config_dialog.py": {"lines": 1870, "symbols": 45, "fan_out": 13},
     "live/brokers/qmt_broker.py": {"lines": 2170, "symbols": 79, "fan_out": 8},
-    "live/data_feed.py": {"lines": 2151, "symbols": 80, "fan_out": 13},
+    "live/data_feed.py": {"lines": 1605, "symbols": 55, "fan_out": 11},  # 2151/80/13→1605/55/11（#421 拆包瘦身实测同步）
     "live/engine.py": {"lines": 3236, "symbols": 77, "fan_out": 17},
     "live/scheduler.py": {"lines": 2419, "symbols": 84, "fan_out": 10},
     "ml/training_pipeline.py": {"lines": 1672, "symbols": 54, "fan_out": 10},
@@ -359,7 +359,7 @@ PACKAGE_STRUCTURE_BASELINE: dict[str, dict[str, int]] = {
     "gui": {"lines": 6603, "symbols": 242, "fan_out": 28},
     "indicators": {"lines": 5884, "symbols": 172, "fan_out": 17},
     "leakage_gate": {"lines": 4466, "symbols": 149, "fan_out": 17},
-    "live": {"lines": 17309, "symbols": 652, "fan_out": 35},
+    "live": {"lines": 17361, "symbols": 652, "fan_out": 35},  # 17309→17361（#421 拆包后重标定：新增 realtime_sources.py 头部开销）
     "ml": {"lines": 5672, "symbols": 208, "fan_out": 27},
     "models": {"lines": 1745, "symbols": 139, "fan_out": 6},
     "monitoring": {"lines": 23932, "symbols": 880, "fan_out": 31},

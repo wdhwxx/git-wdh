@@ -244,7 +244,7 @@ FILE_STMT_CEILING: dict[str, int] = {
     "live/brokers/paper_broker.py": 347,
     "live/brokers/ptrade_broker.py": 58,
     "live/brokers/qmt_broker.py": 981,
-    "live/data_feed.py": 885,  # 882→885（2026-10-15 实测同步：历史功能改造增长未同步 C-5）
+    "live/data_feed.py": 634,  # 885→634（#421 拆包瘦身：行情源层迁出 realtime_sources.py，语句实测同步）
     "live/emergency_liquidation.py": 170,
     "live/engine.py": 1250,  # 1197→1250（+53，#413-#417 T2-1/T2-2/T1-2/T3-1 功能改造，与 R-24 行数 3111→3236 同步，§5.3）
     "live/kill_switch_signal.py": 147,
