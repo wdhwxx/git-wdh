@@ -8,7 +8,7 @@
   - _histogram_data：直方图分箱 / 空输入
   - generate_html：写出 HTML 文件、返回路径、含标题
   - generate_full_report：空池抛 ValueError
-  - generate_pdf：reportlab 可用时执行（缺失则 importorskip 跳过）
+  - generate_pdf：fpdf2 可用时执行（运行依赖恒可用；#387 由 reportlab 过时断言修正）
 """
 from __future__ import annotations
 
@@ -98,8 +98,11 @@ class TestGenerateFullReport:
 
 
 class TestGeneratePdf:
-    def test_pdf_generated_when_reportlab_available(self, tmp_path: Path) -> None:
-        pytest.importorskip("reportlab")
+    def test_pdf_generated_when_fpdf2_available(self, tmp_path: Path) -> None:
+        # #387 修正（过时断言）：generate_pdf 实现已迁移 fpdf2（运行依赖，见
+        # pyproject.toml dependencies），旧 importorskip("reportlab") 使 CI 恒 skip
+        # 且名实脱节（reportlab 不在任何依赖中）。断言对齐实现后 CI 真实执行。
+        pytest.importorskip("fpdf")  # fpdf2 发行包，模块导入名为 fpdf
         gen = CandidatePoolReportGenerator()
         out = tmp_path / "pool.pdf"
         gen.generate_pdf(_pool(), _meta(), out)

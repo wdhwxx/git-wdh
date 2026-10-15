@@ -5523,6 +5523,22 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 
 **纪律遵守**：改基线独立 commit + 理由；核验以实际代码判据为准（发现报告名单与实现脱节即修正，不盲从）；一次一项；git 提交（commit message 引用 #386）。
 
+---
+
+## #387 · 2026-10-15 · P2-5 reportlab 过时断言修正（test_candidate_report）
+
+**核验发现（掩盖性 skip 第 5 处）**：`tests/unit/test_candidate_report.py:102` 的 `pytest.importorskip("reportlab")` 是**过时断言**——`generate_pdf` 实现早已迁移 **fpdf2**（docstring"fpdf2 离线渲染"，fpdf2 是 pyproject 运行依赖），reportlab **不在任何依赖中**。CI 恒 skip（reportlab 缺失），本地却真跑（本地装过 reportlab）——测试名实脱节，CI 上 PDF 路径从未被执行。另查明：fpdf2 发行包模块导入名为 **`fpdf`**（非 fpdf2），importorskip 需用 `fpdf`。
+
+**落地**：`importorskip("reportlab")` → `importorskip("fpdf")`，测试名同步 `test_pdf_generated_when_fpdf2_available`（含 #387 修正注释）。本地补装 fpdf2（运行依赖与本地环境同步）。
+
+**验收**：本地 test_candidate_report **6 passed（PDF 真跑，0 skip）**；核心集（后台，预期 4216 passed/1 skipped，仅 R-05）；**CI 预期 skipped 5→4**（reportlab skip 消除，fpdf 为运行依赖必装）→ 下个 run 确认后 C-7 预算 5→4 收紧（§5.3 独立 commit #388）。
+
+**纪律遵守**：一次一项；核验以实现事实为准（发现过时断言即修，不按"固定 reportlab"的旧选项——那会给废弃依赖装环境）；git 提交（commit message 引用 #387）。
+
+
+
+
+
 
 
 
