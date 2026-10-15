@@ -376,7 +376,9 @@ SOURCE_ASSERT_ONLY_MAX: int = 33
 # 历史值：4（v1.2 建议初值）→ 10（#379b2 2026-10-15，CI run 38666307281 实测 8 留 2 余量）
 #        → 5（#385 2026-10-15 收紧，CI run 38673852582 实测 5：R-05 白名单 1 + reportlab 依赖缺失 1
 #            + live_config 生产配置未入库 3，全部确定性设计性 skip 无波动；本地 1）
-SKIP_BUDGET: int = 5
+#        → 4（#404 2026-10-15 收紧，CI run 38692592422 实测 4：reportlab 过时断言已消除（#387/#391），
+#            fpdf 为运行依赖必装；剩 R-05 白名单 1 + live_config 生产配置未入库 3，全确定性设计性）
+SKIP_BUDGET: int = 4
 
 
 def tier_of(rel_path: str) -> str | None:
