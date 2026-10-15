@@ -189,18 +189,27 @@ def build_backtest_config(
     # P0-03 卡本体收尾（#347）：从 YAML sim_broker 段读新键给显式字段赋值，
     # 替换死键 enforce_limit_up_down（代码读 enforce_limit，旧键永不生效）。
     # 此前恒用类默认（enforce_limit=False/price_limit_pct=0.10）→ 配置→行为断链。
+    # T3-2：capital_base 统一注入——策略仓位计算基准必须与账户资金一致。
+    # 实盘 engine.py:2908 已 setdefault("capital_base", initial_capital)；
+    # 回测此前只透传 yaml params、不含该键 → 落策略类默认 100 万。
+    # 此处显式注入回测 initial_capital，保证回测/实盘两侧 capital_base==账户资金。
+    # 用户若要两侧数值一致，需把 live_config.yaml 的 initial_capital 也改成同值。
+    _strategy_params = dict(strategy_cfg.get("params", {}) or {})
+    _initial_capital = float(args.capital or bt_cfg.get("initial_capital", 1_000_000))
+    _strategy_params.setdefault("capital_base", _initial_capital)
+
     config = BacktestConfig(
         strategy_name=args.strategy or strategy_cfg.get("name", "default"),
         symbols=symbols,
         start_date=args.start or bt_cfg.get("start_date", ""),
         end_date=args.end or bt_cfg.get("end_date", ""),
         frequency=bt_cfg.get("time_frame", "1d"),
-        initial_capital=args.capital or bt_cfg.get("initial_capital", 1_000_000),
+        initial_capital=_initial_capital,
         commission=commission,
         slippage=slippage,
         benchmark=bt_cfg.get("benchmark", "000300.SH"),
         risk_free_rate=metrics_cfg.get("risk_free_rate", 0.02),
-        params=strategy_cfg.get("params", {}),
+        params=_strategy_params,
         # P0-03 约束真可控：sim_broker 段新键（enforce_limit 替换旧键 enforce_limit_up_down）
         price_limit_pct=float(sim_broker_cfg.get("price_limit_pct", 0.10)),
         enforce_limit=bool(sim_broker_cfg.get("enforce_limit", False)),
