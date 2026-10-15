@@ -5497,6 +5497,20 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 
 **纪律遵守**：一次一项；只改点名范围（tests/unit 6 文件）；按实现行为定性的证据链完整（读实现确认，非猜测）；设计性保留登记、掩盖性改红；v1.2 报告追加 §12 实施进度台账；git 提交（commit message 引用 #384）。
 
+---
+
+## #385 · 2026-10-15 · P2-3 C-7 跳过预算收紧（10→5，§5.3 独立 commit）
+
+**现状核实**：P2-1/P2-2 后运行时跳过数大幅下降。**权威口径 CI 实测（run 38673852582 junit）skipped=5**，明细全部确定性设计性：R-05 白名单 1（test_architecture:630）+ reportlab 依赖缺失 1（test_candidate_report:102，P2-5 待办）+ live_config 生产配置未入库 3（test_config_live_check×2 + test_incident_response，实盘配置 .gitignore 安全设计，CI 无文件即跳过）。本地实测 skipped=1（仅 R-05；本地有 reportlab 与 live_config.yaml）。
+
+**落地（§5.3 改基线独立 commit + 理由）**：`myquant/leakage_gate/coverage_gate.py` SKIP_BUDGET **10→5**（CI 实测 5，5 条均为确定性无波动 skip，收紧无红风险；历史值注释登记：4→10（#379b2）→5（#385））。test_coverage_gate.py C-7 测试无需改（red 用例 skipped=12 > 5 仍红、pass 用例 2 ≤ 5 仍过）。
+
+**验收**：本地判据预演全过（skipped 1 ≤ 5）；test_coverage_gate 41 passed；ruff 0 违规。CI 复验（下个 run，预期 5 ≤ 5 绿）。后续 P2-5 处理 reportlab 后可再收紧至 4。
+
+**纪律遵守**：改基线独立 commit + 理由；收紧值以 CI 权威口径为据（用户建议 2~3 基于本地 1 会令 CI 立即红，已按 §5.4 契约纠正）；只减不增棘轮；一次一项；git 提交（commit message 引用 #385）。
+
+
+
 
 
 

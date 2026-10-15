@@ -369,7 +369,10 @@ T2_FILES: frozenset[str] = frozenset({
 # C-6 仅源码断言守护的模块数上限（只减不增；替代不成立的 --cov-omit 方案，保持缺口可见）
 SOURCE_ASSERT_ONLY_MAX: int = 4
 # C-7 运行时跳过预算（pytest.skip 实际触发数，只减不增；防 fail-open 回潮）
-SKIP_BUDGET: int = 10
+# 历史值：4（v1.2 建议初值）→ 10（#379b2 2026-10-15，CI run 38666307281 实测 8 留 2 余量）
+#        → 5（#385 2026-10-15 收紧，CI run 38673852582 实测 5：R-05 白名单 1 + reportlab 依赖缺失 1
+#            + live_config 生产配置未入库 3，全部确定性设计性 skip 无波动；本地 1）
+SKIP_BUDGET: int = 5
 
 
 def tier_of(rel_path: str) -> str | None:
