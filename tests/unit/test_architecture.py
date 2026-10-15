@@ -351,7 +351,7 @@ PACKAGE_STRUCTURE_BASELINE: dict[str, dict[str, int]] = {
     "acceptance": {"lines": 5618, "symbols": 254, "fan_out": 37},  # 5612→5614（#422 live_safety_gate 验收桩 +2 行功能必需）；5614→5618（#422 ruff --fix 展开 import 块 +4 行）
     "allocation": {"lines": 2083, "symbols": 56, "fan_out": 9},
     "api": {"lines": 3775, "symbols": 193, "fan_out": 26},
-    "backtest": {"lines": 20691, "symbols": 560, "fan_out": 37},  # 20689→20691（#420 T3-3 风控参数对齐 + lot_size 死代码 +2 行功能必需）
+    "backtest": {"lines": 20691, "symbols": 560, "fan_out": 37},  # 20689→20691（#424 T3-3 风控参数对齐 + lot_size 死代码 +2 行功能必需；原误标 #420，回写#424 撞号修复重新编号）
     "core": {"lines": 12975, "symbols": 600, "fan_out": 40},
     "data_access": {"lines": 17223, "symbols": 605, "fan_out": 34},
     "database": {"lines": 3608, "symbols": 113, "fan_out": 17},
