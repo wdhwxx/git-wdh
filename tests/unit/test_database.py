@@ -34,6 +34,8 @@ import tempfile
 
 import pytest
 
+from myquant.core.event_bus import PipelineCompleteEvent
+from myquant.data_access.cleaner.pipeline import PipelineResult
 from myquant.database import (
     TABLE_NAMES,
     DatabaseConnection,
@@ -407,12 +409,9 @@ class TestDataQueries:
             {"symbol": "000001.SZ", "report_date": "2024Q1", "revenue": 1000000.0,
              "net_profit": 100000.0, "eps": 0.5, "pe": 20.0, "pb": 1.5},
         ]
-        try:
-            dq.bulk_insert_financial_data(rows)
-            count = get_table_count(conn, "financial_data")
-            assert count >= 1
-        except Exception:
-            pytest.skip("financial_data 表结构与测试数据不匹配")
+        dq.bulk_insert_financial_data(rows)
+        count = get_table_count(conn, "financial_data")
+        assert count >= 1
 
     def test_bulk_insert_factor_data(self, dq, conn):
         """批量插入因子数据"""
@@ -420,12 +419,9 @@ class TestDataQueries:
             {"symbol": "000001.SZ", "trade_date": "2024-01-02",
              "factor_name": "momentum", "factor_value": 0.15},
         ]
-        try:
-            dq.bulk_insert_factor_data(rows)
-            count = get_table_count(conn, "factor_data")
-            assert count >= 1
-        except Exception:
-            pytest.skip("factor_data 表结构与测试数据不匹配")
+        dq.bulk_insert_factor_data(rows)
+        count = get_table_count(conn, "factor_data")
+        assert count >= 1
 
     def test_save_and_load_strategy_state(self, dq):
         """保存和加载策略状态（实盘断点续传）"""
@@ -443,39 +439,27 @@ class TestDataQueries:
 
     def test_register_data_source(self, dq, conn):
         """注册数据源"""
-        try:
-            dq.register_data_source("akshare", "A股行情", "enabled")
-            count = get_table_count(conn, "data_source")
-            assert count >= 1
-        except Exception:
-            pytest.skip("data_source 表结构与测试数据不匹配")
+        dq.register_data_source("akshare", "A股行情", "enabled")
+        count = get_table_count(conn, "data_source")
+        assert count >= 1
 
     def test_get_enabled_data_sources(self, dq):
         """获取启用的数据源"""
-        try:
-            dq.register_data_source("akshare", "A股行情", "enabled")
-            sources = dq.get_enabled_data_sources()
-            assert sources is not None
-        except Exception:
-            pytest.skip("data_source 表结构与测试数据不匹配")
+        dq.register_data_source("akshare", "A股行情", "enabled")
+        sources = dq.get_enabled_data_sources()
+        assert sources is not None
 
     def test_update_sync_status(self, dq, conn):
         """更新同步状态（实盘增量同步）"""
-        try:
-            dq.update_sync_status("000001.SZ", "daily", "2024-01-02", "completed")
-            count = get_table_count(conn, "sync_status")
-            assert count >= 1
-        except Exception:
-            pytest.skip("sync_status 表结构与测试数据不匹配")
+        dq.update_sync_status("000001.SZ", "daily", "2024-01-02", "completed")
+        count = get_table_count(conn, "sync_status")
+        assert count >= 1
 
     def test_get_sync_status(self, dq):
         """获取同步状态"""
-        try:
-            dq.update_sync_status("000001.SZ", "daily", "2024-01-02", "completed")
-            status = dq.get_sync_status("000001.SZ", "daily")
-            assert status is not None
-        except Exception:
-            pytest.skip("sync_status 表结构与测试数据不匹配")
+        dq.update_sync_status("000001.SZ", "daily", "2024-01-02", "completed")
+        status = dq.get_sync_status("000001.SZ", "daily")
+        assert status is not None
 
     def test_get_pending_symbols(self, dq):
         """获取待同步标的"""
@@ -486,13 +470,10 @@ class TestDataQueries:
         """批量查询多标的行情"""
         _insert_market_row(conn, symbol="000001.SZ", trade_date="2024-01-02")
         _insert_market_row(conn, symbol="600000.SH", trade_date="2024-01-02")
-        try:
-            result = dq.get_market_data_batch(
-                ["000001.SZ", "600000.SH"], "2024-01-01", "2024-01-31"
-            )
-            assert result is not None
-        except Exception:
-            pytest.skip("get_market_data_batch 接口签名不匹配")
+        result = dq.get_market_data_batch(
+            ["000001.SZ", "600000.SH"], "2024-01-01", "2024-01-31"
+        )
+        assert result is not None
 
 
 # ═══════════════════════════════════════════
@@ -592,27 +573,29 @@ class TestCleanDataQueries:
 
     def test_insert_clean_run_from_pipeline_result(self, cdq):
         """从清洗管道结果插入记录"""
-        try:
-            run_id = cdq.insert_clean_run_from_pipeline_result(
-                data_type="market_data",
-                symbol="000001.SZ",
-                source="akshare",
-                pipeline_result={"total_rows": 100, "dirty_rows": [], "clean_rows": 100},
-            )
-            assert run_id is not None
-        except Exception:
-            pytest.skip("insert_clean_run_from_pipeline_result 接口签名不匹配")
+        result = PipelineResult(
+            status="completed",
+            data_type="market_data",
+            symbol="000001.SZ",
+            cleaned=[{"ts": "2024-01-02 09:30:00", "open": 10.0}],
+            bad=[],
+            stats={"total": 100, "valid": 100, "bad": 0},
+        )
+        run_id = cdq.insert_clean_run_from_pipeline_result(result, source="akshare")
+        assert run_id is not None
 
     def test_insert_clean_run_from_pipeline_event(self, cdq):
         """从清洗管道事件插入记录"""
-        try:
-            run_id = cdq.insert_clean_run_from_pipeline_event(
-                event={"data_type": "market_data", "symbol": "000001.SZ",
-                       "source": "akshare", "status": "completed"}
-            )
-            assert run_id is not None
-        except Exception:
-            pytest.skip("insert_clean_run_from_pipeline_event 接口签名不匹配")
+        event = PipelineCompleteEvent(
+            symbol="000001.SZ",
+            data_type="market_data",
+            status="completed",
+            cleaned_count=100,
+            bad_count=0,
+            total_count=100,
+        )
+        run_id = cdq.insert_clean_run_from_pipeline_event(event)
+        assert run_id is not None
 
 
 # ═══════════════════════════════════════════

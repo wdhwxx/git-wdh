@@ -5461,6 +5461,24 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 
 **纪律遵守**：改基线独立 commit + 理由（本记录同 commit）；承认现状 + 只减不增棘轮（放宽值登记理由，后续只减不增）；一次一项；git 提交（commit message 引用 #379b2）。
 
+---
+
+## #383 · 2026-10-15 · P2-1 fail-open 收口：test_database.py 掩盖性 skip 清零（v1.2 §6.3）
+
+**现状核实**：`tests/unit/test_database.py` 存在 **9 处** `try: ... except Exception: pytest.skip(...)` 掩盖性跳过（v1.2 报告记为 6 处，仓库后续新增测试使实际达 9 处），把任何真实回归（表结构漂移、接口签名变化、SQL 错误）静默转为"跳过"——门禁看到绿、缺陷已进主干（G-4 最高风险模式）。
+
+**落地（fail-open → fail-closed）**：
+- **9 处** `except Exception: pytest.skip(...)` 全部去除，改为直接调用 + 硬断言——异常自然传播**报红**。
+- **暴露并修复 1 处被掩盖的真实契约漂移**：`test_insert_clean_run_from_pipeline_result` 以旧关键字签名（`data_type=.../symbol=.../pipeline_result=...`）调用，而实现 `CleanDataQueries.insert_clean_run_from_pipeline_result(result, *, source=..., run_id=...)` 已演进为接收 **PipelineResult 对象**（零拷贝对接 cleaner）——改造后该测试立即报红（TypeError: unexpected keyword argument 'data_type'）。按实现真实契约修正：构造 `myquant.data_access.cleaner.pipeline.PipelineResult` 对象传入。
+- 同类升级：`test_insert_clean_run_from_pipeline_event` 由 dict 参数改为真实 **PipelineCompleteEvent** 对象（myquant.core.event_bus）。
+- 其余 8 处原被 skip 的测试（financial/factor/data_source/sync_status/market_data_batch 等）去包装后硬断言**全部通过**——证明原跳过系环境误判，现转为真实守护。
+
+**验收**：`test_database.py` 68 passed（0 skipped）；门禁核心集 **4191 passed / 2 skipped**（原 4190/3，修复项从 skip 转 pass）；ruff 0 违规；C-7 跳过预算进一步宽松。CI 复验（下个 run）。
+
+**纪律遵守**：一次一项；只改点名范围（test_database.py）；契约漂移按 fail-closed 报红并修测试对齐实现；蓝图回写 #383；git 提交（commit message 引用 #383）。
+
+
+
 
 
 
