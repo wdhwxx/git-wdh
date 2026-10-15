@@ -144,7 +144,7 @@ FILE_STMT_CEILING: dict[str, int] = {
     "backtest/monte_carlo.py": 112,
     "backtest/order_matcher.py": 401,
     "backtest/param_optimizer.py": 448,
-    "backtest/pdf_report.py": 333,
+    "backtest/pdf_report.py": 345,  # #390: 跨平台字体候选+DejaVu 兜底 +12 语句（333→345，§5.3）
     "backtest/recorder.py": 124,
     "backtest/report.py": 179,
     "backtest/survivorship_bias.py": 167,
