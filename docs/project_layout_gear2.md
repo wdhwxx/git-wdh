@@ -5664,6 +5664,14 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 
 **P4 纪律遵守**：一次一项；改基线独立 commit + 理由（#407）；C-8 告警非阻断避免首跑即红；git 提交（commit message 均引用编号）。
 
+## #410 · 2026-10-15 · CI 基建：security-scan 浅克隆致 gitleaks 扫描范围解析失败（KP-M03 收口）
+
+**CI 拦截（run 38695153415 唯一红灯，job id 116291896812）**：gitleaks step 失败——push 事件扫描 `before^..after` 提交范围（`e35caee^..40c676f`），checkout 默认 `fetch-depth:1` 浅克隆缺 before 的父提交 → `fatal: ambiguous argument ... unknown revision` → exit 1。日志明示 "no leaks found in partial scan"、扫描 0 bytes，**非真实密钥泄露**（根因已从 job logs 拉取确认）。
+
+**落地（仅 CI 检出配置，无代码/测试/基线改动）**：security-scan job 的 `actions/checkout@v4` 增 `fetch-depth: 0` 全量克隆，保证 gitleaks 可解析完整提交范围。
+
+**验收**：CI run 38696655979 **全绿**（security-scan success，pip-audit "No known vulnerabilities found" + gitleaks 正常扫描）。该 run 为 P2-4/P2-5/P2-6/P3 前 5 项/P4 全批施工的最终验收绿灯。
+
 
 
 
