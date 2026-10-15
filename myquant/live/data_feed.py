@@ -781,7 +781,7 @@ class MarketDataFeed:
         backoff_cap: int = 60,
         local_history_dir: Optional[str] = None,
         factor_svc: Optional[Any] = None,
-        adjust_out: str = "raw",
+        adjust_out: str = "hfq",
     ):
         """
         初始化实时行情接入
@@ -812,7 +812,8 @@ class MarketDataFeed:
         factor_svc : Any | None
             复权因子服务（方案B #82），hfq/qfq 现算与除权跳变豁免用；None 懒加载默认 DB 服务
         adjust_out : str
-            对外输出口径："raw"（默认，事实价原样）或 "qfq"（按最新因子现算前复权）
+            对外输出口径："hfq"（默认，后复权×因子，与回测一致，除权日不跳变）/
+            "qfq"（前复权÷因子）/ "raw"（事实价原样，仅下单层用，指标层禁止静默落 raw）
         """
         self._source = source
         self._local_history_dir = local_history_dir
@@ -824,7 +825,7 @@ class MarketDataFeed:
         # S2(#83)：复权现算——factor_svc 可选（None 懒加载默认 DB 服务）；
         #   adjust_out="qfq" 时对分发 bar 按最新因子现算前复权，"raw" 原样透传
         self._factor_svc = factor_svc
-        self._adjust_out = str(adjust_out or "raw").lower()
+        self._adjust_out = str(adjust_out or "hfq").lower()
         self._factor_lookup_cache: Dict[str, Dict[str, float]] = {}
 
         # 实时模式判定
@@ -1593,11 +1594,13 @@ class MarketDataFeed:
         return lookup
 
     def _maybe_adjust_bar(self, bar: Dict[str, Any]) -> Dict[str, Any]:
-        """adjust_out='qfq' 时按最新因子现算前复权（raw 事实 ÷ 最新因子）。
+        """adjust_out 时按最新因子现算复权（qfq=raw÷因子，hfq=raw×因子）。
 
         仅当该标的有因子事件时折算；无因子/因子无效保持原值（降级 raw）。
+        T3-1：指标层统一 hfq（与回测 backtest_config.adjust=hfq 一致），
+        除权日不跳变；下单层仍用 broker 真实 raw 价（券商认的就是这个）。
         """
-        if self._adjust_out != "qfq" or not bar:
+        if self._adjust_out not in ("qfq", "hfq") or not bar:
             return bar
         factors = self._get_factor_lookup_cached(str(bar.get("symbol", "")))
         if not factors:
@@ -1609,7 +1612,11 @@ class MarketDataFeed:
         for key in ("open", "high", "low", "close"):
             if key in out:
                 try:
-                    out[key] = float(out[key]) / latest
+                    val = float(out[key])
+                    if self._adjust_out == "qfq":
+                        out[key] = val / latest
+                    else:  # hfq
+                        out[key] = val * latest
                 except (ValueError, TypeError):
                     pass
         return out
@@ -1619,10 +1626,10 @@ class MarketDataFeed:
     # ═══════════════════════════════════════════
 
     def _update_cache(self, symbol: str, bars: List[Dict[str, Any]]) -> None:
-        """更新行情缓存（S2 #83：adjust_out='qfq' 时先现算前复权）"""
+        """更新行情缓存（S2 #83：adjust_out 非 raw 时先现算复权；T3-1 hfq 纳入）"""
         if not bars:
             return
-        if self._adjust_out == "qfq":
+        if self._adjust_out in ("qfq", "hfq"):
             bars = [self._maybe_adjust_bar(b) for b in bars]
 
         with self._lock:

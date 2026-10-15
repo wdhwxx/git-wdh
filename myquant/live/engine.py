@@ -1384,7 +1384,7 @@ class LiveEngine(BaseEngine):
             try:
                 period = minute_map[freq]
                 df = ak.stock_zh_a_hist_min_em(
-                    symbol=code, period=period, adjust="qfq",
+                    symbol=code, period=period, adjust="hfq",
                 )
                 if df is not None and not df.empty:
                     return self._akshare_minute_to_bars(df, symbol)[-count:]
@@ -1398,7 +1398,7 @@ class LiveEngine(BaseEngine):
             start_date = (datetime.now() - _td(days=max(30, count * 2))).strftime("%Y%m%d")
             df = ak.stock_zh_a_daily(
                 symbol=sina_code, start_date=start_date,
-                end_date=end_date, adjust="qfq",
+                end_date=end_date, adjust="hfq",
             )
             if df is None or df.empty:
                 return []
@@ -2893,11 +2893,14 @@ def create_live_engine(
     )
 
     # 3) 行情接入（流式清洗默认开启，与回测数据纪律一致）
+    # T3-1：指标层统一 hfq（与回测 backtest_config.adjust=hfq 一致），
+    #   除权日不跳变；撮合/下单仍用 broker 真实 raw 价（券商认的就是这个）。
     feed = MarketDataFeed(
         source=str(market_cfg.get("source", "akshare")),
         frequency=str(market_cfg.get("frequency", "daily")),
         enable_clean=bool(market_cfg.get("enable_clean", True)),
         local_history_dir=str(market_cfg.get("local_history_dir", "datasets/processed")),
+        adjust_out=str(market_cfg.get("adjust_out", "hfq")),
     )
 
     # 4) 策略（与回测共用同一注册器，无缝迁移，铁律2）
