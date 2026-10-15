@@ -96,7 +96,7 @@ TIER_FLOOR: dict[str, float] = {"T0": 68.0, "T1": 60.0, "T2": 52.0}
 # 注：qmt_broker 显示 61.0% 为四舍五入，底层实测 60.95% < 61.0 会浮点边界误报，
 # 故取 60.0（低于实测 1 个点）；其余按 v1.2 表，CI 首轮冻结时整体校准（§5.3）。
 FILE_FLOOR: dict[str, float] = {
-    "live/data_feed.py": 28.0,
+    "live/data_feed.py": 60.0,  # #401 §5.3: P3-1 补测后 28→60（实际 66%）
     "core/light_lookahead_guard.py": 70.0,  # #397 §5.3: P3-2 补测后 34→70（实际 98%）
     "indicators/rsrs.py": 80.0,  # #395 §5.3: P3-3 补测后 43→80（实际 98%）
     "backtest/fee_table.py": 85.0,  # #393 §5.3: P3-5 补测后 44→85（实际 100%）
