@@ -564,7 +564,7 @@ def reset_light_lookahead_guard() -> None:
 # 自测 Demo
 # ─────────────────────────────────────────────
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover — 仅 python -m 自测路径，不计入门禁覆盖
     from datetime import datetime as _dt
 
     print("=" * 60)
