@@ -5719,3 +5719,25 @@ rom myquant.risk.risk_manager import ...（L3 同层），消除 L3→L4 反向�
 **验收**：16 个改动 py 文件 py_compile 全过；全量 `pytest tests/unit/` **4390 passed / 1 skipped / 0 failed**（168s）；证据日志留存 `docs/回测实盘一致性/evidence/T0-2_pytest_full.log`。
 
 **纪律遵守**：未新增文件（纯改既有文件默认值+注释+测试期望值，不涉及目录树变更）；未动佣金/过户费/滑点；按 path:line 复核每处；git 提交（commit message 引用 #412）。
+
+
+---
+
+## #413 · 2026-10-15 · 回测实盘一致性 T2-1：修 on_init 时序颠倒 + warmup 深度不足（RSRS 实盘恒躺平根因）
+
+**现状核实**：核查报告 v1.0 §四标注——`live/engine.py` 启动顺序为"建 context(data={}) → on_init → 订阅 → warmup"，而 RSRS 缓存唯一写入点在 `ma_strategy.py:on_init`（遍历 context.data.items()），空上下文导致空循环，`_rsrs_cache` 恒空 → 指标恒 NaN → RSRS 结构上永远不发信号。本次 monitor-only 实跑坐实：原顺序下日志 `RSRS预计算完成: 0 只股票`。
+
+**落地（启动时序重排，解耦 warmup 填数据与回放）**：
+- **`live/engine.py:_warmup_history`**：新增 `replay: bool = True` 参数。为 False 时只加载历史 bar、填 `_bar_history` + `context.data`，**不**逐根回放 on_bar。默认 True 保持向后兼容。
+- **`live/engine.py:start()` 启动顺序重排**（原 710-736 段）：
+  1. 建 context(data={})；
+  2. 算 symbols 并订阅 data_feed；
+  3. `warmup(replay=False)`：历史 bar 填入 context.data；
+  4. `strategy.on_init(context)`：此时 context.data 已就绪，RSRS 缓存基于历史数据正确预计算；
+  5. 逐 symbol `_replay_warmup_strategies`：on_init 完成、缓存就绪后再逐根 on_bar 重建跨 bar 状态（prev_diff 等）。
+- **warmup 深度默认值 60→200**（`engine.py:210`）：RSRS 需要 `period(18)+norm_window(60)=78` 根才能写入缓存，原默认 60 根 < 78，即使时序对了所有 symbol 仍被 `len(df)>78` 条件挡掉。提到 200 留足标准化窗口与递归指标种子余量。
+- **防未来注释**：warmup 只取启动时刻【已发生】的历史 bar，on_init 看到的就是"跑到启动日"的数据，不引入未来；股票池仍按 `_rebalance_pool(bar, context)` 以 bar.timestamp 截断构建，保持惰性初始化不动。
+
+**验收**：py_compile 全过；monitor-only 90s 实跑日志 `RSRS预计算完成: 3189 只股票`（原 0），预热完成 3195 只、无 Traceback；`pytest test_live_warmup / test_engine_events / test_live_concurrency / test_live_bar_dedup` **37 passed / 0 failed**。证据：`evidence/T2-1_monitor90s_v2.log`。
+
+**纪律遵守**：未新增文件（纯改既有 engine.py 启动段与默认值）；未改策略逻辑、未改股票池构建规则；按 path:line 复核；git 提交（commit message 引用 #413）。

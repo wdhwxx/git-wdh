@@ -207,7 +207,7 @@ class LiveEngine(BaseEngine):
         risk_config: Optional[RiskConfig] = None,
         engine_id: str = "default",
         realtime_poll_interval: int = 3,
-        warmup_bars: int = 60,
+        warmup_bars: int = 200,  # T2-1：60→200，覆盖 RSRS(period18+norm60=78) 及其他递归指标种子需求
         enable_warmup: bool = True,
         # ── H2修复：实盘保障组件注入（全部可选，默认自动创建，向后兼容无参调用）──
         risk_manager: Optional[Any] = None,
@@ -708,6 +708,7 @@ class LiveEngine(BaseEngine):
                 self._data_feed.connect()
 
             # 初始化策略上下文（executor = broker_manager，接口全覆盖）
+            # T2-1：data 先空，warmup 完成后由 _sync_context_data 填充。
             self._context = StrategyContext(
                 data={},
                 portfolio=self._portfolio,
@@ -715,25 +716,34 @@ class LiveEngine(BaseEngine):
                 config={"engine_id": self._engine_id},
             )
 
-            # 初始化策略
-            for strategy in self._strategies:
-                strategy.on_init(self._context)
-
-            # 注册行情回调
-            for strategy in self._strategies:
-                # 策略关注的标的（v1：订阅broker持仓标的 + 策略默认标的）
-                pass
-
-            # 注册data_feed回调（引擎统一处理行情）
+            # 注册行情回调（需先算订阅标的，warmup 与实时订阅共用同一份 symbols）
+            symbols: List[str] = []
             if self._data_feed:
-                # v1：订阅broker持仓标的
                 symbols = self._get_watch_symbols()
                 for symbol in symbols:
                     self._data_feed.subscribe(symbol, self.on_market_data)
 
-                # C项：历史预热（频率自适应 + 清洗过滤），策略启动即有足够窗口
-                if self._enable_warmup and self._warmup_bars > 0 and symbols:
-                    self._warmup_history(symbols)
+            # ── T2-1 修复：on_init 时序颠倒 ──
+            # 原顺序：on_init(data={}) → warmup 填数据 → 回放。导致 RSRS 等依赖
+            # context.data 的指标缓存只在 on_init 写入，空上下文空循环 → 恒 NaN 不发信号。
+            # 新顺序：
+            #   1) warmup(replay=False)：先把历史 bar 填进 context.data 与 _bar_history，不回放
+            #   2) on_init(context)：此时 context.data 就绪，RSRS 缓存能基于历史数据正确预计算
+            #   3) 逐 symbol replay：on_init 完成、缓存就绪后，再逐根 on_bar 重建策略状态
+            # 防未来：warmup 只取启动时刻【已发生】的历史 bar，on_init 看到的就是"跑到启动日"的数据，不引入未来。
+            if self._enable_warmup and self._warmup_bars > 0 and symbols:
+                self._warmup_history(symbols, replay=False)
+
+            # 初始化策略（context.data 已被 warmup 填充，指标缓存可正确预计算）
+            for strategy in self._strategies:
+                strategy.on_init(self._context)
+
+            # on_init 完成后逐 symbol 回放历史 bar，重建跨 bar 状态（prev_diff / _rsrs_cache 读取路径等）
+            if self._enable_warmup and self._warmup_bars > 0 and symbols:
+                for symbol in symbols:
+                    bar_objs = self._bar_history.get(symbol, [])
+                    if bar_objs:
+                        self._replay_warmup_strategies(symbol, bar_objs)
 
             # ── BUG-04：guardian 一键平仓接线（broker 已就绪，先于调度器巡检）──
             self._setup_force_close()
@@ -1231,7 +1241,8 @@ class LiveEngine(BaseEngine):
                 continue
         return bars
 
-    def _warmup_history(self, symbols: List[str], count: Optional[int] = None) -> None:
+    def _warmup_history(self, symbols: List[str], count: Optional[int] = None,
+                        replay: bool = True) -> None:
         """
         启动时历史预热（频率自适应 + 清洗过滤）
 
@@ -1250,6 +1261,12 @@ class LiveEngine(BaseEngine):
             待预热标的列表
         count : int | None
             预热根数（None则用 self._warmup_bars）
+        replay : bool
+            是否在填数据后立即逐根回放 on_bar 重建策略状态。
+            T2-1 修复：on_init 必须在 context.data 就绪后调用，否则 RSRS 等
+            依赖 context.data 的指标缓存会空转（on_init 时 data={} 空循环）。
+            因此启动顺序为：warmup(replay=False) → on_init → 外部逐 symbol replay。
+            默认 True 保持向后兼容（其他调用方一次调用即填数据+回放）。
         """
         if not symbols:
             return
@@ -1276,7 +1293,10 @@ class LiveEngine(BaseEngine):
                 self._sync_context_data(symbol)
                 # 预热驱动策略逐根回放（重建策略状态，如均线交叉 prev_diff）
                 # 仅最新一根 bar 产生的信号交给 _process_signal 推进当日，历史信号丢弃避免重复
-                self._replay_warmup_strategies(symbol, bar_objs)
+                # T2-1：replay=False 时只填数据+context.data，回放延后到 on_init 之后
+                #       （否则 on_bar 读到的 _rsrs_cache 为空，回放无法重建指标状态）。
+                if replay:
+                    self._replay_warmup_strategies(symbol, bar_objs)
                 logger.info(
                     f"[engine] 预热完成: {symbol} {len(bar_objs)}根 "
                     f"({freq}, 清洗后{len(cleaned)}/{len(bars)})"
