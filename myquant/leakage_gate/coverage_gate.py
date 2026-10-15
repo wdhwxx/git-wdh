@@ -98,7 +98,7 @@ TIER_FLOOR: dict[str, float] = {"T0": 68.0, "T1": 60.0, "T2": 52.0}
 FILE_FLOOR: dict[str, float] = {
     "live/data_feed.py": 28.0,
     "core/light_lookahead_guard.py": 34.0,
-    "indicators/rsrs.py": 43.0,
+    "indicators/rsrs.py": 80.0,  # #395 §5.3: P3-3 补测后 43→80（实际 98%）
     "backtest/fee_table.py": 85.0,  # #393 §5.3: P3-5 补测后 44→85（实际 100%）
     "backtest/fee_common.py": 85.0,  # #393 §5.3: P3-5 新增冻结（实际 99%）
     "backtest/order_matcher.py": 48.0,
