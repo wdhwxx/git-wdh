@@ -326,6 +326,28 @@ class AccountReconciler:
                 f"差异仍存在(diff={diff})，冻结已持续 "
                 f"{time.time() - self._frozen_since:.0f} 秒未人工处置"
             )
+        # T2-6：实时对账落库到 reconciliation_runs 表（每次核对都落，超阈附 diff）
+        try:
+            from myquant.core.registry import get_component
+            _ledger = get_component("trade_ledger")
+            if _ledger is not None:
+                run_id = _ledger.record_reconciliation_run(
+                    account_id=self._account_id,
+                    run_type="realtime",
+                    consistent=not diff.exceeds_threshold,
+                    frozen=diff.exceeds_threshold,
+                    details=diff.to_dict(),
+                )
+                if run_id and diff.exceeds_threshold:
+                    _ledger.record_reconciliation_diff(
+                        run_id=run_id,
+                        account_id=self._account_id,
+                        cash_diff=diff.cash_diff,
+                        position_diff=str(diff.position_diff) if diff.position_diff else "",
+                        exceeds_threshold=1,
+                    )
+        except Exception as e:
+            logger.warning("[account_reconciler] T2-6 实时对账落库失败（不阻断）: %s", e)
 
     # ═══════════════════════════════════════════
     #  T+1 终局对账

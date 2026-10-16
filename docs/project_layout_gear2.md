@@ -6098,3 +6098,11 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
       - 若超阈（frozen=True）→ 额外调 record_reconciliation_diff(run_id=..., cash_diff=..., position_diff=..., exceeds_threshold=1) 落差异明细。
    c. 落库失败 try/except 降级为 warning，不阻断 T+1 对账主流程。
    d. 基线同步：monitoring 包 24042/882→24064/882（+22行）。
+
+## #T2-6 · 2026-10-16 · 阶段2 对账闭环：实时对账落库
+   a. 缺陷：实时对账结果只在内存里（to_dict 供 API 读），不落库 → 重启后历史对账数据丢失，无法审计。
+   b. 修复（_ingest_realtime_diff 末尾新增落库逻辑）：
+      - 每次实时核对都调 record_reconciliation_run(run_type="realtime", consistent=..., frozen=..., details=...) 落主表；
+      - 若超阈（frozen=True）→ 额外调 record_reconciliation_diff(run_id=..., cash_diff=..., position_diff=..., exceeds_threshold=1) 落差异明细。
+   c. 落库失败 try/except 降级为 warning，不阻断实时对账主流程。
+   d. 基线同步：monitoring 包 24064/882→24086/882（+22行）。
