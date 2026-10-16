@@ -31,6 +31,11 @@ coverage.json，按**资金安全代价分层**（T0 阻断级 / T1 严格级 / 
 ------------
 - v1.2 §8.2 初值（2026-10-15，P1 占位）：COVERAGE_BASELINE=62.0 / COVERED_LINES_BASELINE=38300
   （本地实测 62.99% / 38,864 行，留 ~1pp / ~564 行学习期余量；CI 实测后替换）。
+- v1.2 §5.3 上调（2026-10-16，行规对齐）：C-4 NEW_FILE_FLOOR 的 T0/T1 由 60.0 → 80.0。
+  依据：业界通行标准——核心业务/新代码覆盖率目标 80%（JetBrains Qodana"aiming for 80% is generally
+  considered a good target for critical business logic"；EM Tools 成熟组织 70-85%、Google ~80%；
+  Art of CTO 新代码（PR）90%）。存量注册表（FILE_STMT_CEILING / T2_FILES）不受影响，仅约束未来新增文件。
+  T2 保持 30.0 不动（工具/胶水类，行规 60-70% 区间暂缓，待 T2 存量清欠后视情况上调）。
 
 ★★★ 防未来函数 ★★★：本模块只读 coverage.json 与 tests/ 源码，不参与回测/实盘数据流，
 无未来函数风险。
@@ -108,6 +113,7 @@ FILE_FLOOR: dict[str, float] = {
     "risk/risk_manager.py": 75.0,  # #399 §5.3: P3-4 补测后 56→75（实际 88%）
     "live/scheduler.py": 59.0,
     "live/brokers/qmt_broker.py": 60.0,
+    "live/realtime_sources.py": 60.0,  # 补注册（2026-10-16）：#421 拆包产物漏入 FILE_FLOOR；实测 63.6%，取 60.0（低于实测 ~3.6pp 余量，与 data_feed/qmt_broker 同级约束）
     "monitoring/alerting.py": 68.0,
     "backtest/vectorized_engine.py": 68.0,
     "strategies/kunpeng_strategy.py": 85.0,
@@ -247,8 +253,11 @@ FILE_STMT_CEILING: dict[str, int] = {
     "live/data_feed.py": 541,  # 885→634（#421 拆包瘦身：行情源层迁出 realtime_sources.py，语句实测同步）；634→541（#423 拆包瘦身：实时桥层迁出 realtime_bridge.py，语句实测同步）
     "live/emergency_liquidation.py": 170,
     "live/engine.py": 1119,  # 1197→1250（+53，#413-#417 T2-1/T2-2/T1-2/T3-1 功能改造，与 R-24 行数 3111→3236 同步，§5.3）；1250→1095（#422 拆包瘦身：装配层迁出 engine_assembly.py，语句实测同步）；1095→1105（+10，#421 T4-1 撤销T+1自动豁免 + #422 T4-2 启动即不下单 + #424 T4-3/T4-4 信号流与fail-closed 功能必需，与 R-24 行数 2808→2829、R-26 live 包 17465→17492 同批对价，§5.3）；1105→1116（+11，#425 引擎预热/回放停止感知 _stop_requested 功能必需，与 R-24/R-26 live 包同步对价，§5.3）；1116→1119（+3，T0-12 ACK_UNKNOWN 查单确认 engine 端分支功能必需）
+    "live/engine_assembly.py": 165,  # 补注册（2026-10-16）：#422 拆包产物，创建时漏入 C-5 注册表；实测 165 语句 / 85.5%，C-4 收紧 80% 时归位存量（仅语句棘轮约束，无 C-4 新增判定）
     "live/kill_switch_signal.py": 147,
     "live/portfolio.py": 419,
+    "live/realtime_bridge.py": 100,  # 补注册（2026-10-16）：#423 拆包产物，创建时漏入 C-5 注册表；实测 100 语句 / 99.0%
+    "live/realtime_sources.py": 258,  # 补注册（2026-10-16）：#421 拆包产物，创建时漏入 C-5 注册表；实测 258 语句 / 63.6%（C-4 收紧 80% 暴露，归位存量并以 FILE_FLOOR 60.0 约束下限）
     "live/run_mode.py": 114,
     "live/scheduler.py": 995,
     "live/state_store.py": 374,
@@ -314,9 +323,9 @@ FILE_STMT_CEILING: dict[str, int] = {
     "strategies/param_tuner.py": 196,
     "strategies/registry.py": 105,
 }
-# C-4 新增文件门槛：T0/T1 新增须 ≥ 60%、T2 新增须 ≥ 30%，否则红。
+# C-4 新增文件门槛：T0/T1 新增须 ≥ 80%（2026-10-16 行规对齐，原 60%）、T2 新增须 ≥ 30%，否则红。
 # "新增"定义 = 不在存量注册表（FILE_STMT_CEILING 的 T0/T1、T2_FILES 的 T2）中的文件。
-NEW_FILE_FLOOR: dict[str, float] = {"T0": 60.0, "T1": 60.0, "T2": 30.0}
+NEW_FILE_FLOOR: dict[str, float] = {"T0": 80.0, "T1": 80.0, "T2": 30.0}
 # C-4 的 T2 存量注册表（T2 全部文件；初值由本地实测回填）
 T2_FILES: frozenset[str] = frozenset({
     "acceptance/__init__.py",
@@ -743,7 +752,7 @@ def evaluate(
             report.violations.append(
                 f"C-3 {rel} 覆盖率 {percent:.1f}% < floor {floor:.1f}%"
             )
-    # ── C-4 新增文件门槛（不在存量注册表 → 新增；T0/T1 ≥60%、T2 ≥30%）──
+    # ── C-4 新增文件门槛（不在存量注册表 → 新增；T0/T1 ≥80%、T2 ≥30%）──
     for rel, (stmts, covered, percent) in file_stats.items():
         tier = tier_of(rel)
         if tier not in ("T0", "T1", "T2") or stmts == 0:

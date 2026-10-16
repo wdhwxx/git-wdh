@@ -5863,3 +5863,9 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    d. T0-12 门禁同步（本轮）：R-24/R-26 文件 qmt_broker 2170→2302（symbols 79→80、fan_out 8→9）、live/engine 2850→2869；R-26 live 包 17513/652→17690/653；C-5 live/brokers/manager 475→477、qmt_broker 981→1033、live/engine 1116→1119（T0-12 报单结果未知查单确认闭环功能必需，对价注释已附各基线处）。
    e. C-3 质量保障：qmt_broker 覆盖率 58.1%→>=60% 达标——新增 TestUnknownSubmitAck 5 用例（tests/unit/test_qmt_broker_live.py）：SDK 异常/返回空 → 查单命中对齐 SUBMITTED/FILLED、全部未命中 REJECTED、查询失败保持 ACK_UNKNOWN（防双仓/防无声丢单路径全覆盖）。
    f. 验证：全量 pytest 4591 passed / 1 skipped；架构门禁（R-24/R-26）38 passed；覆盖率门禁全部判据通过。
+
+## #C-4 · 2026-10-16 · 新文件门槛行规对齐（T0/T1 60→80）+ 拆包产物注册表补漏
+   a. C-4 NEW_FILE_FLOOR 上调：T0/T1 60.0→80.0（依据：JetBrains Qodana 核心业务/新代码目标 80%、EM Tools 成熟组织 70-85%、Art of CTO 新代码 90%；存量不受影响，仅约束未来新增文件）；T2 保持 30.0（工具/胶水类暂缓，待 T2 存量清欠后视情况上调）。
+   b. 收紧暴露治理欠账：拆包产物 live/realtime_sources.py（#421，258 语句 / 63.6%）、live/realtime_bridge.py（#423，100 语句 / 99.0%）、live/engine_assembly.py（#422，165 语句 / 85.5%）创建时漏入 C-5 存量注册表（FILE_STMT_CEILING）与 FILE_FLOOR——此前靠 C-4 60% 门槛兜底，抬 80% 后 realtime_sources 暴露；本次全部补注册（C-5 语句棘轮 3 条 + FILE_FLOOR realtime_sources 60.0，对齐 data_feed/qmt_broker 同级约束）。
+   c. 联动同步：coverage_gate.py 自身 +9 行（治理代码增长，功能必需）→ R-26 包聚合 leakage_gate 4466→4475 同步（test_architecture.py，附对价注释）。
+   d. 验证：覆盖率门禁全判据通过（C-4 收紧后无新增红）；架构门禁 38 passed；相关测试 81 passed。
