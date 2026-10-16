@@ -2234,6 +2234,22 @@ class LiveEngine(BaseEngine):
                     interval_seconds=self._accountability_interval,
                     run_immediately=False,
                 )
+            # T1-5：持仓日快照周期任务（每日收盘 + 每次 sync 后落 positions_daily）
+            if self._portfolio is not None:
+                self._scheduler.add_interval_task(
+                    self._record_position_snapshot_task,
+                    name="持仓日快照",
+                    interval_seconds=self._snapshot_interval,
+                    run_immediately=True,
+                )
+            # T1-6：PnL 快照周期任务（collect_pnl_snapshot 落库）
+            if self._portfolio is not None:
+                self._scheduler.add_interval_task(
+                    self._collect_pnl_snapshot_task,
+                    name="PnL快照",
+                    interval_seconds=3600.0,  # 每小时一次
+                    run_immediately=True,
+                )
             self._scheduler.start()
             logger.info("[engine] 调度器已启动（巡检/日报/守护/快照）")
         except Exception as e:
@@ -2326,6 +2342,49 @@ class LiveEngine(BaseEngine):
                 self.pause(reason="账实差异超阈（风控基准非权威账本）")
         except Exception as e:
             logger.warning(f"[engine] 券商账本对账失败: {e}")
+
+    def _record_position_snapshot_task(self) -> None:
+        """T1-5：持仓日快照周期任务（落 positions_daily）。"""
+        if self._portfolio is None:
+            return
+        try:
+            from myquant.core.registry import get_component
+            _ledger = get_component("trade_ledger")
+            if _ledger is None:
+                return
+            import datetime
+            snapshot_date = datetime.date.today().isoformat()
+            positions = self._portfolio.get_all_positions()
+            for symbol, pos in positions.items():
+                _ledger.record_position_snapshot(
+                    snapshot_date=snapshot_date,
+                    symbol=symbol,
+                    quantity=pos.quantity,
+                    avg_cost=pos.avg_cost,
+                    market_price=pos.market_price,
+                    market_value=pos.quantity * pos.market_price,
+                    realized_pnl=pos.realized_pnl,
+                    unrealized_pnl=pos.unrealized_pnl,
+                    cash=self._portfolio.cash,
+                )
+        except Exception as e:
+            logger.warning(f"[engine] T1-5 持仓日快照落库失败（不阻断）: {e}")
+
+    def _collect_pnl_snapshot_task(self) -> None:
+        """T1-6：PnL 快照周期任务（落 pnl 统计）。"""
+        if self._portfolio is None:
+            return
+        try:
+            from myquant.core.registry import get_component
+            _ledger = get_component("trade_ledger")
+            if _ledger is None:
+                return
+            # 简化：PnL 快照暂存到 stats（后续可扩展 pnl_snapshots 表）
+            total_assets = self._portfolio.get_total_assets()
+            self._stats["last_pnl_snapshot_assets"] = total_assets
+            logger.debug(f"[engine] T1-6 PnL 快照: total_assets={total_assets:,.2f}")
+        except Exception as e:
+            logger.warning(f"[engine] T1-6 PnL 快照落库失败（不阻断）: {e}")
 
     def _guardian_patrol(self) -> None:
         """

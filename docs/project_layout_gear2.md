@@ -6033,3 +6033,9 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
       - 异常时 record_order_error：record_order_event(seq=3, "error")。
    c. 验收：报单后回报前 kill 进程 → 重启能查到 intent 行并完成对账（FI-11）。
    d. 基线同步：engine.py 2933→2970（+37行）；live 包 18055/660/36→18092/660/36（+37行，symbols/fan_out 不变）。
+
+## #T1-5/T1-6 · 2026-10-16 · 阶段1 账本落地：持仓日快照 + PnL 快照周期任务
+   a. T1-5：_record_position_snapshot_task——每 snapshot_interval（默认300s）落 positions_daily；遍历 portfolio 持仓逐只落库。
+   b. T1-6：_collect_pnl_snapshot_task——每小时落 PnL 快照（total_assets 存 stats，后续可扩展 pnl_snapshots 表）。
+   c. 两个任务都在 _setup_scheduler 里挂载（scheduler.start() 之前），通过 registry 取 trade_ledger。
+   d. 基线同步：engine.py 2970→3029（+59行）；live 包 18092/660/36→18151/662/36（+59行/+2符号）。
