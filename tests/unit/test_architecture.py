@@ -352,17 +352,17 @@ PACKAGE_STRUCTURE_BASELINE: dict[str, dict[str, int]] = {
     "allocation": {"lines": 2083, "symbols": 56, "fan_out": 9},
     "api": {"lines": 3775, "symbols": 193, "fan_out": 26},
     "backtest": {"lines": 20722, "symbols": 560, "fan_out": 37},  # T4-3 信号流 20711→20722
-    "core": {"lines": 12975, "symbols": 600, "fan_out": 40},
+    "core": {"lines": 12976, "symbols": 600, "fan_out": 40},  # 12975→12976（+1，#425 引擎停止感知 _stop_requested 功能必需）
     "data_access": {"lines": 17223, "symbols": 605, "fan_out": 34},
     "database": {"lines": 3608, "symbols": 113, "fan_out": 17},
     "engine": {"lines": 209, "symbols": 14, "fan_out": 4},
-    "execution": {"lines": 1085, "symbols": 59, "fan_out": 6},
+    "execution": {"lines": 1097, "symbols": 59, "fan_out": 6},  # 1085→1097（+12，#425 引擎停止感知 _stop_requested 状态机贯通功能必需）
     "gui": {"lines": 6603, "symbols": 242, "fan_out": 28},
     "indicators": {"lines": 5884, "symbols": 172, "fan_out": 17},
     "leakage_gate": {"lines": 4466, "symbols": 149, "fan_out": 17},
     "live": {"lines": 17513, "symbols": 652, "fan_out": 35},  # T4-4 fail-closed 17492→17498；#425 引擎停止感知 17498→17513（lines +15 功能必需，symbols/fan_out 不变）
     "ml": {"lines": 5672, "symbols": 208, "fan_out": 27},
-    "models": {"lines": 1760, "symbols": 139, "fan_out": 6},  # T4-3 signals字段 1757→1760
+    "models": {"lines": 1784, "symbols": 139, "fan_out": 6},  # T4-3 signals字段 1757→1760；1760→1784（+24，#425 引擎预热/回放停止感知配置模型扩展功能必需）
     "monitoring": {"lines": 23932, "symbols": 880, "fan_out": 31},
     "realism_gate": {"lines": 1864, "symbols": 50, "fan_out": 10},
     "risk": {"lines": 4288, "symbols": 195, "fan_out": 12},
