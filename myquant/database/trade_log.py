@@ -47,12 +47,20 @@ class TradeLedger:
     def record_order(
         self, order: Order, engine_id: str = "default",
     ) -> None:
-        """逐笔订单落库（order_id 唯一，重复上报幂等跳过）。"""
+        """逐笔订单落库（order_id 唯一，T1-4：ON CONFLICT DO UPDATE 更新状态/残量）。"""
+        # T1-4：submitted_at 恒 NULL 修复——用 order.created_at 落库（created_at 是订单创建时刻）
+        submitted_ts = getattr(order, "submitted_at", None) or getattr(order, "created_at", None)
+        # T1-4：新增列（0009 迁移）——filled_qty / filled_price / last_update_at / broker_id 等
         sql = (
-            f"INSERT OR IGNORE INTO {TABLE_NAMES['orders']} "
+            f"INSERT INTO {TABLE_NAMES['orders']} "
             "(order_id, symbol, side, order_type, quantity, price, status, "
-            " strategy_id, engine_id, submitted_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " strategy_id, engine_id, submitted_at, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now')) "
+            "ON CONFLICT(order_id) DO UPDATE SET "
+            "  status=excluded.status, "
+            "  filled_qty=excluded.filled_qty, "
+            "  filled_price=excluded.filled_price, "
+            "  last_update_at=excluded.last_update_at"
         )
         with self._db.transaction():
             self._db.execute_update(
@@ -67,7 +75,7 @@ class TradeLedger:
                     _enum_value(order.status),
                     order.strategy_id,
                     engine_id,
-                    getattr(order, "submitted_at", None),
+                    submitted_ts,
                 ),
             )
 
@@ -98,6 +106,66 @@ class TradeLedger:
                     engine_id,
                 ),
             )
+
+    # ── 写入：订单事件（T1-4，append-only）──
+
+    def record_order_event(
+        self, order_id: str, seq: int, event_type: str, payload: str = "",
+    ) -> None:
+        """T1-4：订单事件落库（append-only, order_id+seq 唯一）。"""
+        sql = (
+            "INSERT OR IGNORE INTO order_events "
+            "(order_id, seq, event_type, payload) "
+            "VALUES (?, ?, ?, ?)"
+        )
+        with self._db.transaction():
+            self._db.execute_update(sql, (order_id, seq, event_type, payload))
+
+    # ── 写入：对账记录（T1-4）──
+
+    def record_reconciliation_run(
+        self, account_id: str, run_type: str, started_at: float,
+        finished_at: float = None, consistent: int = None, frozen: int = 0,
+        note: str = "",
+    ) -> int:
+        """T1-4：对账批次落库，返回 run_id。"""
+        sql = (
+            "INSERT INTO reconciliation_runs "
+            "(account_id, run_type, started_at, finished_at, consistent, frozen, note) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)"
+        )
+        with self._db.transaction():
+            cur = self._db.execute_update(
+                sql, (account_id, run_type, started_at, finished_at, consistent, frozen, note),
+            )
+            return cur.lastrowid if cur else 0
+
+    def record_reconciliation_diff(
+        self, run_id: int, account_id: str, cash_diff: float = None,
+        position_diff: str = "", exceeds_threshold: int = 0,
+    ) -> None:
+        """T1-4：对账差异落库。"""
+        sql = (
+            "INSERT INTO reconciliation_diffs "
+            "(run_id, account_id, cash_diff, position_diff, exceeds_threshold) "
+            "VALUES (?, ?, ?, ?, ?)"
+        )
+        with self._db.transaction():
+            self._db.execute_update(
+                sql, (run_id, account_id, cash_diff, position_diff, exceeds_threshold),
+            )
+
+    def record_reconciliation_freeze(
+        self, account_id: str, action: str, actor: str, reason: str = "",
+    ) -> None:
+        """T1-4：冻结/解冻记录落库。"""
+        sql = (
+            "INSERT INTO reconciliation_freeze "
+            "(account_id, action, actor, reason) "
+            "VALUES (?, ?, ?, ?)"
+        )
+        with self._db.transaction():
+            self._db.execute_update(sql, (account_id, action, actor, reason))
 
     # ── 写入：持仓日快照 ──
 

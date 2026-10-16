@@ -355,7 +355,7 @@ PACKAGE_STRUCTURE_BASELINE: dict[str, dict[str, int]] = {
     "backtest": {"lines": 20722, "symbols": 560, "fan_out": 37},  # T4-3 信号流 20711→20722
     "core": {"lines": 12976, "symbols": 600, "fan_out": 40},  # 12975→12976（+1，#425 引擎停止感知 _stop_requested 功能必需）
     "data_access": {"lines": 17223, "symbols": 605, "fan_out": 34},
-    "database": {"lines": 3763, "symbols": 116, "fan_out": 17},  # 3608/113→3763/116（+155行/+3符号，T1-3 0009 对账账本迁移 upgrade/downgrade/辅助函数，fan_out 不变）
+    "database": {"lines": 3831, "symbols": 120, "fan_out": 17},  # 3608/113→3763/116（+155行/+3符号，T1-3 0009 对账账本迁移 upgrade/downgrade/辅助函数，fan_out 不变）；3763/116→3831/120（+68行/+4符号，T1-4 record_order ON CONFLICT + 新增 record_order_event/record_reconciliation_run/diff/freeze 四个方法）
     "engine": {"lines": 209, "symbols": 14, "fan_out": 4},
     "execution": {"lines": 1097, "symbols": 59, "fan_out": 6},  # 1085→1097（+12，#425 引擎停止感知 _stop_requested 状态机贯通功能必需）
     "gui": {"lines": 6603, "symbols": 242, "fan_out": 28},

@@ -6014,3 +6014,13 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
       - _assert_live_reconciliation_gate 加第 4 项检查：trade_ledger 未注册 → 拒启（并入 T0-8 门）。
    c. 验收：live 模式下 trade_ledger 未装配 → ValueError 拒启；装配成功 → 正常启动。
    d. 基线同步：live 包 18032/660/35→18055/660/36（+23行/+1fan_out，T1-1 TradeLedger 装配功能必需对价）。
+
+## #T1-4 · 2026-10-16 · 阶段1 账本落地：record_order ON CONFLICT + 对账/事件写入方法
+   a. 缺陷：record_order 用 INSERT OR IGNORE（重复上报跳过，状态不更新）；submitted_at 恒 NULL（order 无 submitted_at 字段）。
+   b. 修复：
+      - record_order 改 ON CONFLICT(order_id) DO UPDATE：更新 status / filled_qty / filled_price / last_update_at；
+      - submitted_at 改用 order.created_at 落库（created_at 是订单创建时刻）；
+      - 新增 record_order_event（append-only, order_id+seq 唯一）；
+      - 新增 record_reconciliation_run / record_reconciliation_diff / record_reconciliation_freeze 三个对账写入方法。
+   c. 验收：重复上报同一 order_id → 状态更新而非跳过；query_orders() 按 submitted_at 排序正确。
+   d. 基线同步：database 包 3763/116→3831/120（+68行/+4符号，T1-4 四个新方法功能必需对价）。
