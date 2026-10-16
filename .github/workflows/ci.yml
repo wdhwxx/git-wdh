@@ -240,6 +240,29 @@ jobs:
         run: pytest tests/unit/test_architecture.py -q --tb=short
 
   # ============================================================
+  # 任务：门禁参数变更审计（#C-4·5；判据A 对价：test_architecture.py/coverage_gate.py
+  #       基线/参数常量变更须 独立commit+工单#N或回写+蓝图回写；判据B 蓝图登记：
+  #       新增 .py/.md 须在蓝图全文登记——源头拦截 18d4bb6 类误提交；门禁顶红治理方案 §6）
+  # ============================================================
+  gate-audit:
+    name: 门禁参数变更审计（对价+蓝图登记）
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          # 全历史检出：审计依赖 push 前 SHA（github.event.before）与完整历史（浅克隆会挂）
+          fetch-depth: 0
+
+      - name: 设置Python环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 门禁参数变更审计（判据A 对价 + 判据B 蓝图登记；首次 push before=全0 自动跳过）
+        run: python scripts/门禁审计.py --before ${{ github.event.before }} --head ${{ github.sha }}
+
+  # ============================================================
   # 任务3：V5 三模式一致性回归 + 缓存/指纹专项（P3-6 核心）
   # ============================================================
   consistency-check:
