@@ -6106,3 +6106,11 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
       - 若超阈（frozen=True）→ 额外调 record_reconciliation_diff(run_id=..., cash_diff=..., position_diff=..., exceeds_threshold=1) 落差异明细。
    c. 落库失败 try/except 降级为 warning，不阻断实时对账主流程。
    d. 基线同步：monitoring 包 24064/882→24086/882（+22行）。
+
+## #T2-7 · 2026-10-16 · 阶段2 对账闭环：冻结记录落库
+   a. 缺陷：冻结动作只发告警 + 审计 append，不落 reconciliation_freeze 表 → 事后无法审计"什么时候冻结的、为什么冻结"。
+   b. 修复（_trigger_freeze 末尾新增落库逻辑）：
+      - 调 record_reconciliation_freeze(account_id=..., action=action, actor=..., reason=...) 落冻结记录；
+      - action 复用现有参数（"freeze" 实时 / "t1_freeze" 终局）。
+   c. 落库失败 try/except 降级为 warning，不阻断冻结主流程。
+   d. 基线同步：monitoring 包 24086/882→24099/882（+13行）。

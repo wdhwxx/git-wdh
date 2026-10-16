@@ -467,6 +467,19 @@ class AccountReconciler:
         self._append_audit(
             kind="reconciliation", action=action, actor=DEFAULT_ACTOR, detail=details,
         )
+        # T2-7：冻结记录落库到 reconciliation_freeze 表
+        try:
+            from myquant.core.registry import get_component
+            _ledger = get_component("trade_ledger")
+            if _ledger is not None:
+                _ledger.record_reconciliation_freeze(
+                    account_id=self._account_id,
+                    action=action,
+                    actor=DEFAULT_ACTOR,
+                    reason=f"现金差={diff.cash_diff:.2f}, 持仓差异={len(diff.position_diffs)}只",
+                )
+        except Exception as e:
+            logger.warning("[account_reconciler] T2-7 冻结记录落库失败（不阻断）: %s", e)
 
     def mark_resolved(self, actor: str, note: str = "") -> None:
         """人工介入解冻：清除冻结标记并审计留痕（action="unfreeze"）。
