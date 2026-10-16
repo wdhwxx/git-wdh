@@ -978,6 +978,64 @@ def run_live_trading(args: argparse.Namespace) -> int:
         print("[试运行] 未进入交易循环。去掉 --dry-run 即可正式运行。")
         return 0
 
+    # ── 7.5 提前装配优雅停止机制（回写#425：stop_event/信号/时长守护须在
+    #     engine.start() 之前生效——本地回放模式下 start() 同步阻塞主线程，
+    #     若按旧序在主等待循环才注册，--duration 超时与 Ctrl+C 永远无法触达，
+    #     导致无人值守补跑无法收尾、stats-json 永不产出）──
+    stop_event = threading.Event()
+    start_time = time.time()
+
+    def _request_stop(signum: Any = None, frame: Any = None) -> None:
+        """收到 SIGINT/SIGTERM 时请求优雅停止：置位停止事件并停止引擎。
+
+        引擎 stop() 为幂等操作（非 RUNNING/PAUSED 状态直接返回），
+        可在 engine.start() 阻塞期间被信号处理器安全调用，
+        使阻塞的 start() 尽快返回并进入收尾流程。
+
+        Args:
+            signum: 信号编号（signal.SIGINT / signal.SIGTERM）。
+            frame: 当前栈帧（信号处理器惯例参数，未使用）。
+        """
+        print("\n[停止] 收到停止信号，正在优雅停止...")
+        stop_event.set()
+        try:
+            engine.stop()
+        except Exception as e:
+            logger.warning("优雅停止触发引擎停止异常: %s", e)
+
+    try:
+        os_signal.signal(os_signal.SIGINT, _request_stop)
+        os_signal.signal(os_signal.SIGTERM, _request_stop)
+    except (ValueError, OSError) as e:
+        logger.debug("信号处理器注册失败（非主线程降级为仅 KeyboardInterrupt）: %s", e)
+
+    if args.duration > 0:
+
+        def _duration_watchdog() -> None:
+            """时长守护：运行满 args.duration 秒后请求优雅停止（无人值守收尾）。
+
+            以 1 秒步进计数而非整段 sleep，保证 stop_event 一旦被外部置位
+            （如 Ctrl+C）能及时观察到并退出等待。
+
+            Returns:
+                None。
+            """
+            elapsed: float = 0.0
+            while elapsed < args.duration and not stop_event.is_set():
+                time.sleep(1.0)
+                elapsed += 1.0
+            if not stop_event.is_set():
+                print(f"\n[停止] 达到运行时长 {args.duration}s（无人值守自动收尾）")
+                stop_event.set()
+                try:
+                    engine.stop()
+                except Exception as e:
+                    logger.warning("时长守护触发引擎停止异常: %s", e)
+
+        threading.Thread(
+            target=_duration_watchdog, daemon=True, name="duration-watchdog"
+        ).start()
+
     # ── 8. 启动引擎 ──
     print("[启动] 正在启动实盘引擎（连接券商/行情/策略/调度）...")
     try:
@@ -1016,20 +1074,8 @@ def run_live_trading(args: argparse.Namespace) -> int:
             print(f"[警告] 行情轮询启动失败: {e}")
 
     # ── 10. 主等待循环（优雅停止）──
-    stop_event = threading.Event()
-    start_time = time.time()
     last_report = 0.0
     last_live_write = 0.0
-
-    def _request_stop(signum: Any = None, frame: Any = None) -> None:
-        print("\n[停止] 收到停止信号，正在优雅停止...")
-        stop_event.set()
-
-    try:
-        os_signal.signal(os_signal.SIGINT, _request_stop)
-        os_signal.signal(os_signal.SIGTERM, _request_stop)
-    except (ValueError, OSError) as e:
-        logger.debug("信号处理器注册失败（非主线程降级为仅 KeyboardInterrupt）: %s", e)
 
     try:
         while not stop_event.is_set():

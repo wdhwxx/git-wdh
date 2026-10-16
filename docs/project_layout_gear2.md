@@ -190,7 +190,7 @@ Pythonwdhmm/
 
 ├── run_GUI入口.py                 # GUI入口（中文名）：启动桌面图形界面（可选依赖）
 
-├── run_实盘入口.py                # 实盘入口（中文名）：加载实盘配置 -> 初始化引擎与风控 -> 启动事件循环；✨【回写#159】装配后注册真实 live 健康探针（KP-P5-02）
+├── run_实盘入口.py                # 实盘入口（中文名）：加载实盘配置 -> 初始化引擎与风控 -> 启动事件循环；✨【回写#159】装配后注册真实 live 健康探针（KP-P5-02）；✨【回写#425】无人值守自动停止机制前移装配（--duration 时长守护+SIGINT/SIGTERM 可唤醒阻塞的 engine.start()）
 
 ├── run_回测配置GUI.py             # ✨【回写】GUI子入口（中文名）：启动回测参数配置对话框（gui/backtest_config_dialog.py），可视化选择策略/标的池/参数后调起回测；回测与实盘配置同源
 
@@ -5833,3 +5833,23 @@ b. **test_architecture.py L354 注释修正**：#420 T3-3 → #424 T3-3（当前
 **验收**：架构测试通过；全量验证通过。
 
 **纪律遵守**：历史 commit 不改写（账本不可篡改）；当前代码注释修正；蓝图登记 #424 并声明撞号修复。
+
+---
+
+## #425 · 2026-10-16 · 修复 run_实盘入口.py 无人值守自动停止失效（--duration 前移装配）
+
+**背景**：10-16 补跑 10-15 Paper 仿真时实证——本地回放模式下 `engine.start()` 同步阻塞主线程，stop_event/信号注册/`--duration` 检查按旧序在主等待循环（start() 之后）才生效，导致：
+
+1. `--duration 600` 超时自动停止永不触发（两次后台补跑共 75+ 分钟仍空转，bar 持续增长无自然终点）；
+2. stats-json 仅在优雅停止（stop_event/Ctrl+C 路径）后写入，强杀/跨进程信号均无法触发收尾；
+3. 该缺陷同时解释了「30天Paper仿真·每日收盘推进」定时任务从未自动产出 stats 的根因。
+
+**落地**：
+
+a. **run_实盘入口.py 7.5 段新增「提前装配优雅停止机制」**（位于 dry_run 分支之后、engine.start() 之前）：stop_event/start_time 前移创建；`_request_stop`（SIGINT/SIGTERM 处理器）置位 stop_event 并调用 engine.stop()（幂等，非 RUNNING/PAUSED 直接返回，可安全唤醒阻塞的 start()）；`--duration>0` 时启动 daemon 时长守护线程（1 秒步进，到期置位 stop_event + engine.stop()）。
+b. **主等待循环（10 段）去重**：删除原重复的 stop_event/start_time 创建与 _request_stop/信号注册块（已前移 7.5），保留 last_report/last_live_write 与 while 轮询主体（duration 检查保留为兜底，watchdog 置位后循环条件直接退出）。
+c. **零行为变更**：不触碰引擎、策略、数据层任何执行逻辑；仅入口脚本的停止机制装配时序调整。
+
+**验收**：py_compile + ast 通过；全量 pytest **4606 passed / 1 skipped**（669s）；架构门禁 R-24/R-26/C-5 全绿（入口脚本行数净增约 40 行未触发冻结反红，未抬任何门禁基线）；语法警告仅原有 finally return（非本次引入）。
+
+**纪律遵守**：查蓝图 → 写码 → 蓝图回写（#425）→ pytest 全量 → git 提交（commit message 引用 #425）；无新增文件、无蓝图外文件。
