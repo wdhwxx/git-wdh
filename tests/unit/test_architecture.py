@@ -280,10 +280,10 @@ CONFIG_KEY_REQUIRED: set[str] = {
 #   risk_manager 1901→2020（0.7 三条异常交易规则 + anomaly_rules 参数）
 #   acceptance/live_safety_gate.py 1756→1749（0.1~0.9 + LIVE 门槛验收累计，#287~#296；入白名单）
 OVERSIZE_LINE_BASELINE: dict[str, int] = {
-    "monitoring/alerting.py": 3688, "live/engine.py": 2850, "core/event_bus.py": 2379,  # 2829→2835（#424 T4-4 fail-closed +6行）；2835→2850（#425 引擎预热/回放停止感知 _stop_requested +15 行功能必需）
+    "monitoring/alerting.py": 3688, "live/engine.py": 2869, "core/event_bus.py": 2379,  # 2829→2835（#424 T4-4 fail-closed +6行）；2835→2850（#425 引擎预热/回放停止感知 _stop_requested +15 行功能必需）；2850→2869（T0-12 报单结果未知查单确认闭环 engine 端 ACK_UNKNOWN 处理 +19 行功能必需）
     "live/scheduler.py": 2419, "monitoring/metrics_collector.py": 2276,  # 2382→2409（#265 阶段二 7 处装配点改经注册表，代码行增长）；metrics 2268→2273→2276（#264 工厂注册代码；P0-2 ruff --fix 微增）
     "monitoring/action_engine.py": 2307, "data_access/manager.py": 2204,  # 2170→2186→2200→2204（#281 M1A-01/06 每股收益时点日基收敛+失败可观测化；M1A-10 available_time 增量派生+存量补列；P0-2 ruff --fix 微增）
-    "live/brokers/qmt_broker.py": 2170, "live/data_feed.py": 1336,  # 2151→1605（#421 拆包瘦身：行情源层迁出 realtime_sources.py）；1605→1336（#423 拆包瘦身：实时桥层迁出 realtime_bridge.py，实测同步并移出 OVERSIZE_WHITELIST——1336<1500 受标准 R-14 约束，R-24 仍冻结 1336 防回升）
+    "live/brokers/qmt_broker.py": 2302, "live/data_feed.py": 1336,  # 2151→1605（#421 拆包瘦身：行情源层迁出 realtime_sources.py）；1605→1336（#423 拆包瘦身：实时桥层迁出 realtime_bridge.py，实测同步并移出 OVERSIZE_WHITELIST——1336<1500 受标准 R-14 约束，R-24 仍冻结 1336 防回升）；2170→2302（T0-12 报单结果未知查单确认闭环 _handle_unknown_submit + 查单/状态对齐 +132 行功能必需）
     "gui/backtest_config_dialog.py": 1871, "risk/risk_manager.py": 2020,
     "web/dashboard.py": 1760, "ml/training_pipeline.py": 1672,  # 1651→1672（#358 P1-11 训练出口泄漏审计报告薄接线 +21 行功能必需）
     "monitoring/dynamic_baseline.py": 1546,  # 1552→1546（#260 去全局采集器兜底）
@@ -328,9 +328,9 @@ STRUCTURE_BASELINE: dict[str, dict[str, int]] = {
     "core/event_bus.py": {"lines": 2379, "symbols": 109, "fan_out": 11},
     "data_access/manager.py": {"lines": 2204, "symbols": 52, "fan_out": 13},
     "gui/backtest_config_dialog.py": {"lines": 1870, "symbols": 45, "fan_out": 13},
-    "live/brokers/qmt_broker.py": {"lines": 2170, "symbols": 79, "fan_out": 8},
+    "live/brokers/qmt_broker.py": {"lines": 2302, "symbols": 80, "fan_out": 9},  # 2170/79/8→2302/80/9（T0-12 报单结果未知查单确认闭环 _handle_unknown_submit 新增方法 + 真实委托/查询分支，三维实测同步功能必需）
     "live/data_feed.py": {"lines": 1336, "symbols": 42, "fan_out": 11},  # 2151/80/13→1605/55/11（#421 拆包瘦身实测同步）；1605/55/11→1336/42/11（#423 拆包瘦身：实时桥层迁出 realtime_bridge.py，-13 符号=桥类及方法，实测同步）
-    "live/engine.py": {"lines": 2850, "symbols": 72, "fan_out": 15},  # T4-4 fail-closed 2829→2835；#425 引擎预热/回放停止感知 2835→2850（lines +15 功能必需，symbols/fan_out 不变）
+    "live/engine.py": {"lines": 2869, "symbols": 72, "fan_out": 15},  # T4-4 fail-closed 2829→2835；#425 引擎预热/回放停止感知 2835→2850（lines +15 功能必需，symbols/fan_out 不变）；2850→2869（T0-12 ACK_UNKNOWN 查单确认 engine 端分支 +19 行功能必需，symbols/fan_out 不变）
     "live/scheduler.py": {"lines": 2419, "symbols": 84, "fan_out": 10},
     "ml/training_pipeline.py": {"lines": 1672, "symbols": 54, "fan_out": 10},
     "monitoring/action_engine.py": {"lines": 2307, "symbols": 86, "fan_out": 9},
@@ -360,7 +360,7 @@ PACKAGE_STRUCTURE_BASELINE: dict[str, dict[str, int]] = {
     "gui": {"lines": 6603, "symbols": 242, "fan_out": 28},
     "indicators": {"lines": 5884, "symbols": 172, "fan_out": 17},
     "leakage_gate": {"lines": 4466, "symbols": 149, "fan_out": 17},
-    "live": {"lines": 17513, "symbols": 652, "fan_out": 35},  # T4-4 fail-closed 17492→17498；#425 引擎停止感知 17498→17513（lines +15 功能必需，symbols/fan_out 不变）
+    "live": {"lines": 17690, "symbols": 653, "fan_out": 35},  # T4-4 fail-closed 17492→17498；#425 引擎停止感知 17498→17513（lines +15 功能必需，symbols/fan_out 不变）；17513/652→17690/653（T0-12 查单确认闭环 qmt_broker/manager/engine 功能必需，+1 符号=_handle_unknown_submit 方法）
     "ml": {"lines": 5672, "symbols": 208, "fan_out": 27},
     "models": {"lines": 1784, "symbols": 139, "fan_out": 6},  # T4-3 signals字段 1757→1760；1760→1784（+24，#425 引擎预热/回放停止感知配置模型扩展功能必需）
     "monitoring": {"lines": 23932, "symbols": 880, "fan_out": 31},

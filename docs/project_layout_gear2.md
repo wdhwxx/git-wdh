@@ -5855,3 +5855,11 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
 **验收**：py_compile + ast 通过；全量 pytest **4606 passed / 1 skipped**（664s）；架构门禁 R-24/R-26/C-5 全绿（基线已随 #425 实测同步，engine.py 2850 < 硬顶 4425）；60s 短时长实测全链路通过（watchdog→预热中止→回放中止→start() 返回→收尾→stats 导出→进程退出）；**正式补跑 10-15（--duration 600）成功**：自动收尾并产出 `paper_20261015.json` + `paper_report_20261016_110630.html/.pdf` + `positions_20261016_110633.csv`（11:06:30）；语法警告仅原有 finally return（非本次引入）。
 
 **纪律遵守**：查蓝图 → 写码 → 蓝图回写（#425）→ pytest 全量 → git 提交（commit message 引用 #425）；无新增文件、无蓝图外文件。
+
+## #T0-12 · 2026-10-16 · CI 全红修复 + 门禁联动同步（C-5 五条 + R-24/R-26 增量）
+   a. CI 全红根因：T4 系列（#421/#422/#423/#424）与 #425 改核心代码时，三套门禁只同步了 R-24/R-26 部分，漏了 C-5 语句棘轮与包/文件级增量 → 覆盖率门禁连锁红 75 个 run（run#66–#75）；哈希/lookahead 两 bug 已由上游 1e7e409 修复。
+   b. C-5 实测同步（commit 287af86，已 push main+master，CI run#76/#77 绿）：backtest/engine 711→725（+14，#424 T4-3/T4-4）、live/engine 1095→1105（+10，#421/#422/#424）、models/backtest 224→225（+1，#423 dict 兼容）。
+   c. #425 门禁同步（commit 64fff9f）：R-26 包聚合 core 12975→12976、execution 1085→1097、models 1760→1784；C-5 core/constants 265→266、models/trade 260→261（#425 引擎停止感知功能必需）。
+   d. T0-12 门禁同步（本轮）：R-24/R-26 文件 qmt_broker 2170→2302（symbols 79→80、fan_out 8→9）、live/engine 2850→2869；R-26 live 包 17513/652→17690/653；C-5 live/brokers/manager 475→477、qmt_broker 981→1033、live/engine 1116→1119（T0-12 报单结果未知查单确认闭环功能必需，对价注释已附各基线处）。
+   e. C-3 质量保障：qmt_broker 覆盖率 58.1%→>=60% 达标——新增 TestUnknownSubmitAck 5 用例（tests/unit/test_qmt_broker_live.py）：SDK 异常/返回空 → 查单命中对齐 SUBMITTED/FILLED、全部未命中 REJECTED、查询失败保持 ACK_UNKNOWN（防双仓/防无声丢单路径全覆盖）。
+   f. 验证：全量 pytest 4591 passed / 1 skipped；架构门禁（R-24/R-26）38 passed；覆盖率门禁全部判据通过。

@@ -515,3 +515,115 @@ class TestStatusMapping:
             volume: float = 0.0
 
         assert broker._map_qmt_position(_Zero()) is None
+
+
+# ═══════════════════════════════════════════
+#  T0-12：报单结果未知 → N 轮查单确认闭环
+#  （SDK 抛异常/返回空 → _handle_unknown_submit：
+#   查单命中对齐 / 全部未命中 REJECTED / 查询失败保持 ACK_UNKNOWN）
+# ═══════════════════════════════════════════
+
+
+class TestUnknownSubmitAck:
+    """T0-12：防双仓/防无声丢单——SDK 结果未知时绝不直接拒单，先查单确认"""
+
+    @pytest.fixture(autouse=True)
+    def _no_retry_sleep(self, monkeypatch):
+        """测试不真等 1s/3s/9s 退避：_ACK_UNKNOWN_RETRY_DELAYS 置 0"""
+        monkeypatch.setattr(QmtBroker, "_ACK_UNKNOWN_RETRY_DELAYS", (0.0, 0.0, 0.0))
+
+    def _sdk_exception_broker(self, live_broker, monkeypatch, query_result):
+        """构造 broker：SDK submit 抛异常 + query_broker_orders 预设结果"""
+        broker, fake = live_broker
+        broker.connect()
+
+        def _boom(*args, **kwargs):  # noqa: ARG001 - SDK 抛异常路径
+            raise RuntimeError("SDK 网络抖动（T0-12 模拟）")
+
+        monkeypatch.setattr(broker, "_call_qmt_sdk", _boom)
+        if callable(query_result):
+            monkeypatch.setattr(broker, "query_broker_orders", query_result)
+        else:
+            monkeypatch.setattr(
+                broker, "query_broker_orders", lambda symbol: query_result,
+            )
+        return broker
+
+    def test_sdk_exception_query_confirmed(self, live_broker, monkeypatch) -> None:
+        """SDK 抛异常 → 查单第 1 轮命中 → 订单对齐 SUBMITTED + 双向映射建立"""
+        order = _make_order(quantity=100, price=10.0)
+
+        def _query_hit(symbol):  # noqa: ARG001 - 返回券商端已受理记录
+            return [{
+                "order_id": order.order_id[:24],
+                "qmt_order_id": 555001,
+                "status": OrderStatus.SUBMITTED,
+            }]
+
+        broker = self._sdk_exception_broker(live_broker, monkeypatch, _query_hit)
+        result = broker.submit_order(order)
+
+        assert result.status is OrderStatus.SUBMITTED  # 查单确认已受理
+        assert result.extra.get("ack_unknown_reason", "").startswith("QMT 委托异常")  # 审计留痕
+        assert result.extra.get("qmt_order_id") == 555001
+        assert broker._local_to_qmt[order.order_id] == 555001
+        assert broker._qmt_to_local[555001] == order.order_id
+
+    def test_sdk_exception_query_filled_aligned(self, live_broker, monkeypatch) -> None:
+        """查单命中且券商端已成 → 本地对齐 FILLED（不丢成交）"""
+        order = _make_order(quantity=100, price=10.0)
+
+        def _query_filled(symbol):  # noqa: ARG001
+            return [{
+                "order_id": order.order_id[:24],
+                "qmt_order_id": 555002,
+                "status": OrderStatus.FILLED,
+            }]
+
+        broker = self._sdk_exception_broker(live_broker, monkeypatch, _query_filled)
+        result = broker.submit_order(order)
+
+        assert result.status is OrderStatus.FILLED
+        assert result.extra.get("qmt_order_id") == 555002
+
+    def test_sdk_exception_all_miss_rejected(self, live_broker, monkeypatch) -> None:
+        """SDK 抛异常 + 查单全部未命中（空列表）→ 窗口走完 → REJECTED"""
+        order = _make_order(quantity=100, price=10.0)
+        broker = self._sdk_exception_broker(
+            live_broker, monkeypatch, query_result=[],
+        )
+        result = broker.submit_order(order)
+
+        assert result.status is OrderStatus.REJECTED
+        assert result.extra.get("ack_unknown_reason", "").startswith("QMT 委托异常")  # 审计留痕
+
+    def test_sdk_exception_query_failed_keeps_unknown(self, live_broker, monkeypatch) -> None:
+        """SDK 抛异常 + 查询本身失败（None）→ 保持 ACK_UNKNOWN 不判死（交对账闭环）"""
+        order = _make_order(quantity=100, price=10.0)
+        broker = self._sdk_exception_broker(
+            live_broker, monkeypatch, query_result=None,
+        )
+        result = broker.submit_order(order)
+
+        assert result.status is OrderStatus.ACK_UNKNOWN  # 保守不判死
+        assert result.extra.get("ack_unknown") is True
+
+    def test_sdk_empty_return_query_confirmed(self, live_broker, monkeypatch) -> None:
+        """SDK 返回空（非异常）→ 查单命中 → 同样走确认闭环对齐 SUBMITTED"""
+        order = _make_order(quantity=100, price=10.0)
+
+        def _query_hit(symbol):  # noqa: ARG001
+            return [{
+                "order_id": order.order_id[:24],
+                "qmt_order_id": 555003,
+                "status": OrderStatus.SUBMITTED,
+            }]
+
+        broker, fake = live_broker
+        broker.connect()
+        monkeypatch.setattr(broker, "_call_qmt_sdk", lambda *a, **kw: None)  # 返回空
+        monkeypatch.setattr(broker, "query_broker_orders", _query_hit)
+        result = broker.submit_order(order)
+
+        assert result.status is OrderStatus.SUBMITTED
+        assert result.extra.get("qmt_order_id") == 555003

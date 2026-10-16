@@ -240,13 +240,13 @@ FILE_STMT_CEILING: dict[str, int] = {
     "live/broker_factory.py": 13,
     "live/brokers/__init__.py": 8,
     "live/brokers/base_broker.py": 351,
-    "live/brokers/manager.py": 475,
+    "live/brokers/manager.py": 477,  # 475→477（+2，T0-12 报单结果未知分类 business_skipped 计数功能必需）
     "live/brokers/paper_broker.py": 347,
     "live/brokers/ptrade_broker.py": 58,
-    "live/brokers/qmt_broker.py": 981,
+    "live/brokers/qmt_broker.py": 1033,  # 981→1033（+52，T0-12 报单结果未知查单确认闭环 _handle_unknown_submit/查单退避/状态对齐功能必需；配套新增 TestUnknownSubmitAck 5 用例覆盖，C-3 覆盖率 60% 达标）
     "live/data_feed.py": 541,  # 885→634（#421 拆包瘦身：行情源层迁出 realtime_sources.py，语句实测同步）；634→541（#423 拆包瘦身：实时桥层迁出 realtime_bridge.py，语句实测同步）
     "live/emergency_liquidation.py": 170,
-    "live/engine.py": 1116,  # 1197→1250（+53，#413-#417 T2-1/T2-2/T1-2/T3-1 功能改造，与 R-24 行数 3111→3236 同步，§5.3）；1250→1095（#422 拆包瘦身：装配层迁出 engine_assembly.py，语句实测同步）；1095→1105（+10，#421 T4-1 撤销T+1自动豁免 + #422 T4-2 启动即不下单 + #424 T4-3/T4-4 信号流与fail-closed 功能必需，与 R-24 行数 2808→2829、R-26 live 包 17465→17492 同批对价，§5.3）；1105→1116（+11，#425 引擎预热/回放停止感知 _stop_requested 功能必需，与 R-24/R-26 live 包同步对价，§5.3）
+    "live/engine.py": 1119,  # 1197→1250（+53，#413-#417 T2-1/T2-2/T1-2/T3-1 功能改造，与 R-24 行数 3111→3236 同步，§5.3）；1250→1095（#422 拆包瘦身：装配层迁出 engine_assembly.py，语句实测同步）；1095→1105（+10，#421 T4-1 撤销T+1自动豁免 + #422 T4-2 启动即不下单 + #424 T4-3/T4-4 信号流与fail-closed 功能必需，与 R-24 行数 2808→2829、R-26 live 包 17465→17492 同批对价，§5.3）；1105→1116（+11，#425 引擎预热/回放停止感知 _stop_requested 功能必需，与 R-24/R-26 live 包同步对价，§5.3）；1116→1119（+3，T0-12 ACK_UNKNOWN 查单确认 engine 端分支功能必需）
     "live/kill_switch_signal.py": 147,
     "live/portfolio.py": 419,
     "live/run_mode.py": 114,
