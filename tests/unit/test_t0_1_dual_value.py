@@ -99,3 +99,44 @@ class TestDualValueNoOverwrite:
         p.sync_from_broker(broker, cash_tolerance=0.0)
         assert "600000" in p._positions, "T0-1 失败: 持仓 diff 超阈时本地持仓被 clear"
         assert p.is_reconciliation_blocked is True
+
+
+class TestT015Rounding:
+    """T0-15 / FI-22：现金差 1e-9 浮点尾差不触发冻结；持仓数量整数比较。"""
+
+    def test_cash_diff_1e_9_does_not_freeze(self):
+        """FI-22：cash_diff=1e-9（浮点尾差）→ round(,2)=0 → 不冻结。"""
+        p = LivePortfolio(initial_capital=100_000.0)
+        # broker 现金 = 本地 + 1e-9（浮点运算尾差）
+        broker = _StubBroker(cash=100_000.000000001)
+
+        diff = p.reconcile_vs_broker(broker, cash_tolerance=0.0)
+        assert diff.cash_diff == 0.0, f"T0-15 失败: 1e-9 尾差未 round, cash_diff={diff.cash_diff}"
+        assert diff.exceeds_threshold is False, "1e-9 尾差不应触发冻结"
+
+    def test_cash_diff_0_01_triggers_freeze(self):
+        """现金差 0.01 元 → round 后仍超阈（容差=0），触发冻结。"""
+        p = LivePortfolio(initial_capital=100_000.0)
+        broker = _StubBroker(cash=99_999.99)  # 差 0.01
+
+        diff = p.reconcile_vs_broker(broker, cash_tolerance=0.0)
+        assert abs(diff.cash_diff) == 0.01
+        assert diff.exceeds_threshold is True
+
+    def test_position_qty_float_tail_does_not_freeze(self):
+        """持仓数量 float 尾差（1000.0000001 vs 1000）→ int 截断后相等，不触发冻结。"""
+        p = LivePortfolio(initial_capital=100_000.0)
+        p._positions["600000"] = Position(symbol="600000", quantity=1000, avg_cost=10.0,
+                                         market_price=10.0, realized_pnl=0.0,
+                                         opened_at=0.0, strategy_id="test")
+        # broker 返回 1000.0000001（float 尾差）
+        broker_pos = Position(symbol="600000", quantity=1000.0000001, avg_cost=10.0,
+                              market_price=10.0, realized_pnl=0.0,
+                              opened_at=0.0, strategy_id="test")
+        broker = _StubBroker(cash=100_000.0, positions=[broker_pos])
+
+        diff = p.reconcile_vs_broker(broker, cash_tolerance=0.0)
+        assert "600000" not in diff.position_diffs, (
+            f"T0-15 失败: 持仓数量 float 尾差未按整数比较, diff={diff.position_diffs}"
+        )
+        assert diff.exceeds_threshold is False

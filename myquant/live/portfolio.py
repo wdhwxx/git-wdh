@@ -712,7 +712,8 @@ class LivePortfolio:
 
         account = broker.get_account()
         broker_cash = float(account.get("cash", 0.0))
-        cash_diff = self._cash - broker_cash
+        # T0-15：cash_diff 先 round 2 位再比较（FI-22：1e-9 浮点尾差不冻结）
+        cash_diff = round(self._cash - broker_cash, 2)
 
         broker_positions = {p.symbol: p for p in broker.get_positions()}
         pos_diffs: Dict[str, Dict[str, float]] = {}
@@ -720,8 +721,9 @@ class LivePortfolio:
         for symbol in sorted(all_symbols):
             local_pos = self._positions.get(symbol)
             broker_pos = broker_positions.get(symbol)
-            local_qty = float(local_pos.quantity) if local_pos is not None else 0.0
-            broker_qty = float(broker_pos.quantity) if broker_pos is not None else 0.0
+            # T0-15：持仓数量用整数比较（A股数量必为整数，float 尾差不触发冻结）
+            local_qty = int(local_pos.quantity) if local_pos is not None else 0
+            broker_qty = int(broker_pos.quantity) if broker_pos is not None else 0
             if local_qty != broker_qty:
                 pos_diffs[symbol] = {
                     "local_quantity": local_qty,

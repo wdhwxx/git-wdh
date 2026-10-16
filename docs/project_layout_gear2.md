@@ -5959,3 +5959,10 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    d. 专项测试 tests/unit/test_t0_1_dual_value.py 6 用例：diff超阈不覆写book_cash；broker返回0不清零；容差内自动同步；adopt显式收敛；adopt缺reason/actor抛错；持仓diff不覆写。6 passed。
    e. 基线同步：live 包 17882/655→17947/659（+65行/+4符号=adopt_broker_ledger方法+3property，fan_out不变，功能必需对价）。
    f. ⚠️ C-1 红线：T0-1 + T0-15 + T0-16 必须同 PR。本 commit 仅 T0-1 代码，PR-B 完整 PR 待 T0-15/T0-16 补齐后合并。
+
+## #T0-15 · 2026-10-16 · cash_diff round 2位 + 持仓数量整数比较（FI-22）
+   a. 缺陷：cash_diff 直接浮点减法，1e-9 这类浮点尾差被算成超阈 → 误冻结；持仓数量 float 直接比较，1000.0000001 vs 1000 也误判。
+   b. 修复：reconcile_vs_broker 里 cash_diff = round(本地-券商, 2)；持仓数量 int(local_qty) / int(broker_qty) 后比较（A股数量必为整数）。
+   c. 验收：FI-22 cash_diff=1e-9 → round(,2)=0 → 不冻结；0.01 元差仍触发冻结；持仓 1000.0000001 vs 1000 → int 截断后相等不冻结。
+   d. 专项测试 TestT015Rounding 3 用例（追加到 test_t0_1_dual_value.py）。9 passed。
+   e. 基线同步：live 包 17947/659→17949/659（+2 行，symbols/fan_out 不变，功能必需对价）。
