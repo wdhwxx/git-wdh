@@ -5995,3 +5995,13 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    f. T0-19：broker_manager.submit_order 开头加拦截——portfolio.is_reconciliation_blocked=True → order.reject + CRITICAL，拒绝新提交。
    g. 专项测试 test_pr_d_guardrails.py 5 用例：live scheduler 禁用拒启 / paper 放行 / 持续冻结 critical / 冻结拒提交 / 解冻放行。5 passed。
    h. 基线同步：engine.py 2919→2933（+14行）；live 包 18002/660→18032/660（+30行）；monitoring 包 24008/881→24015/881（+7行）。
+
+## #T1-3 · 2026-10-16 · 阶段1 账本落地：0009 对账账本迁移（RC-07 真钱硬前置）
+   a. 背景：0004 只建了 orders/fills/positions_daily 三表骨架，无对账相关字段/表。
+   b. 迁移内容（0009_reconciliation_ledger.py）：
+      - orders 增列：client_order_id / broker_order_id / broker_id / account_id / filled_qty / filled_price / last_update_at / raw_payload
+      - fills 增列：broker_trade_id(唯一) / stamp_tax / transfer_fee / account_id
+      - 新增 order_events（append-only, order_id+seq 唯一）
+      - 新增 reconciliation_runs / reconciliation_diffs / reconciliation_freeze 三表
+   c. 验收：alembic upgrade head 成功（0008→0009）；database/quant.db 验证所有新列/新表存在。
+   d. 基线同步：database 包 3608/113/17→3763/116/17（+155行/+3符号，T1-3 迁移功能必需对价）；ZERO_COVERAGE_BASELINE 追加 0009 迁移文件。
