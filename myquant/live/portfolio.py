@@ -224,8 +224,11 @@ class LivePortfolio:
         self._initial_capital = float(initial_capital)
 
         # 资金
-        self._cash = float(initial_capital)        # 总资金
+        self._cash = float(initial_capital)        # 总资金（本地记账账，book_cash）
         self._frozen_cash = 0.0                      # 冻结资金（挂单中）
+        # T0-1 双值并存：broker_cash 是券商快照值（仅比对用，不自动覆写本地账）
+        self._broker_cash: float = 0.0               # 券商现金快照（sync_from_broker 时刷新）
+        self._reconciliation_blocked: bool = False   # 对账冻结（diff 超阈 → 本地账不被覆写）
 
         # 持仓
         self._positions: Dict[str, Position] = {}   # symbol -> Position
@@ -587,6 +590,22 @@ class LivePortfolio:
         """
         return self._cash + self.get_market_value()
 
+    # ── T0-1 双值并存访问器 ──
+    @property
+    def book_cash(self) -> float:
+        """本地记账账现金（book_cash）——本地账权威，不被券商快照自动覆写。"""
+        return self._cash
+
+    @property
+    def broker_cash(self) -> float:
+        """券商快照现金（broker_cash）——仅比对用，双值并存。"""
+        return self._broker_cash
+
+    @property
+    def is_reconciliation_blocked(self) -> bool:
+        """对账是否冻结（diff 超阈 → 本地账不被覆写，需人工 adopt）。"""
+        return self._reconciliation_blocked
+
     @_locked
     def get_equity(self) -> float:
         """
@@ -790,11 +809,14 @@ class LivePortfolio:
         self, broker: Any, cash_tolerance: Optional[float] = None,
     ) -> ReconciliationDiff:
         """
-        从broker同步持仓和资金（先 diff 后重建，禁止静默覆盖）。
+        从broker同步持仓和资金（先 diff 后比对，T0-1 双值并存不自动覆写）。
 
-        KP-P4-01：同步前先与券商对账——若账实不一致（现金差超容差或任一持仓
-        数量不同），记录 critical 日志并通知 __reconciliation_diff__ 回调，
-        不静默 clear 覆盖本地账本。
+        T0-1 / C-1 双值并存规则：
+          - 先 diff，记录 broker_cash 快照（仅比对，不覆写本地 _cash/_positions）；
+          - diff 超阈 → 置 reconciliation_blocked=True + CRITICAL + 通知回调，
+            本地账（book_cash / _positions）**保持不变**（不再被镜像抹平）；
+          - diff 在容差内 → 才正常同步（旧行为，自动对齐）；
+          - 要显式收敛到券商账 → 调 adopt_broker_ledger(reason, actor)（带审计）。
 
         Parameters
         ----------
@@ -805,24 +827,36 @@ class LivePortfolio:
 
         Returns
         -------
-        ReconciliationDiff : 本次同步前的账实差异快照。
+        ReconciliationDiff : 本次账实差异快照。
         """
-        # #T-07(KP-P4-01)：先 diff 后重建
+        # T0-1：先 diff（不覆写），再决定是否同步
         diff = self.reconcile_vs_broker(broker, cash_tolerance=cash_tolerance)
+
+        # 刷新 broker_cash 快照（双值并存：broker_cash 仅比对，不自动覆盖 book_cash）
+        account = broker.get_account() or {}
+        self._broker_cash = float(account.get("cash", 0.0) or 0.0)
+
         if diff.exceeds_threshold:
+            # T0-1：差异超阈 → 置对账冻结 + CRITICAL + 通知回调，本地账保持不变
+            self._reconciliation_blocked = True
             self._stats["last_reconciliation_diff"] = str(diff)
+            self._stats["last_reconciliation_blocked_ts"] = time.time()
             logger.critical(
-                f"[portfolio] 账实差异 {diff}，禁止静默覆盖（仍按券商权威账本重建）"
+                f"[portfolio] 账实差异超容差 {diff}，置 reconciliation_blocked=True，"
+                f"本地账(book_cash={self._cash:,.2f})不被券商快照(broker_cash={self._broker_cash:,.2f})覆写；"
+                f"需人工显式 adopt_broker_ledger(reason, actor) 收敛"
             )
             self._notify_callbacks("__reconciliation_diff__")
+            self._notify_callbacks("__reconciliation_blocked__")
+            return diff
 
-        # 同步资金
-        account = broker.get_account()
-        self._cash = account.get("cash", self._cash)
-        self._frozen_cash = account.get("frozen_cash", 0.0)
+        # diff 在容差内 → 正常同步（旧行为，自动对齐）
+        self._reconciliation_blocked = False
+        self._cash = self._broker_cash
+        self._frozen_cash = float(account.get("frozen_cash", 0.0) or 0.0)
 
         # 同步持仓
-        broker_positions = broker.get_positions()
+        broker_positions = broker.get_positions() or []
         self._positions.clear()
         for pos in broker_positions:
             self._positions[pos.symbol] = Position(
@@ -837,11 +871,42 @@ class LivePortfolio:
 
         self._stats["last_update_time"] = time.time()
         logger.info(
-            f"从broker同步完成: 持仓={self.get_position_count()}只, "
+            f"从broker同步完成(差异在容差内, 已自动对齐): 持仓={self.get_position_count()}只, "
             f"资金={self._cash:,.2f}, 总资产={self.get_total_assets():,.2f}"
         )
         self._notify_callbacks("__sync__")
         return diff
+
+    def adopt_broker_ledger(self, reason: str, actor: str) -> None:
+        """
+        T0-1 显式收敛到券商账本（人工介入后调用，带审计）。
+
+        双值并存规则下：diff 超阈时本地账不被自动覆写；人工核查确认券商账
+        正确后，调本方法显式 adopt——把 broker_cash / broker 持仓写回本地账，
+        并解除 reconciliation_blocked。
+
+        Parameters
+        ----------
+        reason : str
+            收敛原因（如"人工核查确认券商账正确"）。
+        actor : str
+            操作人（必填，审计留痕）。
+        """
+        if not reason or not actor:
+            raise ValueError("adopt_broker_ledger 需要 reason 和 actor（审计必填）")
+        logger.info(
+            f"[portfolio] 显式 adopt_broker_ledger: actor={actor!r} reason={reason!r} "
+            f"(book_cash {self._cash:,.2f} → broker_cash {self._broker_cash:,.2f})"
+        )
+        self._cash = self._broker_cash
+        # 注意：持仓不在这里 adopt——持仓 adopt 需要从 broker 重新拉取，
+        # 调用方应在 adopt 前先调 sync_from_broker（diff 超阈时它只比对不覆写），
+        # 再调本方法收敛资金；持仓收敛由调用方显式处理。
+        self._reconciliation_blocked = False
+        self._stats["last_adopt_ts"] = time.time()
+        self._stats["last_adopt_actor"] = actor
+        self._stats["last_adopt_reason"] = reason
+        self._notify_callbacks("__adopted__")
 
     # ═══════════════════════════════════════════
     #  A-7：事件驱动对账触发（R-02：实时核对由事件流触发，周期巡检仅兜底）

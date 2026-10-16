@@ -5947,3 +5947,15 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
       - 引擎接口：pause() 有 force 参数 / __init__ 有 _startup_blocked / BrokerManager.restore_state 有子券商转发逻辑
    d. 新建 tests/integration/test_assembly_wiring.py（注意：清单要求文件名"测试_装配有效性.py"，因 Windows 文件系统中文文件名易导致 pytest 收集问题，采用等价英文名 test_assembly_wiring.py）。11 passed。
    e. 无生产代码改动，基线不变。
+
+## #T0-1 · 2026-10-16 · portfolio 双值并存防镜像覆写（PR-B 核心）
+   a. 缺陷：sync_from_broker 先 diff 告警，但不管 diff 超不超阈都照覆写——line 821 self._cash = account.get("cash") + line 826 self._positions.clear() → 本地账被券商快照抹平（RC-11 镜像覆写病）。
+   b. 修复（双值并存）：
+      - 新增 _broker_cash / _reconciliation_blocked 属性；
+      - sync_from_broker：diff 超阈 → 置 blocked + CRITICAL + 通知回调，本地 book_cash/_positions **保持不变**；diff 在容差内 → 正常同步（旧行为）；
+      - 新增 dopt_broker_ledger(reason, actor)：人工显式收敛资金 + 解除 blocked（reason/actor 必填，审计留痕）；
+      - 新增 property：book_cash / broker_cash / is_reconciliation_blocked。
+   c. 验收覆盖：FI-01/02（broker 返回 0 不清零）、FI-11 衍生（diff 超阈本地账不被覆写）。
+   d. 专项测试 tests/unit/test_t0_1_dual_value.py 6 用例：diff超阈不覆写book_cash；broker返回0不清零；容差内自动同步；adopt显式收敛；adopt缺reason/actor抛错；持仓diff不覆写。6 passed。
+   e. 基线同步：live 包 17882/655→17947/659（+65行/+4符号=adopt_broker_ledger方法+3property，fan_out不变，功能必需对价）。
+   f. ⚠️ C-1 红线：T0-1 + T0-15 + T0-16 必须同 PR。本 commit 仅 T0-1 代码，PR-B 完整 PR 待 T0-15/T0-16 补齐后合并。
