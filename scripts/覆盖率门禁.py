@@ -5,9 +5,12 @@
     python scripts/覆盖率门禁.py
     python scripts/覆盖率门禁.py --json outputs/coverage.json --junit test-results.xml
     python scripts/覆盖率门禁.py --report-only   # 报告模式（CI 首轮：基线待冻结）
+    python scripts/覆盖率门禁.py --explain        # 显式输出顶红指引（红时默认自动输出）
 
 读 pytest-cov 产物 coverage.json，按 v1.2 §5 判据（C-1~C-7）判定通过/失败；
 业务逻辑全部在 myquant.leakage_gate.coverage_gate。
+判定失败时自动输出"顶红指引"（红类型→强制路径→禁止动作，对齐根目录
+门禁顶红治理方案.md §3）——AI 与人都照此执行。
 被 CI coverage-gate-check job 调用。
 """
 
@@ -25,6 +28,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 from myquant.leakage_gate.coverage_gate import (  # noqa: E402
     DEFAULT_COVERAGE_JSON,
     evaluate,
+    explain_violations,
 )
 
 
@@ -40,6 +44,8 @@ def main() -> int:
     parser.add_argument("--root", default=".", help="项目根目录（默认当前目录）")
     parser.add_argument("--report-only", action="store_true",
                         help="报告模式：输出判据预演，不阻断（CI 首轮用，基线冻结后移除）")
+    parser.add_argument("--explain", action="store_true",
+                        help="显式输出顶红指引（红类型→强制路径→禁止动作；判定失败时默认自动输出）")
     args = parser.parse_args()
 
     root = Path(args.root).resolve()
@@ -55,8 +61,12 @@ def main() -> int:
     print(report.summary())
     if not report.ok:
         print(f"  ❌ 覆盖率门禁未通过（{len(report.violations)} 项违反）")
+        # 顶红指引：判定失败自动输出（门禁顶红治理方案 §3/§4），AI 与人都照此执行
+        print(explain_violations(report.violations))
         # 报告模式：输出判据预演但不阻断（CI 首轮自产基线，冻结后转阻断）
         return 0 if args.report_only else 1
+    if args.explain:
+        print(explain_violations(report.violations))  # 显式请求且无红：提示当前无红
     print("  ✓ 覆盖率门禁通过")
     return 0
 

@@ -359,7 +359,7 @@ PACKAGE_STRUCTURE_BASELINE: dict[str, dict[str, int]] = {
     "execution": {"lines": 1097, "symbols": 59, "fan_out": 6},  # 1085→1097（+12，#425 引擎停止感知 _stop_requested 状态机贯通功能必需）
     "gui": {"lines": 6603, "symbols": 242, "fan_out": 28},
     "indicators": {"lines": 5884, "symbols": 172, "fan_out": 17},
-    "leakage_gate": {"lines": 4475, "symbols": 149, "fan_out": 17},  # 4466→4475（+9，C-4 行规对齐 NEW_FILE_FLOOR T0/T1 60→80 + 拆包产物 realtime_sources/realtime_bridge/engine_assembly 补注册 C-5/FILE_FLOOR——门禁治理代码自身增长，功能必需对价，2026-10-16）
+    "leakage_gate": {"lines": 4555, "symbols": 150, "fan_out": 17},  # 4466→4475（+9，C-4 行规对齐 NEW_FILE_FLOOR T0/T1 60→80 + 拆包产物 realtime_sources/realtime_bridge/engine_assembly 补注册 C-5/FILE_FLOOR——门禁治理代码自身增长，功能必需对价，2026-10-16）；4475/149→4555/150（+80 行/+1 符号=explain_violations，顶红指引引擎 _RED_GUIDES+explain_violations 功能必需对价，与 C-5 coverage_gate 242→255 联动同步，2026-10-16）
     "live": {"lines": 17690, "symbols": 653, "fan_out": 35},  # T4-4 fail-closed 17492→17498；#425 引擎停止感知 17498→17513（lines +15 功能必需，symbols/fan_out 不变）；17513/652→17690/653（T0-12 查单确认闭环 qmt_broker/manager/engine 功能必需，+1 符号=_handle_unknown_submit 方法）
     "ml": {"lines": 5672, "symbols": 208, "fan_out": 27},
     "models": {"lines": 1784, "symbols": 139, "fan_out": 6},  # T4-3 signals字段 1757→1760；1760→1784（+24，#425 引擎预热/回放停止感知配置模型扩展功能必需）

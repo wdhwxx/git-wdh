@@ -233,7 +233,7 @@ FILE_STMT_CEILING: dict[str, int] = {
     "leakage_gate/config_deadkey.py": 72,
     "leakage_gate/consumption.py": 84,
     "leakage_gate/contract.py": 99,
-    "leakage_gate/coverage_gate.py": 242,  # 冻结 commit 更新：229→242（#407 §5.3：C-8 季度治理实现新增 13 语句）
+    "leakage_gate/coverage_gate.py": 255,  # 冻结 commit 更新：229→242（#407 §5.3：C-8 季度治理实现新增 13 语句）；242→255（2026-10-16：顶红指引引擎 explain_violations + _RED_GUIDES 新增 13 语句，配套 TestExplainViolations 6 用例覆盖 91.4%，与 R-26 leakage_gate 包基线 4475→4555/149→150 联动同步）
     "leakage_gate/cross_sectional.py": 138,
     "leakage_gate/exemption.py": 143,
     "leakage_gate/gate.py": 106,
@@ -805,3 +805,83 @@ def evaluate(
         )
 
     return report
+
+
+# ── 顶红指引（门禁顶红治理方案.md §3 红类型→强制路径矩阵，2026-10-16 落地）──
+# 每项：(红类型, 强制路径, 禁止动作)。AI 与人类顶红后都必须按此方向走，
+# 禁止动作列为红线——任何主体（含 AI）不得触碰。
+_RED_GUIDES: dict[str, tuple[str, str, str]] = {
+    "C-1": (
+        "标准红（覆盖率）",
+        "只许补测试：把总覆盖率补到 ≥ C-1b 63.0%，且已覆盖行 ≥ C-1a 38800 行（防删测试）。",
+        "禁止降 COVERAGE_BASELINE / COVERED_LINES_BASELINE；禁止删测试；禁止改 coverage 口径。",
+    ),
+    "C-2": (
+        "标准红（分层下限）",
+        "只许补测试：把该层覆盖率补到 ≥ 对应 floor（T0 68.0% / T1 60.0% / T2 52.0%）。",
+        "禁止降 TIER_FLOOR；禁止删测试；禁止用 R-19 引用级数字冒充执行级。",
+    ),
+    "C-3": (
+        "标准红（文件下限）",
+        "只许补该文件测试：补到 ≥ FILE_FLOOR 对应值（见 门禁顶红治理方案.md 附录参数快照）。",
+        "禁止降 FILE_FLOOR；禁止删该文件测试。",
+    ),
+    "C-4": (
+        "新文件红",
+        "只许补测试到 80%（T0/T1）；确系历史存量漏注册 → 补入 C-5/FILE_FLOOR 注册表（附实测 + 蓝图回写）。",
+        "禁止降 NEW_FILE_FLOOR；禁止虚报为存量；禁止新建低覆盖文件承接逻辑（横向分裂）。",
+    ),
+    "C-5": (
+        "膨胀红（语句棘轮）",
+        "先拆后抬：能拆就拆（实测下调语句数）；拆不动走对价抬升（功能必需+工单+实测+独立 commit+蓝图回写，与 R-24/R-26 联动同步）。",
+        "禁止无对价抬升；禁止压缩/拼接代码绕过；禁止只抬一套门禁。",
+    ),
+    "C-6": (
+        "结构红（仅源码断言模块）",
+        "为新增的仅字符串守护模块补行为测试，把计数降到 ≤ SOURCE_ASSERT_ONLY_MAX(33)。",
+        "禁止调 SOURCE_ASSERT_ONLY_MAX 上限；禁止删断言凑数。",
+    ),
+    "C-7": (
+        "结构红（跳过预算）",
+        "修掉运行时 skip，使跳过数 ≤ SKIP_BUDGET(4)。",
+        "禁止调 SKIP_BUDGET；禁止改 junit 数据源绕过。",
+    ),
+    "V-9": (
+        "结构红（分层口径）",
+        "为新文件登记分层（蓝图 + tier_of 口径），消除 UNMAPPED 文件。",
+        "禁止改分层口径绕过。",
+    ),
+}
+
+_DEFAULT_RED_GUIDE: tuple[str, str, str] = (
+    "门禁红（未分类）",
+    "按 门禁顶红治理方案.md §4 六步协议处理：定位 → 分类 → 走强制路径 → 实测复核 → 留痕提交 → CI 验证。",
+    "禁止静默改门禁参数；禁止删测试；禁止把红归因环境差异而不实测复核。",
+)
+
+
+def explain_violations(violations: list[str]) -> str:
+    """把门禁违反判据逐条翻译成顶红指引（红类型 + 强制路径 + 禁止动作）。
+
+    对齐根目录文档 门禁顶红治理方案.md §3 红类型→强制路径矩阵；供
+    scripts/覆盖率门禁.py 在判定失败时自动输出——AI 与人都照此执行，
+    任何主体不得触碰"禁止动作"列。
+
+    Args:
+        violations: evaluate() 返回报告中的违反判据文本列表。
+
+    Returns:
+        多行指引文本；violations 为空时返回"当前无红"提示。
+    """
+    if not violations:
+        return "当前无违反判据，无顶红指引。"
+    lines = [
+        "顶红指引（门禁顶红治理方案.md §3/§4 六步协议：定位→分类→执行→复核→留痕→CI）",
+    ]
+    for v in violations:
+        marker = v.split(" ", 1)[0].rstrip(":")
+        base = "C-1" if marker.startswith("C-1") else marker
+        kind, path, forbid = _RED_GUIDES.get(base, _DEFAULT_RED_GUIDE)
+        lines.append(f"  [{marker}] {kind}：{path}")
+        lines.append(f"      ❌ 禁止动作：{forbid}")
+    return "\n".join(lines)

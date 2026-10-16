@@ -289,3 +289,54 @@ def test_report_only_marked(tmp_path: Path, relaxed_baselines: None) -> None:
     cov = _write_fake_coverage(tmp_path, files, totals)
     report = cg.evaluate(cov, project_root=PROJECT_ROOT, report_only=True)
     assert "报告模式" in report.summary()
+
+
+# ── 10. 顶红指引（explain_violations，门禁顶红治理方案 §3）─────────
+class TestExplainViolations:
+    """顶红指引分类：标准红/新文件红/膨胀红/结构红 + 未知前缀兜底。"""
+
+    def test_standard_red_c1(self) -> None:
+        text = cg.explain_violations(
+            ["C-1b 总覆盖率 60.0% < 基线 63.0%（疑似堆未测代码）"]
+        )
+        assert "标准红（覆盖率）" in text
+        assert "只许补测试" in text
+        assert "禁止降 COVERAGE_BASELINE" in text
+        assert "禁止删测试" in text
+
+    def test_new_file_red_c4(self) -> None:
+        text = cg.explain_violations(
+            ["C-4 新增文件 live/foo.py（T0）覆盖率 50.0% < 门槛 80.0%"]
+        )
+        assert "新文件红" in text
+        assert "补测试到 80%" in text
+        assert "禁止降 NEW_FILE_FLOOR" in text
+        assert "禁止虚报为存量" in text
+
+    def test_bump_red_c5(self) -> None:
+        text = cg.explain_violations(
+            ["C-5 myquant/live/foo.py 语句数 999 > 冻结值 500（存量语句只增不减）"]
+        )
+        assert "膨胀红（语句棘轮）" in text
+        assert "先拆后抬" in text
+        assert "禁止只抬一套门禁" in text
+
+    def test_structure_red_and_unknown(self) -> None:
+        text = cg.explain_violations(
+            [
+                "V-9 分层口径不自洽：2 个 myquant 文件未归层",
+                "coverage.json 缺失或非法，门禁无法判定（fail-closed）",
+            ]
+        )
+        assert "结构红（分层口径）" in text
+        assert "门禁红（未分类）" in text
+        assert "六步协议" in text
+
+    def test_no_red(self) -> None:
+        assert "当前无违反判据" in cg.explain_violations([])
+
+    def test_c1a_marker_normalized(self) -> None:
+        text = cg.explain_violations(
+            ["C-1a 已覆盖行 1000 < 基线 38800（疑似删测试/删已覆盖代码）"]
+        )
+        assert "标准红（覆盖率）" in text  # C-1a 归一为 C-1 分类
