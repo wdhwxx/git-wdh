@@ -155,9 +155,12 @@ class AccountReconciler:
         self._pending_broker: Any = None
 
         # 对账状态（供 B-2/B-8/B-10 消费）
+        # T0-14：_consistent 三态——True=一致 / False=差异冻结 / None=UNKNOWN(核对异常失联)
+        # 初始 None（未跑过任何核对）；broker 查询持续异常时置 None，看板显式"对账失联"
         self._frozen: bool = False
-        self._consistent: bool = True
+        self._consistent: Optional[bool] = None
         self._last_check_ts: float = 0.0
+        self._last_success_ts: float = 0.0  # T0-14：最近一次成功核对时刻（异常不刷新）
         self._last_diff_dict: Optional[Dict[str, Any]] = None
         self._last_t1_diff_dict: Optional[Dict[str, Any]] = None
         self._resolved_by: Optional[str] = None
@@ -257,13 +260,20 @@ class AccountReconciler:
                 broker, cash_tolerance=tolerances["realtime"],
             )
             self._ingest_realtime_diff(diff)
-        except Exception as e:  # 异步核对异常不阻断事件流
-            logger.error("[account_reconciler] 异步实时核对异常（不阻断事件流）: %s", e)
+        except Exception as e:  # T0-14：核对异常 → 置 UNKNOWN + CRITICAL，不再保持旧 True
+            with self._lock:
+                self._consistent = None  # UNKNOWN：broker 查询失联
+                self._last_check_ts = time.time()
+                # 不刷新 _last_success_ts：last_success_ts 停留在最近一次成功时刻
+            logger.critical(
+                "[account_reconciler] 实时核对异常(对账失联, consistent=None): %s", e,
+            )
 
     def _ingest_realtime_diff(self, diff: "ReconciliationDiff") -> None:
         """写入实时核对结果到状态；差异超阈 → 置冻结 + CRITICAL + 审计（仅首次冻结触发）。"""
         with self._lock:
             self._last_check_ts = time.time()  # 核对时刻（当前时点，防未来）
+            self._last_success_ts = time.time()  # T0-14：成功核对才刷新 success_ts
             self._last_diff_dict = diff.to_dict()
             if diff.exceeds_threshold:
                 self._consistent = False
@@ -309,6 +319,7 @@ class AccountReconciler:
         )
         with self._lock:
             self._last_check_ts = time.time()
+            self._last_success_ts = time.time()  # T0-14：T+1 成功也刷新 success_ts
             self._last_t1_diff_dict = diff.to_dict()
             self._last_diff_dict = diff.to_dict()
             if diff.exceeds_threshold:
@@ -433,9 +444,9 @@ class AccountReconciler:
 
     @property
     def is_consistent(self) -> bool:
-        """最近一次核对是否一致（未超容差）。"""
+        """最近一次核对是否一致（未超容差）。T0-14：None(对账失联) 保守返回 False。"""
         with self._lock:
-            return self._consistent
+            return bool(self._consistent)
 
     @property
     def is_frozen(self) -> bool:
@@ -457,12 +468,20 @@ class AccountReconciler:
                 resolved_by / last_diff（实时差异摘要）/ last_t1_diff（终局差异摘要）。
         """
         with self._lock:
+            # T0-14：stale_seconds = 当前时间 - 最近一次成功核对时刻；
+            # consistent=None 表示对账失联（broker 查询异常），看板据此显式"对账失联"。
+            now = time.time()
+            stale_seconds = (
+                now - self._last_success_ts if self._last_success_ts > 0 else None
+            )
             return {
                 "account_id": self._account_id,
                 "consistent": self._consistent,
                 "frozen": self._frozen,
                 "in_flight": self._in_flight,
                 "last_check_ts": self._last_check_ts,
+                "last_success_ts": self._last_success_ts,
+                "stale_seconds": stale_seconds,
                 "resolved_by": self._resolved_by,
                 "last_diff": self._last_diff_dict,
                 "last_t1_diff": self._last_t1_diff_dict,

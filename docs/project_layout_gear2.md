@@ -5907,3 +5907,11 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    b. 修复：_submit_realtime 包 try/except——异常时 logger.critical + 锁内清 _in_flight/_pending_after/pending portfolio/broker，保证下次事件能继续触发；不重新抛（后台任务保事件流不中断）。
    c. 专项测试 tests/unit/test_account_reconciler.py 新增 TestInFlightLeak 2 用例：submit 抛异常 → in_flight 恢复 False；清理后重建 executor 能正常提交下一次核对。14 passed。
    d. 基线同步：monitoring 包 23932→23954（+22 行，symbols/fan_out 不变，功能必需对价）。
+
+## #T0-14 · 2026-10-16 · account_reconciler 核对异常置 UNKNOWN + to_dict 增 success/stale
+   a. 缺陷：_run_realtime_check 异常时只 logger.error，consistent 保持旧 True → broker 查询持续失联时驾驶舱仍显示"一致"。
+   b. 修复：_consistent 改三态 Optional[bool]（True/False/None=UNKNOWN）；异常时置 None + CRITICAL + 刷新 last_check_ts（不刷新 last_success_ts）；is_consistent 属性 None 保守返回 False（PnL 防脏门拒）。
+   c. to_dict 增 last_success_ts（最近一次成功核对时刻）和 stale_seconds（当前-success_ts，从未成功=None）；看板据 consistent=None 显式"对账失联"。
+   d. T+1 终局对账成功也刷新 last_success_ts。
+   e. 专项测试 tests/unit/test_account_reconciler.py 新增 TestReconcileUnknown 4 用例：异常→consistent=None；None时is_consistent=False；to_dict含success_ts/stale；从未成功stale=None。18 passed。
+   f. 基线同步：monitoring 包 23954→23973（+19 行，symbols/fan_out 不变，功能必需对价）。

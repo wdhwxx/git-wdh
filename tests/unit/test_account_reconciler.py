@@ -412,3 +412,72 @@ class TestInFlightLeak:
             assert broker.calls >= 1
         finally:
             rec.shutdown()
+
+
+# ═══════════════════════════════════════════════
+#  T0-14 / FI-21：核对异常 → consistent=UNKNOWN(None)；to_dict 增 success_ts/stale
+# ═══════════════════════════════════════════════
+
+class _ExplodingBroker:
+    """get_account 抛异常的 broker：模拟 broker 查询持续失联。"""
+    def get_account(self) -> Dict[str, Any]:
+        raise RuntimeError("broker 查询失败（T0-14 模拟失联）")
+    def get_positions(self) -> List[Any]:
+        raise RuntimeError("broker 查询失败")
+
+
+class TestReconcileUnknown:
+    """T0-14：broker 查询异常时 consistent 置 None（UNKNOWN），不再保持旧 True。"""
+
+    def test_exception_sets_consistent_none(self, hooks: SimpleNamespace) -> None:
+        """broker 抛异常 → consistent=None（对账失联），不再是 True/False。"""
+        p = _make_portfolio(100_000.0)
+        broker = _ExplodingBroker()
+        rec = _new_rec(hooks)
+        try:
+            rec.request_realtime_reconciliation(p, broker)
+            assert rec.flush(timeout=3.0) is True
+            state = rec.to_dict()
+            assert state["consistent"] is None, "T0-14 失败: 异常后 consistent 应为 None"
+        finally:
+            rec.shutdown()
+
+    def test_is_consistent_returns_false_when_unknown(self, hooks: SimpleNamespace) -> None:
+        """consistent=None 时 is_consistent 属性保守返回 False（PnL 防脏门拒）。"""
+        p = _make_portfolio(100_000.0)
+        broker = _ExplodingBroker()
+        rec = _new_rec(hooks)
+        try:
+            rec.request_realtime_reconciliation(p, broker)
+            rec.flush(timeout=3.0)
+            assert rec.is_consistent is False
+        finally:
+            rec.shutdown()
+
+    def test_to_dict_has_success_and_stale(self, hooks: SimpleNamespace) -> None:
+        """to_dict 包含 last_success_ts 和 stale_seconds 字段。"""
+        p = _make_portfolio(100_000.0)
+        broker = _FakeBroker(100_000.0)
+        rec = _new_rec(hooks)
+        try:
+            rec.request_realtime_reconciliation(p, broker)
+            assert rec.flush(timeout=3.0) is True
+            state = rec.to_dict()
+            assert "last_success_ts" in state
+            assert "stale_seconds" in state
+            # 刚成功，stale_seconds 应该很小（<1s）
+            assert state["last_success_ts"] > 0
+            assert state["stale_seconds"] is not None
+            assert 0 <= state["stale_seconds"] < 5.0
+        finally:
+            rec.shutdown()
+
+    def test_stale_seconds_none_before_any_success(self, hooks: SimpleNamespace) -> None:
+        """从未成功核对时 stale_seconds=None（不是 0）。"""
+        rec = _new_rec(hooks)
+        try:
+            state = rec.to_dict()
+            assert state["last_success_ts"] == 0.0
+            assert state["stale_seconds"] is None
+        finally:
+            rec.shutdown()

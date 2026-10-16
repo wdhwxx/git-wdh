@@ -364,7 +364,7 @@ PACKAGE_STRUCTURE_BASELINE: dict[str, dict[str, int]] = {
     "live": {"lines": 17732, "symbols": 654, "fan_out": 35},  # T4-4 fail-closed 17492→17498；#425 引擎停止感知 17498→17513（lines +15 功能必需，symbols/fan_out 不变）；17513/652→17690/653（T0-12 查单确认闭环 qmt_broker/manager/engine 功能必需，+1 符号=_handle_unknown_submit 方法）；17690/653→17732/654（T0-12·2 order_timeout 活配置化 _build_ack_unknown_delays +42行/+1符号功能必需）
     "ml": {"lines": 5672, "symbols": 208, "fan_out": 27},
     "models": {"lines": 1784, "symbols": 139, "fan_out": 6},  # T4-3 signals字段 1757→1760；1760→1784（+24，#425 引擎预热/回放停止感知配置模型扩展功能必需）
-    "monitoring": {"lines": 23954, "symbols": 880, "fan_out": 31},  # 23932→23954（+22，T0-13 account_reconciler._submit_realtime try/except 防 in_flight 泄漏，symbols/fan_out 不变）
+    "monitoring": {"lines": 23973, "symbols": 880, "fan_out": 31},  # 23932→23954（+22，T0-13 account_reconciler._submit_realtime try/except 防 in_flight 泄漏）；23954→23973（+19，T0-14 核对异常置 consistent=None + to_dict 增 success_ts/stale_seconds，symbols/fan_out 不变）
     "realism_gate": {"lines": 1864, "symbols": 50, "fan_out": 10},
     "risk": {"lines": 4288, "symbols": 195, "fan_out": 12},
     "strategies": {"lines": 6901, "symbols": 190, "fan_out": 21},
