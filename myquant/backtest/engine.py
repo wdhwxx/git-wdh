@@ -856,6 +856,13 @@ class BacktestEngine(BaseEngine):
         if signal.is_hold:
             return
 
+        # T4-3：回测侧生成 signal_id（与实盘同源）+ timestamp 传 bar 时间
+        if not signal.signal_id:
+            signal.signal_id = signal.make_signal_id(
+                as_of_date=getattr(bar, "timestamp", "") and str(bar.timestamp)[:10]
+            )
+        signal.timestamp = getattr(bar, "timestamp", signal.timestamp)  # T4-3：bar 时间替代 time.time()
+
         if signal.is_buy:
             # 买入：计算仓位
             quantity = self._calc_buy_quantity(symbol=signal.symbol, price=bar.close)
@@ -952,15 +959,28 @@ class BacktestEngine(BaseEngine):
         )
 
     def _calc_buy_quantity(self, symbol: str, price: float) -> int:
-        """计算买入数量（基于策略的仓位管理规则）"""
+        """计算买入数量（基于策略的仓位管理规则）
+
+        T5-1：与实盘 _calc_order_quantity 统一逻辑——
+        总资产×max_position_pct − 已持市值，不超过可用现金。
+        """
         if not self.strategy or not self.context:
             return 0
         if hasattr(self.strategy, 'calc_buy_quantity'):
             return self.strategy.calc_buy_quantity(price, self.context)
-        # 默认：20%仓位
+        # T5-1：向实盘对齐（总资产比例−已持市值），而非可用现金×20%
+        portfolio = self.context.portfolio
+        total_assets = getattr(portfolio, "total_assets", 0) or getattr(portfolio, "get_total_assets", lambda: 0)()
+        max_position_pct = getattr(self, "_max_position_pct", 0.20)
+        max_amount = total_assets * max_position_pct
+        current_value = 0.0
+        pos = self.context.get_position(symbol) if hasattr(self.context, "get_position") else None
+        if pos:
+            current_value = pos.quantity * price
+        available_amount = max(0, max_amount - current_value)
         cash = self.context.get_cash()
-        max_amount = cash * 0.20
-        shares = int(max_amount / price / 100) * 100
+        available_amount = min(available_amount, cash)
+        shares = int(available_amount / price / 100) * 100
         return max(0, shares)
 
     def _calc_benchmark_equity(self, timestamp: float) -> float:

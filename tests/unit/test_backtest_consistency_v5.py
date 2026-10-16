@@ -354,7 +354,7 @@ class TestCheckAll:
         assert mv.max_rel_diff < 1e-6
 
     def test_event_pairs_converge_within_default_tolerance(self) -> None:
-        """event 参与的对拍应在默认收敛容差（rel 5e-3）内通过。"""
+        """event 参与的对拍应在默认收敛容差（rel 1e-3）内通过。"""
         checker = ConsistencyChecker()
         report = checker.check_all(
             config=_make_config(),
@@ -364,7 +364,7 @@ class TestCheckAll:
         for c in report.comparisons:
             if c.engine_a == ENGINE_EVENT or c.engine_b == ENGINE_EVENT:
                 assert c.ok is True
-                assert c.max_rel_diff < 5e-3
+                assert c.max_rel_diff < 1e-3
 
     def test_partial_modes(self) -> None:
         """只对拍 2 种模式应产生 1 对。"""

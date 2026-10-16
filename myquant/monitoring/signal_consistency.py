@@ -105,7 +105,7 @@ _FUTURE_EPS: float = 1.0
 #: 缺省比对容差（非业务阈值；可注入）。缺省 0.0 = 价格/时间须精确一致，
 #   真实部署经构造参数按标的波动注入合理容差。
 DEFAULT_PRICE_TOLERANCE: float = 0.0
-DEFAULT_TIME_TOLERANCE: float = 0.0
+DEFAULT_TIME_TOLERANCE: float = 86400.0  # T4-3：0→86400（1交易日，回测T日信号vs实盘T+1成交）
 
 #: 指标名（set_gauge 进 collector，自动建指标）
 METRIC_TOTAL: str = "signal_consistency_total"

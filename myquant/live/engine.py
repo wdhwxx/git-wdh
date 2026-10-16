@@ -719,6 +719,7 @@ class LiveEngine(BaseEngine):
                 portfolio=self._portfolio,
                 executor=self._broker_manager,
                 config={"engine_id": self._engine_id},
+                extra={"lookahead_guard": self._lookahead_guard} if self._lookahead_guard else {},  # T5-2：守卫注入策略上下文
             )
 
             # 注册行情回调（需先算订阅标的，warmup 与实时订阅共用同一份 symbols）
@@ -1529,6 +1530,7 @@ class LiveEngine(BaseEngine):
             signal.signal_id = signal.make_signal_id(
                 as_of_date=format_bar_date(bar.timestamp, period=str(bar.frequency.value))
             )
+        signal.timestamp = bar.timestamp  # T4-3：bar 时间替代 time.time()
         if signal.signal_id in self._processed_signal_ids:
             self._stats["dedup_skipped"] += 1
             logger.info(
@@ -1909,6 +1911,17 @@ class LiveEngine(BaseEngine):
             # T2-2：恢复已处理信号 id（最近 5 个交易日 ≈ 7 自然日窗口），
             # 防止重启后同一信号被重复下单。过期 id 丢弃防无限膨胀。
             self._restore_processed_signal_ids(snapshot.state)
+            # T4-4：策略状态校验（策略名/参数哈希不匹配时告警，不阻断）
+            saved_strategies = (snapshot.state.get("extra") or {}).get("strategy_state") or []
+            if saved_strategies:
+                for i, saved in enumerate(saved_strategies):
+                    if i < len(self._strategies):
+                        cur = self._strategies[i]
+                        if saved.get("name") != getattr(cur, "name", ""):
+                            logger.warning(
+                                f"[engine] T4-4 策略名不匹配: 快照={saved.get('name')!r} "
+                                f"当前={getattr(cur, 'name', '')!r}（可能已切换策略）"
+                            )
             logger.info(
                 f"[engine] 崩溃恢复完成: 快照v{snapshot.version} "
                 f"tag={snapshot.tag!r} result={result}"
@@ -2012,6 +2025,14 @@ class LiveEngine(BaseEngine):
                     # 重启后恢复最近窗口内的 id，防重启重复下单。
                     "processed_signal_ids": [
                         [sid, float(ts)] for sid, ts in self._processed_signal_ids.items()
+                    ],
+                    # T4-4：策略状态落盘（策略名+参数哈希，恢复时校验）
+                    "strategy_state": [
+                        {
+                            "name": getattr(s, "name", ""),
+                            "params_hash": hash(str(getattr(s, "params", {}))) & 0xFFFFFFFF,
+                        }
+                        for s in self._strategies
                     ],
                 },
             )

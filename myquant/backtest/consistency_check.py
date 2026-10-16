@@ -137,10 +137,10 @@ DEFAULT_PAIR_TOLERANCES: dict[tuple[str, str], ComparisonTolerance] = {
         abs_tol=1e-3, rel_tol=1e-6
     ),
     (ENGINE_EVENT, ENGINE_MIXED): ComparisonTolerance(
-        abs_tol=1e-3, rel_tol=5e-3
+        abs_tol=1e-3, rel_tol=1e-3  # T6-2：5e-3→1e-3 收紧
     ),
     (ENGINE_EVENT, ENGINE_VECTORIZED): ComparisonTolerance(
-        abs_tol=1e-3, rel_tol=5e-3
+        abs_tol=1e-3, rel_tol=1e-3  # T6-2：5e-3→1e-3 收紧
     ),
 }
 
