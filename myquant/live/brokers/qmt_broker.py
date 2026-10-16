@@ -254,6 +254,11 @@ class QmtBroker(BaseBroker):
         self._qmt_to_local: Dict[int, str] = {}      # QMT 委托编号 → 本地 order_id
         self._local_to_qmt: Dict[str, int] = {}      # 本地 order_id → QMT 委托编号
 
+        # T0-12：ACK_UNKNOWN 查单确认总窗口（秒），与 config/live_config.yaml:order_timeout 对齐。
+        # load_config 时从 broker 配置 dict 读 order_timeout 覆盖；未配置时默认 30 秒。
+        # 退避序列在窗口内指数分布（1,2,4,8,...），全部未命中才判 REJECTED。
+        self._ack_unknown_window: float = 30.0
+
         # 真实 SDK 可用性标志（connect 成功后置 True）
         self._qmt_sdk_ready = False
 
@@ -305,6 +310,10 @@ class QmtBroker(BaseBroker):
                     "transfer_fee_rate", "slippage_value", "price_limit_pct"):
             if key in cfg and cfg[key] is not None:
                 setattr(self, key, float(cfg[key]))
+        # T0-12：ACK_UNKNOWN 查单窗口从配置读 order_timeout（RC-15 死配置盘活为活配置）。
+        # 与 config/live_config.yaml:order_timeout 对齐，未配置时保持默认 30 秒。
+        if cfg.get("order_timeout") is not None:
+            self._ack_unknown_window = float(cfg["order_timeout"])
         for key in ("enable_t1",):
             if key in cfg and cfg[key] is not None:
                 setattr(self, key, bool(cfg[key]))
@@ -631,11 +640,43 @@ class QmtBroker(BaseBroker):
         self._notify_order_update(order)
         return order
 
-    # T0-12：报单结果未知时的N轮查单退避序列（秒）。
-    # 异常路径保守等待：等券商端委托传播落库（order_remark 反查需要时间），
-    # 防止刚 order_stock 完立刻 query_stock_orders 查不到而误杀在途单。
-    # 总窗口~13s，仅异常路径触发，正常路径不受影响。
-    _ACK_UNKNOWN_RETRY_DELAYS: tuple = (1.0, 3.0, 9.0)
+    # T0-12：ACK_UNKNOWN 查单窗口默认 30 秒（与 config/live_config.yaml:order_timeout 对齐），
+    # 实际值由 load_config 从 order_timeout 覆盖。退避序列在窗口内指数分布。
+    # 总等待时间 = 窗口长度；任一轮命中即提前退出；全部未命中窗口走完才判 REJECTED。
+
+    def _build_ack_unknown_delays(self, window: float) -> List[float]:
+        """
+        T0-12：根据查单窗口生成指数退避序列。
+
+        规则：从 1 秒开始翻倍（1, 2, 4, 8, ...），直到下一轮会超出窗口；
+        最后一轮补满窗口剩余时间。保证总等待 ≈ window，且至少 3 轮。
+
+        Parameters
+        ----------
+        window : float
+            总查单窗口（秒），来自 config/live_config.yaml:order_timeout
+
+        Returns
+        -------
+        List[float] : 退避间隔列表，如 window=30 → [1, 2, 4, 8, 15]
+        """
+        if window <= 0:
+            return [1.0]
+        delays: List[float] = []
+        elapsed = 0.0
+        d = 1.0
+        while elapsed + d < window:
+            delays.append(d)
+            elapsed += d
+            d *= 2
+        # 补满剩余窗口（至少一轮）
+        remaining = window - elapsed
+        if remaining > 0:
+            delays.append(remaining)
+        # 防御：窗口过小时至少保证 3 轮（用户要求 ≥3 轮）
+        while len(delays) < 3:
+            delays.append(min(1.0, window))
+        return delays
 
     def _handle_unknown_submit(self, order: Order, reason: str) -> Order:
         """
@@ -649,7 +690,7 @@ class QmtBroker(BaseBroker):
         新流程：
           1. 状态 SUBMITTED → ACK_UNKNOWN（走 OrderStateMachine._transition，
              非法迁移抛 ExecutionError，不静默 return False）
-          2. N 轮退避查单（_ACK_UNKNOWN_RETRY_DELAYS：1s/3s/9s），
+          2. N 轮指数退避查单（窗口 = self._ack_unknown_window，来自 order_timeout 配置），
              每轮用 query_broker_orders(symbol) 查券商端当日委托，
              按 order_id 前24位（=order_remark）反查本单
           3. 任一轮命中：
@@ -684,16 +725,17 @@ class QmtBroker(BaseBroker):
         order.extra["ack_unknown_reason"] = reason
         order.extra["ack_unknown_ts"] = time.time()
         logger.critical(
-            "[qmt_broker] 订单报单结果未知，进入N轮查单确认: "
+            "[qmt_broker] 订单报单结果未知，进入N轮查单确认(window=%.0fs): "
             "order_id=%s symbol=%s reason=%s",
-            order.order_id, order.symbol, reason,
+            self._ack_unknown_window, order.order_id, order.symbol, reason,
         )
         self._notify_order_update(order)
 
-        # 2. N 轮退避查单
+        # 2. N 轮指数退避查单（窗口从配置读，不硬编码）
+        delays = self._build_ack_unknown_delays(self._ack_unknown_window)
         matched_record: Optional[Dict[str, Any]] = None
         query_failed = False
-        for delay in self._ACK_UNKNOWN_RETRY_DELAYS:
+        for delay in delays:
             time.sleep(delay)
             try:
                 remote_orders = self.query_broker_orders(symbol=order.symbol)

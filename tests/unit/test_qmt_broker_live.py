@@ -528,9 +528,11 @@ class TestUnknownSubmitAck:
     """T0-12：防双仓/防无声丢单——SDK 结果未知时绝不直接拒单，先查单确认"""
 
     @pytest.fixture(autouse=True)
-    def _no_retry_sleep(self, monkeypatch):
-        """测试不真等 1s/3s/9s 退避：_ACK_UNKNOWN_RETRY_DELAYS 置 0"""
-        monkeypatch.setattr(QmtBroker, "_ACK_UNKNOWN_RETRY_DELAYS", (0.0, 0.0, 0.0))
+    def _no_retry_sleep(self, live_broker):
+        """测试不真等退避：ACK_UNKNOWN 查单窗口压到极小（time.sleep 可忽略）"""
+        broker, _ = live_broker
+        broker._ack_unknown_window = 0.05
+        yield
 
     def _sdk_exception_broker(self, live_broker, monkeypatch, query_result):
         """构造 broker：SDK submit 抛异常 + query_broker_orders 预设结果"""

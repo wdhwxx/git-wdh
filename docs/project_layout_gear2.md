@@ -5891,3 +5891,13 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    a. docs/py文件代码规则.md 新增"# 顶红纪律摘要"节（位于"# 角色"后）：六步协议、红类型→强制方向五条（标准红只许补测试/新文件红补到 80%/膨胀红先拆后抬/硬顶红无豁免只能拆/结构红改结构或登记，含禁止动作）、红灯冻结提交、AI 特别禁止五条、决策边界（补测试可直接做/抬基线必须拍板/触标准只能报告）。
    b. 与根目录 门禁顶红治理方案.md 互为引用（冲突以方案为准）；AI 每次开工读本文件即读到顶红协议核心约束。
    c. 验证：回读新增节内容完整无乱码；纯文档改动不触发门禁。
+
+## #T0-12·2 · 2026-10-16 · ACK_UNKNOWN 状态机落地 + N轮查单闭环 + order_timeout 活配置化
+   a. 新状态 ACK_UNKNOWN（待券商确认）：models/trade.py OrderStatus 枚举新增（is_active=True、非终态）；合法转移集 {SUBMITTED, REJECTED, CANCELLED, PARTIAL_FILLED, FILLED, EXPIRED}；SUBMITTED→ACK_UNKNOWN 为唯一来源。execution/state_machine.py VALID_TRANSITIONS 同步；constants.py OrderStatus 同步（死枚举 RC-26 保持一致，不删）。
+   b. qmt_broker._handle_unknown_submit(order, reason) 闭环：SDK 抛异常/返回空 → 不直接 reject（防 RC-16 双仓）；状态 SUBMITTED→ACK_UNKNOWN（走 OrderStateMachine._transition 抛 ExecutionError，不用 order.transition_to 静默 return False）；N 轮指数退避查单（窗口=order_timeout 配置，默认30s，退避序列 _build_ack_unknown_delays 动态生成 1,2,4,8,... 补满窗口）；任一轮按 order_id[:24]（=order_remark）命中 → 建立 _local_to_qmt/_qmt_to_local 双向映射 + 按券商状态对齐 SUBMITTED/PARTIAL_FILLED/FILLED；全部未命中且查单成功 → REJECTED；查询本身返回 None/异常 → 保持 ACK_UNKNOWN + CRITICAL 告警（不判死，交 resend_pending_orders 对账闭环）。
+   c. manager._classify_submit_failure 三分类（channel/business/unknown）：unknown 优先级高于 channel 关键词——委托异常/委托返回空/order_stock/submit_order/sdk调用 即使含通道关键词也判 unknown（绝不 failover）；未连接/断线/连接超时归 channel（可 failover）；资金/持仓/风控/涨跌停归 business。
+   d. engine._submit_order ACK_UNKNOWN 专报分支：REJECTED 分支后插 elif result_status == ACK_UNKNOWN → logger.critical + ORDER_SUBMIT 事件 status="ack_unknown"；**不回滚 BUY 占位**（占位保留直到查单闭环）。
+   e. resend_pending_orders 显式排除 ACK_UNKNOWN（注释）：该状态由 _handle_unknown_submit 自己闭环，绝不进断线补发集合（防双仓）。
+   f. order_timeout 活配置化（RC-15）：config/live_config.yaml:order_timeout=30 经 qmt_broker.load_config 读入 self._ack_unknown_window，作为查单总窗口真源；未配置时默认 30 秒。
+   g. 专项测试 tests/unit/test_qmt_ack_unknown.py 12 用例：置位留痕/查询None保持unknown/查询异常保持unknown/未命中REJECTED/命中映射+SUBMITTED对齐/PARTIAL/FILLED对齐/非法转移不崩溃/退避序列生成正确性（30s窗口≥3轮指数分布、小窗口≥3轮、零窗口防御）。test_qmt_broker_live.py TestUnknownSubmitAck 5 用例 fixture 改用 _ack_unknown_window=0.05（兼容 _build_ack_unknown_delays 动态生成）。
+   h. 验证：67 passed（12 新专项 + 23 旧 live + 27 failover + 5 旧 ACK_UNKNOWN）；py_compile 全绿；下游落库 record_order 用字符串存 status 无枚举约束，"ACK_UNKNOWN" 直接可存。
