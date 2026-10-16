@@ -173,14 +173,15 @@ def test_unknown_reason_no_failover() -> None:
 # ═══════════════════════════════════════════════
 #  2. 通道故障：允许 failover（副本重试）
 # ═══════════════════════════════════════════════
+# T0-12 breaking-test：原参数化列表把"委托异常/委托返回空/SDK调用失败"也当 channel，
+# 但这类 SDK 调用阶段的失败可能券商端已受理，failover 会造成双仓（RC-16）。
+# 新语义：只有"确定连不上"的通道故障（未连接/断线/连接超时）才允许 failover；
+# SDK 调用结果未知的归 unknown，绝不 failover（见 test_unknown_submit_no_failover）。
 
 @pytest.mark.parametrize("reason", [
     "QMT 未连接，拒绝下单",
-    "QMT 委托异常: order_stock 失败",
-    "QMT 委托返回空（可能被拒/废单）",
     "QMT 断线回报",
     "连接超时",
-    "SDK 调用失败",
 ])
 def test_channel_failover_success(reason: str) -> None:
     """通道类拒单 → failover 到备券商成功，主券商切换、原主保留待恢复"""
@@ -194,6 +195,31 @@ def test_channel_failover_success(reason: str) -> None:
     assert mgr._failover_stats["attempts"] == 1
     assert mgr._failover_stats["success"] == 1
     assert mgr._pre_failover_primary == "primary"   # 原主保留（健康恢复切回用）
+
+
+@pytest.mark.parametrize("reason", [
+    "QMT 委托异常: order_stock 失败",
+    "QMT 委托返回空（可能被拒/废单）",
+    "SDK 调用失败",
+])
+def test_unknown_submit_no_failover(reason: str) -> None:
+    """
+    T0-12：SDK 调用结果未知类拒单（委托异常/返回空/SDK调用失败）→ 绝不 failover。
+
+    这类失败的共性是"调用已发出但不知道券商端是否受理"，盲目 failover 到备券商
+    会在券商端实际已受理时造成双仓真金白银损失（RC-16）。正确行为是返回 REJECTED
+    留痕 + unknown 分类 + business_skipped 计数，不触发备券商重试。
+    """
+    mgr, primary, backup = _make_mgr(primary_mode="reject", primary_reason=reason)
+    order = _make_order()
+    result = mgr.submit_order(order)
+    # 主券商已拒，结果为 REJECTED（FakeBroker reject 模式直接置 REJECTED）
+    assert result.status == OrderStatus.REJECTED
+    # 备券商绝不能收到重试（这是 T0-12 的核心保护）
+    assert backup.submit_calls == []
+    # 统计归为 business_skipped（unknown 与 business 同路径不 failover）
+    assert mgr._failover_stats["attempts"] == 0
+    assert mgr._failover_stats["business_skipped"] == 1
 
 
 def test_exception_failover_success() -> None:

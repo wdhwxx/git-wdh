@@ -599,23 +599,22 @@ class QmtBroker(BaseBroker):
             return order
         self._orders[order.order_id] = order
 
-        # 5. 真实委托（返回 QMT 委托编号；失败则拒绝）
+        # 5. 真实委托（返回 QMT 委托编号；失败不直接判 REJECTED——T0-12）
         try:
             qmt_order_id = self._call_qmt_sdk("submit_order", order=order)
-        except Exception as e:  # noqa: BLE001 - SDK 异常统一按委托失败处理
+        except Exception as e:  # noqa: BLE001 - SDK 异常统一走查单确认，不直接拒单
+            # T0-12：SDK 抛异常时券商端可能已受理（响应丢失/网络抖动），
+            # 旧实现直接 order.reject() → manager 判 channel → failover 到备券商
+            # → 若券商端已受理则双仓真金白银损失。改走查单确认闭环。
             reason = f"QMT 委托异常: {e}"
             logger.error(f"[qmt_broker] {reason}")
-            order.reject(reason)
-            self._record_order_rejected(order, reason)
-            self._notify_order_update(order)
-            return order
+            return self._handle_unknown_submit(order, reason)
         if qmt_order_id is None:
-            reason = "QMT 委托返回空（可能被拒/废单），等待 QMT 废单回报或人工核对"
+            # T0-12：返回空不直接判死（可能是废单，也可能是受理后回报丢失），
+            # 同样走查单确认，按 order_remark 反查券商端当日委托。
+            reason = "QMT 委托返回空（可能被拒/废单，待查单确认）"
             logger.error(f"[qmt_broker] {reason}")
-            order.reject(reason)
-            self._record_order_rejected(order, reason)
-            self._notify_order_update(order)
-            return order
+            return self._handle_unknown_submit(order, reason)
 
         # 6. 建立 QMT 委托编号 ↔ 本地 order_id 双向映射（回报反查用）
         self._local_to_qmt[order.order_id] = int(qmt_order_id)
@@ -629,6 +628,139 @@ class QmtBroker(BaseBroker):
             f"{order.symbol} {order.side.value} {order.quantity:.0f} "
             f"qmt_order_id={qmt_order_id}"
         )
+        self._notify_order_update(order)
+        return order
+
+    # T0-12：报单结果未知时的N轮查单退避序列（秒）。
+    # 异常路径保守等待：等券商端委托传播落库（order_remark 反查需要时间），
+    # 防止刚 order_stock 完立刻 query_stock_orders 查不到而误杀在途单。
+    # 总窗口~13s，仅异常路径触发，正常路径不受影响。
+    _ACK_UNKNOWN_RETRY_DELAYS: tuple = (1.0, 3.0, 9.0)
+
+    def _handle_unknown_submit(self, order: Order, reason: str) -> Order:
+        """
+        T0-12：报单SDK异常/返回空后的查单确认闭环（防双仓/防无声丢单）。
+
+        背景：
+            order_stock() 抛异常或返回 None 时，无法确定券商端是否已受理。
+            旧实现直接 order.reject() → BrokerManager 判 channel → failover 到备券商，
+            若券商端实际已受理则双仓真金白银损失（RC-16）。
+
+        新流程：
+          1. 状态 SUBMITTED → ACK_UNKNOWN（走 OrderStateMachine._transition，
+             非法迁移抛 ExecutionError，不静默 return False）
+          2. N 轮退避查单（_ACK_UNKNOWN_RETRY_DELAYS：1s/3s/9s），
+             每轮用 query_broker_orders(symbol) 查券商端当日委托，
+             按 order_id 前24位（=order_remark）反查本单
+          3. 任一轮命中：
+             - 建立 _local_to_qmt/_qmt_to_local 双向映射
+             - 按券商返回状态对齐本地订单（SUBMITTED/PARTIAL_FILLED/FILLED）
+             - 发通知回调
+          4. 全部轮次未命中且查单本身成功（非None）：窗口走完仍未命中 → REJECTED
+          5. 某轮 query_broker_orders 返回 None（查询本身失败）：
+             保持 ACK_UNKNOWN 不判死，CRITICAL 告警，交对账循环/resend_pending_orders 闭环
+
+        Parameters
+        ----------
+        order  : Order
+            已在 self._orders 注册、状态为 SUBMITTED 的本地订单
+        reason : str
+            异常/返回空的原因描述（写入 extra.ack_unknown_reason 供审计）
+
+        Returns
+        -------
+        Order : 对齐后的订单（状态为 ACK_UNKNOWN / SUBMITTED / REJECTED 之一）
+        """
+        # 延迟 import 避免与 execution 包循环依赖风险
+        from myquant.execution.state_machine import OrderStateMachine
+
+        # 1. 置 ACK_UNKNOWN（走状态机校验，非法迁移抛 ExecutionError）
+        try:
+            OrderStateMachine()._transition(order, OrderStatus.ACK_UNKNOWN, reason)
+        except Exception as e:  # pragma: no cover - 防御：状态机抛错不影响订单留痕
+            logger.error(f"[qmt_broker] 置 ACK_UNKNOWN 状态转移失败: {e}")
+        order.extra = dict(order.extra or {})
+        order.extra["ack_unknown"] = True
+        order.extra["ack_unknown_reason"] = reason
+        order.extra["ack_unknown_ts"] = time.time()
+        logger.critical(
+            "[qmt_broker] 订单报单结果未知，进入N轮查单确认: "
+            "order_id=%s symbol=%s reason=%s",
+            order.order_id, order.symbol, reason,
+        )
+        self._notify_order_update(order)
+
+        # 2. N 轮退避查单
+        matched_record: Optional[Dict[str, Any]] = None
+        query_failed = False
+        for delay in self._ACK_UNKNOWN_RETRY_DELAYS:
+            time.sleep(delay)
+            try:
+                remote_orders = self.query_broker_orders(symbol=order.symbol)
+            except Exception as e:  # noqa: BLE001 - 查单异常按查询失败处理
+                logger.warning(f"[qmt_broker] 查单异常(order_id={order.order_id}): {e}")
+                query_failed = True
+                continue
+            if remote_orders is None:
+                # 查询本身失败（券商端未连接/SDK异常），保守不判死
+                query_failed = True
+                continue
+            # 按 order_id 前24位（=order_remark 写入规则）匹配本单
+            key = str(order.order_id)[:24]
+            for rec in remote_orders:
+                if str(rec.get("order_id") or "")[:24] == key:
+                    matched_record = rec
+                    break
+            if matched_record is not None:
+                break
+
+        # 3. 命中：建立映射 + 状态对齐
+        if matched_record is not None:
+            qmt_id = matched_record.get("qmt_order_id")
+            if qmt_id is not None:
+                qmt_int = int(qmt_id)
+                self._local_to_qmt[order.order_id] = qmt_int
+                self._qmt_to_local[qmt_int] = order.order_id
+                order.extra["qmt_order_id"] = qmt_int
+            remote_status = matched_record.get("status")
+            # 券商已受理 → SUBMITTED；若已有成交回报则对齐 PARTIAL_FILLED/FILLED
+            target_status: OrderStatus = OrderStatus.SUBMITTED
+            if remote_status in (OrderStatus.PARTIAL_FILLED, OrderStatus.FILLED):
+                target_status = remote_status
+            try:
+                OrderStateMachine()._transition(order, target_status, "ack_unknown_confirmed")
+            except Exception as e:  # pragma: no cover - 状态已由券商确认，转移失败只记日志
+                logger.error(
+                    f"[qmt_broker] 查单命中后状态对齐失败: order_id={order.order_id} "
+                    f"target={target_status.value} err={e}"
+                )
+            order.extra.pop("ack_unknown", None)
+            logger.warning(
+                "[qmt_broker] 查单命中券商已受理，状态对齐: "
+                "order_id=%s qmt_order_id=%s status=%s",
+                order.order_id, qmt_id, target_status.value,
+            )
+            self._notify_order_update(order)
+            return order
+
+        # 4/5. 未命中：区分"查询失败" vs "确认无此单"
+        if query_failed:
+            # 查询本身失败 → 保持 ACK_UNKNOWN，交对账循环闭环
+            logger.critical(
+                "[qmt_broker] N轮查单未能确认(order_id=%s)，保持ACK_UNKNOWN待人工/对账: %s",
+                order.order_id, reason,
+            )
+            return order
+
+        # 4. 全部轮次查单成功但均未命中 → 窗口走完确认券商端无此单 → REJECTED
+        final_reason = f"查单N轮未命中，券商端无此单: {reason}"
+        try:
+            OrderStateMachine()._transition(order, OrderStatus.REJECTED, final_reason)
+        except Exception as e:  # pragma: no cover
+            logger.error(f"[qmt_broker] 窗口未命中后转REJECTED失败: {e}")
+            order.reject(final_reason)
+        order.extra.pop("ack_unknown", None)
+        self._record_order_rejected(order, final_reason)
         self._notify_order_update(order)
         return order
 

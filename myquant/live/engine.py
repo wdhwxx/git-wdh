@@ -2398,6 +2398,25 @@ class LiveEngine(BaseEngine):
                         or ""
                     ),
                 ))
+            elif result_status == OrderStatus.ACK_UNKNOWN:
+                # T0-12：报单结果未知（SDK异常/返回空），已转入N轮查单确认。
+                # 关键：不能发普通 ORDER_SUBMIT（会被下游当成"提交成功"抹掉异常语义），
+                # 也不能回滚 BUY 占位（这单可能真在券商侧，占位必须保留直到查单闭环）。
+                logger.critical(
+                    "[engine] 订单报单结果未知(ACK_UNKNOWN)，已进入查单确认: "
+                    "order_id=%s symbol=%s side=%s qty=%s broker=%s reason=%s",
+                    order.order_id, order.symbol, order.side.value,
+                    order.quantity,
+                    (order.extra or {}).get("broker_id", ""),
+                    (getattr(result, "extra", None) or {}).get("ack_unknown_reason", ""),
+                )
+                self._publish_engine_event(OrderEvent(
+                    event_type=EventType.ORDER_SUBMIT,
+                    order_id=order.order_id,
+                    event_ts=time.time(),
+                    symbol=order.symbol,
+                    status="ack_unknown",
+                ))
             else:
                 self._publish_engine_event(OrderEvent(
                     event_type=EventType.ORDER_SUBMIT,

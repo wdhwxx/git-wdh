@@ -530,19 +530,41 @@ class BrokerManager:
         """
         分类订单提交失败原因
 
+        T0-12：返回值三分类——
+          - "channel"  通道故障（可 failover 到备券商）：连接/断线/超时/未连接等
+          - "business" 业务拒单（绝不 failover）：资金不足/持仓不足/风控/涨跌停等
+          - "unknown"  结果未知（绝不 failover）：无 reason / 关键词都不命中；
+                        与 business 的区别是"不确定"，必须保守不重试，
+                        且不允许把"委托异常/返回空/SDK"这类**券商端可能已受理**
+                        的文案误判为 channel 而盲目 failover（双仓风险）。
+
         Returns
         -------
-        str : "channel"=通道故障（可 failover） / "business"=业务拒单（不可）
+        str : "channel" / "business" / "unknown"
         """
         reason = str(getattr(order, "extra", {}).get("reject_reason", "") or "")
         if not reason:
-            return "business"  # 无原因说明 → 保守不重试（安全第一）
+            return "unknown"  # 无原因说明 → 未知，保守不重试
         text = reason.lower()
         if any(k.lower() in text for k in cls._BUSINESS_FAILURE_KEYWORDS):
             return "business"
         if any(k.lower() in text for k in cls._CHANNEL_FAILURE_KEYWORDS):
+            # T0-12：通道关键词命中前，先显式排除"券商端可能已受理"的未知结果。
+            # 这类文案（委托异常/委托返回空/order_stock/submit_order/SDK调用）
+            # 即使含通道关键词，也不允许 failover——因为 SDK 抛异常时券商端可能
+            # 已落单，failover = 双仓真金白银损失。
+            # 走 unknown 分支，由调用方/查单闭环处理，不在这里盲目重发。
+            if any(
+                flag in text
+                for flag in (
+                    "委托异常", "委托返回空",
+                    "order_stock", "submit_order",
+                    "sdk 调用", "sdk调用",
+                )
+            ):
+                return "unknown"
             return "channel"
-        return "business"  # 无法分类 → 保守不重试（未知拒单不盲目重试）
+        return "unknown"  # 无法分类 → 未知，保守不重试（绝不盲目 failover）
 
     @staticmethod
     def _clone_order_for_retry(order: Order) -> Order:
@@ -721,6 +743,10 @@ class BrokerManager:
                         continue
 
                     # 2. 本地 SUBMITTED 订单（补发候选）
+                    # T0-12 显式排除 ACK_UNKNOWN：该状态是"报单结果未知、已发起N轮查单"，
+                    # 由 qmt_broker._handle_unknown_submit 自己闭环（查单命中→SUBMITTED，
+                    # 窗口走完未命中→REJECTED）；绝不能进入补发集合——否则等于在查单
+                    # 还没结论时就盲目重发，正是 RC-16 双仓要防的路径。
                     local_submitted = [
                         o for o in broker.get_orders(symbol)
                         if o.status is OrderStatus.SUBMITTED
