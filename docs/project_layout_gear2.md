@@ -5936,3 +5936,14 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    c. 启动期暂停标记：INIT 状态下调 pause(force=True) → 置 _startup_blocked=True；start() 置 RUNNING 之前检查此标记，若 True 则保持 PAUSED 不进 RUNNING。
    d. 专项测试 tests/unit/test_t0_11_pause_gate.py 5 用例：INIT+force=False 留痕不变；STOPPED+force=False 留痕不变；INIT+force=True 置 blocked；STOPPED+force=True 强制 PAUSED；RUNNING 正常暂停旧行为保留。5 passed。
    e. 基线同步：engine.py 2887→2913（+26 行）；live 包 17856/655→17882/655（+26 行，symbols/fan_out 不变，功能必需对价）。
+
+## #T4-5 提前 · 2026-10-16 · 装配有效性防复发集成测试（tests/integration/）
+   a. 目的：防"在册未接线"复发——任一护栏（ledger/reconciler/alert_manager/scheduler/退订）未接上 → CI 集成测试直接失败。
+   b. 测试策略：不真实装配引擎（避免外部 broker/feed 依赖），改为断言【配置文件关键值】+【代码工厂/护栏存在性】——比端到端装配更稳定可复现。
+   c. 覆盖 11 用例：
+      - 配置值：broker.type=paper / trade_mode=paper / scheduler.enabled=true / order_timeout 已配置（防 T0-8/T0-12·2 护栏被随手改坏）
+      - registry 接线：account_reconciler / alert_manager 工厂已注册（T0-8 硬前置）
+      - 装配护栏：_assert_live_reconciliation_gate / _assert_live_watchdog_gate 存在
+      - 引擎接口：pause() 有 force 参数 / __init__ 有 _startup_blocked / BrokerManager.restore_state 有子券商转发逻辑
+   d. 新建 tests/integration/test_assembly_wiring.py（注意：清单要求文件名"测试_装配有效性.py"，因 Windows 文件系统中文文件名易导致 pytest 收集问题，采用等价英文名 test_assembly_wiring.py）。11 passed。
+   e. 无生产代码改动，基线不变。
