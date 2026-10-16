@@ -280,7 +280,7 @@ CONFIG_KEY_REQUIRED: set[str] = {
 #   risk_manager 1901→2020（0.7 三条异常交易规则 + anomaly_rules 参数）
 #   acceptance/live_safety_gate.py 1756→1749（0.1~0.9 + LIVE 门槛验收累计，#287~#296；入白名单）
 OVERSIZE_LINE_BASELINE: dict[str, int] = {
-    "monitoring/alerting.py": 3688, "live/engine.py": 2835, "core/event_bus.py": 2379,  # 2829→2835（#424 T4-4 fail-closed +6行）
+    "monitoring/alerting.py": 3688, "live/engine.py": 2850, "core/event_bus.py": 2379,  # 2829→2835（#424 T4-4 fail-closed +6行）；2835→2850（#425 引擎预热/回放停止感知 _stop_requested +15 行功能必需）
     "live/scheduler.py": 2419, "monitoring/metrics_collector.py": 2276,  # 2382→2409（#265 阶段二 7 处装配点改经注册表，代码行增长）；metrics 2268→2273→2276（#264 工厂注册代码；P0-2 ruff --fix 微增）
     "monitoring/action_engine.py": 2307, "data_access/manager.py": 2204,  # 2170→2186→2200→2204（#281 M1A-01/06 每股收益时点日基收敛+失败可观测化；M1A-10 available_time 增量派生+存量补列；P0-2 ruff --fix 微增）
     "live/brokers/qmt_broker.py": 2170, "live/data_feed.py": 1336,  # 2151→1605（#421 拆包瘦身：行情源层迁出 realtime_sources.py）；1605→1336（#423 拆包瘦身：实时桥层迁出 realtime_bridge.py，实测同步并移出 OVERSIZE_WHITELIST——1336<1500 受标准 R-14 约束，R-24 仍冻结 1336 防回升）
@@ -330,7 +330,7 @@ STRUCTURE_BASELINE: dict[str, dict[str, int]] = {
     "gui/backtest_config_dialog.py": {"lines": 1870, "symbols": 45, "fan_out": 13},
     "live/brokers/qmt_broker.py": {"lines": 2170, "symbols": 79, "fan_out": 8},
     "live/data_feed.py": {"lines": 1336, "symbols": 42, "fan_out": 11},  # 2151/80/13→1605/55/11（#421 拆包瘦身实测同步）；1605/55/11→1336/42/11（#423 拆包瘦身：实时桥层迁出 realtime_bridge.py，-13 符号=桥类及方法，实测同步）
-    "live/engine.py": {"lines": 2835, "symbols": 72, "fan_out": 15},  # T4-4 fail-closed 2829→2835
+    "live/engine.py": {"lines": 2850, "symbols": 72, "fan_out": 15},  # T4-4 fail-closed 2829→2835；#425 引擎预热/回放停止感知 2835→2850（lines +15 功能必需，symbols/fan_out 不变）
     "live/scheduler.py": {"lines": 2419, "symbols": 84, "fan_out": 10},
     "ml/training_pipeline.py": {"lines": 1672, "symbols": 54, "fan_out": 10},
     "monitoring/action_engine.py": {"lines": 2307, "symbols": 86, "fan_out": 9},
@@ -360,7 +360,7 @@ PACKAGE_STRUCTURE_BASELINE: dict[str, dict[str, int]] = {
     "gui": {"lines": 6603, "symbols": 242, "fan_out": 28},
     "indicators": {"lines": 5884, "symbols": 172, "fan_out": 17},
     "leakage_gate": {"lines": 4466, "symbols": 149, "fan_out": 17},
-    "live": {"lines": 17498, "symbols": 652, "fan_out": 35},  # T4-4 fail-closed 17492→17498
+    "live": {"lines": 17513, "symbols": 652, "fan_out": 35},  # T4-4 fail-closed 17492→17498；#425 引擎停止感知 17498→17513（lines +15 功能必需，symbols/fan_out 不变）
     "ml": {"lines": 5672, "symbols": 208, "fan_out": 27},
     "models": {"lines": 1760, "symbols": 139, "fan_out": 6},  # T4-3 signals字段 1757→1760
     "monitoring": {"lines": 23932, "symbols": 880, "fan_out": 31},

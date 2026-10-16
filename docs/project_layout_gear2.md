@@ -5848,8 +5848,10 @@ b. **test_architecture.py L354 注释修正**：#420 T3-3 → #424 T3-3（当前
 
 a. **run_实盘入口.py 7.5 段新增「提前装配优雅停止机制」**（位于 dry_run 分支之后、engine.start() 之前）：stop_event/start_time 前移创建；`_request_stop`（SIGINT/SIGTERM 处理器）置位 stop_event 并调用 engine.stop()（幂等，非 RUNNING/PAUSED 直接返回，可安全唤醒阻塞的 start()）；`--duration>0` 时启动 daemon 时长守护线程（1 秒步进，到期置位 stop_event + engine.stop()）。
 b. **主等待循环（10 段）去重**：删除原重复的 stop_event/start_time 创建与 _request_stop/信号注册块（已前移 7.5），保留 last_report/last_live_write 与 while 轮询主体（duration 检查保留为兜底，watchdog 置位后循环条件直接退出）。
-c. **零行为变更**：不触碰引擎、策略、数据层任何执行逻辑；仅入口脚本的停止机制装配时序调整。
+c. **引擎层预热/回放停止感知（第二层根因）**：实测发现 `engine.start()` 为同步方法——warmup（3195 只×200 根）+ 逐 symbol 回放（63.9 万根 on_bar，约 0.13s/根 → 理论 23 小时）完成后才设 RUNNING 并返回；而 `stop()` 对非 RUNNING/PAUSED 状态直接 return → 预热/回放阶段无法被停止，入口 watchdog 触发也唤不醒 start()。新增 `self._stop_requested = threading.Event()`（__init__ 状态区）；`stop()` 非 RUNNING/PAUSED 时置位 `_stop_requested` 而非直接 return；`_warmup_history` 与 `start()` 回放循环检查该事件提前 break；`start()` 在回放后检查，已置位则 return False（不进入运行态）。
+d. **入口适配启动中止**：`started=False` 且 stop_event 已置位时视为「停止信号中止启动」，打印提示并进入收尾（写 stats），不再按启动失败 return 4。
+e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engine.py lines 2835→2850（+15 功能必需，symbols 72/fan_out 15 不变）、live 包聚合 lines 17498→17513（+15，symbols 652/fan_out 35 不变）——`OVERSIZE_LINE_BASELINE`/`STRUCTURE_BASELINE`/`PACKAGE_STRUCTURE_BASELINE` 三处一次性同步并附 #425 注释；未抬硬顶（2850 < 4425）。
 
-**验收**：py_compile + ast 通过；全量 pytest **4606 passed / 1 skipped**（669s）；架构门禁 R-24/R-26/C-5 全绿（入口脚本行数净增约 40 行未触发冻结反红，未抬任何门禁基线）；语法警告仅原有 finally return（非本次引入）。
+**验收**：py_compile + ast 通过；全量 pytest **4606 passed / 1 skipped**（664s）；架构门禁 R-24/R-26/C-5 全绿（基线已随 #425 实测同步，engine.py 2850 < 硬顶 4425）；60s 短时长实测全链路通过（watchdog→预热中止→回放中止→start() 返回→收尾→stats 导出→进程退出）；**正式补跑 10-15（--duration 600）成功**：自动收尾并产出 `paper_20261015.json` + `paper_report_20261016_110630.html/.pdf` + `positions_20261016_110633.csv`（11:06:30）；语法警告仅原有 finally return（非本次引入）。
 
 **纪律遵守**：查蓝图 → 写码 → 蓝图回写（#425）→ pytest 全量 → git 提交（commit message 引用 #425）；无新增文件、无蓝图外文件。

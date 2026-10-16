@@ -1048,8 +1048,12 @@ def run_live_trading(args: argparse.Namespace) -> int:
         return 4
 
     if not started:
-        print("[错误] 实盘引擎启动失败（详见日志）")
-        return 4
+        if stop_event.is_set():
+            # #425：启动阶段被停止信号中止（无人值守时长到期/Ctrl+C），进入收尾保存状态
+            print("[停止] 启动阶段被停止信号中止，进入收尾（状态快照保存）")
+        else:
+            print("[错误] 实盘引擎启动失败（详见日志）")
+            return 4
 
     status = engine.get_status()
     safeguards = status.get("safeguards", {})

@@ -302,6 +302,8 @@ class LiveEngine(BaseEngine):
         self._pause_time = 0.0
         # 0.2/决策点4：暂停来源记录（隔离复位区分"谁置位"，resume 时只清自己置位的）
         self._pause_source: str = ""
+        # #425：预热/回放阶段停止请求（stop() 对非 RUNNING/PAUSED 状态仅置位，由 start() 内循环检查中断）
+        self._stop_requested = threading.Event()
 
         # 行情历史（为策略提供历史数据）
         self._bar_history: Dict[str, List[Bar]] = {}
@@ -747,9 +749,17 @@ class LiveEngine(BaseEngine):
             # on_init 完成后逐 symbol 回放历史 bar，重建跨 bar 状态（prev_diff / _rsrs_cache 读取路径等）
             if self._enable_warmup and self._warmup_bars > 0 and symbols:
                 for symbol in symbols:
+                    if self._stop_requested.is_set():
+                        logger.info("[engine] 回放收到停止请求，提前中止回放")
+                        break
                     bar_objs = self._bar_history.get(symbol, [])
                     if bar_objs:
                         self._replay_warmup_strategies(symbol, bar_objs)
+
+            # #425：启动阶段被停止请求中止（无人值守时长到期/Ctrl+C），不进入运行态
+            if self._stop_requested.is_set():
+                logger.info("[engine] 启动阶段收到停止请求，中止启动（不进入运行态）")
+                return False
 
             # ── BUG-04：guardian 一键平仓接线（broker 已就绪，先于调度器巡检）──
             self._setup_force_close()
@@ -786,6 +796,8 @@ class LiveEngine(BaseEngine):
     def stop(self) -> None:
         """停止引擎"""
         if self._state not in (EngineState.RUNNING, EngineState.PAUSED):
+            # #425：预热/回放阶段置位停止请求，由 start() 内循环检查并中断
+            self._stop_requested.set()
             return
 
         try:
@@ -1282,6 +1294,9 @@ class LiveEngine(BaseEngine):
         freq = str(getattr(self._data_feed, '_frequency', 'daily')).lower() if self._data_feed else 'daily'
 
         for symbol in symbols:
+            if self._stop_requested.is_set():
+                logger.info("[engine] 预热收到停止请求，提前中止")
+                break
             try:
                 bars = self._load_local_history(symbol, count) if freq == "daily" else []
                 if not bars:
