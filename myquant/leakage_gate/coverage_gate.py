@@ -237,7 +237,7 @@ FILE_STMT_CEILING: dict[str, int] = {
     "leakage_gate/cross_sectional.py": 138,
     "leakage_gate/exemption.py": 143,
     "leakage_gate/gate.py": 106,
-    "leakage_gate/gate_audit.py": 108,  # 2026-10-16 新建：门禁参数变更审计（判据A 对价+判据B 蓝图登记），配套 test_gate_audit 13 用例覆盖 93.1%，与 R-26 leakage_gate 包基线 4555→4855/150→163/17→18 联动同步（#C-4·5）；102→108（+6 语句=判据补全：注册条目/基线字段命中 + 独立commit去重，功能必需对价，2026-10-16）
+    "leakage_gate/gate_audit.py": 112,  # 2026-10-16 新建：门禁参数变更审计（判据A 对价+判据B 蓝图登记），配套 test_gate_audit 13 用例覆盖 93.8%，与 R-26 leakage_gate 包基线 4555→4864/150→163/17→19 联动同步（#C-4·5）；102→108（+6 语句=判据补全：注册条目/基线字段命中 + 独立commit去重，功能必需对价）；108→112（+4 语句=平台解码修复：git 输出显式 UTF-8 + --no-pager + 干净环境，修 CI windows 腿 UnicodeDecodeError，功能必需对价，2026-10-16）
     "leakage_gate/report.py": 63,
     "leakage_gate/sanity.py": 228,
     "leakage_gate/signal_words.py": 6,

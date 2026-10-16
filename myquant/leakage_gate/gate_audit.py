@@ -23,6 +23,7 @@ coverage_gate.py 中的基线、floor、硬顶、注册表）与协议代码位�
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from dataclasses import dataclass, field
@@ -133,18 +134,26 @@ def _git(
     Raises:
         RuntimeError: check=True 且 git 调用失败（含 git 不可用）。
     """
+    env = dict(os.environ)
+    env["GIT_PAGER"] = "cat"  # 禁用 pager：windows/无 TTY 环境下 git show/log/diff 防阻塞
+    env["GIT_TERMINAL_PROMPT"] = "0"  # 防交互式提示挂起
     try:
         proc = subprocess.run(
-            ["git", *args],
+            ["git", "--no-pager", *args],
             cwd=str(project_root),
             capture_output=True,
             text=True,
+            encoding="utf-8",  # git 输出 commit message/路径为 UTF-8；显式编码防平台 locale（cp1252/cp936）解码差异
+            errors="replace",
             timeout=60,
+            env=env,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:  # pragma: no cover - 环境性
         raise RuntimeError(f"git 调用失败（fail-closed）: {exc}") from exc
     if check and proc.returncode != 0:
-        raise RuntimeError(f"git 调用失败（fail-closed）: {proc.stderr.strip()}")
+        raise RuntimeError(
+            f"git 调用失败（fail-closed）: {proc.stderr.strip() or proc.stdout.strip()}"
+        )
     if not check and proc.returncode != 0:
         return ""
     return proc.stdout.strip()

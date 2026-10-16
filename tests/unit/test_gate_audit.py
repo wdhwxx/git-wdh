@@ -26,7 +26,14 @@ BLUEPRINT_BODY = "# 蓝图 v1\n\n## 目录树\n\n- tests/unit/test_architecture.
 
 def _git(repo: Path, *args: str) -> str:
     proc = subprocess.run(
-        ["git", *args], cwd=str(repo), capture_output=True, text=True, check=True, timeout=60
+        ["git", "--no-pager", *args],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",  # git 输出为 UTF-8；显式编码防平台 locale 解码差异（CI windows=cp1252）
+        errors="replace",
+        check=True,
+        timeout=60,
     )
     return proc.stdout.strip()
 
