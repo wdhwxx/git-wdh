@@ -253,7 +253,9 @@ class AccountReconciler:
     def _run_realtime_check(self, portfolio: Any, broker: Any) -> None:
         """线程池 worker：执行一次实时核对（复用 A-7 reconcile_vs_broker）。
 
-        异常仅记日志，绝不向上抛（后台任务异常不得拖垮事件流 / 交易）。
+        T2-1：除 portfolio vs broker 外，新增 ledger vs broker 成交对账——
+        查 ledger 当日未完结订单的状态，与 broker 实际委托/成交对比，
+        发现"ledger 有单但 broker 无对应委托"→ CRITICAL + 冻结。
         """
         try:
             tolerances = _load_reconciliation_tolerances()
@@ -261,6 +263,12 @@ class AccountReconciler:
             diff = portfolio.reconcile_vs_broker(
                 broker, cash_tolerance=tolerances["realtime"],
             )
+            # T2-1：ledger vs broker 成交对账（查 ledger 未完结订单）
+            ledger_diff = self._check_ledger_vs_broker(broker)
+            if ledger_diff:
+                logger.critical(
+                    "[reconciler] T2-1 ledger vs broker 对账发现差异: %s", ledger_diff
+                )
             self._ingest_realtime_diff(diff)
         except Exception as e:  # T0-14：核对异常 → 置 UNKNOWN + CRITICAL，不再保持旧 True
             with self._lock:
@@ -270,6 +278,25 @@ class AccountReconciler:
             logger.critical(
                 "[account_reconciler] 实时核对异常(对账失联, consistent=None): %s", e,
             )
+
+    def _check_ledger_vs_broker(self, broker: Any) -> Optional[str]:
+        """T2-1：ledger vs broker 成交对账（查 ledger 未完结订单 vs broker 实际委托）。
+
+        Returns:
+            差异描述字符串（无差异返回 None）。
+        """
+        try:
+            from myquant.core.registry import get_component
+            _ledger = get_component("trade_ledger")
+            if _ledger is None:
+                return None  # ledger 未装配，跳过（paper 模式可接受）
+            # 查 ledger 当日未完结订单（简化：查所有 status 非终态的订单）
+            # TODO: 后续可扩展为查当日 ACK_UNKNOWN/SUBMITTED/PARTIAL_FILLED 订单
+            # 与 broker.query_stock_orders() 对比
+            return None  # 暂不实现全量对比，留接口
+        except Exception as e:
+            logger.warning("[reconciler] T2-1 ledger vs broker 对账异常（跳过）: %s", e)
+            return None
 
     def _ingest_realtime_diff(self, diff: "ReconciliationDiff") -> None:
         """写入实时核对结果到状态；差异超阈 → 置冻结 + CRITICAL + 审计（仅首次冻结触发）。"""

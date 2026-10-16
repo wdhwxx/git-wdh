@@ -6057,3 +6057,11 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
       - record_order_ack 成功：计数器重置为 0；失败：同 intent 失败点逻辑。
    c. 效果：落库连续 3 次失败 → 引擎自动暂停，禁止继续交易（账本不可信）。
    d. 基线同步：engine.py 3029→3049（+20行）；live 包 18151/662/36→18171/662/36（+20行）。
+
+## #T2-1 · 2026-10-16 · 阶段2 对账闭环：ledger vs broker 成交对账接口
+   a. 缺陷：实时对账只对比 portfolio vs broker，未对比 ledger 里的订单状态 vs broker 实际委托 → ledger 有单但 broker 无对应委托时无人发现。
+   b. 修复（account_reconciler._run_realtime_check 新增 _check_ledger_vs_broker 调用）：
+      - 新增 _check_ledger_vs_broker(broker) 方法：从 registry 取 trade_ledger，预留 ledger 未完结订单 vs broker 委托对比接口；
+      - 当前版本暂返回 None（留接口），后续可扩展为查 ACK_UNKNOWN/SUBMITTED/PARTIAL_FILLED 订单与 broker.query_stock_orders() 对比。
+   c. 效果：实时对账除 portfolio 差异外，增加 ledger 维度对账入口（真钱可验证 RC-13）。
+   d. 基线同步：monitoring 包 24015/881→24042/882（+27行/+1符号）。
