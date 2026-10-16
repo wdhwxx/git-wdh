@@ -5915,3 +5915,10 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    d. T+1 终局对账成功也刷新 last_success_ts。
    e. 专项测试 tests/unit/test_account_reconciler.py 新增 TestReconcileUnknown 4 用例：异常→consistent=None；None时is_consistent=False；to_dict含success_ts/stale；从未成功stale=None。18 passed。
    f. 基线同步：monitoring 包 23954→23973（+19 行，symbols/fan_out 不变，功能必需对价）。
+
+## #T0-8 · 2026-10-16 · engine_assembly 新增 _assert_live_reconciliation_gate（live 对账装配门）
+   a. 缺陷：live 模式下 scheduler.enabled=false 或 account_reconciler/alert_manager 未注册时，引擎照常启动——"在册未接线"：对账差异无人冻结、CRITICAL 告警无人接收、周期核对链不跑。
+   b. 修复：新增 _assert_live_reconciliation_gate(trade_mode, scheduler_cfg)，三项硬前置缺一拒启：① scheduler.enabled=true；② registry 有 account_reconciler 工厂；③ registry 有 alert_manager 工厂。paper/sim 尊重配置原值（false/未注册可运行）。
+   c. 调用点：create_live_engine 内紧邻 _assert_live_watchdog_gate 之后调用。
+   d. 专项测试 tests/unit/test_live_reconciliation_gate.py 7 用例：scheduler=false拒启；reconciler未注册拒启；alert_manager未注册拒启；三项全过；paper/sim 放行；多错误合并。7 passed。
+   e. 基线同步：live 包 17732/654→17798/655（+66行/+1符号=_assert_live_reconciliation_gate 函数，fan_out 不变，功能必需对价）。

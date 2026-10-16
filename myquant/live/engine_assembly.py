@@ -300,6 +300,10 @@ def create_live_engine(
     # （F-1 能力缺失 fail-closed）；paper/sim 尊重配置原值（false 可运行）。
     _assert_live_watchdog_gate(trade_mode)
 
+    # T0-8：LIVE 实时对账装配门——scheduler/account_reconciler/alert_manager
+    # 三者缺一不可（在册未接线防复发）；paper/sim 尊重配置原值。
+    _assert_live_reconciliation_gate(trade_mode, scheduler_cfg)
+
     # P1-11：实盘出口泄漏审计报告（R-16 §4.2；断言通过后、返回引擎前落盘；
     # 实盘不 reset guard——统计为装配期进程累计，报告标注语义）
     _write_live_leakage_report(strategy_name, lookahead_guard, name)
@@ -334,6 +338,68 @@ def _assert_live_watchdog_gate(trade_mode: str) -> None:
                 "（A-4/A-5/A-6 看门狗未启用，能力缺失 fail-closed；"
                 "请在 config/settings.yaml 开启 monitoring.watchdog.enabled）"
             )
+
+
+def _assert_live_reconciliation_gate(
+    trade_mode: str,
+    scheduler_cfg: Dict[str, Any],
+) -> None:
+    """
+    T0-8 LIVE 启动门：实时对账 + 告警 + 调度器为 live 必备装配能力，未接线 → 拒启。
+
+    三项硬前置（缺一拒启）：
+      1. scheduler.enabled=true（周期核对链必须跑，否则实时对账只靠事件触发，
+         券商侧状态漂移无人兜底）；
+      2. account_reconciler 已注册（registry 有工厂，否则差异超阈无法冻结/告警）；
+      3. alert_manager 已注册（registry 有工厂，否则 CRITICAL 告警无人接收）。
+
+    paper/sim 尊重配置原值（false / 未注册可运行）。
+
+    Parameters
+    ----------
+    trade_mode : str
+        引擎运行模式（live/paper/sim）。
+    scheduler_cfg : dict
+        scheduler 配置段（来自 config["scheduler"]）。
+
+    Raises
+    ------
+    ValueError
+        trade_mode=live 且任一硬前置未满足时拒启。
+    """
+    if str(trade_mode).lower() != "live":
+        return
+
+    from myquant.core.registry import get_component
+
+    errors: List[str] = []
+
+    # 1) scheduler.enabled
+    if not bool(scheduler_cfg.get("enabled", True)):
+        errors.append(
+            "scheduler.enabled=false（周期核对链未启用，券商侧状态漂移无人兜底）"
+        )
+
+    # 2) account_reconciler 已注册
+    if get_component("account_reconciler") is None:
+        errors.append(
+            "account_reconciler 未注册（registry 无工厂，差异超阈无法冻结/告警；"
+            "请确认 myquant.monitoring.account_reconciler 已被 import 触发自注册）"
+        )
+
+    # 3) alert_manager 已注册
+    if get_component("alert_manager") is None:
+        errors.append(
+            "alert_manager 未注册（registry 无工厂，CRITICAL 告警无人接收；"
+            "请确认 myquant.monitoring.alerting 已被 import 触发自注册）"
+        )
+
+    if errors:
+        detail = "；".join(errors)
+        raise ValueError(
+            f"LIVE 模式拒绝启动：{detail}"
+            "（T0-8 实时对账装配门 fail-closed）"
+        )
 
 
 def _write_live_leakage_report(
