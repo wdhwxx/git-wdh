@@ -177,12 +177,12 @@ class BacktestConfig:
             "participation_rate": self.participation_rate,
             # T6-1：佣金/滑点模型透传（此前缺失→门禁恒读默认值万3/万0.2）
             "commission": {
-                "buy_rate": self.commission.buy_rate,
-                "sell_rate": self.commission.sell_rate,
-                "min_commission": self.commission.min_commission,
-                "stamp_tax": self.commission.stamp_tax,
-                "transfer_fee": self.commission.transfer_fee,
-            },
+                "buy_rate": getattr(self.commission, "buy_rate", 0.0003),
+                "sell_rate": getattr(self.commission, "sell_rate", 0.0003),
+                "min_commission": getattr(self.commission, "min_commission", 5.0),
+                "stamp_tax": getattr(self.commission, "stamp_tax", 0.001),
+                "transfer_fee": getattr(self.commission, "transfer_fee", 0.00002),
+            } if not isinstance(self.commission, dict) else self.commission,
             "slippage": {
                 "type": getattr(self.slippage, "type", "fixed"),
                 "value": getattr(self.slippage, "value", 0.0),

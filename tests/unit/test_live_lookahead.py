@@ -199,15 +199,15 @@ class TestTradeRecording:
         assert stats["trades_recorded"] == 1
         assert stats["violations"] == 0
 
-    def test_同日模拟撮合跳过T1校验不误报(self) -> None:
-        """paper模式信号当日收盘生成、当日撮合（trade_date==signal_date）→ 跳过T+1不误报"""
+    def test_同日成交必报违规(self) -> None:
+        """T4-1：同日成交（trade_date==signal_date）不再豁免 → 必报违规（红线 RL-08）"""
         guard = LookaheadGuard()
         engine = _make_min_engine(guard)
         engine._process_signal(_make_signal(st=SignalType.BUY), _make_bar(ts=_ts(2024, 1, 15)))
         engine.on_trade(_make_trade(order_id=_real_order_id(engine), ts=_ts(2024, 1, 15)))  # 同日成交
         stats = guard.stats
         assert stats["trades_recorded"] == 1
-        assert stats["violations"] == 0
+        assert stats["violations"] == 1  # T4-1：不再豁免，同日成交=违规
 
     def test_成交早于信号日真违规(self) -> None:
         """成交日早于信号日（未来函数）必须被 guard 捕获"""
