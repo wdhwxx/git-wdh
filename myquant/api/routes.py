@@ -698,6 +698,38 @@ def create_app(
             content={"success": False, "code": 501, "message": "交易恢复未接线：需接入风控管理器后可用", "data": {}},
         )
 
+    # T0-16 / FI-23：解冻入口（actor 必填 + 写审计）
+    @app.post("/api/reconciliation/unfreeze", response_model=ApiResponse, tags=["对账"])
+    async def unfreeze_reconciliation(body: dict):
+        """人工解冻对账冻结（T0-16）。
+
+        请求体：{"actor": "操作人", "note": "处置备注"}
+        - actor 必填（审计留痕）
+        - 解冻后 is_frozen=False，写审计 action=unfreeze
+        """
+        actor = str(body.get("actor", "")).strip()
+        note = str(body.get("note", "")).strip()
+        if not actor:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "code": 400, "message": "actor 必填（审计留痕）", "data": {}},
+            )
+        try:
+            recon = _get_reconciler()
+            recon.mark_resolved(actor=actor, note=note)
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "success": True, "code": 200, "message": "对账已解冻",
+                    "data": {"is_frozen": recon.is_frozen, "actor": actor},
+                },
+            )
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse(
+                status_code=500,
+                content={"success": False, "code": 500, "message": f"解冻失败: {e}", "data": {}},
+            )
+
     # ═══════════════════════════════════════════
     #  数据
     # ═══════════════════════════════════════════

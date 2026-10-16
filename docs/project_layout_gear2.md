@@ -5966,3 +5966,14 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    c. 验收：FI-22 cash_diff=1e-9 → round(,2)=0 → 不冻结；0.01 元差仍触发冻结；持仓 1000.0000001 vs 1000 → int 截断后相等不冻结。
    d. 专项测试 TestT015Rounding 3 用例（追加到 test_t0_1_dual_value.py）。9 passed。
    e. 基线同步：live 包 17947/659→17949/659（+2 行，symbols/fan_out 不变，功能必需对价）。
+
+## #T0-16 · 2026-10-16 · 解冻入口 API + 冻结超时升级告警（FI-23 / FI-08）
+   a. 缺陷：mark_resolved 已存在但无 API 入口（人工无法从驾驶舱解冻）；冻结后无超时升级（冻结 30 分钟无人管也不告警）。
+   b. 修复：
+      - account_reconciler 新增 _frozen_since / _freeze_timeout_alerted 属性；首次冻结时记录起始时刻；
+      - 新增 check_freeze_timeout(timeout_sec=1800) 方法：冻结超 30 分钟未解冻 → logger.critical 升级告警（防重复，只发一次）；
+      - api/routes.py 新增 POST /api/reconciliation/unfreeze 接口：body={actor, note}，actor 必填，调 mark_resolved 解冻 + 返回 is_frozen 状态。
+   c. 验收：FI-23 解冻后 is_frozen=False + 审计 action=unfreeze；FI-08 冻结 30 分钟未处置 → 升级告警。
+   d. 专项测试 TestUnfreezeAndTimeout 4 用例（追加到 test_account_reconciler.py）：解冻清 frozen + 审计；actor 空抛错；超时升级；未冻结不检查。22 passed。
+   e. 基线同步：api 包 3775/193→3807/194（+32行/+1符号=unfreeze API）；monitoring 包 23973/880→24008/881（+35行/+1符号=check_freeze_timeout 方法），fan_out 不变。
+   f. ✅ C-1 红线完成：T0-1 + T0-15 + T0-16 同 PR（PR-B 闭环）。

@@ -351,7 +351,7 @@ STRUCTURE_HARD_CAP: dict[str, int] = {"lines": 4425, "symbols": 174, "fan_out": 
 PACKAGE_STRUCTURE_BASELINE: dict[str, dict[str, int]] = {
     "acceptance": {"lines": 5618, "symbols": 254, "fan_out": 37},  # 5612→5614（#422 live_safety_gate 验收桩 +2 行功能必需）；5614→5618（#422 ruff --fix 展开 import 块 +4 行）
     "allocation": {"lines": 2083, "symbols": 56, "fan_out": 9},
-    "api": {"lines": 3775, "symbols": 193, "fan_out": 26},
+    "api": {"lines": 3807, "symbols": 194, "fan_out": 26},  # T0-16 新增 /api/reconciliation/unfreeze 解冻接口 +32行/+1符号功能必需
     "backtest": {"lines": 20722, "symbols": 560, "fan_out": 37},  # T4-3 信号流 20711→20722
     "core": {"lines": 12976, "symbols": 600, "fan_out": 40},  # 12975→12976（+1，#425 引擎停止感知 _stop_requested 功能必需）
     "data_access": {"lines": 17223, "symbols": 605, "fan_out": 34},
@@ -364,7 +364,7 @@ PACKAGE_STRUCTURE_BASELINE: dict[str, dict[str, int]] = {
     "live": {"lines": 17949, "symbols": 659, "fan_out": 35},  # T4-4 fail-closed 17492→17498；#425 引擎停止感知 17498→17513（lines +15 功能必需，symbols/fan_out 不变）；17513/652→17690/653（T0-12 查单确认闭环 qmt_broker/manager/engine 功能必需，+1 符号=_handle_unknown_submit 方法）；17690/653→17732/654（T0-12·2 order_timeout 活配置化 _build_ack_unknown_delays +42行/+1符号功能必需）；17732/654→17798/655（T0-8 _assert_live_reconciliation_gate +66行/+1符号功能必需）；17798/655→17856/655（T0-10 restore_state转发子券商+撤单返回值检查+connect_all后撤单 +58行，symbols/fan_out 不变）；17856/655→17882/655（T0-11 pause force参数+_startup_blocked +26行，symbols/fan_out 不变）；17882/655→17947/659（T0-1 双值并存 sync_from_broker 不覆写+adopt_broker_ledger+3property +65行/+4符号功能必需）；17947/659→17949/659（T0-15 cash_diff round 2位 + 持仓数量整数比较 +2行，symbols/fan_out 不变）
     "ml": {"lines": 5672, "symbols": 208, "fan_out": 27},
     "models": {"lines": 1784, "symbols": 139, "fan_out": 6},  # T4-3 signals字段 1757→1760；1760→1784（+24，#425 引擎预热/回放停止感知配置模型扩展功能必需）
-    "monitoring": {"lines": 23973, "symbols": 880, "fan_out": 31},  # 23932→23954（+22，T0-13 account_reconciler._submit_realtime try/except 防 in_flight 泄漏）；23954→23973（+19，T0-14 核对异常置 consistent=None + to_dict 增 success_ts/stale_seconds，symbols/fan_out 不变）
+    "monitoring": {"lines": 24008, "symbols": 881, "fan_out": 31},  # 23932→23954（+22，T0-13 account_reconciler._submit_realtime try/except 防 in_flight 泄漏）；23954→23973（+19，T0-14 核对异常置 consistent=None + to_dict 增 success_ts/stale_seconds）；23973→24008/881（+35行/+1符号=check_freeze_timeout 方法，T0-16 冻结超时升级告警功能必需）
     "realism_gate": {"lines": 1864, "symbols": 50, "fan_out": 10},
     "risk": {"lines": 4288, "symbols": 195, "fan_out": 12},
     "strategies": {"lines": 6901, "symbols": 190, "fan_out": 21},

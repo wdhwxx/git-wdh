@@ -481,3 +481,67 @@ class TestReconcileUnknown:
             assert state["stale_seconds"] is None
         finally:
             rec.shutdown()
+
+
+# ═══════════════════════════════════════════════
+#  T0-16：解冻入口 + 冻结超时升级告警（FI-23 / FI-08）
+# ═══════════════════════════════════════════════
+
+class TestUnfreezeAndTimeout:
+    """T0-16：mark_resolved 解冻 + check_freeze_timeout 超时升级。"""
+
+    def test_unfreeze_clears_frozen_and_audits(self, hooks: SimpleNamespace) -> None:
+        """FI-23：解冻后 is_frozen=False，且有审计 action=unfreeze。"""
+        p = _make_portfolio(100_000.0)
+        # 制造 1 分钱差异 → 冻结
+        broker = _FakeBroker(99_999.99)  # 差 1 分
+        rec = _new_rec(hooks)
+        try:
+            rec.request_realtime_reconciliation(p, broker)
+            rec.flush(timeout=3.0)
+            assert rec.is_frozen is True
+            # 解冻
+            rec.mark_resolved(actor="admin", note="人工核查确认券商账正确")
+            assert rec.is_frozen is False
+            # 审计有 unfreeze 记录
+            unfreeze_audits = [a for a in hooks.audits if a["action"] == "unfreeze"]
+            assert len(unfreeze_audits) >= 1
+            assert unfreeze_audits[-1]["actor"] == "admin"
+        finally:
+            rec.shutdown()
+
+    def test_unfreeze_requires_actor(self, hooks: SimpleNamespace) -> None:
+        """actor 为空 → ValueError。"""
+        rec = _new_rec(hooks)
+        try:
+            with pytest.raises(ValueError):
+                rec.mark_resolved(actor="", note="")
+        finally:
+            rec.shutdown()
+
+    def test_freeze_timeout_triggers_escalation(self, hooks: SimpleNamespace) -> None:
+        """FI-08：冻结超过 timeout → check_freeze_timeout 返回 True（升级告警）。"""
+        p = _make_portfolio(100_000.0)
+        broker = _FakeBroker(99_999.99)
+        rec = _new_rec(hooks)
+        try:
+            rec.request_realtime_reconciliation(p, broker)
+            rec.flush(timeout=3.0)
+            assert rec.is_frozen is True
+            # 刚冻结，未超时 → False
+            assert rec.check_freeze_timeout(timeout_sec=1800.0) is False
+            # 模拟冻结已超 30 分钟
+            rec._frozen_since = time.time() - 1801.0
+            assert rec.check_freeze_timeout(timeout_sec=1800.0) is True
+            # 已发过升级告警，再调 → False（防重复）
+            assert rec.check_freeze_timeout(timeout_sec=1800.0) is False
+        finally:
+            rec.shutdown()
+
+    def test_no_freeze_no_timeout_check(self, hooks: SimpleNamespace) -> None:
+        """未冻结 → check_freeze_timeout 直接返回 False。"""
+        rec = _new_rec(hooks)
+        try:
+            assert rec.check_freeze_timeout() is False
+        finally:
+            rec.shutdown()

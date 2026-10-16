@@ -158,6 +158,8 @@ class AccountReconciler:
         # T0-14：_consistent 三态——True=一致 / False=差异冻结 / None=UNKNOWN(核对异常失联)
         # 初始 None（未跑过任何核对）；broker 查询持续异常时置 None，看板显式"对账失联"
         self._frozen: bool = False
+        self._frozen_since: float = 0.0  # T0-16：冻结起始时刻（超时升级告警用）
+        self._freeze_timeout_alerted: bool = False  # T0-16：超时升级告警已发（防重复）
         self._consistent: Optional[bool] = None
         self._last_check_ts: float = 0.0
         self._last_success_ts: float = 0.0  # T0-14：最近一次成功核对时刻（异常不刷新）
@@ -279,6 +281,9 @@ class AccountReconciler:
                 self._consistent = False
                 was_frozen = self._frozen
                 self._frozen = True
+                if not was_frozen:
+                    self._frozen_since = time.time()  # T0-16：首次冻结记录起始时刻
+                    self._freeze_timeout_alerted = False
                 should_freeze = not was_frozen  # 仅首次冻结触发告警 + 审计
             else:
                 # 一致：刷新一致标记；已冻结保持冻结（须人工 mark_resolved 解冻）
@@ -326,6 +331,9 @@ class AccountReconciler:
                 self._consistent = False
                 was_frozen = self._frozen
                 self._frozen = True
+                if not was_frozen:
+                    self._frozen_since = time.time()  # T0-16：首次冻结记录起始时刻
+                    self._freeze_timeout_alerted = False
                 should_freeze = not was_frozen
             else:
                 self._consistent = True
@@ -414,6 +422,33 @@ class AccountReconciler:
             "[account_reconciler] 账户解冻: account=%s actor=%s was_frozen=%s",
             self._account_id, actor_s, was_frozen,
         )
+
+    def check_freeze_timeout(self, timeout_sec: float = 1800.0) -> bool:
+        """
+        T0-16 / FI-08：检查冻结是否超时（N 分钟未解冻 → 升级告警）。
+
+        由周期调度器定期调用（如每 60s 一次）；超时且未发过升级告警 →
+        logger.critical 升级告警（区别于首次冻结的 CRITICAL，这是"冻结未处置"升级）。
+
+        Args:
+            timeout_sec: 冻结超时阈值（秒），默认 1800=30 分钟（FI-08）。
+
+        Returns:
+            bool: True=已超时且刚发升级告警；False=未超时或已发过。
+        """
+        if not self._frozen or self._freeze_timeout_alerted:
+            return False
+        frozen_duration = time.time() - self._frozen_since
+        if frozen_duration < timeout_sec:
+            return False
+        # 超时未解冻 → 升级告警
+        self._freeze_timeout_alerted = True
+        logger.critical(
+            "[account_reconciler] 对账冻结超时升级: account=%s 已冻结 %.0f 秒(%.1f分钟)未人工处置, "
+            "需立即核查解冻(FI-08)",
+            self._account_id, frozen_duration, frozen_duration / 60.0,
+        )
+        return True
 
     def note_pnl_blocked(self, reason: str = "") -> None:
         """PnL 防脏门留痕（由 LivePortfolio 在冻结时调用拒绝记录）。
