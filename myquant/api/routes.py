@@ -756,6 +756,44 @@ def create_app(
                 content={"success": False, "code": 500, "message": f"查询对账状态失败: {e}", "data": {}},
             )
 
+    # T2-4：对账历史查询接口
+    @app.get("/api/reconciliation/history", response_model=ApiResponse, tags=["对账"])
+    async def get_reconciliation_history(
+        start_date: str = "", end_date: str = "", limit: int = 100,
+    ):
+        """T2-4：按日期范围查对账运行历史（含差异明细）。
+
+        查询参数：
+        - start_date: 起始日期（YYYY-MM-DD，可选）
+        - end_date: 结束日期（YYYY-MM-DD，可选）
+        - limit: 最大返回条数（默认 100）
+        """
+        try:
+            from myquant.core.registry import get_component
+            _ledger = get_component("trade_ledger")
+            if _ledger is None:
+                return JSONResponse(
+                    status_code=503,
+                    content={"success": False, "code": 503, "message": "trade_ledger 未装配", "data": {}},
+                )
+            runs = _ledger.query_reconciliation_runs(
+                start_date=start_date, end_date=end_date, limit=limit,
+            )
+            # 每条 run 附带差异明细
+            for run in runs:
+                run_id = run.get("id")
+                if run_id is not None:
+                    run["diffs"] = _ledger.query_reconciliation_diffs(run_id=run_id, limit=50)
+            return JSONResponse(
+                status_code=200,
+                content={"success": True, "code": 200, "message": "对账历史", "data": {"runs": runs, "count": len(runs)}},
+            )
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse(
+                status_code=500,
+                content={"success": False, "code": 500, "message": f"查询对账历史失败: {e}", "data": {}},
+            )
+
     # ═══════════════════════════════════════════
     #  数据
     # ═══════════════════════════════════════════

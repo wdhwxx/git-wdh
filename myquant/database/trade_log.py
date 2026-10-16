@@ -283,6 +283,52 @@ class TradeLedger:
         ).description]
         return [dict(zip(cols, r)) for r in rows]
 
+    # ── 查询：T2-4 对账历史查询 ──
+
+    def query_reconciliation_runs(
+        self, start_date: str = "", end_date: str = "", limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """T2-4：按日期范围查对账运行记录（按时间倒序）。"""
+        where: List[str] = []
+        params: List[Any] = []
+        if start_date:
+            where.append("run_ts >= ?")
+            params.append(start_date)
+        if end_date:
+            where.append("run_ts <= ?")
+            params.append(end_date)
+        where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+        rows = self._db.execute(
+            f"SELECT * FROM reconciliation_runs{where_sql} ORDER BY run_ts DESC LIMIT ?",
+            params + [limit],
+        ).fetchall()
+        if not rows:
+            return []
+        cols = [d[0] for d in self._db.execute(
+            "SELECT * FROM reconciliation_runs LIMIT 0"
+        ).description]
+        return [dict(zip(cols, r)) for r in rows]
+
+    def query_reconciliation_diffs(
+        self, run_id: Optional[int] = None, limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        """T2-4：按 run_id 查对账差异明细。"""
+        where: str = ""
+        params: List[Any] = []
+        if run_id is not None:
+            where = " WHERE run_id = ?"
+            params.append(run_id)
+        rows = self._db.execute(
+            f"SELECT * FROM reconciliation_diffs{where} ORDER BY id DESC LIMIT ?",
+            params + [limit],
+        ).fetchall()
+        if not rows:
+            return []
+        cols = [d[0] for d in self._db.execute(
+            "SELECT * FROM reconciliation_diffs LIMIT 0"
+        ).description]
+        return [dict(zip(cols, r)) for r in rows]
+
     def query_orders(
         self, symbol: Optional[str] = None, status: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
