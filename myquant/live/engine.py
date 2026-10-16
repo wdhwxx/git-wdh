@@ -2437,6 +2437,19 @@ class LiveEngine(BaseEngine):
             logger.error("[engine] 无broker_manager，无法提交订单")
             return
 
+        # T1-2：intent-first——入口先 record_order_intent（报单前落 intent）
+        try:
+            from myquant.core.registry import get_component
+            _ledger = get_component("trade_ledger")
+            if _ledger is not None:
+                _ledger.record_order(order, engine_id=self._engine_id)
+                _ledger.record_order_event(
+                    order_id=order.order_id, seq=1, event_type="intent",
+                    payload=f"symbol={order.symbol} side={order.side.value} qty={order.quantity}",
+                )
+        except Exception as e:
+            logger.warning(f"[engine] T1-2 record_order_intent 失败（不阻断提交）: {e}")
+
         try:
             self._orders.append(order)
             if len(self._orders) > self._max_orders:
@@ -2445,6 +2458,19 @@ class LiveEngine(BaseEngine):
 
             # 提交到 broker_manager（路由主券商 + 主备 failover 统一处理）
             result = self._broker_manager.submit_order(order)
+
+            # T1-2：报单成功后 record_order_ack（更新状态 + 落 ack 事件）
+            try:
+                from myquant.core.registry import get_component
+                _ledger = get_component("trade_ledger")
+                if _ledger is not None:
+                    _ledger.record_order(result or order, engine_id=self._engine_id)
+                    _ledger.record_order_event(
+                        order_id=order.order_id, seq=2, event_type="ack",
+                        payload=f"status={getattr(result, 'status', order.status).value}",
+                    )
+            except Exception as e:
+                logger.warning(f"[engine] T1-2 record_order_ack 失败（不阻断）: {e}")
 
             # A-3 引擎统一埋点：订单提交/拒单事件（SUBMITTED/PENDING→submit，
             # REJECTED→rejected；链路 id：order_id 与 signal_id 幂等同源）
@@ -2516,6 +2542,17 @@ class LiveEngine(BaseEngine):
 
         except Exception as e:
             logger.error(f"[engine] 订单提交失败: {e}")
+            # T1-2：异常时 record_order_error（落 error 事件）
+            try:
+                from myquant.core.registry import get_component
+                _ledger = get_component("trade_ledger")
+                if _ledger is not None:
+                    _ledger.record_order_event(
+                        order_id=order.order_id, seq=3, event_type="error",
+                        payload=f"error={e}",
+                    )
+            except Exception as ledger_e:
+                logger.warning(f"[engine] T1-2 record_order_error 失败（不阻断）: {ledger_e}")
             self._stats["errors"] += 1
             self._stats["rejected_orders"] += 1
             # A-3 引擎统一埋点：系统错误事件（订单提交异常，携带订单链路 id）

@@ -6024,3 +6024,12 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
       - 新增 record_reconciliation_run / record_reconciliation_diff / record_reconciliation_freeze 三个对账写入方法。
    c. 验收：重复上报同一 order_id → 状态更新而非跳过；query_orders() 按 submitted_at 排序正确。
    d. 基线同步：database 包 3763/116→3831/120（+68行/+4符号，T1-4 四个新方法功能必需对价）。
+
+## #T1-2 · 2026-10-16 · 阶段1 账本落地：intent-first 订单账本写入（FI-11）
+   a. 缺陷：订单提交不落 intent/ack/error 事件，报单后回报前 kill 进程 → 重启查不到 intent 行，无法完成对账。
+   b. 修复（engine._submit_order）：
+      - 入口先 record_order_intent：record_order + record_order_event(seq=1, "intent")；
+      - 报单成功后 record_order_ack：record_order(更新状态) + record_order_event(seq=2, "ack")；
+      - 异常时 record_order_error：record_order_event(seq=3, "error")。
+   c. 验收：报单后回报前 kill 进程 → 重启能查到 intent 行并完成对账（FI-11）。
+   d. 基线同步：engine.py 2933→2970（+37行）；live 包 18055/660/36→18092/660/36（+37行，symbols/fan_out 不变）。
