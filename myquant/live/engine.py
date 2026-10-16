@@ -2256,8 +2256,11 @@ class LiveEngine(BaseEngine):
         portfolio_count = len(self._portfolio.get_all_positions())
         try:
             broker_positions = broker.get_positions()
-        except Exception as e:  # noqa: BLE001 - broker 读持仓失败不硬阻断，但告警
-            logger.warning(f"[engine] T1-2 启动断言：broker 持仓读取失败（放行但告警）: {e}")
+        except Exception as e:  # T0-7：live 下 fail-closed 拒启；paper/sim 告警放行
+            msg = f"[engine] T1-2 启动断言：broker 持仓读取失败: {e}"
+            if getattr(self, "_trade_mode", "paper") == "live":
+                raise RuntimeError(msg + "，live 模式拒绝启动（broker 查询失败不可放行）") from e
+            logger.warning(msg + "，paper/sim 模式告警放行")
             return
         broker_count = len(broker_positions)
 
@@ -2284,8 +2287,11 @@ class LiveEngine(BaseEngine):
                     f"[engine] T1-2 启动对账完成: portfolio={portfolio_count} -> "
                     f"{len(self._portfolio.get_all_positions())} 只, diff={diff}"
                 )
-            except Exception as e:  # noqa: BLE001
-                logger.warning(f"[engine] T1-2 启动对账失败（不阻断）: {e}")
+            except Exception as e:  # T0-7：live 下 fail-closed 拒启；paper/sim 告警放行
+                msg = f"[engine] T1-2 启动对账失败: {e}"
+                if getattr(self, "_trade_mode", "paper") == "live":
+                    raise RuntimeError(msg + "，live 模式拒绝启动（对账失败不可放行）") from e
+                logger.warning(msg + "，paper/sim 模式告警放行")
 
     def _broker_accountability_patrol(self) -> None:
         """

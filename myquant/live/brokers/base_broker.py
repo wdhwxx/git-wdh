@@ -1063,3 +1063,13 @@ class BaseBroker(ExecutionInterface):
             f"connected={self._connected}, "
             f"subscribed={len(self._subscribed_symbols)})"
         )
+
+
+class BrokerQueryError(Exception):
+    """
+    T0-2：券商查询异常（get_account/get_positions 等查询失败时抛出）。
+
+    旧实现查询异常返回空列表/零账户 → 调用方以为"券商真的没钱/没持仓" →
+    本地账被清成 0（RC-01 病）。新实现抛本异常，调用方 fail-closed
+    （本地账保持不变，不误判）。
+    """

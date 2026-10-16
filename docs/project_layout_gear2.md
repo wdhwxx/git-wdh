@@ -5977,3 +5977,11 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    d. 专项测试 TestUnfreezeAndTimeout 4 用例（追加到 test_account_reconciler.py）：解冻清 frozen + 审计；actor 空抛错；超时升级；未冻结不检查。22 passed。
    e. 基线同步：api 包 3775/193→3807/194（+32行/+1符号=unfreeze API）；monitoring 包 23973/880→24008/881（+35行/+1符号=check_freeze_timeout 方法），fan_out 不变。
    f. ✅ C-1 红线完成：T0-1 + T0-15 + T0-16 同 PR（PR-B 闭环）。
+
+## #T0-2/3/6/7 · 2026-10-16 · PR-C 异常不当权威（查询异常禁返回空零 + 健全性闸 + frozen_cash缺键保留 + live启动fail-closed）
+   a. T0-2：base_broker 新增 BrokerQueryError 异常类；qmt_broker.get_positions/get_account LIVE 模式异常时抛 BrokerQueryError（旧实现返回空列表/零账户 → 调用方误以为券商真没钱/没持仓 → 本地账被清成 0）。
+   b. T0-3：portfolio.sync_from_broker 加健全性闸——券商持仓数/总资产相对上一快照骤降 >50% 或绝对值 0 → 拒覆盖 + CRITICAL + 置 reconciliation_blocked；__init__ 新增 _last_sync_position_count / _last_sync_total_assets 字段。
+   c. T0-6：frozen_cash 缺键 → 保留原值（旧实现 .get('frozen_cash', 0.0) 会虚增可用资金）。
+   d. T0-7：engine._assert_startup_positions 两处异常分支（broker.get_positions / sync_from_broker）—— live 模式改 fail-closed 抛 RuntimeError 拒启，paper/sim 保持告警放行。
+   e. 专项测试 test_pr_c_guardrails.py 5 用例：BrokerQueryError 存在性 + 空持仓拒覆盖 + 首次同步建快照 + frozen_cash 缺键保留原值。5 passed。
+   f. 基线同步：engine.py 2913→2919（+6行，T0-7）；live 包 17949/659→18002/660（+53行/+1符号，T0-2/3/6/7 功能必需对价）。

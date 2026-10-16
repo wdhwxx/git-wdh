@@ -1081,9 +1081,11 @@ class QmtBroker(BaseBroker):
                     pos = self._map_qmt_position(raw)
                     if pos is not None:
                         positions.append(pos)
-            except Exception as e:  # noqa: BLE001 - 查询失败返回空列表并记录
-                logger.error(f"[qmt_broker] 持仓查询异常: {e}")
+            except Exception as e:  # T0-2：查询异常抛 BrokerQueryError（不再返回空列表）
+                logger.critical(f"[qmt_broker] 持仓查询异常(T0-2 fail-closed): {e}")
                 self._stats["last_error"] = f"get_positions: {e}"
+                from myquant.live.brokers.base_broker import BrokerQueryError
+                raise BrokerQueryError(f"QMT 持仓查询失败: {e}") from e
             return positions
         return list(self._positions.values())
 
@@ -1120,18 +1122,11 @@ class QmtBroker(BaseBroker):
                     "account_id": self._account_id,
                     "mode": self._mode,
                 }
-            except Exception as e:  # noqa: BLE001 - 查询失败返回空账户并记录
-                logger.error(f"[qmt_broker] 资产查询异常: {e}")
+            except Exception as e:  # T0-2：查询异常抛 BrokerQueryError（不再返回零账户）
+                logger.critical(f"[qmt_broker] 资产查询异常(T0-2 fail-closed): {e}")
                 self._stats["last_error"] = f"get_account: {e}"
-                return {
-                    "cash": 0.0,
-                    "available_cash": 0.0,
-                    "frozen_cash": 0.0,
-                    "market_value": 0.0,
-                    "total_assets": 0.0,
-                    "account_id": self._account_id,
-                    "mode": self._mode,
-                }
+                from myquant.live.brokers.base_broker import BrokerQueryError
+                raise BrokerQueryError(f"QMT 资产查询失败: {e}") from e
 
         market_value = sum(
             p.quantity * p.market_price

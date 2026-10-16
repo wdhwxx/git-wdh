@@ -229,6 +229,9 @@ class LivePortfolio:
         # T0-1 双值并存：broker_cash 是券商快照值（仅比对用，不自动覆写本地账）
         self._broker_cash: float = 0.0               # 券商现金快照（sync_from_broker 时刷新）
         self._reconciliation_blocked: bool = False   # 对账冻结（diff 超阈 → 本地账不被覆写）
+        # T0-3 健全性闸：上一次同步的持仓数/总资产（骤降 >50% 或绝对值 0 → 拒覆盖）
+        self._last_sync_position_count: int = 0
+        self._last_sync_total_assets: float = 0.0
 
         # 持仓
         self._positions: Dict[str, Position] = {}   # symbol -> Position
@@ -854,11 +857,46 @@ class LivePortfolio:
 
         # diff 在容差内 → 正常同步（旧行为，自动对齐）
         self._reconciliation_blocked = False
-        self._cash = self._broker_cash
-        self._frozen_cash = float(account.get("frozen_cash", 0.0) or 0.0)
 
-        # 同步持仓
+        # T0-3 健全性闸：券商持仓数/总资产相对上一快照骤降 >50% 或绝对值 0 → 拒覆盖 + CRITICAL
         broker_positions = broker.get_positions() or []
+        broker_pos_count = len(broker_positions)
+        broker_total_assets = self._broker_cash + sum(
+            p.quantity * p.market_price for p in broker_positions
+        )
+        if self._last_sync_position_count > 0:
+            # 与上一快照比较（不是第一次同步）
+            pos_drop_ratio = 1.0 - (broker_pos_count / self._last_sync_position_count)
+            asset_drop_ratio = 1.0 - (broker_total_assets / self._last_sync_total_assets) if self._last_sync_total_assets > 0 else 0.0
+            if broker_pos_count == 0 or broker_total_assets == 0:
+                logger.critical(
+                    f"[portfolio] T0-3 健全性闸拒绝覆盖: 券商返回持仓数=0 或总资产=0 "
+                    f"(上一快照: 持仓数={self._last_sync_position_count}, 总资产={self._last_sync_total_assets:,.2f})"
+                )
+                self._reconciliation_blocked = True
+                self._notify_callbacks("__reconciliation_blocked__")
+                return diff
+            if pos_drop_ratio > 0.5 or asset_drop_ratio > 0.5:
+                logger.critical(
+                    f"[portfolio] T0-3 健全性闸拒绝覆盖: 持仓数骤降 {pos_drop_ratio:.0%} "
+                    f"({self._last_sync_position_count}→{broker_pos_count}), "
+                    f"总资产骤降 {asset_drop_ratio:.0%} "
+                    f"({self._last_sync_total_assets:,.2f}→{broker_total_assets:,.2f})"
+                )
+                self._reconciliation_blocked = True
+                self._notify_callbacks("__reconciliation_blocked__")
+                return diff
+
+        self._cash = self._broker_cash
+        # T0-6：frozen_cash 缺键 → 保留原值（不用 0）+ CRITICAL（防虚增可用资金）
+        if "frozen_cash" in account:
+            self._frozen_cash = float(account.get("frozen_cash", 0.0) or 0.0)
+        else:
+            logger.critical(
+                f"[portfolio] broker 账户 dict 缺 frozen_cash 键，保留原值={self._frozen_cash:,.2f}（T0-6 防虚增可用资金）"
+            )
+
+        # 同步持仓（broker_positions 已在 T0-3 健全性闸时获取，不重复调）
         self._positions.clear()
         for pos in broker_positions:
             self._positions[pos.symbol] = Position(
@@ -870,6 +908,10 @@ class LivePortfolio:
                 opened_at=pos.opened_at,
                 strategy_id=pos.strategy_id,
             )
+
+        # T0-3：更新上一快照（供下次健全性比较）
+        self._last_sync_position_count = broker_pos_count
+        self._last_sync_total_assets = broker_total_assets
 
         self._stats["last_update_time"] = time.time()
         logger.info(
