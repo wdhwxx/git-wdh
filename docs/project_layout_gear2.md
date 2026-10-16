@@ -5901,3 +5901,9 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    f. order_timeout 活配置化（RC-15）：config/live_config.yaml:order_timeout=30 经 qmt_broker.load_config 读入 self._ack_unknown_window，作为查单总窗口真源；未配置时默认 30 秒。
    g. 专项测试 tests/unit/test_qmt_ack_unknown.py 12 用例：置位留痕/查询None保持unknown/查询异常保持unknown/未命中REJECTED/命中映射+SUBMITTED对齐/PARTIAL/FILLED对齐/非法转移不崩溃/退避序列生成正确性（30s窗口≥3轮指数分布、小窗口≥3轮、零窗口防御）。test_qmt_broker_live.py TestUnknownSubmitAck 5 用例 fixture 改用 _ack_unknown_window=0.05（兼容 _build_ack_unknown_delays 动态生成）。
    h. 验证：67 passed（12 新专项 + 23 旧 live + 27 failover + 5 旧 ACK_UNKNOWN）；py_compile 全绿；下游落库 record_order 用字符串存 status 无枚举约束，"ACK_UNKNOWN" 直接可存。
+
+## #T0-13 · 2026-10-16 · account_reconciler._submit_realtime 防 in_flight 泄漏
+   a. 缺陷：executor.submit / add_done_callback 本身可能抛异常（executor 已 shutdown、队列满），旧实现异常时 _in_flight 已在 request_realtime_reconciliation 置 True，但 future 没建、回调没注册 → 在途标记永远卡住，后续所有实时核对被去重跳过（无声停摆）。
+   b. 修复：_submit_realtime 包 try/except——异常时 logger.critical + 锁内清 _in_flight/_pending_after/pending portfolio/broker，保证下次事件能继续触发；不重新抛（后台任务保事件流不中断）。
+   c. 专项测试 tests/unit/test_account_reconciler.py 新增 TestInFlightLeak 2 用例：submit 抛异常 → in_flight 恢复 False；清理后重建 executor 能正常提交下一次核对。14 passed。
+   d. 基线同步：monitoring 包 23932→23954（+22 行，symbols/fan_out 不变，功能必需对价）。

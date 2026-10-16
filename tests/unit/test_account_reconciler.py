@@ -365,3 +365,50 @@ class TestNoLookahead:
             assert before - 1.0 <= ts <= after + 1.0
         finally:
             rec.shutdown()
+
+
+# ═══════════════════════════════════════════════
+#  T0-13 / FI-20：executor.submit 异常 → _in_flight 必清理（防在途标记泄漏）
+# ═══════════════════════════════════════════════
+
+class TestInFlightLeak:
+    """T0-13：submit 抛异常时 in_flight 必须恢复 False，否则后续实时核对永远被去重跳过。"""
+
+    def test_submit_exception_clears_in_flight(self, hooks: SimpleNamespace) -> None:
+        """executor.submit 抛异常（如已 shutdown）→ _in_flight 恢复 False，下次事件可继续触发。"""
+        p = _make_portfolio(100_000.0)
+        broker = _FakeBroker(100_000.0)
+        rec = _new_rec(hooks)
+        try:
+            # 先 shutdown executor，让后续 submit 抛 RuntimeError
+            rec._executor.shutdown(wait=False)
+            # 第一次提交：会因 executor shutdown 抛异常 → _submit_realtime 内部 catch 并清 in_flight
+            result = rec.request_realtime_reconciliation(p, broker)
+            # request 返回 True（它确实置了 in_flight=True 后调 _submit_realtime）
+            assert result is True
+            # 关键断言：in_flight 已被清理（没卡在 True）
+            assert rec._in_flight is False, "T0-13 失败: submit 异常后 in_flight 泄漏"
+            # pending 标记也清了
+            assert rec._pending_after is False
+        finally:
+            # 已经 shutdown 过，不再重复
+            pass
+
+    def test_in_flight_recovers_after_exception(self, hooks: SimpleNamespace) -> None:
+        """异常清理 in_flight 后，重建 executor 能正常提交下一次核对。"""
+        p = _make_portfolio(100_000.0)
+        broker = _FakeBroker(100_000.0)
+        rec = _new_rec(hooks)
+        try:
+            rec._executor.shutdown(wait=False)
+            rec.request_realtime_reconciliation(p, broker)
+            assert rec._in_flight is False
+            # 重建 executor（模拟重启/重连）
+            from concurrent.futures import ThreadPoolExecutor
+            rec._executor = ThreadPoolExecutor(max_workers=2)
+            result2 = rec.request_realtime_reconciliation(p, broker)
+            assert result2 is True
+            assert rec.flush(timeout=3.0) is True
+            assert broker.calls >= 1
+        finally:
+            rec.shutdown()

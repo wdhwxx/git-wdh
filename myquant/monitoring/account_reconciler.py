@@ -204,9 +204,31 @@ class AccountReconciler:
         return True
 
     def _submit_realtime(self, portfolio: Any, broker: Any) -> None:
-        """提交实时核对到线程池，并注册在途清理回调。"""
-        fut: Future = self._executor.submit(self._run_realtime_check, portfolio, broker)
-        fut.add_done_callback(self._on_task_done)
+        """
+        提交实时核对到线程池，并注册在途清理回调。
+
+        T0-13 防 in_flight 泄漏：executor.submit / add_done_callback 本身可能抛
+        （executor 已 shutdown、队列满、解释器退出阶段）。旧实现异常时
+        `_in_flight` 已在 request_realtime_reconciliation 置 True，但 future 没建、
+        回调没注册 → 在途标记永远卡住，后续所有实时核对被去重跳过（无声停摆）。
+        新实现：异常时 CRITICAL 告警 + 锁内清 `_in_flight`，保证下次事件能继续触发。
+        """
+        try:
+            fut: Future = self._executor.submit(
+                self._run_realtime_check, portfolio, broker,
+            )
+            fut.add_done_callback(self._on_task_done)
+        except Exception as e:  # noqa: BLE001 - 后台提交失败不抛，保事件流不中断
+            logger.critical(
+                "[reconciler] 实时核对任务提交失败(in_flight 已清理, 下次事件可重试): %s",
+                e,
+            )
+            # 防御：清掉在途标记，否则后续实时核对永远被去重跳过
+            with self._lock:
+                self._in_flight = False
+                self._pending_after = False
+                self._pending_portfolio = None
+                self._pending_broker = None
 
     def _on_task_done(self, fut: Future) -> None:
         """在途任务完成回调：清理在途标记；若期间又来了事件则补一次核对。"""
