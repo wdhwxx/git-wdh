@@ -224,7 +224,7 @@ def create_live_engine(
     try:
         from myquant.database.connection import DatabaseConnection
         from myquant.database.trade_log import TradeLedger
-        trade_ledger = TradeLedger(DatabaseConnection())
+        trade_ledger = TradeLedger(DatabaseConnection("database/quant.db"))
         logger.info("[build] TradeLedger 已装配（T1-1 本地账本）")
     except Exception as exc:
         logger.warning(f"[build] TradeLedger 装配失败（live 模式将拒启）: {exc}")
