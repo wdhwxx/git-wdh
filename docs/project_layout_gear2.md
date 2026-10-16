@@ -6081,3 +6081,12 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
       - 复用 account_reconciler.to_dict()，与 dashboard/看板共享同一数据源。
    c. 用途：运维排障、dashboard 展示、人工核查对账健康度。
    d. 基线同步：api 包 3807/194→3833/195（+26行/+1符号）。
+
+## #T2-4 · 2026-10-16 · 阶段2 对账闭环：对账历史查询接口
+   a. 缺陷：无法按日期范围查对账历史（什么时候对过账、差异多少）→ 排障/审计无据可查。
+   b. 修复：
+      - trade_log.py 新增 query_reconciliation_runs(start_date, end_date, limit)：按时间倒序查对账运行记录；
+      - trade_log.py 新增 query_reconciliation_diffs(run_id, limit)：按 run_id 查差异明细；
+      - routes.py 新增 GET /api/reconciliation/history：每条 run 自动附带 diffs 明细（最多 50 条）。
+   c. 用途：审计追溯、排障分析、对账健康度趋势。
+   d. 基线同步：database 包 3910/122→3960/124（+50行/+2符号）；api 包 3833/195→3871/196（+38行/+1符号）。
