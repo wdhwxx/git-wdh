@@ -280,7 +280,7 @@ CONFIG_KEY_REQUIRED: set[str] = {
 #   risk_manager 1901→2020（0.7 三条异常交易规则 + anomaly_rules 参数）
 #   acceptance/live_safety_gate.py 1756→1749（0.1~0.9 + LIVE 门槛验收累计，#287~#296；入白名单）
 OVERSIZE_LINE_BASELINE: dict[str, int] = {
-    "monitoring/alerting.py": 3688, "live/engine.py": 2802, "core/event_bus.py": 2379,  # engine 2858→2869（#275 M0-09 出口强制挂载 +11 行治理注入）；alerting 3675→3681→3688（#264 工厂注册代码；P0-2 ruff --fix 导入排序微增）；event_bus 2383→2379（#261 事件池注入化）；live/engine 3063→3065→3109→3111（#355 P1-07③ 空值 fail-closed；#358 P1-11 实盘出口泄漏审计报告；P0-2 ruff --fix 微增）；3111→3178（#413 T2-1 on_init 时序重排+warmup replay 参数；#414 T2-2 信号 id 持久化恢复）；3178→3228（#415 T1-2 启动持仓断言 fail-closed）；3228→3231（#416 T3-1 复权口径 hfq 显式传参）；3231→3236（#417 T1-2 仅 live 模式 fail-closed，paper 告警放行）；3236→2802（#422 拆包瘦身：装配层迁出 engine_assembly.py，实测同步）
+    "monitoring/alerting.py": 3688, "live/engine.py": 2808, "core/event_bus.py": 2379,  # engine 2858→2869（#275 M0-09 出口强制挂载 +11 行治理注入）；alerting 3675→3681→3688（#264 工厂注册代码；P0-2 ruff --fix 导入排序微增）；event_bus 2383→2379（#261 事件池注入化）；live/engine 3063→3065→3109→3111（#355 P1-07③ 空值 fail-closed；#358 P1-11 实盘出口泄漏审计报告；P0-2 ruff --fix 微增）；3111→3178（#413 T2-1 on_init 时序重排+warmup replay 参数；#414 T2-2 信号 id 持久化恢复）；3178→3228（#415 T1-2 启动持仓断言 fail-closed）；3228→3231（#416 T3-1 复权口径 hfq 显式传参）；3231→3236（#417 T1-2 仅 live 模式 fail-closed，paper 告警放行）；3236→2802（#422 拆包瘦身：装配层迁出 engine_assembly.py，实测同步）；2802→2808（#421 T4-1/T4-2 注释+日志）
     "live/scheduler.py": 2419, "monitoring/metrics_collector.py": 2276,  # 2382→2409（#265 阶段二 7 处装配点改经注册表，代码行增长）；metrics 2268→2273→2276（#264 工厂注册代码；P0-2 ruff --fix 微增）
     "monitoring/action_engine.py": 2307, "data_access/manager.py": 2204,  # 2170→2186→2200→2204（#281 M1A-01/06 每股收益时点日基收敛+失败可观测化；M1A-10 available_time 增量派生+存量补列；P0-2 ruff --fix 微增）
     "live/brokers/qmt_broker.py": 2170, "live/data_feed.py": 1336,  # 2151→1605（#421 拆包瘦身：行情源层迁出 realtime_sources.py）；1605→1336（#423 拆包瘦身：实时桥层迁出 realtime_bridge.py，实测同步并移出 OVERSIZE_WHITELIST——1336<1500 受标准 R-14 约束，R-24 仍冻结 1336 防回升）
@@ -330,7 +330,7 @@ STRUCTURE_BASELINE: dict[str, dict[str, int]] = {
     "gui/backtest_config_dialog.py": {"lines": 1870, "symbols": 45, "fan_out": 13},
     "live/brokers/qmt_broker.py": {"lines": 2170, "symbols": 79, "fan_out": 8},
     "live/data_feed.py": {"lines": 1336, "symbols": 42, "fan_out": 11},  # 2151/80/13→1605/55/11（#421 拆包瘦身实测同步）；1605/55/11→1336/42/11（#423 拆包瘦身：实时桥层迁出 realtime_bridge.py，-13 符号=桥类及方法，实测同步）
-    "live/engine.py": {"lines": 2802, "symbols": 72, "fan_out": 15},  # 3236/77/17→2802/72/15（#422 拆包瘦身实测同步：装配层迁出 engine_assembly.py）
+    "live/engine.py": {"lines": 2808, "symbols": 72, "fan_out": 15},  # 3236/77/17→2802/72/15（#422 拆包瘦身）；2802→2808（#421 T4-1/T4-2）
     "live/scheduler.py": {"lines": 2419, "symbols": 84, "fan_out": 10},
     "ml/training_pipeline.py": {"lines": 1672, "symbols": 54, "fan_out": 10},
     "monitoring/action_engine.py": {"lines": 2307, "symbols": 86, "fan_out": 9},

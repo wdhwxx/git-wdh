@@ -1338,8 +1338,16 @@ class LiveEngine(BaseEngine):
                         self._prev_close_map[symbol] = float(bar_objs[-2].close)
                     except Exception:
                         pass
+                # T4-2：预热回放阶段只重建策略状态，不提交订单。
+                # 此前最新 bar 信号直接 _process_signal 下单，可能落在非交易时段。
+                # 改法：最新 bar 的信号丢弃（不下单），等第一根真实 bar 到达时
+                # 策略基于新 bar 重新判断——若信号仍成立会产生新信号，T+1 撮合。
                 for sig in (strategy.on_bar(latest, self._context) or []):
-                    self._process_signal(sig, latest)
+                    logger.info(
+                        f"[engine] T4-2 预热信号记录不下单: "
+                        f"{sig.symbol if hasattr(sig,'symbol') else '?'} "
+                        f"(等待首根真实bar)"
+                    )
             except Exception as e:
                 logger.warning(
                     f"[engine] 预热驱动策略失败 {symbol} "

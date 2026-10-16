@@ -175,6 +175,18 @@ class BacktestConfig:
             "lot_size": self.lot_size,
             # P1-09 流动性约束透传
             "participation_rate": self.participation_rate,
+            # T6-1：佣金/滑点模型透传（此前缺失→门禁恒读默认值万3/万0.2）
+            "commission": {
+                "buy_rate": self.commission.buy_rate,
+                "sell_rate": self.commission.sell_rate,
+                "min_commission": self.commission.min_commission,
+                "stamp_tax": self.commission.stamp_tax,
+                "transfer_fee": self.commission.transfer_fee,
+            },
+            "slippage": {
+                "type": getattr(self.slippage, "type", "fixed"),
+                "value": getattr(self.slippage, "value", 0.0),
+            },
             # P0-01 端到端（#345）：真实性门禁配置透传
             "realism_gate": self.realism_gate,
         }
