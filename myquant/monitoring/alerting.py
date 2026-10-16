@@ -998,6 +998,10 @@ class WebhookAlertChannel(AlertChannel):
             for k, v in alert.details.items():
                 text += f"- {k}: {v}\n"
 
+        # C-6 实测修复：落款系统名（飞书自定义机器人若开启「自定义关键词」安全校验，
+        # 消息正文必须包含关键词，否则返回 code 19024 拒收；落款同时作为来源标识）
+        text += "\n> 🐋 鲲鹏量化交易系统 · 告警通道\n"
+
         return {
             "msg_type": "interactive",
             "card": {
@@ -1966,6 +1970,18 @@ class AlertManager:
         channels = []
         for name in channel_names:
             ch = self._channels.get(name)
+            if ch is None and name == "webhook":
+                # C-6 实测修复：规则通配名 "webhook" 未装配时，匹配所有 Webhook 类通道
+                # （实际装配名为 feishu/wecom/dingtalk，历史规则名与之不匹配，
+                #  导致 CRITICAL 路由永远命中 console/log 而跳过 webhook 通道）
+                for wch in self._channels.values():
+                    if (
+                        isinstance(wch, WebhookAlertChannel)
+                        and wch not in channels
+                        and wch.can_send(Alert(level=level, message="route_check"))
+                    ):
+                        channels.append(wch)
+                continue
             if ch and ch.can_send(Alert(level=level, message="route_check")):
                 channels.append(ch)
         # 如果规则中没有匹配的通道，回退到所有可用通道
@@ -3118,9 +3134,16 @@ def configure_notification_channels(manager: AlertManager) -> int:
         for wh_name in ("feishu", "wecom", "dingtalk"):
             wh = channels.get(wh_name) or {}
             url = wh.get("webhook") if isinstance(wh, dict) else None
-            if url:
+            # C-6 实测修复：
+            #   1) 跳过占位符/无效 URL（如未配置的 "${WECOM_WEBHOOK}" 会被 safe_load 读为字面量，
+            #      非空但不可用，装配只会产生发送必败的噪声通道）
+            #   2) 按通道名装配对应 webhook_type（feishu→飞书 interactive 格式；此前默认 generic，
+            #      payload 无 msg_type 字段会被飞书拒收）
+            if url and str(url).startswith("http") and "${" not in str(url):
                 manager.add_channel(
-                    WebhookAlertChannel(name=wh_name, webhook_url=url)
+                    WebhookAlertChannel(
+                        name=wh_name, webhook_url=url, webhook_type=wh_name,
+                    )
                 )
                 added += 1
     except Exception as e:

@@ -232,6 +232,7 @@ ENTRY_ALLOWLIST: set[str] = {
     "scripts/豁免管理.py",  # 回写#365：P1-14 豁免流管理薄入口（list/grant/approve/revoke，委托 myquant/leakage_gate/exemption.py）
     "scripts/台账consumers实测.py",  # 回写#P2-12：台账 consumers AST 实测薄入口（委托 leakage_gate.static_scan.collect_consumers_by_column）
     "scripts/配置死键扫描.py",  # 回写#P2-07：配置死键扫描薄入口（委托 leakage_gate.config_deadkey.scan_dead_keys）
+    "scripts/告警通道实测.py",  # 回写#C-6：告警通道实测薄入口（飞书 Webhook 单条/并发/直连探测，委托 myquant/monitoring/alerting.py）
     # 根目录入口（.py + .bat）
     "run_GUI入口.py", "run_全量清洗GUI.py", "run_回测入口.py", "run_回测配置GUI.py",
     "run_实盘入口.py", "run_批量回测.py", "run_数据下载GUI.py", "run_清理GUI.py",
@@ -281,7 +282,8 @@ CONFIG_KEY_REQUIRED: set[str] = {
 #   risk_manager 1901→2020（0.7 三条异常交易规则 + anomaly_rules 参数）
 #   acceptance/live_safety_gate.py 1756→1749（0.1~0.9 + LIVE 门槛验收累计，#287~#296；入白名单）
 OVERSIZE_LINE_BASELINE: dict[str, int] = {
-    "monitoring/alerting.py": 3688, "live/engine.py": 3049, "core/event_bus.py": 2379,  # 2829→2835（#424 T4-4 fail-closed +6行）；2835→2850（#425 引擎预热/回放停止感知 _stop_requested +15 行功能必需）；2850→2869（T0-12 报单结果未知查单确认闭环 engine 端 ACK_UNKNOWN 处理 +19 行功能必需）；2869→2887（T0-10 恢复撤单移到 connect_all 后 +cancel 返回值检查 +18 行功能必需）；2887→2913（T0-11 pause 非 RUNNING 留痕 + force 参数 + _startup_blocked +26 行功能必需）；2913→2919（T0-7 启动断言 live fail-closed +6 行功能必需）；2919→2933（T0-4 对账周期调度断言 +_accountability_interval +14 行功能必需）；2933→2970（T1-2 intent-first 账本写入 +37 行功能必需）；2970→3029（T1-5/T1-6 持仓日快照+PnL快照周期任务 +59 行功能必需）；3029→3049（T1-8 落库连续失败计数+pause +20 行功能必需）
+    "monitoring/alerting.py": 3711,  # 3688→3711（+23行，C-6 告警通道实测功能必需：飞书 webhook 装配 webhook_type/跳过占位符 URL/路由通配/关键词落款）
+    "live/engine.py": 3049, "core/event_bus.py": 2379,  # 2829→2835（#424 T4-4 fail-closed +6行）；2835→2850（#425 引擎预热/回放停止感知 _stop_requested +15 行功能必需）；2850→2869（T0-12 报单结果未知查单确认闭环 engine 端 ACK_UNKNOWN 处理 +19 行功能必需）；2869→2887（T0-10 恢复撤单移到 connect_all 后 +cancel 返回值检查 +18 行功能必需）；2887→2913（T0-11 pause 非 RUNNING 留痕 + force 参数 + _startup_blocked +26 行功能必需）；2913→2919（T0-7 启动断言 live fail-closed +6 行功能必需）；2919→2933（T0-4 对账周期调度断言 +_accountability_interval +14 行功能必需）；2933→2970（T1-2 intent-first 账本写入 +37 行功能必需）；2970→3029（T1-5/T1-6 持仓日快照+PnL快照周期任务 +59 行功能必需）；3029→3049（T1-8 落库连续失败计数+pause +20 行功能必需）
     "live/scheduler.py": 2419, "monitoring/metrics_collector.py": 2276,  # 2382→2409（#265 阶段二 7 处装配点改经注册表，代码行增长）；metrics 2268→2273→2276（#264 工厂注册代码；P0-2 ruff --fix 微增）
     "monitoring/action_engine.py": 2307, "data_access/manager.py": 2204,  # 2170→2186→2200→2204（#281 M1A-01/06 每股收益时点日基收敛+失败可观测化；M1A-10 available_time 增量派生+存量补列；P0-2 ruff --fix 微增）
     "live/brokers/qmt_broker.py": 2344, "live/data_feed.py": 1336,  # 2151→1605（#421 拆包瘦身：行情源层迁出 realtime_sources.py）；1605→1336（#423 拆包瘦身：实时桥层迁出 realtime_bridge.py，实测同步并移出 OVERSIZE_WHITELIST——1336<1500 受标准 R-14 约束，R-24 仍冻结 1336 防回升）；2170→2302（T0-12 报单结果未知查单确认闭环 _handle_unknown_submit + 查单/状态对齐 +132 行功能必需）；2302→2344（T0-12·2 order_timeout 活配置化 _build_ack_unknown_delays 动态退避 + load_config 读取 +42 行功能必需）
@@ -335,7 +337,7 @@ STRUCTURE_BASELINE: dict[str, dict[str, int]] = {
     "live/scheduler.py": {"lines": 2419, "symbols": 84, "fan_out": 10},
     "ml/training_pipeline.py": {"lines": 1672, "symbols": 54, "fan_out": 10},
     "monitoring/action_engine.py": {"lines": 2307, "symbols": 86, "fan_out": 9},
-    "monitoring/alerting.py": {"lines": 3688, "symbols": 145, "fan_out": 17},
+    "monitoring/alerting.py": {"lines": 3711, "symbols": 145, "fan_out": 17},  # 3688→3711（+23行，C-6 告警通道实测：飞书 webhook 装配 webhook_type/跳过占位符 URL/路由通配/关键词落款，功能必需；symbols/fan_out 不变）
     "monitoring/dynamic_baseline.py": {"lines": 1546, "symbols": 48, "fan_out": 9},
     "monitoring/metrics_collector.py": {"lines": 2276, "symbols": 58, "fan_out": 8},
     "risk/risk_manager.py": {"lines": 2020, "symbols": 65, "fan_out": 8},
@@ -364,7 +366,7 @@ PACKAGE_STRUCTURE_BASELINE: dict[str, dict[str, int]] = {
     "live": {"lines": 18308, "symbols": 662, "fan_out": 36},  # T4-4 fail-closed 17492→17498；#425 引擎停止感知 17498→17513（lines +15 功能必需，symbols/fan_out 不变）；17513/652→17690/653（T0-12 查单确认闭环 qmt_broker/manager/engine 功能必需，+1 符号=_handle_unknown_submit 方法）；17690/653→17732/654（T0-12·2 order_timeout 活配置化 _build_ack_unknown_delays +42行/+1符号功能必需）；17732/654→17798/655（T0-8 _assert_live_reconciliation_gate +66行/+1符号功能必需）；17798/655→17856/655（T0-10 restore_state转发子券商+撤单返回值检查+connect_all后撤单 +58行，symbols/fan_out 不变）；17856/655→17882/655（T0-11 pause force参数+_startup_blocked +26行，symbols/fan_out 不变）；17882/655→17947/659（T0-1 双值并存 sync_from_broker 不覆写+adopt_broker_ledger+3property +65行/+4符号功能必需）；17947/659→17949/659（T0-15 cash_diff round 2位 + 持仓数量整数比较 +2行，symbols/fan_out 不变）；17949/659→18002/660（T0-2 BrokerQueryError异常类+get_positions/get_account改抛错 + T0-3健全性闸 + T0-6 frozen_cash缺键保留 + T0-7启动断言live fail-closed +53行/+1符号功能必需）；18002/660→18032/660（T0-4对账周期调度断言 + T0-19冻结拒绝新提交 +30行，symbols/fan_out 不变）；18032/660→18055/660/36（T1-1 TradeLedger装配+注册到registry+gate加ledger检查 +23行/+1fan_out，symbols 不变）；18055/660/36→18092/660/36（T1-2 intent-first账本写入 +37行，symbols/fan_out 不变）；18092/660/36→18151/662/36（T1-5/T1-6 持仓日快照+PnL快照周期任务 +59行/+2符号，fan_out 不变）；18151/662/36→18171/662/36（T1-8 落库连续失败计数+pause +20行，symbols/fan_out 不变）；18171/662/36→18308/662/36（T0-17 克隆订单副本移入循环内 + T0-18 PR-B 回路验证测试 +137行，symbols/fan_out 不变）
     "ml": {"lines": 5672, "symbols": 208, "fan_out": 27},
     "models": {"lines": 1784, "symbols": 139, "fan_out": 6},  # T4-3 signals字段 1757→1760；1760→1784（+24，#425 引擎预热/回放停止感知配置模型扩展功能必需）
-    "monitoring": {"lines": 24112, "symbols": 882, "fan_out": 31},  # 23932→23954（+22，T0-13 account_reconciler._submit_realtime try/except 防 in_flight 泄漏）；23954→23973（+19，T0-14 核对异常置 consistent=None + to_dict 增 success_ts/stale_seconds）；23973→24008/881（+35行/+1符号=check_freeze_timeout 方法，T0-16 冻结超时升级告警功能必需）；24008→24015（+7行，T0-5 持续冻结留痕 CRITICAL，symbols/fan_out 不变）；24015→24042/882（+27行/+1符号=_check_ledger_vs_broker 方法，T2-1 ledger vs broker 成交对账接口）；24042→24064（+22行，T2-5 T+1 终局对账落库 reconciliation_runs，symbols/fan_out 不变）；24064→24086（+22行，T2-6 实时对账落库 reconciliation_runs，symbols/fan_out 不变）；24086→24099（+13行，T2-7 冻结记录落库 reconciliation_freeze，symbols/fan_out 不变）；24099→24112（+13行，T2-8 解冻记录落库 reconciliation_freeze，symbols/fan_out 不变）
+    "monitoring": {"lines": 24135, "symbols": 882, "fan_out": 31},  # 23932→23954（+22，T0-13 account_reconciler._submit_realtime try/except 防 in_flight 泄漏）；23954→23973（+19，T0-14 核对异常置 consistent=None + to_dict 增 success_ts/stale_seconds）；23973→24008/881（+35行/+1符号=check_freeze_timeout 方法，T0-16 冻结超时升级告警功能必需）；24008→24015（+7行，T0-5 持续冻结留痕 CRITICAL，symbols/fan_out 不变）；24015→24042/882（+27行/+1符号=_check_ledger_vs_broker 方法，T2-1 ledger vs broker 成交对账接口）；24042→24064（+22行，T2-5 T+1 终局对账落库 reconciliation_runs，symbols/fan_out 不变）；24064→24086（+22行，T2-6 实时对账落库 reconciliation_runs，symbols/fan_out 不变）；24086→24099（+13行，T2-7 冻结记录落库 reconciliation_freeze，symbols/fan_out 不变）；24099→24112（+13行，T2-8 解冻记录落库 reconciliation_freeze，symbols/fan_out 不变）；24112→24135（+23行，C-6 告警通道实测：飞书 webhook 装配 webhook_type/跳过占位符 URL/路由通配/关键词落款，功能必需）
     "realism_gate": {"lines": 1864, "symbols": 50, "fan_out": 10},
     "risk": {"lines": 4288, "symbols": 195, "fan_out": 12},
     "strategies": {"lines": 6901, "symbols": 190, "fan_out": 21},

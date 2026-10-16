@@ -6134,3 +6134,17 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    - T2-6 实时对账落库（_ingest_realtime_diff 落 reconciliation_runs）
    - T2-7 冻结记录落库（_trigger_freeze 落 reconciliation_freeze）
    - T2-8 解冻记录落库（mark_resolved 落 reconciliation_freeze）
+
+## #C-6 · 2026-10-16 · 告警通道实测（飞书 Webhook，P0-2 前置）
+   a. 缺陷（实测暴露，三处，均在 myquant/monitoring/alerting.py）：
+      - configure_notification_channels 装配 webhook 通道未传 webhook_type → 默认 generic payload 无 msg_type 字段，飞书拒收；
+      - 装配名 feishu/wecom/dingtalk 与 AlertRule 默认规则名 "webhook" 不匹配 → CRITICAL 路由永远命中 console/log，飞书通道从不参与投递；
+      - 未配置的 "${WECOM_WEBHOOK}" 占位符被 safe_load 读为字面量且非空 → 被当有效 URL 装配出发送必败的噪声通道。
+   b. 修复（最小 3 处，功能必需）：
+      - 装配时按通道名传 webhook_type（feishu→飞书 interactive 格式）；
+      - 跳过占位符/非 http URL（url 不以 http 开头或含 "${" 则不装配）；
+      - _route_channels 规则通配名 "webhook" 未装配时展开为全部 WebhookAlertChannel 实例；
+      - _build_feishu_payload 落款系统名「鲲鹏量化交易系统」（满足飞书自定义关键词校验 code 19024）。
+   c. 配置：config/live_config.yaml notification.enabled=true + feishu.webhook=真实 URL（该文件被 .gitignore 忽略，不入库）。
+   d. 验证：scripts/告警通道实测.py single/concurrent/probe 三模式 + 人工端确认；架构门禁全绿。
+   e. 基线同步：monitoring 包 24112/882→24135/882（+23行）；alerting.py 3688→3711（+23行）；ENTRY_ALLOWLIST 新增 scripts/告警通道实测.py。
