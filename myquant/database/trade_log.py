@@ -164,10 +164,12 @@ class TradeLedger:
             "VALUES (?, ?, ?, ?, ?, ?, ?)"
         )
         with self._db.transaction():
-            cur = self._db.execute_update(
+            self._db.execute_update(
                 sql, (account_id, run_type, started_at, finished_at, consistent, frozen, note),
             )
-            return cur.lastrowid if cur else 0
+            # execute_update 返回 rowcount(int)，用 SELECT last_insert_rowid() 取 run_id
+            rows = self._db.execute("SELECT last_insert_rowid()")
+            return rows[0][0] if rows else 0
         # T1-7：同步审计哈希链（reconciliation 类）
         if self._audit is not None:
             try:
@@ -259,29 +261,25 @@ class TradeLedger:
 
     def get_order_by_id(self, order_id: str) -> Optional[Dict[str, Any]]:
         """T2-2：按 order_id 查订单状态（用于对账/排障）。"""
-        row = self._db.execute(
+        rows = self._db.execute(
             f"SELECT * FROM {TABLE_NAMES['orders']} WHERE order_id = ?",
             (order_id,),
-        ).fetchone()
-        if row is None:
+        )
+        if not rows:
             return None
-        cols = [d[0] for d in self._db.execute(
-            f"SELECT * FROM {TABLE_NAMES['orders']} LIMIT 0"
-        ).description]
-        return dict(zip(cols, row))
+        row = rows[0]
+        # sqlite3.Row 支持 keys()
+        return dict(zip(row.keys(), row))
 
     def get_order_events(self, order_id: str) -> List[Dict[str, Any]]:
         """T2-2：按 order_id 查事件链（intent/ack/error/fill，按 seq 升序）。"""
         rows = self._db.execute(
             f"SELECT * FROM {TABLE_NAMES['order_events']} WHERE order_id = ? ORDER BY seq ASC",
             (order_id,),
-        ).fetchall()
+        )
         if not rows:
             return []
-        cols = [d[0] for d in self._db.execute(
-            f"SELECT * FROM {TABLE_NAMES['order_events']} LIMIT 0"
-        ).description]
-        return [dict(zip(cols, r)) for r in rows]
+        return [dict(zip(r.keys(), r)) for r in rows]
 
     # ── 查询：T2-4 对账历史查询 ──
 

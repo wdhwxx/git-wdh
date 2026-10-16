@@ -40,6 +40,10 @@ TABLE_NAMES = {
     "orders": "orders",                     # 订单关系账（KP-P4-02）
     "fills": "fills",                       # 成交关系账（KP-P4-02）
     "positions_daily": "positions_daily",   # 持仓日快照账（KP-P4-02）
+    "order_events": "order_events",         # 订单事件链（T1-4 对账账本）
+    "reconciliation_runs": "reconciliation_runs",  # 对账运行记录（T1-4 对账账本）
+    "reconciliation_diffs": "reconciliation_diffs",  # 对账差异明细（T1-4 对账账本）
+    "reconciliation_freeze": "reconciliation_freeze",  # 冻结/解冻记录（T1-4 对账账本）
     "alerts": "alerts",                     # 告警持久化表（BASE-1 告警落库）
     "metrics_history": "metrics_history",   # 指标时序存储表（BASE-2 周期落库）
     "audit_log": "audit_log",               # 审计日志只追加表（BASE-7 哈希链）
