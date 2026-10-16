@@ -6005,3 +6005,12 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
       - 新增 reconciliation_runs / reconciliation_diffs / reconciliation_freeze 三表
    c. 验收：alembic upgrade head 成功（0008→0009）；database/quant.db 验证所有新列/新表存在。
    d. 基线同步：database 包 3608/113/17→3763/116/17（+155行/+3符号，T1-3 迁移功能必需对价）；ZERO_COVERAGE_BASELINE 追加 0009 迁移文件。
+
+## #T1-1 · 2026-10-16 · 阶段1 账本落地：TradeLedger 装配 + live 无 ledger 拒启（RC-07）
+   a. 缺陷：engine_assembly 未装配 TradeLedger，live 模式下 orders/fills/reconciliation 无法落库。
+   b. 修复：
+      - create_live_engine 新增 TradeLedger(DatabaseConnection()) 装配（StateStore 之后）；
+      - 注册到 registry（"trade_ledger"），引擎通过 get_component 取用；
+      - _assert_live_reconciliation_gate 加第 4 项检查：trade_ledger 未注册 → 拒启（并入 T0-8 门）。
+   c. 验收：live 模式下 trade_ledger 未装配 → ValueError 拒启；装配成功 → 正常启动。
+   d. 基线同步：live 包 18032/660/35→18055/660/36（+23行/+1fan_out，T1-1 TradeLedger 装配功能必需对价）。

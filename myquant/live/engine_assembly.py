@@ -218,6 +218,17 @@ def create_live_engine(
         store_root = _Path(state_dir).expanduser() if state_dir else None
         state_store = StateStore(root=store_root, store_id=str(name))
 
+    # 6.1) TradeLedger（T1-1：本地账本落地，真钱硬前置 RC-07）
+    #      live 模式必须装配，否则 _assert_live_reconciliation_gate 拒启
+    trade_ledger = None
+    try:
+        from myquant.database.connection import DatabaseConnection
+        from myquant.database.trade_log import TradeLedger
+        trade_ledger = TradeLedger(DatabaseConnection())
+        logger.info("[build] TradeLedger 已装配（T1-1 本地账本）")
+    except Exception as exc:
+        logger.warning(f"[build] TradeLedger 装配失败（live 模式将拒启）: {exc}")
+
     # 6.5) LookaheadGuard（任务42：消费配置 lookahead_guard.enabled / strict_mode 段）
     #      配置模板默认 enabled:true + strict_mode:true（规则4强制防未来）
     lookahead_enabled = bool(lookahead_cfg.get("enabled", True))
@@ -251,6 +262,11 @@ def create_live_engine(
         engine_id=str(name),
     )
     circuit_breaker.subscribe_to_event_bus()
+
+    # T1-1：TradeLedger 注册到 registry（引擎通过 get_component 取用）
+    if trade_ledger is not None:
+        from myquant.core.registry import register_component
+        register_component("trade_ledger", trade_ledger)
 
     # 7) 引擎装配（保障组件经构造函数注入，调度器由引擎自建自停）
     engine = LiveEngine(
@@ -392,6 +408,13 @@ def _assert_live_reconciliation_gate(
         errors.append(
             "alert_manager 未注册（registry 无工厂，CRITICAL 告警无人接收；"
             "请确认 myquant.monitoring.alerting 已被 import 触发自注册）"
+        )
+
+    # 4) trade_ledger 已注册（T1-1：本地账本落地，真钱硬前置 RC-07）
+    if get_component("trade_ledger") is None:
+        errors.append(
+            "trade_ledger 未注册（本地账本未装配，orders/fills/reconciliation 无法落库；"
+            "请确认 TradeLedger(DatabaseConnection()) 已装配）"
         )
 
     if errors:
