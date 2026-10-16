@@ -41,6 +41,7 @@ class OrderStatus(Enum):
     """订单状态"""
     PENDING = "PENDING"         # 待提交
     SUBMITTED = "SUBMITTED"     # 已提交
+    ACK_UNKNOWN = "ACK_UNKNOWN"  # 待券商确认（T0-12：报单异常/返回空，已发起查单确认，非终态、不可重复提交、不触发 failover）
     PARTIAL_FILLED = "PARTIAL_FILLED"  # 部分成交
     FILLED = "FILLED"           # 全部成交
     CANCELLED = "CANCELLED"     # 已撤销

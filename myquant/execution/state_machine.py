@@ -45,12 +45,24 @@ VALID_TRANSITIONS: Dict[OrderStatus, Set[OrderStatus]] = {
         OrderStatus.REJECTED,
         OrderStatus.CANCELLED,
     },
-    # 已报：可部分成交/全部成交/撤销/拒绝/过期
+    # 已报：可部分成交/全部成交/撤销/拒绝/过期/转待确认（T0-12：报单异常或返回空时，
+    # 从 SUBMITTED 转 ACK_UNKNOWN 走查单确认，禁止直接置 REJECTED 或盲目 failover）
     OrderStatus.SUBMITTED: {
         OrderStatus.PARTIAL_FILLED,
         OrderStatus.FILLED,
         OrderStatus.CANCELLED,
         OrderStatus.REJECTED,
+        OrderStatus.EXPIRED,
+        OrderStatus.ACK_UNKNOWN,
+    },
+    # 待确认（T0-12）：查单命中券商已受理→SUBMITTED；查单未命中→REJECTED；
+    # 人工可撤→CANCELLED；后续券商回报成交→PARTIAL_FILLED/FILLED；超时→EXPIRED
+    OrderStatus.ACK_UNKNOWN: {
+        OrderStatus.SUBMITTED,
+        OrderStatus.REJECTED,
+        OrderStatus.CANCELLED,
+        OrderStatus.PARTIAL_FILLED,
+        OrderStatus.FILLED,
         OrderStatus.EXPIRED,
     },
     # 部成：可继续部成/全部成交/撤销/过期

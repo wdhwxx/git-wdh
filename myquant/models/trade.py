@@ -59,6 +59,7 @@ class OrderStatus(Enum):
     """订单状态机"""
     PENDING = "PENDING"              # 待提交
     SUBMITTED = "SUBMITTED"          # 已提交
+    ACK_UNKNOWN = "ACK_UNKNOWN"      # 待券商确认（T0-12：报单SDK异常/返回空，已发起N轮查单确认；非终态、不可重复提交、不触发failover）
     PARTIAL_FILLED = "PARTIAL_FILLED"  # 部分成交
     FILLED = "FILLED"                # 全部成交
     CANCELLED = "CANCELLED"          # 已撤销
@@ -77,11 +78,12 @@ class OrderStatus(Enum):
 
     @property
     def is_active(self) -> bool:
-        """是否活跃 (可撤销)"""
+        """是否活跃 (可撤销)；ACK_UNKNOWN 算活跃：在途、可人工撤、可被查单/成交回报推进"""
         return self in (
             OrderStatus.PENDING,
             OrderStatus.SUBMITTED,
             OrderStatus.PARTIAL_FILLED,
+            OrderStatus.ACK_UNKNOWN,
         )
 
     def __str__(self) -> str:
@@ -91,7 +93,29 @@ class OrderStatus(Enum):
 # 合法状态转换表
 _VALID_TRANSITIONS: Dict[OrderStatus, set] = {
     OrderStatus.PENDING: {OrderStatus.SUBMITTED, OrderStatus.REJECTED, OrderStatus.CANCELLED},
-    OrderStatus.SUBMITTED: {OrderStatus.PARTIAL_FILLED, OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.REJECTED, OrderStatus.EXPIRED},
+    OrderStatus.SUBMITTED: {
+        OrderStatus.PARTIAL_FILLED,
+        OrderStatus.FILLED,
+        OrderStatus.CANCELLED,
+        OrderStatus.REJECTED,
+        OrderStatus.EXPIRED,
+        # T0-12：报单SDK异常/返回空时，从 SUBMITTED 转 ACK_UNKNOWN 走N轮查单确认
+        OrderStatus.ACK_UNKNOWN,
+    },
+    # T0-12 待确认状态的合法去向（与 execution/state_machine.py VALID_TRANSITIONS 保持一致）：
+    #   → SUBMITTED    查单命中券商已受理
+    #   → REJECTED     N轮查单全部未命中且窗口走完（不提前判死，防传播延迟误杀在途单）
+    #   → CANCELLED   人工撤单
+    #   → PARTIAL_FILLED/FILLED  券商回报真的成交了
+    #   → EXPIRED     查单窗口超时
+    OrderStatus.ACK_UNKNOWN: {
+        OrderStatus.SUBMITTED,
+        OrderStatus.REJECTED,
+        OrderStatus.CANCELLED,
+        OrderStatus.PARTIAL_FILLED,
+        OrderStatus.FILLED,
+        OrderStatus.EXPIRED,
+    },
     OrderStatus.PARTIAL_FILLED: {OrderStatus.PARTIAL_FILLED, OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.EXPIRED},
     OrderStatus.FILLED: set(),
     OrderStatus.CANCELLED: set(),
