@@ -360,6 +360,9 @@ class LiveEngine(BaseEngine):
         self._snapshot_interval = max(30.0, float(snapshot_interval))
         self._patrol_interval = max(10.0, float(patrol_interval))
         self._accountability_interval = 300.0  # T0-4：对账周期（5 分钟，live 必须启用）
+        # T1-8：落库失败连续计数器（连续 N 次失败 → pause + CRITICAL）
+        self._ledger_fail_count: int = 0
+        self._ledger_fail_threshold: int = 3  # 连续 3 次失败触发 pause
         self._accountability_interval = max(30.0, float(snapshot_interval))  # KP-P3-08: 券商账本对账周期
 
         # 风控上下文运行态（只记录"已发生"事实，严格防未来函数）
@@ -2508,6 +2511,14 @@ class LiveEngine(BaseEngine):
                 )
         except Exception as e:
             logger.warning(f"[engine] T1-2 record_order_intent 失败（不阻断提交）: {e}")
+            # T1-8：连续落库失败计数
+            self._ledger_fail_count += 1
+            if self._ledger_fail_count >= self._ledger_fail_threshold:
+                logger.critical(
+                    f"[engine] T1-8 落库连续失败 {self._ledger_fail_count} 次，"
+                    f"暂停引擎（账本不可信，禁止继续交易）"
+                )
+                self.pause(reason=f"落库连续失败{self._ledger_fail_count}次（账本不可信）")
 
         try:
             self._orders.append(order)
@@ -2528,8 +2539,17 @@ class LiveEngine(BaseEngine):
                         order_id=order.order_id, seq=2, event_type="ack",
                         payload=f"status={getattr(result, 'status', order.status).value}",
                     )
+                    self._ledger_fail_count = 0  # T1-8：落库成功重置计数器
             except Exception as e:
                 logger.warning(f"[engine] T1-2 record_order_ack 失败（不阻断）: {e}")
+                # T1-8：连续落库失败计数
+                self._ledger_fail_count += 1
+                if self._ledger_fail_count >= self._ledger_fail_threshold:
+                    logger.critical(
+                        f"[engine] T1-8 落库连续失败 {self._ledger_fail_count} 次，"
+                        f"暂停引擎（账本不可信，禁止继续交易）"
+                    )
+                    self.pause(reason=f"落库连续失败{self._ledger_fail_count}次（账本不可信）")
 
             # A-3 引擎统一埋点：订单提交/拒单事件（SUBMITTED/PENDING→submit，
             # REJECTED→rejected；链路 id：order_id 与 signal_id 幂等同源）

@@ -6049,3 +6049,11 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
       - record_reconciliation_freeze 末尾同步 append(kind="freeze", action=action, ...)。
    c. 审计存储不可用不阻断交易（try/except 包裹，降级为 logger）。
    d. 基线同步：database 包 3831/120→3882/120（+51行，T1-7 四类写入审计同步功能必需对价）。
+
+## #T1-8 · 2026-10-16 · 阶段1 账本落地：落库连续失败 N 次→pause+CRITICAL
+   a. 缺陷：落库失败仅 log warning，不阻断交易 → 账本不可信时仍继续下单 → 对账崩溃。
+   b. 修复（engine.__init__ 新增 _ledger_fail_count / _ledger_fail_threshold=3）：
+      - record_order_intent 失败：计数器递增，连续 ≥3 次 → logger.critical + pause(reason="落库连续失败N次（账本不可信）")；
+      - record_order_ack 成功：计数器重置为 0；失败：同 intent 失败点逻辑。
+   c. 效果：落库连续 3 次失败 → 引擎自动暂停，禁止继续交易（账本不可信）。
+   d. 基线同步：engine.py 3029→3049（+20行）；live 包 18151/662/36→18171/662/36（+20行）。
