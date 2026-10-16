@@ -6073,3 +6073,11 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
       - get_order_events(order_id) → 返回事件链 list（按 seq 升序：intent→ack→error→fill）。
    c. 用途：T2-1 ledger vs broker 对账、API 排障、人工核查订单状态。
    d. 基线同步：database 包 3882/120→3910/122（+28行/+2符号）。
+
+## #T2-3 · 2026-10-16 · 阶段2 对账闭环：API 对账状态查询接口
+   a. 缺陷：无法通过 API 查询当前对账状态（是否一致/是否冻结/最近差异）→ 只能看日志，排障效率低。
+   b. 修复（routes.py 新增 GET /api/reconciliation/status）：
+      - 返回 consistent（True/False/None=UNKNOWN）、is_frozen、last_check_ts、last_success_ts、stale_seconds、last_diff 完整状态；
+      - 复用 account_reconciler.to_dict()，与 dashboard/看板共享同一数据源。
+   c. 用途：运维排障、dashboard 展示、人工核查对账健康度。
+   d. 基线同步：api 包 3807/194→3833/195（+26行/+1符号）。

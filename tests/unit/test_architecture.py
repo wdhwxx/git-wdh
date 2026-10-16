@@ -351,7 +351,7 @@ STRUCTURE_HARD_CAP: dict[str, int] = {"lines": 4425, "symbols": 174, "fan_out": 
 PACKAGE_STRUCTURE_BASELINE: dict[str, dict[str, int]] = {
     "acceptance": {"lines": 5618, "symbols": 254, "fan_out": 37},  # 5612→5614（#422 live_safety_gate 验收桩 +2 行功能必需）；5614→5618（#422 ruff --fix 展开 import 块 +4 行）
     "allocation": {"lines": 2083, "symbols": 56, "fan_out": 9},
-    "api": {"lines": 3807, "symbols": 194, "fan_out": 26},  # T0-16 新增 /api/reconciliation/unfreeze 解冻接口 +32行/+1符号功能必需
+    "api": {"lines": 3833, "symbols": 195, "fan_out": 26},  # T0-16 新增 /api/reconciliation/unfreeze 解冻接口 +32行/+1符号功能必需；3807/194→3833/195（T2-3 新增 /api/reconciliation/status 对账状态查询 +26行/+1符号）
     "backtest": {"lines": 20722, "symbols": 560, "fan_out": 37},  # T4-3 信号流 20711→20722
     "core": {"lines": 12976, "symbols": 600, "fan_out": 40},  # 12975→12976（+1，#425 引擎停止感知 _stop_requested 功能必需）
     "data_access": {"lines": 17223, "symbols": 605, "fan_out": 34},

@@ -730,6 +730,32 @@ def create_app(
                 content={"success": False, "code": 500, "message": f"解冻失败: {e}", "data": {}},
             )
 
+    # T2-3：对账状态查询接口
+    @app.get("/api/reconciliation/status", response_model=ApiResponse, tags=["对账"])
+    async def get_reconciliation_status():
+        """T2-3：查询对账状态（账本状态 + 差异 + 冻结状态）。
+
+        返回：
+        - consistent: 是否一致（True/False/None=UNKNOWN）
+        - is_frozen: 是否冻结
+        - last_check_ts: 最近核对时间戳
+        - last_success_ts: 最近成功核对时间戳
+        - stale_seconds: 距最近成功核对的秒数
+        - last_diff: 最近差异详情
+        """
+        try:
+            recon = _get_reconciler()
+            state = recon.to_dict()
+            return JSONResponse(
+                status_code=200,
+                content={"success": True, "code": 200, "message": "对账状态", "data": state},
+            )
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse(
+                status_code=500,
+                content={"success": False, "code": 500, "message": f"查询对账状态失败: {e}", "data": {}},
+            )
+
     # ═══════════════════════════════════════════
     #  数据
     # ═══════════════════════════════════════════
