@@ -5929,3 +5929,10 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    c. 缺陷3（cancel 返回值）：state_store.restore_live_state 和 engine._reconcile_restored_orders 都不检查 cancel_order 返回值 → 券商拒绝（返回 False）也被记成"已 cancel"（无声错账）。修复：收集成功/失败两组，reconciled_orders 只计成功；失败的 logger.critical + notes 记"需人工核查"。
    d. 专项测试 tests/unit/test_t0_10_recovery_gate.py 4 用例：restore 转发子券商；子券商失败不阻断；cancel False 不计入；cancel 失败记 notes。4 passed。
    e. 基线同步：engine.py 2869→2887（+18 行）；live 包 17798/655→17856/655（+58 行，symbols/fan_out 不变，功能必需对价）。
+
+## #T0-11 · 2026-10-16 · pause() 非 RUNNING 留痕 + force 参数 + _startup_blocked
+   a. 缺陷：pause() 在非 RUNNING 时静默 return——调用方以为暂停了，实际没生效（无声bug）。
+   b. 修复：pause(reason, force=False)——force=False 时非 RUNNING → logger.warning 留痕"pause 被忽略(当前状态=X)"，状态不变；force=True → 强制置 PAUSED。
+   c. 启动期暂停标记：INIT 状态下调 pause(force=True) → 置 _startup_blocked=True；start() 置 RUNNING 之前检查此标记，若 True 则保持 PAUSED 不进 RUNNING。
+   d. 专项测试 tests/unit/test_t0_11_pause_gate.py 5 用例：INIT+force=False 留痕不变；STOPPED+force=False 留痕不变；INIT+force=True 置 blocked；STOPPED+force=True 强制 PAUSED；RUNNING 正常暂停旧行为保留。5 passed。
+   e. 基线同步：engine.py 2887→2913（+26 行）；live 包 17856/655→17882/655（+26 行，symbols/fan_out 不变，功能必需对价）。

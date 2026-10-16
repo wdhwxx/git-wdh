@@ -375,6 +375,7 @@ class LiveEngine(BaseEngine):
         self._own_scheduler: bool = False   # 调度器是否引擎创建（决定stop归属）
         self._state_recovered: bool = False
         self._pending_reconcile_orders: list = []  # T0-10：connect_all 后待对账撤单的快照订单
+        self._startup_blocked: bool = False  # T0-11：启动期暂停标记（INIT时 force pause 置位，start时不进 RUNNING）
 
         # 1) RiskManager：订单前置检查 + 数据质量事件联动（铁律2：回测实盘共用风控）
         self._risk_manager = None
@@ -777,7 +778,15 @@ class LiveEngine(BaseEngine):
             # ── H2修复：调度器挂载启动（巡检/日报/风控守护/定时快照）──
             self._setup_scheduler()
 
-            self._state = EngineState.RUNNING
+            # T0-11：启动期暂停标记——INIT 时调过 force pause → 启动后保持 PAUSED，不进 RUNNING
+            if self._startup_blocked:
+                self._state = EngineState.PAUSED
+                self._pause_time = time.time()
+                logger.warning(
+                    "[engine] 启动期暂停标记生效(_startup_blocked=True)，引擎保持 PAUSED 不进 RUNNING"
+                )
+            else:
+                self._state = EngineState.RUNNING
             self._initialized = True   # BaseEngine 状态同步
             self._running = True       # BaseEngine 状态同步
             self._start_time = time.time()
@@ -889,16 +898,33 @@ class LiveEngine(BaseEngine):
         )
         return self._lookahead_guard.assert_pass()
 
-    def pause(self, reason: str = "手动暂停") -> None:
+    def pause(self, reason: str = "手动暂停", force: bool = False) -> None:
         """
         暂停引擎（实时模式同时停止行情轮询，节能）。
 
         0.2/决策点4：风控状态为权威、引擎为投影——同步置风控暂停
         （pause_for_engine 隔离语义，不碰数据质量暂停标记），并记录
         _pause_source 供隔离复位区分"谁置位"。
+
+        T0-11：非 RUNNING 时不再静默返回——
+          - force=False（默认）：logger.warning 留痕"pause 被忽略, 当前状态=X"；
+          - force=True：强制置 PAUSED（不管当前状态）；若当前为 INIT（启动前），
+            置 _startup_blocked=True，start() 时不进入 RUNNING（启动期暂停标记）。
         """
         if self._state != EngineState.RUNNING:
-            return
+            if not force:
+                # T0-11：非 RUNNING 静默返回改为 warning 留痕（防"调了 pause 但没生效"无声bug）
+                logger.warning(
+                    f"[engine] pause 被忽略(当前状态={self._state}, 非RUNNING): reason={reason!r}"
+                )
+                return
+            # force=True：强制置 PAUSED
+            logger.warning(
+                f"[engine] pause force=True 强制暂停(原状态={self._state}): reason={reason!r}"
+            )
+            if self._state == EngineState.INIT:
+                # T0-11：启动期暂停标记——start() 时不进入 RUNNING
+                self._startup_blocked = True
         self._state = EngineState.PAUSED
         self._pause_time = time.time()
         self._pause_source = reason
