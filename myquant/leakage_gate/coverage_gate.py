@@ -134,7 +134,7 @@ FILE_STMT_CEILING: dict[str, int] = {
     "backtest/consistency_check.py": 285,
     "backtest/dashboard_serializer.py": 238,
     "backtest/data_loader.py": 5,
-    "backtest/engine.py": 711,
+    "backtest/engine.py": 725,  # 711→725（+14，#424 T4-3 BacktestResult信号流 + T4-4 fail-closed 功能必需；与 R-24 行数 1838→1858、R-26 backtest 包 20691→20711 同批对价，§5.3）
     "backtest/engine_benchmark.py": 149,
     "backtest/exempt_registry.py": 10,
     "backtest/fee_common.py": 289,
@@ -246,7 +246,7 @@ FILE_STMT_CEILING: dict[str, int] = {
     "live/brokers/qmt_broker.py": 981,
     "live/data_feed.py": 541,  # 885→634（#421 拆包瘦身：行情源层迁出 realtime_sources.py，语句实测同步）；634→541（#423 拆包瘦身：实时桥层迁出 realtime_bridge.py，语句实测同步）
     "live/emergency_liquidation.py": 170,
-    "live/engine.py": 1095,  # 1197→1250（+53，#413-#417 T2-1/T2-2/T1-2/T3-1 功能改造，与 R-24 行数 3111→3236 同步，§5.3）；1250→1095（#422 拆包瘦身：装配层迁出 engine_assembly.py，语句实测同步）
+    "live/engine.py": 1105,  # 1197→1250（+53，#413-#417 T2-1/T2-2/T1-2/T3-1 功能改造，与 R-24 行数 3111→3236 同步，§5.3）；1250→1095（#422 拆包瘦身：装配层迁出 engine_assembly.py，语句实测同步）；1095→1105（+10，#421 T4-1 撤销T+1自动豁免 + #422 T4-2 启动即不下单 + #424 T4-3/T4-4 信号流与fail-closed 功能必需，与 R-24 行数 2808→2829、R-26 live 包 17465→17492 同批对价，§5.3）
     "live/kill_switch_signal.py": 147,
     "live/portfolio.py": 419,
     "live/run_mode.py": 114,
@@ -261,7 +261,7 @@ FILE_STMT_CEILING: dict[str, int] = {
     "ml/model_registry.py": 518,
     "ml/training_pipeline.py": 624,
     "models/__init__.py": 5,
-    "models/backtest.py": 224,
+    "models/backtest.py": 225,  # 224→225（+1，#423 T6-1 commission dict 兼容分支功能必需，与 R-24/R-26 models 包同步对价，§5.3）
     "models/market_data.py": 280,
     "models/trade.py": 260,
     "monitoring/__init__.py": 4,
