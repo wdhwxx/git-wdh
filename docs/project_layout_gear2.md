@@ -6065,3 +6065,11 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
       - 当前版本暂返回 None（留接口），后续可扩展为查 ACK_UNKNOWN/SUBMITTED/PARTIAL_FILLED 订单与 broker.query_stock_orders() 对比。
    c. 效果：实时对账除 portfolio 差异外，增加 ledger 维度对账入口（真钱可验证 RC-13）。
    d. 基线同步：monitoring 包 24015/881→24042/882（+27行/+1符号）。
+
+## #T2-2 · 2026-10-16 · 阶段2 对账闭环：订单账本查询接口
+   a. 缺陷：对账/排障时无法按 order_id 快速查 ledger 状态和事件链 → 只能全表扫，效率低且不直观。
+   b. 修复（trade_log.py 新增两个查询方法）：
+      - get_order_by_id(order_id) → 返回订单完整状态 dict（不存在返回 None）；
+      - get_order_events(order_id) → 返回事件链 list（按 seq 升序：intent→ack→error→fill）。
+   c. 用途：T2-1 ledger vs broker 对账、API 排障、人工核查订单状态。
+   d. 基线同步：database 包 3882/120→3910/122（+28行/+2符号）。

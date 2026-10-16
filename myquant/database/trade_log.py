@@ -255,6 +255,34 @@ class TradeLedger:
 
     # ── 查询 ──
 
+    # ── 查询：T2-2 订单账本查询接口 ──
+
+    def get_order_by_id(self, order_id: str) -> Optional[Dict[str, Any]]:
+        """T2-2：按 order_id 查订单状态（用于对账/排障）。"""
+        row = self._db.execute(
+            f"SELECT * FROM {TABLE_NAMES['orders']} WHERE order_id = ?",
+            (order_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        cols = [d[0] for d in self._db.execute(
+            f"SELECT * FROM {TABLE_NAMES['orders']} LIMIT 0"
+        ).description]
+        return dict(zip(cols, row))
+
+    def get_order_events(self, order_id: str) -> List[Dict[str, Any]]:
+        """T2-2：按 order_id 查事件链（intent/ack/error/fill，按 seq 升序）。"""
+        rows = self._db.execute(
+            f"SELECT * FROM {TABLE_NAMES['order_events']} WHERE order_id = ? ORDER BY seq ASC",
+            (order_id,),
+        ).fetchall()
+        if not rows:
+            return []
+        cols = [d[0] for d in self._db.execute(
+            f"SELECT * FROM {TABLE_NAMES['order_events']} LIMIT 0"
+        ).description]
+        return [dict(zip(cols, r)) for r in rows]
+
     def query_orders(
         self, symbol: Optional[str] = None, status: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
