@@ -654,14 +654,16 @@ class BrokerManager:
         self._failover_stats["attempts"] += 1
         self._failover_stats["last_reason"] = reason
         self._failover_stats["last_at"] = time.time()
-        retry_order = self._clone_order_for_retry(order)
+        # T0-17：克隆订单副本从循环外移入循环内，每个备券商用全新副本
+        # （原缺陷：第 1 个备券商提交后 retry_order 状态改变，第 2、3 个备券商再用同一对象会被幂等入口拒绝）
         with self._lock:
             tried = {current}
             for alias, reg in self._registrations.items():
                 if alias in tried:
                     continue
                 tried.add(alias)
-                retry_order.extra = dict(retry_order.extra or {})
+                # T0-17：每个备券商用全新副本（不共享状态）
+                retry_order = self._clone_order_for_retry(order)
                 retry_order.extra["broker_id"] = alias
                 retry_order.extra["failover_from"] = current
                 try:
