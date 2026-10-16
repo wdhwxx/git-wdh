@@ -41,6 +41,13 @@ class TradeLedger:
 
     def __init__(self, db: DatabaseConnection) -> None:
         self._db = db
+        # T1-7：AuditLogStore 哈希链（订单/成交/对账/冻结四类写入同步审计）
+        self._audit = None
+        try:
+            from myquant.core.audit_log import AuditLogStore
+            self._audit = AuditLogStore()
+        except Exception:
+            self._audit = None  # 审计存储不可用不阻断交易
 
     # ── 写入：订单 ──
 
@@ -78,6 +85,17 @@ class TradeLedger:
                     submitted_ts,
                 ),
             )
+        # T1-7：同步审计哈希链（order 类）
+        if self._audit is not None:
+            try:
+                self._audit.append(
+                    kind="order",
+                    action=_enum_value(order.status),
+                    actor="trade_ledger",
+                    detail={"order_id": order.order_id, "symbol": order.symbol},
+                )
+            except Exception:
+                pass  # 审计写失败不阻断交易
 
     # ── 写入：成交 ──
 
@@ -106,6 +124,17 @@ class TradeLedger:
                     engine_id,
                 ),
             )
+        # T1-7：同步审计哈希链（fill 类）
+        if self._audit is not None:
+            try:
+                self._audit.append(
+                    kind="fill",
+                    action="create",
+                    actor="trade_ledger",
+                    detail={"trade_id": trade.trade_id, "order_id": trade.order_id},
+                )
+            except Exception:
+                pass
 
     # ── 写入：订单事件（T1-4，append-only）──
 
@@ -139,6 +168,17 @@ class TradeLedger:
                 sql, (account_id, run_type, started_at, finished_at, consistent, frozen, note),
             )
             return cur.lastrowid if cur else 0
+        # T1-7：同步审计哈希链（reconciliation 类）
+        if self._audit is not None:
+            try:
+                self._audit.append(
+                    kind="reconciliation",
+                    action=run_type,
+                    actor="trade_ledger",
+                    detail={"account_id": account_id, "consistent": consistent, "frozen": frozen},
+                )
+            except Exception:
+                pass
 
     def record_reconciliation_diff(
         self, run_id: int, account_id: str, cash_diff: float = None,
@@ -166,6 +206,17 @@ class TradeLedger:
         )
         with self._db.transaction():
             self._db.execute_update(sql, (account_id, action, actor, reason))
+        # T1-7：同步审计哈希链（freeze 类）
+        if self._audit is not None:
+            try:
+                self._audit.append(
+                    kind="freeze",
+                    action=action,
+                    actor=actor,
+                    detail={"account_id": account_id, "reason": reason},
+                )
+            except Exception:
+                pass
 
     # ── 写入：持仓日快照 ──
 

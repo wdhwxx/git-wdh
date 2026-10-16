@@ -6039,3 +6039,13 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    b. T1-6：_collect_pnl_snapshot_task——每小时落 PnL 快照（total_assets 存 stats，后续可扩展 pnl_snapshots 表）。
    c. 两个任务都在 _setup_scheduler 里挂载（scheduler.start() 之前），通过 registry 取 trade_ledger。
    d. 基线同步：engine.py 2970→3029（+59行）；live 包 18092/660/36→18151/662/36（+59行/+2符号）。
+
+## #T1-7 · 2026-10-16 · 阶段1 账本落地：四类写入同步 AuditLogStore 哈希链
+   a. 缺陷：订单/成交/对账/冻结四类写入只落业务表，不同步审计哈希链 → 事后无法追溯篡改。
+   b. 修复（TradeLedger.__init__ 新增 self._audit = AuditLogStore()）：
+      - record_order 末尾同步 append(kind="order", action=status, ...)；
+      - record_fill 末尾同步 append(kind="fill", action="create", ...)；
+      - record_reconciliation_run 末尾同步 append(kind="reconciliation", action=run_type, ...)；
+      - record_reconciliation_freeze 末尾同步 append(kind="freeze", action=action, ...)。
+   c. 审计存储不可用不阻断交易（try/except 包裹，降级为 logger）。
+   d. 基线同步：database 包 3831/120→3882/120（+51行，T1-7 四类写入审计同步功能必需对价）。
