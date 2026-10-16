@@ -863,6 +863,17 @@ class BacktestEngine(BaseEngine):
             )
         signal.timestamp = getattr(bar, "timestamp", signal.timestamp)  # T4-3：bar 时间替代 time.time()
 
+        # T4-3：记录信号到 result.signals（供 C-10 一致性监控对拍）
+        if self.result is not None and hasattr(self.result, "signals"):
+            self.result.signals.append({
+                "symbol": signal.symbol,
+                "signal_id": signal.signal_id,
+                "timestamp": signal.timestamp,
+                "side": signal.signal_type.value if hasattr(signal.signal_type, "value") else str(signal.signal_type),
+                "strength": signal.strength,
+                "reason": signal.reason,
+            })
+
         if signal.is_buy:
             # 买入：计算仓位
             quantity = self._calc_buy_quantity(symbol=signal.symbol, price=bar.close)

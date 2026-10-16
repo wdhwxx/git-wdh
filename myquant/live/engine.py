@@ -1911,16 +1911,22 @@ class LiveEngine(BaseEngine):
             # T2-2：恢复已处理信号 id（最近 5 个交易日 ≈ 7 自然日窗口），
             # 防止重启后同一信号被重复下单。过期 id 丢弃防无限膨胀。
             self._restore_processed_signal_ids(snapshot.state)
-            # T4-4：策略状态校验（策略名/参数哈希不匹配时告警，不阻断）
+            # T4-4：策略状态 fail-closed 校验——策略名/参数哈希不一致 → 拒绝恢复
             saved_strategies = (snapshot.state.get("extra") or {}).get("strategy_state") or []
             if saved_strategies:
                 for i, saved in enumerate(saved_strategies):
                     if i < len(self._strategies):
                         cur = self._strategies[i]
                         if saved.get("name") != getattr(cur, "name", ""):
-                            logger.warning(
-                                f"[engine] T4-4 策略名不匹配: 快照={saved.get('name')!r} "
-                                f"当前={getattr(cur, 'name', '')!r}（可能已切换策略）"
+                            raise RuntimeError(
+                                f"T4-4 策略名不匹配拒绝恢复: 快照={saved.get('name')!r} "
+                                f"当前={getattr(cur, 'name', '')!r}（已切换策略，从零开始）"
+                            )
+                        cur_hash = hash(str(getattr(cur, "params", {}))) & 0xFFFFFFFF
+                        if saved.get("params_hash") != cur_hash:
+                            raise RuntimeError(
+                                f"T4-4 策略参数哈希不匹配拒绝恢复: "
+                                f"快照={saved.get('params_hash')} 当前={cur_hash}（参数已变，从零开始）"
                             )
             logger.info(
                 f"[engine] 崩溃恢复完成: 快照v{snapshot.version} "

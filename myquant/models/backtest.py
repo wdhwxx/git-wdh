@@ -499,6 +499,9 @@ class BacktestResult:
     # 成交记录
     trades: List[TradeRecord] = field(default_factory=list)
 
+    # T4-3：信号流（与实盘 signal_consistency 对齐，含 signal_id/bar时间）
+    signals: List[Dict[str, Any]] = field(default_factory=list)
+
     # 运行元数据
     run_id: str = field(default_factory=lambda: f"bt_{int(time.time())}")
     started_at: float = field(default_factory=time.time)
