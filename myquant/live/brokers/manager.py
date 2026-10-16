@@ -476,6 +476,22 @@ class BrokerManager:
           3. 冷却熔断：最近一次 failover 全部失败后 failover_cooldown 秒内
              不再触发 failover（防网络波动下信号重发导致 failover 风暴）。
         """
+        # T0-19：对账冻结状态下拒绝新提交（冻结形同虚设的修复）
+        # 从 registry 取 portfolio，检查 is_reconciliation_blocked
+        try:
+            from myquant.core.registry import get_component
+            _portfolio = get_component("portfolio")
+            if _portfolio is not None and hasattr(_portfolio, "is_reconciliation_blocked"):
+                if _portfolio.is_reconciliation_blocked:
+                    order.reject("对账冻结中（T0-19）：账实差异超阈，禁止新提交，需人工解冻")
+                    logger.critical(
+                        f"[broker_manager] T0-19 对账冻结，拒绝新提交: order={order.order_id} "
+                        f"symbol={order.symbol} reason=reconciliation_blocked"
+                    )
+                    return order
+        except Exception as e:  # registry 获取失败不阻断（保守放行）
+            logger.warning(f"[broker_manager] T0-19 检查 portfolio 冻结状态失败（放行）: {e}")
+
         do_failover = self._auto_failover if auto_failover is None else auto_failover
         alias = self._resolve_alias(broker_id)
         order.extra = dict(order.extra or {})

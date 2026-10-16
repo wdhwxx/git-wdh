@@ -359,6 +359,7 @@ class LiveEngine(BaseEngine):
         self._auto_recover = bool(auto_recover)
         self._snapshot_interval = max(30.0, float(snapshot_interval))
         self._patrol_interval = max(10.0, float(patrol_interval))
+        self._accountability_interval = 300.0  # T0-4：对账周期（5 分钟，live 必须启用）
         self._accountability_interval = max(30.0, float(snapshot_interval))  # KP-P3-08: 券商账本对账周期
 
         # 风控上下文运行态（只记录"已发生"事实，严格防未来函数）
@@ -2292,6 +2293,19 @@ class LiveEngine(BaseEngine):
                 if getattr(self, "_trade_mode", "paper") == "live":
                     raise RuntimeError(msg + "，live 模式拒绝启动（对账失败不可放行）") from e
                 logger.warning(msg + "，paper/sim 模式告警放行")
+
+        # T0-4：live 模式下断言对账周期调度已启用（5 分钟自动对账，否则拒启动）
+        if getattr(self, "_trade_mode", "paper") == "live":
+            if not self._scheduler_enabled:
+                raise RuntimeError(
+                    "[engine] T0-4 live 模式拒绝启动：scheduler_enabled=False，"
+                    "无对账周期调度（5 分钟自动对账），账实漂移无人发现"
+                )
+            if self._portfolio is None:
+                raise RuntimeError(
+                    "[engine] T0-4 live 模式拒绝启动：portfolio=None，"
+                    "无法挂载对账周期任务"
+                )
 
     def _broker_accountability_patrol(self) -> None:
         """

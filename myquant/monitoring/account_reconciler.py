@@ -292,6 +292,13 @@ class AccountReconciler:
 
         if should_freeze:
             self._trigger_freeze(diff, action="freeze")
+        elif self._frozen and diff.exceeds_threshold:
+            # T0-5：已冻结 + 持续差异 → 记 CRITICAL（防静默：冻结后无人发现还在漂移）
+            logger.critical(
+                f"[account_reconciler] 持续冻结留痕: account={self._account_id} "
+                f"差异仍存在(diff={diff})，冻结已持续 "
+                f"{time.time() - self._frozen_since:.0f} 秒未人工处置"
+            )
 
     # ═══════════════════════════════════════════
     #  T+1 终局对账

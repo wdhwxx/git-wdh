@@ -5985,3 +5985,13 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    d. T0-7：engine._assert_startup_positions 两处异常分支（broker.get_positions / sync_from_broker）—— live 模式改 fail-closed 抛 RuntimeError 拒启，paper/sim 保持告警放行。
    e. 专项测试 test_pr_c_guardrails.py 5 用例：BrokerQueryError 存在性 + 空持仓拒覆盖 + 首次同步建快照 + frozen_cash 缺键保留原值。5 passed。
    f. 基线同步：engine.py 2913→2919（+6行，T0-7）；live 包 17949/659→18002/660（+53行/+1符号，T0-2/3/6/7 功能必需对价）。
+
+## #T0-4/5/9/17/18/19 · 2026-10-16 · PR-D 无人工对账（对账周期调度断言 + 持续冻结留痕 + 装配门 + 冻结拒提交）
+   a. T0-4：engine._assert_startup_positions 末尾加 live 断言——scheduler_enabled=False 或 portfolio=None → 抛 RuntimeError 拒启动；__init__ 补 _accountability_interval=300（5 分钟）。
+   b. T0-5：account_reconciler 实时对账路径加——已冻结 + 持续差异 → logger.critical 留痕（旧实现只发首次冻结告警，二次冻结静默）。
+   c. T0-9：已被 T0-8 装配门覆盖（scheduler.enabled + account_reconciler + alert_manager 三项检查）。
+   d. T0-17：解冻 actor 已走 AuditLogStore 持久化（mark_resolved → _append_audit）。
+   e. T0-18：周期对账（5 分钟）已是断线恢复兜底（broker 重连后下一轮自动对账）。
+   f. T0-19：broker_manager.submit_order 开头加拦截——portfolio.is_reconciliation_blocked=True → order.reject + CRITICAL，拒绝新提交。
+   g. 专项测试 test_pr_d_guardrails.py 5 用例：live scheduler 禁用拒启 / paper 放行 / 持续冻结 critical / 冻结拒提交 / 解冻放行。5 passed。
+   h. 基线同步：engine.py 2919→2933（+14行）；live 包 18002/660→18032/660（+30行）；monitoring 包 24008/881→24015/881（+7行）。
