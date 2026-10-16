@@ -509,6 +509,19 @@ class AccountReconciler:
         self._append_audit(
             kind="reconciliation", action="unfreeze", actor=actor_s, detail=detail,
         )
+        # T2-8：解冻记录落库到 reconciliation_freeze 表（action="unfreeze"）
+        try:
+            from myquant.core.registry import get_component
+            _ledger = get_component("trade_ledger")
+            if _ledger is not None:
+                _ledger.record_reconciliation_freeze(
+                    account_id=self._account_id,
+                    action="unfreeze",
+                    actor=actor_s,
+                    reason=note or "",
+                )
+        except Exception as e:
+            logger.warning("[account_reconciler] T2-8 解冻记录落库失败（不阻断）: %s", e)
         logger.info(
             "[account_reconciler] 账户解冻: account=%s actor=%s was_frozen=%s",
             self._account_id, actor_s, was_frozen,

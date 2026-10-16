@@ -6114,3 +6114,23 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
       - action 复用现有参数（"freeze" 实时 / "t1_freeze" 终局）。
    c. 落库失败 try/except 降级为 warning，不阻断冻结主流程。
    d. 基线同步：monitoring 包 24086/882→24099/882（+13行）。
+
+## #T2-8 · 2026-10-16 · 阶段2 对账闭环：解冻记录落库
+   a. 缺陷：解冻动作只发审计 append，不落 reconciliation_freeze 表 → 事后无法审计"谁解的冻、什么时候解的"。
+   b. 修复（mark_resolved 末尾新增落库逻辑）：
+      - 调 record_reconciliation_freeze(account_id=..., action="unfreeze", actor=..., reason=note) 落解冻记录；
+      - 与 T2-7 冻结记录同一表，action 区分 freeze/unfreeze/t1_freeze。
+   c. 落库失败 try/except 降级为 warning，不阻断解冻主流程。
+   d. 基线同步：monitoring 包 24099/882→24112/882（+13行）。
+
+---
+
+## 阶段 2 总账（对账闭环，真钱可验证 RC-13）
+   - T2-1 ledger vs broker 成交对账接口（_check_ledger_vs_broker）
+   - T2-2 订单账本查询接口（get_order_by_id + get_order_events）
+   - T2-3 API 对账状态查询（GET /api/reconciliation/status）
+   - T2-4 对账历史查询（query_reconciliation_runs/diffs + GET /api/reconciliation/history）
+   - T2-5 T+1 终局对账落库（run_t1_final_reconciliation 落 reconciliation_runs）
+   - T2-6 实时对账落库（_ingest_realtime_diff 落 reconciliation_runs）
+   - T2-7 冻结记录落库（_trigger_freeze 落 reconciliation_freeze）
+   - T2-8 解冻记录落库（mark_resolved 落 reconciliation_freeze）
