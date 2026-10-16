@@ -6090,3 +6090,11 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
       - routes.py 新增 GET /api/reconciliation/history：每条 run 自动附带 diffs 明细（最多 50 条）。
    c. 用途：审计追溯、排障分析、对账健康度趋势。
    d. 基线同步：database 包 3910/122→3960/124（+50行/+2符号）；api 包 3833/195→3871/196（+38行/+1符号）。
+
+## #T2-5 · 2026-10-16 · 阶段2 对账闭环：T+1 终局对账落库
+   a. 缺陷：T+1 终局对账结果只记日志，不落库 → 事后无法审计"昨天终局对没对、差异多少"。
+   b. 修复（run_t1_final_reconciliation 末尾新增落库逻辑）：
+      - 调 record_reconciliation_run(run_type="t1_final", consistent=..., frozen=..., details=...) 落主表；
+      - 若超阈（frozen=True）→ 额外调 record_reconciliation_diff(run_id=..., cash_diff=..., position_diff=..., exceeds_threshold=1) 落差异明细。
+   c. 落库失败 try/except 降级为 warning，不阻断 T+1 对账主流程。
+   d. 基线同步：monitoring 包 24042/882→24064/882（+22行）。

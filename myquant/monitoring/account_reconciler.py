@@ -379,6 +379,28 @@ class AccountReconciler:
             "[account_reconciler] T+1 终局核对: account=%s 超阈=%s 现金差=%.4f",
             self._account_id, diff.exceeds_threshold, diff.cash_diff,
         )
+        # T2-5：T+1 终局对账落库到 reconciliation_runs 表
+        try:
+            from myquant.core.registry import get_component
+            _ledger = get_component("trade_ledger")
+            if _ledger is not None:
+                run_id = _ledger.record_reconciliation_run(
+                    account_id=self._account_id,
+                    run_type="t1_final",
+                    consistent=not diff.exceeds_threshold,
+                    frozen=diff.exceeds_threshold,
+                    details=diff.to_dict(),
+                )
+                if run_id and diff.exceeds_threshold:
+                    _ledger.record_reconciliation_diff(
+                        run_id=run_id,
+                        account_id=self._account_id,
+                        cash_diff=diff.cash_diff,
+                        position_diff=str(diff.position_diff) if diff.position_diff else "",
+                        exceeds_threshold=1,
+                    )
+        except Exception as e:
+            logger.warning("[account_reconciler] T2-5 T+1 对账落库失败（不阻断）: %s", e)
         return diff
 
     # ═══════════════════════════════════════════
