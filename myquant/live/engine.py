@@ -2528,17 +2528,15 @@ class LiveEngine(BaseEngine):
                 except Exception as e:
                     logger.error(f"[engine] 成交落库失败: {e}")
 
-            # ── 任务42：成交回报记录防未来校验（铁律3：信号T日→T+1成交）──
-            # 实盘/paper模式下信号当日收盘生成、撮合可能在同日（trade_date==signal_date），
-            # 属"模拟撮合时点"与执行纪律差异；无信号映射（手动补单/风控强平）无法校验。
-            # P1-07③（G13）：豁免必须显式（skip_t1_check=True），不再用"置空 signal_date"
-            # 静默跳过（空值已升级阻断档 fail-closed）；成交日早于信号日仍是真违规。
+            # ── T4-1：撤销 T+1 自动豁免（红线 RL-08 不可豁免）──
+            # 旧逻辑：trade_date==signal_date（信号日成交）自动豁免 T+1 检查。
+            # 新逻辑：仅"无信号映射"（手动补单/风控强平）豁免；信号日成交属违规。
+            # PaperBroker 已是 T+1 撮合（on_market_data 先 push_market_data 撮合旧单
+            # 再生成新信号），正常路径不会出现 trade_date==signal_date。
             if self._lookahead_guard:
                 trade_date = get_date_part(trade.timestamp) or ""
                 signal_date = self._order_signal_dates.get(trade.order_id, "")
-                skip_t1 = bool(signal_date and trade_date and trade_date == signal_date) or (
-                    not signal_date and bool(trade_date)
-                )
+                skip_t1 = not signal_date and bool(trade_date)  # T4-1：只保留无信号映射豁免
                 side = trade.side.value if hasattr(trade.side, 'value') else str(trade.side)
                 self._lookahead_guard.record_trade(
                     symbol=trade.symbol,
