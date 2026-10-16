@@ -834,19 +834,45 @@ def restore_live_state(
                 if so_id is not None and so_id not in live_ids:
                     unclaimed.append(so_id)
             if unclaimed:
+                cancelled_ok: List[str] = []
+                cancelled_failed: List[str] = []
                 if hasattr(broker, "cancel_order"):
                     for oid in unclaimed:
                         try:
-                            broker.cancel_order(str(oid))
+                            # T0-10：必须检查返回值——券商拒绝时 cancel_order 返回 False，
+                            # 旧代码不检查返回值，把失败单也记成"已 cancel"（无声错账）。
+                            result = broker.cancel_order(str(oid))
+                            if result is False:
+                                cancelled_failed.append(str(oid))
+                                logger.critical(
+                                    f"[state_store] 崩溃恢复订单对账: cancel {oid} 被券商拒绝(返回False)"
+                                )
+                            else:
+                                cancelled_ok.append(str(oid))
                         except Exception as e:  # noqa: BLE001
-                            restored["notes"].append(f"订单对账 cancel {oid} 失败: {type(e).__name__}: {e}")
-                restored["reconciled_orders"] = len(unclaimed)
-                restored["notes"].append(
-                    f"快照订单对账: {len(unclaimed)} 笔挂单未在券商账本领回，已 cancel: {sorted(map(str, unclaimed))}"
-                )
-                logger.warning(
-                    f"[state_store] 崩溃恢复订单对账: 未领回挂单 {len(unclaimed)} 笔已 cancel: {sorted(map(str, unclaimed))}"
-                )
+                            cancelled_failed.append(str(oid))
+                            logger.critical(
+                                f"[state_store] 崩溃恢复订单对账: cancel {oid} 异常: {type(e).__name__}: {e}"
+                            )
+                else:
+                    # broker 无 cancel_order 能力：全部算失败（不能假装已 cancel）
+                    cancelled_failed = [str(x) for x in unclaimed]
+
+                restored["reconciled_orders"] = len(cancelled_ok)
+                if cancelled_ok:
+                    restored["notes"].append(
+                        f"快照订单对账: {len(cancelled_ok)} 笔挂单已 cancel: {sorted(cancelled_ok)}"
+                    )
+                    logger.warning(
+                        f"[state_store] 崩溃恢复订单对账: 未领回挂单 {len(cancelled_ok)} 笔已 cancel: {sorted(cancelled_ok)}"
+                    )
+                if cancelled_failed:
+                    restored["notes"].append(
+                        f"快照订单对账: {len(cancelled_failed)} 笔挂单 cancel 失败(需人工核查): {sorted(cancelled_failed)}"
+                    )
+                    logger.critical(
+                        f"[state_store] 崩溃恢复订单对账: {len(cancelled_failed)} 笔挂单 cancel 失败(需人工核查): {sorted(cancelled_failed)}"
+                    )
         except Exception as e:  # noqa: BLE001
             restored["notes"].append(f"订单对账失败: {type(e).__name__}: {e}")
     elif snapshot_orders and broker is None:

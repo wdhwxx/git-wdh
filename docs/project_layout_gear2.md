@@ -5922,3 +5922,10 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    c. 调用点：create_live_engine 内紧邻 _assert_live_watchdog_gate 之后调用。
    d. 专项测试 tests/unit/test_live_reconciliation_gate.py 7 用例：scheduler=false拒启；reconciler未注册拒启；alert_manager未注册拒启；三项全过；paper/sim 放行；多错误合并。7 passed。
    e. 基线同步：live 包 17732/654→17798/655（+66行/+1符号=_assert_live_reconciliation_gate 函数，fan_out 不变，功能必需对价）。
+
+## #T0-10 · 2026-10-16 · 崩溃恢复撤单三缺陷修复
+   a. 缺陷1（manager.restore_state）：只恢复 primary_alias，不转发子券商 restore_state → qmt_broker 订单簿/映射表不恢复，崩溃后查单/撤单全错。修复：遍历 _registrations，对每个有 restore_state 的子券商 duck-typing 调用，单个失败不阻断其余。
+   b. 缺陷2（撤单时序）：engine._recover_state() 在 connect_all() 之前执行 _reconcile_restored_orders → broker 未连接，get_orders/cancel_order 必失败。修复：暂存 snapshot_orders 到 self._pending_reconcile_orders，connect_all() 之后统一调 _reconcile_restored_orders。
+   c. 缺陷3（cancel 返回值）：state_store.restore_live_state 和 engine._reconcile_restored_orders 都不检查 cancel_order 返回值 → 券商拒绝（返回 False）也被记成"已 cancel"（无声错账）。修复：收集成功/失败两组，reconciled_orders 只计成功；失败的 logger.critical + notes 记"需人工核查"。
+   d. 专项测试 tests/unit/test_t0_10_recovery_gate.py 4 用例：restore 转发子券商；子券商失败不阻断；cancel False 不计入；cancel 失败记 notes。4 passed。
+   e. 基线同步：engine.py 2869→2887（+18 行）；live 包 17798/655→17856/655（+58 行，symbols/fan_out 不变，功能必需对价）。

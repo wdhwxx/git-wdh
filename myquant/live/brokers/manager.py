@@ -1083,10 +1083,13 @@ class BrokerManager:
 
     def restore_state(self, state: Dict[str, Any]) -> None:
         """
-        恢复管理器状态（崩溃恢复后重建主备角色）
+        恢复管理器状态（崩溃恢复后重建主备角色 + 转发子券商恢复）。
 
-        仅恢复角色配置；连接状态由调用方 connect_all() 重建
-        （不恢复连接本身——连接状态不应从快照"恢复"，必须重新连接验证）。
+        T0-10：除恢复 primary_alias 外，必须把 state 转发给每个已注册子券商的
+        restore_state（duck-typing），否则 qmt_broker 等子券商的订单簿/映射表
+        不恢复——崩溃恢复后子券商本地状态为空，查单/撤单全错。
+
+        连接状态由调用方 connect_all() 重建（不恢复连接本身）。
 
         Parameters
         ----------
@@ -1098,6 +1101,17 @@ class BrokerManager:
         primary = state.get("primary_alias")
         if primary and primary in self._registrations:
             self.set_primary(primary)
+
+        # T0-10：转发子券商 restore_state（duck-typing，单个失败不阻断其余）
+        for alias, reg in self._registrations.items():
+            broker = reg.broker
+            if hasattr(broker, "restore_state"):
+                try:
+                    broker.restore_state(state)
+                except Exception as e:  # noqa: BLE001 - 单子券商恢复失败不阻断
+                    logger.warning(
+                        f"[broker] 子券商 restore_state 失败({alias}): {type(e).__name__}: {e}"
+                    )
 
     def get_summary(self) -> Dict[str, Any]:
         """管理器摘要（券商数 + 主券商 + 各券商健康/角色/连接 + failover 统计 + 最近补单对账）"""

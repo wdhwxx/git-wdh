@@ -374,6 +374,7 @@ class LiveEngine(BaseEngine):
         self._event_subscription_ids: List[str] = []
         self._own_scheduler: bool = False   # 调度器是否引擎创建（决定stop归属）
         self._state_recovered: bool = False
+        self._pending_reconcile_orders: list = []  # T0-10：connect_all 后待对账撤单的快照订单
 
         # 1) RiskManager：订单前置检查 + 数据质量事件联动（铁律2：回测实盘共用风控）
         self._risk_manager = None
@@ -687,6 +688,15 @@ class LiveEngine(BaseEngine):
             # 连接全部券商（BrokerManager 统一编排，含主备 failover 能力）
             if self._broker_manager and hasattr(self._broker_manager, 'connect_all'):
                 self._broker_manager.connect_all()
+
+            # T0-10：恢复订单对账撤单移到 connect_all() 之后（旧实现 broker 未连接就撤单必失败）
+            if self._pending_reconcile_orders:
+                try:
+                    self._reconcile_restored_orders(self._pending_reconcile_orders)
+                except Exception as e:  # noqa: BLE001 - 对账撤单失败不阻断启动
+                    logger.critical(f"[engine] connect_all 后订单对账撤单失败: {e}")
+                finally:
+                    self._pending_reconcile_orders = []
 
             # 注册broker回调（成交回报/订单更新；BrokerManager 透传到全部券商）
             if self._broker_manager and hasattr(self._broker_manager, 'register_trade_callback'):
@@ -1921,8 +1931,8 @@ class LiveEngine(BaseEngine):
                 broker=self._broker_manager or self._broker,
             )
             self._state_recovered = True
-            # KP-P3-03：恢复后对账（快照订单 vs 券商在途订单差集，未领回挂单取消）
-            self._reconcile_restored_orders(snapshot.state.get("orders") or [])
+            # T0-10：暂存快照订单，connect_all() 之后再对账撤单（此时 broker 已连接）
+            self._pending_reconcile_orders = list(snapshot.state.get("orders") or [])
             # T2-2：恢复已处理信号 id（最近 5 个交易日 ≈ 7 自然日窗口），
             # 防止重启后同一信号被重复下单。过期 id 丢弃防无限膨胀。
             self._restore_processed_signal_ids(snapshot.state)
@@ -1978,11 +1988,19 @@ class LiveEngine(BaseEngine):
             f"[engine] 恢复后未领回订单 {len(unclaimed)} 笔，尝试取消: {sorted(unclaimed)}"
         )
         if hasattr(broker, "cancel_order"):
+            cancel_failed: list = []
             for oid in sorted(unclaimed):
                 try:
-                    broker.cancel_order(oid)
+                    # T0-10：检查返回值——券商拒绝时返回 False，旧代码不检查
+                    result = broker.cancel_order(oid)
+                    if result is False:
+                        cancel_failed.append(oid)
+                        logger.critical(f"[engine] 取消未领回订单 {oid} 被券商拒绝(返回False)")
                 except Exception as e:
-                    logger.warning(f"[engine] 取消未领回订单 {oid} 失败: {e}")
+                    cancel_failed.append(oid)
+                    logger.critical(f"[engine] 取消未领回订单 {oid} 异常: {e}")
+            if cancel_failed:
+                logger.critical(f"[engine] {len(cancel_failed)} 笔订单撤单失败，需人工核查: {cancel_failed}")
         threshold = 1 if self._trade_mode == "live" else 5
         if len(unclaimed) > threshold:
             logger.critical(
