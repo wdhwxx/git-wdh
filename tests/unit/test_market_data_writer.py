@@ -121,31 +121,87 @@ def test_write_raw_prev_row_context() -> None:
     assert "price_jump" in (db_row["anomaly_flags"] or "")
 
 
-# ── 5. write_upsert 覆盖语义 ────────────────────────────────
+# ── 5. write_upsert UPSERT 语义（C-02 #453）──────────────────
 def test_write_upsert_replace_semantics() -> None:
     conn = _make_conn()
-    # B-01 部分唯一索引（生产库已迁移；内存库需手动补建以复现 INSERT OR REPLACE 语义）
-    conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS uq_market_data_daily_key "
-        "ON market_data(symbol, period, adjust, trade_date) "
-        "WHERE trade_time IS NULL"
-    )
     writer = MarketDataWriter(DataQueries(conn))
     first = [{"symbol": "000001.SZ", "market": "A股", "period": "daily",
               "adjust": "raw", "trade_date": "2024-01-02", "open": 10.0,
               "high": 10.5, "low": 9.8, "close": 10.2, "volume": 1e6,
               "amount": 1e7, "data_source": "incremental_clean"}]
-    assert writer.write_upsert(first, "000001.SZ") == 1
+    assert writer.write_upsert(first, "000001.SZ", corrected_by="incremental_clean") == 1
     second = [{"symbol": "000001.SZ", "market": "A股", "period": "daily",
                "adjust": "raw", "trade_date": "2024-01-02", "open": 10.1,
                "high": 10.6, "low": 9.9, "close": 10.3, "volume": 1.1e6,
                "amount": 1.1e7, "data_source": "incremental_clean"}]
-    assert writer.write_upsert(second, "000001.SZ") == 1
+    assert writer.write_upsert(second, "000001.SZ", corrected_by="incremental_clean") == 1
     dq = DataQueries(conn)
     rows = dq.get_market_data("000001.SZ", adjust="raw")
-    assert len(rows) == 1, "INSERT OR REPLACE 应按键覆盖不新增"
+    assert len(rows) == 1, "UPSERT 按键更新不新增"
     assert rows[0]["close"] == 10.3
+    # 变化字段写台账（C-02 可审计回滚依据）
+    ledger = dq.conn.execute("SELECT * FROM correction_ledger")
+    assert len(ledger) >= 1
+    by_field = {r["field"]: r for r in ledger}
+    assert by_field["close"]["old_value"] == "10.2"  # 台账文本化存储
+    assert by_field["close"]["new_value"] == "10.3"
     assert writer.write_upsert([], "000001.SZ") == 0
+
+
+def test_write_upsert_no_change_skips_ledger() -> None:
+    """同键同值：不更新、不写台账（防御 needs_write 之外的重复调用）。"""
+    conn = _make_conn()
+    writer = MarketDataWriter(DataQueries(conn))
+    row = {"symbol": "000001.SZ", "market": "A股", "period": "daily",
+           "adjust": "raw", "trade_date": "2024-01-02", "open": 10.0,
+           "high": 10.5, "low": 9.8, "close": 10.2, "volume": 1e6,
+           "amount": 1e7, "data_source": "incremental_clean"}
+    assert writer.write_upsert([row], "000001.SZ") == 1
+    assert writer.write_upsert([row], "000001.SZ") == 0  # 无变化跳过
+    dq = DataQueries(conn)
+    assert len(dq.get_market_data("000001.SZ", adjust="raw")) == 1
+    assert dq.conn.execute_one("SELECT COUNT(*) AS c FROM correction_ledger")["c"] == 0
+
+
+def test_write_upsert_rows_monotonic() -> None:
+    """行数单调不减：写回含 1 新 + 1 改，总行数不减少（绝不删除）。"""
+    conn = _make_conn()
+    writer = MarketDataWriter(DataQueries(conn))
+    base = [
+        {"symbol": "000001.SZ", "market": "A股", "period": "daily",
+         "adjust": "raw", "trade_date": "2024-01-02", "open": 10.0,
+         "high": 10.5, "low": 9.8, "close": 10.2, "volume": 1e6,
+         "amount": 1e7, "data_source": "incremental_clean"},
+        {"symbol": "000001.SZ", "market": "A股", "period": "daily",
+         "adjust": "raw", "trade_date": "2024-01-03", "open": 10.3,
+         "high": 10.8, "low": 10.1, "close": 10.6, "volume": 1.2e6,
+         "amount": 1.3e7, "data_source": "incremental_clean"},
+    ]
+    assert writer.write_upsert(base, "000001.SZ") == 2
+    # 全量清洗后：1 行修正 + 1 行新增（01-04）
+    after = [
+        {"symbol": "000001.SZ", "market": "A股", "period": "daily",
+         "adjust": "raw", "trade_date": "2024-01-02", "open": 10.1,
+         "high": 10.6, "low": 9.9, "close": 10.3, "volume": 1.1e6,
+         "amount": 1.1e7, "data_source": "incremental_clean"},
+        {"symbol": "000001.SZ", "market": "A股", "period": "daily",
+         "adjust": "raw", "trade_date": "2024-01-03", "open": 10.3,
+         "high": 10.8, "low": 10.1, "close": 10.6, "volume": 1.2e6,
+         "amount": 1.3e7, "data_source": "incremental_clean"},
+        {"symbol": "000001.SZ", "market": "A股", "period": "daily",
+         "adjust": "raw", "trade_date": "2024-01-04", "open": 10.4,
+         "high": 10.9, "low": 10.2, "close": 10.7, "volume": 1.3e6,
+         "amount": 1.4e7, "data_source": "incremental_clean"},
+    ]
+    n = writer.write_upsert(after, "000001.SZ")
+    dq = DataQueries(conn)
+    rows = dq.get_market_data("000001.SZ", adjust="raw")
+    assert len(rows) == 3, "UPSERT 绝不删除：行数单调不减"
+    assert n == 2  # 1 修正 + 1 新增
+    ledger = dq.conn.execute_one(
+        "SELECT COUNT(*) AS c FROM correction_ledger"
+    )["c"]
+    assert ledger == 6  # 01-02 行 open/high/low/close/volume/amount 六字段各记一条；01-03 无变化不记
 
 
 # ── 6. 写失败可观测 ─────────────────────────────────────────
@@ -186,4 +242,48 @@ def test_manager_delegates_to_writer() -> None:
     assert manager._admission_stats == {"blocked": 1, "flagged": 0}
     dq = DataQueries(conn)
     assert dq.query_admission_rejects(symbol="000001.SZ") != []
+
+
+# ── 8. write_back_symbol 废止 delete（C-02）──────────────────
+def test_write_back_symbol_no_delete() -> None:
+    """write_back_symbol 不再整标的删除：UPSERT 保留既有行 + 台账留痕。"""
+    from myquant.data_access.full_clean_service import FullCleanService
+
+    conn = _make_conn()
+    # 预置 2 行旧数据
+    dq = DataQueries(conn)
+    dq.bulk_insert_market_data([
+        {"symbol": "000001.SZ", "market": "A股", "period": "daily",
+         "adjust": "raw", "trade_date": "2024-01-02", "open": 10.0,
+         "high": 10.5, "low": 9.8, "close": 10.2, "volume": 1e6,
+         "amount": 1e7, "data_source": "tdx"},
+        {"symbol": "000001.SZ", "market": "A股", "period": "daily",
+         "adjust": "raw", "trade_date": "2024-01-03", "open": 10.3,
+         "high": 10.8, "low": 10.1, "close": 10.6, "volume": 1.2e6,
+         "amount": 1.3e7, "data_source": "tdx"},
+    ], replace=False)
+    svc = FullCleanService(config={"batch_id": "test"}, dry_run=False)
+    # 清洗后：01-02 修正 + 01-04 新增（01-03 无变化）
+    cleaned = [
+        {"symbol": "000001.SZ", "market": "A股", "period": "daily",
+         "adjust": "raw", "trade_date": "2024-01-02", "open": 10.1,
+         "high": 10.6, "low": 9.9, "close": 10.3, "volume": 1.1e6,
+         "amount": 1.1e7, "data_source": "incremental_clean"},
+        {"symbol": "000001.SZ", "market": "A股", "period": "daily",
+         "adjust": "raw", "trade_date": "2024-01-03", "open": 10.3,
+         "high": 10.8, "low": 10.1, "close": 10.6, "volume": 1.2e6,
+         "amount": 1.3e7, "data_source": "incremental_clean"},
+        {"symbol": "000001.SZ", "market": "A股", "period": "daily",
+         "adjust": "raw", "trade_date": "2024-01-04", "open": 10.4,
+         "high": 10.9, "low": 10.2, "close": 10.7, "volume": 1.3e6,
+         "amount": 1.4e7, "data_source": "incremental_clean"},
+    ]
+    rc = svc.write_back_symbol(dq, "000001.SZ", cleaned)
+    assert rc == "written"
+    rows = dq.get_market_data("000001.SZ", adjust="raw")
+    assert len(rows) == 3, "绝不删除：3 行全保留"
+    by_date = {r["trade_date"]: r for r in rows}
+    assert by_date["2024-01-02"]["close"] == 10.3
+    ledger = dq.conn.execute_one("SELECT COUNT(*) AS c FROM correction_ledger")["c"]
+    assert ledger == 8  # 01-02 六值字段+data_source 共 7 条；01-03 仅 data_source(tdx→incremental_clean) 1 条
 

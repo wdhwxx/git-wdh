@@ -6424,3 +6424,16 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    d. C-6 判定口径修正：coverage_gate.py `_find_source_assert_only_modules` 增加 `importlib.import_module("myquant.<mod>")` 识别——数字开头迁移模块（0009-0012）无法静态 import，测试以 importlib 动态导入执行 DDL（test_migration_0010/0011/0012 同款先例，R-19 名单已认可），属真实行为测试而非"仅字符串断言"；修正后 assert_only 37→33（不调 SOURCE_ASSERT_ONLY_MAX 上限，红线不变）。
    e. 验证：test_coverage_gate 50 passed（原 3 红消除）；全量 pytest 4779 passed/1 skipped 本地复验；BLE001 29 处 noqa（工作区 486→466 ≤ 468）；gate_audit 本地复验 0 红；CI 待全量复跑。
    f. 纪律遵守：本回写与 coverage_gate.py/gate_audit.py 门禁逻辑修正同 commit（纯门禁文件+蓝图，无业务混入，判据A 独立 commit 合规）；未触碰另一会话 #452 未提交回写。
+
+## #453 · 2026-10-17 · 数据层施工 C-02：废止整标的 delete+insert → UPSERT + correction_ledger
+   a. 依据：《数据层结构优化可行性施工方案报告_v1.1》§5.2 C-02（P2，交付=full_clean_service 改造；验收=**行数单调不减**、台账有记录；回滚=C-02 值级回退依据 correction_ledger）。
+   b. 事实基线：write_back_symbol 现为 delete_market_data(整标的) + bulk_insert(replace=True)（C-03 #452 后委托 write_upsert）；B-01 部分唯一索引（生产库 WHERE trade_time IS NULL）+ A-13 已清重复键 → UPSERT 不删行不产生残留；record_correction（B-03 #443）接口现成（symbol/trade_date/field/old/new/corrected_by/reason）。
+   c. 变更：①MarketDataWriter.write_upsert 升级 UPSERT 语义——事务内读该标的现有行建 trade_date 索引；键不存在 → INSERT（replace=False）；键存在且字段有变 → 变化字段逐条 record_correction（corrected_by 传 full_clean/incremental_clean）+ UPDATE 单行；键存在且无变化 → 跳过（防御，needs_write 已挡多数）；**绝不 DELETE（行数单调不减）**；②write_back_symbol 废止 delete_market_data，直接委托 write_upsert（原子性由 write_upsert 内事务保证，外层事务移除）；③增量主流程改传 corrected_by="incremental_clean"；④tests/unit/test_market_data_writer.py 升级——UPSERT 覆盖+台账留痕（close 10.2→10.3 文本化存储）、行数单调不减（2→3 全保留）、无变化跳过（台账零记录）、write_back_symbol 不删行。
+   d. 验证：py_compile 通过；test_market_data_writer 11 passed；回归 test_data_clean/test_data_clean_incremental/test_architecture 通过（仅 R-26 data_access 超基线——见 #454 对价）；门禁 R-13/R-26 leakage_gate 已由另一会话 #455（b35d967/37a76a1）消除。
+   e. 纪律遵守：先登记蓝图再落代码；独立 commit；UPSERT 键=部分唯一索引键（symbol, period, adjust, trade_date）与 B-01 一致；delete_market_data 保留接口不删（其他调用方仍可能用）；数据源字段（data_source）变化亦留痕（溯源完整）。
+
+## #454 · 2026-10-17 · R-26 data_access 包基线对价（C-03/C-02 功能必需）
+   a. 依据：顶红六步协议——包级聚合上涨超限时对价登记（py 文件代码规则 C-5/R-26 联动同步）。
+   b. 变更：test_architecture.py PACKAGE_STRUCTURE_BASELINE data_access 18107/632/37 → **18252/635/37**（+145 行/+3 符号，fan_out 37 不变）——C-03 新增 market_data_writer.py 统一写入口模块（write_raw 门禁①+ingest 三列 / write_upsert UPSERT+台账，~170 行）+ C-02 write_back_symbol 废止 delete+insert 改委托（full_clean_service 净增少）、manager._save_to_database 委托 write_raw（R-24 2204 冻结内净减）。
+   c. 验证：对价后 test_architecture 全绿（除外部已由 #455 消除项）；test_architecture.py 注释同步 #454 留痕。
+   d. 纪律遵守：对价与 C-02 功能 commit 同批；不抬 R-24 manager 基线（manager 行数未涨）。

@@ -17,6 +17,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from myquant.data_access.admission import AdmissionChecker
+from myquant.database.schema import TABLE_NAMES
 
 logger = logging.getLogger(__name__)
 
@@ -149,20 +150,27 @@ class MarketDataWriter:
                 raise MarketDataWriteError(f"write_raw 失败 [{symbol}]: {exc}") from exc
         return {"written": written, "blocked": blocked, "flagged": flagged}
 
-    # ── 清洗写回（INSERT OR REPLACE，C-02 升级 UPSERT+台账）──
+    # ── 清洗写回（C-02 #453：UPSERT + correction_ledger，绝不删除）──
     def write_upsert(
         self,
         rows: List[Dict[str, Any]],
         symbol: str,
+        corrected_by: str = "full_clean",
     ) -> int:
-        """批量 upsert 写入（INSERT OR REPLACE，保留 C-02 前语义）。
+        """UPSERT 语义写入（废止整标的 delete+insert，行数单调不减）。
+
+        键 = (symbol, period, adjust, trade_date)（与 B-01 部分唯一索引一致）：
+          - 键不存在 → INSERT（replace=False）
+          - 键存在且字段有变 → 变化字段逐条写 correction_ledger（值级可审计回滚）+ UPDATE 单行
+          - 键存在且无变化 → 跳过（防御；needs_write 已挡多数无变化场景）
 
         Args:
-            rows: 已清洗/构造好的 DB 行（含 symbol/trade_date 等完整字段）
+            rows: 已清洗/构造好的 DB 行（含 symbol/period/adjust/trade_date + 数据字段）
             symbol: 标的（日志定位用）
+            corrected_by: 修正者标记（full_clean / incremental_clean）
 
         Returns:
-            写入行数
+            写入行数（新增 + 更新）
 
         Raises:
             MarketDataWriteError: 数据库写失败（不静默）
@@ -170,7 +178,53 @@ class MarketDataWriter:
         if not rows:
             return 0
         try:
-            return self._queries.bulk_insert_market_data(rows, replace=True)
+            period = rows[0].get("period", "daily")
+            adjust = rows[0].get("adjust", "raw")
+            with self._queries.conn.transaction():
+                existing = self._queries.get_market_data(
+                    symbol, period=period, adjust=adjust,
+                )
+                index: Dict[str, Dict[str, Any]] = {}
+                for r in existing:
+                    index.setdefault(str(r.get("trade_date", "")), r)
+                written = 0
+                for row in rows:
+                    td = str(row.get("trade_date", ""))
+                    old = index.get(td)
+                    if old is None:
+                        self._queries.bulk_insert_market_data([row], replace=False)
+                        written += 1
+                        continue
+                    changes: Dict[str, Any] = {}
+                    for field, new_val in row.items():
+                        if field in ("symbol", "market", "period", "adjust",
+                                     "trade_date", "trade_time"):
+                            continue
+                        if old.get(field) != new_val:
+                            changes[field] = new_val
+                    if not changes:
+                        continue
+                    for field, new_val in changes.items():
+                        self._queries.record_correction(
+                            symbol=symbol,
+                            trade_date=td,
+                            field=field,
+                            old_value=old.get(field),
+                            new_value=new_val,
+                            corrected_by=corrected_by,
+                            reason="C-02 upsert 值级修正",
+                        )
+                    sets = ",".join(f"{f} = ?" for f in changes)
+                    params: List[Any] = [changes[f] for f in changes]
+                    params += [symbol, period, adjust, td]
+                    self._queries.conn.execute_update(
+                        f"UPDATE {TABLE_NAMES['market_data']} SET {sets} "
+                        f"WHERE symbol = ? AND period = ? AND adjust = ? "
+                        f"AND trade_date = ?",
+                        tuple(params),
+                    )
+                    written += 1
+            return written
         except Exception as exc:
             logger.error("MarketDataWriter.write_upsert 写失败 [%s]: %s", symbol, exc)
             raise MarketDataWriteError(f"write_upsert 失败 [{symbol}]: {exc}") from exc
