@@ -6287,3 +6287,10 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    e. 验证：py_compile 通过；pytest test_a09_processed_pre_close.py + test_data_export_columns.py 11 passed；门禁复跑（test_architecture + 相关回归）63 passed, 1 skipped —— R-24/R-26 全绿（manager.py 零改动，无需对价抬升）。
    f. 验收对照（报告 §6 V-00 系列）：两写入方 schema 一致=均无前收盘价派生列 ✓；增量新行前收盘价由 provider 兜底派生（shift(1)，非 NaN）✓；vectorized_engine fail-closed 读取路径经 provider 兜底不误拒 ✓。
    g. 纪律遵守：方案一先实现后因门禁硬顶回滚（manager.py 恢复原状、git diff 零残留），改走方案二并完整留痕；先登记蓝图（manager/导出脚本/两测试）再落代码；独立 commit。
+
+## #437 · 2026-10-17 · 数据层施工 A-06：data_dictionary 文档失真修正
+   a. 依据：《数据层结构优化可行性施工方案报告_v1.1》§5.2 A-06（交付物=文档修订，验收=与代码事实逐条一致；git 可回滚）。
+   b. 事实基线（代码级取证）：market_data 表 adjust 列注释 raw(不复权原始层，当前)/hfq/qfq(预留)（schema.py:66）；processed 为 hfq 日线（scripts/数据导出_DB到processed.py 导出 quant.db hfq）；volume 注释"手"（schema.py:73，A-07 统一为股）；真实表清单=market_data/financial_data/factor_data/adjust_factor/share_change/strategy_state/data_source/sync_status/clean_run_meta/dirty_data_stats/orders/fills/positions_daily/alerts/metrics_history/audit_log/audit_archive/audit_archive_manifest（非文档旧称 daily_bar/stock_factor/trade_record/position_state/live_run_log）；factor_data 0 行（实测，features 层未接线空转）。
+   c. 变更：docs/data_dictionary.md 修订四处失真——①复权口径：DB market_data 现为 raw 原始层、processed 为 hfq 复权（删除"回测使用 hfq、实盘也 hfq"旧表述）；②表名：§3 旧表结构替换为真实表清单+核心表字段；③features 空转：标注 factor_data 0 行、未接线；④清理文末生成指令残留（"复制保存/回复我第2个完成"）；volume 单位按"股"写（A-07 同步后代码注释一致）。
+   d. 验证：修订后文档与 schema.py 表清单逐表一致；全文档 grep 无 daily_bar/stock_factor/trade_record/position_state/live_run_log 旧表名残留。
+   e. 纪律遵守：蓝图已有条目（docs 段 267 行），先追加回写记录再修订；独立 commit。
