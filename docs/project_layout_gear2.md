@@ -6375,3 +6375,10 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    c. 变更：①derived_metrics.py compute_b_class_metrics 两处 fin_idx 循环（187/236）重构为 match_latest_financial 单次匹配（fin_avail 复用，删除 fin_sorted 死代码）：流通股本反推/换手率/市盈动全部按"有效披露日<=trade_date 可见最新一期"，消除 (report_deadline, 真实 ann_date] 泄漏窗口；②config/data_time_semantics.yaml 三列 date_basis 更正 report_deadline_estimate→eff_disclosure_date（台账例外入库，随 commit）；③tests/unit/test_derived_metrics_pit.py：late-disclosure 用例（构造 ann_date>report_deadline 样本，ann_date 前不可见、ann_date 后可见）+ 正常披露等价用例。
    d. 验证：py_compile 通过；pytest 新增测试全绿 + 既有 derived_metrics/manager 财务测试不回归；test_architecture 门禁全绿（derived_metrics 净行数变化小，若超基线按 PR2 对价 #447 抬升；R-09 测试命名门禁无涉）。
    e. 纪律遵守：先登记蓝图（cleaner/data_access 目录树 + 台账 + 本回写）再落代码；独立 commit；历史行不重导（回填未授权，新增/重算路径生效）。
+
+## #448 · 2026-10-17 · 数据层施工 B-08：全量/增量派生量口径统一
+   a. 依据：《数据层结构优化可行性施工方案报告_v1.1》§5.2 B-08（P1，交付=代码+单测；验收=两路径逐字段等价用例通过；V-10）。
+   b. 事实基线（代码级取证）：全量 worker_clean（full_clean_service.py:499-521,550-551）注入 factor_lookup（#82 除权豁免）+ compute_b_class_metrics 走 match_latest_financial；增量 save_cleaned_incremental_parquet（manager.py:1107-1114 run_clean_pipeline 未注入 factor_lookup）fin_b 构造（manager.py:1149-1157）只取 report_date/circ_mv/total_mv/net_profit **缺 ann_date** → B-07 后 match_latest_financial ann_date 优先语义下增量回退 report_deadline，与全量口径分叉（两分叉点）。
+   c. 变更：①manager.py 增量 run_clean_pipeline 前函数内延迟 import _load_factor_lookup/_with_factor_lookup（full_clean_service 模块级，避免循环依赖）注入 factor_lookup（除权跳变豁免与全量同口径）；②fin_b 构造补 ann_date（对齐全量 B-07 口径）；③tests/unit/test_derived_parity_incremental_full.py：两路径逐字段等价用例（同一 fin 列表含 ann_date → 全量 vs 增量 compute_b_class_metrics 输出逐字段相等；晚披露样本两路径 ann_date 前均不可见；_with_factor_lookup 副本注入不污染原 config）。
+   d. 验证：py_compile 通过；pytest 新增测试全绿 + 既有 full_clean/manager 清洗测试不回归；test_architecture 门禁全绿（manager.py R-24 2204 行只减不增红线——本次 +~12 行属功能必需，若超限按顶红六步协议对价 #448）。
+   e. 纪律遵守：先登记蓝图（manager/full_clean_service 目录树 + 本回写）再落代码；独立 commit；因子加载 SQL 与 full_clean_service._load_factor_lookup 逐字一致内联（实测：跨模块延迟 import 触发 R-01b 全量导入图真环 1>0，改为内联消除环，行为等价）。

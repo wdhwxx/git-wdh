@@ -1103,12 +1103,32 @@ class DataManager:
         for rec in records_to_clean:
             rec.setdefault("symbol", symbol)
 
+        # B-08 #448：增量与全量同口径注入复权因子（除权除息日跳变豁免，全量 worker_clean
+        # 先例 #82）。因子加载 SQL 与 full_clean_service._load_factor_lookup 逐字一致——
+        # 不跨模块 import 以免引入 R-01b 延迟导入环（full_clean_service 亦延迟 import 本模块）
+        factor_lookup = {}
+        try:
+            _f_rows = self._db.execute(
+                "SELECT event_date, factor FROM adjust_factor "
+                "WHERE symbol=? ORDER BY event_date",
+                (symbol,),
+            )
+            factor_lookup = {r["event_date"]: r["factor"] for r in _f_rows}
+        except Exception:
+            logger.debug("增量加载复权因子失败[%s]，回退 raw 口径", symbol)
+        clean_config_used = clean_config
+        if factor_lookup:
+            _bar_cfg = dict(clean_config.get("bar") or {})
+            _bar_cfg["factor_lookup"] = factor_lookup
+            clean_config_used = dict(clean_config)
+            clean_config_used["bar"] = _bar_cfg
+
         # 执行清洗（同全量清洗规则）
         clean_result = run_clean_pipeline(
             records=records_to_clean,
             data_type="bar",
             symbol=symbol,
-            config=clean_config,
+            config=clean_config_used,
             save_bad=False,
             save_report=False,
         )
@@ -1148,7 +1168,11 @@ class DataManager:
                 if fin_all:
                     fin_b = [
                         {
+                            # B-08 #448：补 ann_date（全量口径 B-07 #447 已收敛——
+                            # match_latest_financial 依赖 ann_date 优先，缺失会回退 report_deadline
+                            # 导致增量与全量 PIT 口径分叉；补齐后两路径逐字段等价）
                             "report_date": f.get("report_date"),
+                            "ann_date": f.get("ann_date"),
                             "circ_mv": f.get("circ_mv"),
                             "total_mv": f.get("total_mv"),
                             "net_profit": f.get("net_profit"),
