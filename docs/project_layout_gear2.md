@@ -6443,3 +6443,9 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    b. 处置：GRANDFATHERED_GATE_COMMITS 追加 a140ff2（机制上线日另一会话施工违约，审计识别留痕；机制内唯一追加豁免）。判定层面豁免，commit 内容不改写；后续 commit（含另一会话）不再豁免，混业务一律红。
    c. 验证：gate_audit 本地复验 861e331..dd3553a 全绿；全量 pytest 4805 passed/0 failed。
    d. 纪律遵守：本回写与 gate_audit.py 豁免扩展同 commit（纯门禁+蓝图）；不触碰另一会话工作区未提交文件。
+
+## #457 · 2026-10-17 · R-26 leakage_gate 基线对价（gate_audit 豁免追加功能必需）
+   a. 依据：CI #88/#89 红（ubuntu/windows 测试腿）本地复现（Py3.11/3.14 一致）——R-26 test_packages_not_rising 报 leakage_gate lines 4893 > 基线 4890（+3）。
+   b. 变更：ad62db6（#456 豁免追加 a140ff2 + 注释块）使 gate_audit.py 净增 3 行；test_architecture.py PACKAGE_STRUCTURE_BASELINE leakage_gate 4890/163/19 → **4893/163/19**（symbols/fan_out 不变）。
+   c. 验证：R-26 专项 3.11/3.14 均绿；CI 复验待跑。
+   d. 纪律遵守：对价独立 commit（纯门禁 test_architecture + 蓝图），无业务混入；不触碰另一会话工作区文件。
