@@ -11,8 +11,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from myquant.data_access.cleaner.derived_metrics import compute_b_class_metrics
 from myquant.data_access.full_clean_service import _with_factor_lookup
 

@@ -16,8 +16,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, List
 
-import pytest
-
 from myquant.data_access.admission import AdmissionChecker
 from myquant.data_access.manager import DataManager
 from myquant.data_access.sources.base import MarketDataResult

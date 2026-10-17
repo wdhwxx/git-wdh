@@ -697,8 +697,8 @@ class DataManager:
         if not self._db or not data_result or data_result.count == 0:
             return 0
         try:
-            from ..database.queries import DataQueries
             from ..data_access.market_data_writer import MarketDataWriter
+            from ..database.queries import DataQueries
             writer = MarketDataWriter(
                 DataQueries(self._db), admission_checker=self._admission_checker,
             )
