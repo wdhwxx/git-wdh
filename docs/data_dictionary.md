@@ -14,8 +14,10 @@ datasets/
 │   ├── 000001.parquet      # 每只股票一个文件
 │   ├── 000002.parquet
 │   └── ...
-└── features/               # ⚠️ 当前空转：factor_data 表 0 行（实测 2026-10-17），
-                            # 因子落库未接线（见 C-09 DWS 因子落库决策）
+└── features/               # ⚠️ 【C-09 决策 2026-10-17】保留占位（仅 .gitkeep）：因子**不落库**，
+                            # DWS 口径=processed + DB 派生列组合（adjust_factor/financial_data 现算），
+                            # 因子在内存现算（features.py FactorEngine/IncrementalFeatureSession）；
+                            # factor_data 表=可选能力（代码完备、未启用、无消费方、不设计门禁）
 
 ## 2. 行情数据字段说明（processed/*.parquet，扁平式中文字段）
 
@@ -66,7 +68,7 @@ datasets/
 |---|---|
 | market_data | 行情数据表（核心表，K线） |
 | financial_data | 财务数据表（329,735 行；A-02/B-09 后 ann_date 链路补齐） |
-| factor_data | 因子数据表（**当前 0 行，空转**，见 C-09） |
+| factor_data | 因子数据表（**0 行，可选能力未启用**；C-09 决策=不落库，因子内存现算） |
 | adjust_factor | 复权因子表（除权除息事件，方案B #82） |
 | share_change | 股本变动表（真实总/流通股本事件） |
 | strategy_state | 策略状态表 |
@@ -123,14 +125,19 @@ datasets/
 | data_source / created_at | TEXT | 数据来源/创建时间 |
 | 唯一约束 | | UNIQUE(symbol, report_date) |
 
-### 3.4 核心表：factor_data（因子，当前空转）
+### 3.4 核心表：factor_data（因子，可选能力未启用——C-09 决策=不落库）
+
+> **C-09 决策（2026-10-17）**：生产实测 0 行、无任何消费方（策略/模型/回测均不读）；因子在内存现算
+> （features.py FactorEngine / IncrementalFeatureSession）已完备。本表保留 schema/查询/写入代码作为
+> **可选能力**（未启用、不设计门禁），DWS 口径=processed + DB 派生列组合。若未来出现真实消费方，
+> 需先登记蓝图再接线 `scripts/财务数据入库.py --mode factors`。
 
 | 字段名 | 类型 | 说明 |
 |---|---|---|
 | id | INTEGER PRIMARY KEY AUTOINCREMENT | 自增主键 |
 | symbol | TEXT NOT NULL | 股票代码 |
 | trade_date | TEXT NOT NULL | 交易日期 |
-| factor_name | TEXT NOT NULL | 因子名称（volatility_20/momentum_60/rsrs_score 等） |
+| factor_name | TEXT NOT NULL | 因子名称（SMA5/MACD_DIF/PE 等，见 financial_service TECH_FACTOR_SPECS / FUNDAMENTAL_FACTOR_MAP） |
 | factor_value / factor_rank | REAL | 因子值/因子排名（百分位 0-1） |
 | calc_method / data_source / created_at | TEXT | 计算方法/数据来源/创建时间 |
 | 唯一约束 | | UNIQUE(symbol, trade_date, factor_name) |

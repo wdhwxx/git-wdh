@@ -232,7 +232,7 @@ Pythonwdhmm/
 
 │   │                                 # ✅已实现完整版本化管理（#M2/#S5修复）：由data_access/manager.py的DatasetVersion提供，含create_dataset_version/create_from_clean_run/list/get/get_latest/load/rollback/delete/verify版本方法 + checksum(SHA256)校验 + parent_version派生链 + 版本索引持久化 + DatasetVersionError异常体系；v1不再仅输出简单json统计报告
 
-│   ├── features/                     # 特征数据（因子计算后的中间结果，供策略与模型使用，依赖processed，不直接读raw）
+│   ├── features/                     # 【C-09 #449 决策】当前为空转占位：因子不落库——DWS 口径=processed + DB 派生列组合（adjust_factor/financial_data 现算），因子在内存现算（features.py FactorEngine/IncrementalFeatureSession）；features/ 目录保留占位（.gitkeep），不新增数据流、不设计门禁；历史标注"供策略与模型使用"作废（无消费方，见回写#449）
 
 │   └── bad/                          # ✨【新增】脏数据归档目录：校验失败、不可修复数据原样存放，附带错误标记json；gitignore忽略
 
@@ -6382,3 +6382,16 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    c. 变更：①manager.py 增量 run_clean_pipeline 前函数内延迟 import _load_factor_lookup/_with_factor_lookup（full_clean_service 模块级，避免循环依赖）注入 factor_lookup（除权跳变豁免与全量同口径）；②fin_b 构造补 ann_date（对齐全量 B-07 口径）；③tests/unit/test_derived_parity_incremental_full.py：两路径逐字段等价用例（同一 fin 列表含 ann_date → 全量 vs 增量 compute_b_class_metrics 输出逐字段相等；晚披露样本两路径 ann_date 前均不可见；_with_factor_lookup 副本注入不污染原 config）。
    d. 验证：py_compile 通过；pytest 新增测试全绿 + 既有 full_clean/manager 清洗测试不回归；test_architecture 门禁全绿（manager.py R-24 2204 行只减不增红线——本次 +~12 行属功能必需，若超限按顶红六步协议对价 #448）。
    e. 纪律遵守：先登记蓝图（manager/full_clean_service 目录树 + 本回写）再落代码；独立 commit；因子加载 SQL 与 full_clean_service._load_factor_lookup 逐字一致内联（实测：跨模块延迟 import 触发 R-01b 全量导入图真环 1>0，改为内联消除环，行为等价）。
+
+## #449 · 2026-10-17 · 数据层施工 C-09：DWS 因子落库决策（决策=不落库，文档收敛）
+   a. 依据：《数据层结构优化可行性施工方案报告_v1.1》§2.3 新增发现 1 + §5.2(g)（C-09 决策项；"不做决策则禁止为 DWS 设计门禁"）。
+   b. 事实基线（实测 + 代码级取证，5 项证据链）：
+      ① 生产库只读实测（mode=ro）：factor_data **0 行 / 0 标的**；adjust_factor 61,719 行（复权因子链路 #82 独立且正常）；financial_data 329,735 行（财务已入库）。
+      ② 写入端完备但从未生产执行：financial_service.compute_factors（myquant/data_access/financial_service.py:366，14 技术因子 + 5 基本面因子，防未来函数 + 分批 + REPLACE 幂等）经 scripts/财务数据入库.py --mode factors 与 GUI finance_import 入口可触发，但生产库 0 行=从未实际跑过。
+      ③ **无任何消费方**：策略/模型/回测/指标均不读 factor_data（仅 data_layer_baseline 指纹监控 / data_versioner 版本登记 / queries.get_factor_data 查询方法存在；features/ 空目录仅 .gitkeep）。
+      ④ 因子在内存现算链路已完备：features.py FactorEngine + IncrementalFeatureSession（F-14）供策略与 ML 消费，不依赖落库。
+      ⑤ 报告原则：避免为空气设计/为空气接线——无消费方时落库仅增加长表膨胀（3,195 标的 × 因子展开）与维护负担。
+   c. 决策结论：**因子不落库**——DWS 口径明确为「processed + DB 派生列组合（adjust_factor/financial_data 现算）+ 因子内存现算」；factor_data 表保留为可选能力（schema/queries/financial_service 代码不动，未启用、无门禁）；datasets/features/ 保留占位（.gitkeep）不再视为数据流。
+   d. 变更（纯文档收敛，零生产代码改动）：①蓝图目录树 datasets/features/（L235）标注更新为 #449 决策结论（历史"供策略与模型使用"标注作废）；②docs/data_dictionary.md 三处"见 C-09 空转"占位标注→决策结论（L18 目录注释 / L69 表清单 / §3.4 小节标题与字段说明，标注可选能力未启用）；③施工清单 C-09 完成回写。
+   e. 验证：文档一致性自查（data_dictionary 与蓝图对 factor_data/features 口径一致，不再出现"待决策/见 C-09"悬置表述）；无代码变更→不触碰 R-24/R-26/C-5 门禁，无需跑代码门禁（架构纪律：纯文档 commit 独立提交）。
+   f. 纪律遵守：先登记蓝图（目录树 + 本回写）再落文档；独立 commit；不删 features/ 占位（目录树 3.3 保留+注释纪律）；config/datasets/features 预留占位（L425）不动（真实 .gitkeep 占位）。
