@@ -206,6 +206,8 @@ class DataQueries:
             "symbol", "market", "period", "adjust", "trade_date", "trade_time",
             "open", "high", "low", "close", "volume", "amount",
             "pct_chg", "turnover", "amplitude", "volume_ratio", "float_share", "pe_dynamic", "is_suspended", "data_source",
+            # B-02 #442：采集元数据三列（item.get 缺省 None，向后兼容旧调用方；新库 schema.py 已含列）
+            "ingest_time", "ingest_batch", "anomaly_flags",
         ]
         placeholders = ",".join(["?"] * len(columns))
         action = "REPLACE" if replace else "IGNORE"

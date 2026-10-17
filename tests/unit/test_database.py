@@ -331,6 +331,33 @@ class TestSchema:
         assert any("symbol" in name for name in index_names)
         assert any("date" in name for name in index_names)
 
+    # ── B-02 #442：采集元数据三列 ─────────────────────────
+    def test_ingest_metadata_columns_exist(self, conn):
+        """create_all_tables 后 market_data 含 ingest_time/ingest_batch/anomaly_flags 三列（schema.py 与 0011 迁移双路一致）"""
+        cols = {
+            row["name"] for row in conn.execute(
+                "SELECT name FROM pragma_table_info('market_data')"
+            )
+        }
+        assert {"ingest_time", "ingest_batch", "anomaly_flags"} <= cols
+
+    def test_bulk_insert_ingest_metadata_nonempty(self, dq, conn):
+        """新写入行 ingest_time/ingest_batch 非空率 100%（anomaly_flags 为 B-04 预留可空）"""
+        rows = [
+            {"symbol": "000001.SZ", "trade_date": "2024-01-04", "period": "daily",
+             "market": "SZ", "open": 10.0, "high": 10.5, "low": 9.8,
+             "close": 10.2, "volume": 100000.0, "amount": 1020000.0,
+             "ingest_time": "2026-10-17T09:30:00", "ingest_batch": "20261017-0001",
+             "anomaly_flags": None},
+        ]
+        dq.bulk_insert_market_data(rows)
+        row = conn.execute_one(
+            "SELECT ingest_time, ingest_batch FROM market_data WHERE trade_date='2024-01-04'"
+        )
+        assert row is not None
+        assert row["ingest_time"] == "2026-10-17T09:30:00"
+        assert row["ingest_batch"] == "20261017-0001"
+
 
 # ═══════════════════════════════════════════
 #  TestDataQueries - 数据查询接口

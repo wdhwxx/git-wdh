@@ -80,6 +80,9 @@ CREATE TABLE IF NOT EXISTS market_data (
     pe_dynamic   REAL,                        -- 市盈(动)（动态市盈率，年化净利润口径）
     is_suspended INTEGER DEFAULT 0,         -- 是否停牌 1=是 0=否
     data_source TEXT,                        -- 数据来源标识
+    ingest_time   TEXT,                      -- 采集入库时间（ISO 8601，B-02 #442 新增，与 0011 迁移双路一致）
+    ingest_batch  TEXT,                      -- 采集批次号（YYYYMMDD-序号，B-02 #442 新增）
+    anomaly_flags TEXT,                      -- 异常标记（门禁① FLAG 落列预留，B-02 #442 新增；B-04 接线后写入）
     created_at  TEXT    DEFAULT (datetime('now')),  -- 记录创建时间
     UNIQUE(symbol, period, adjust, trade_date, trade_time)
 );

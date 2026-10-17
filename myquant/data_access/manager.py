@@ -697,6 +697,10 @@ class DataManager:
         try:
             from ..database.queries import DataQueries
             queries = DataQueries(self._db)
+            # B-02 #442：采集元数据——ingest_time 精确到采集时刻、ingest_batch 用日期+自增序号
+            ingest_time = datetime.now().isoformat(timespec="seconds")
+            self._ingest_batch_seq = getattr(self, "_ingest_batch_seq", 0) + 1
+            ingest_batch = f"{datetime.now():%Y%m%d}-{self._ingest_batch_seq:04d}"
             # 转换为数据库格式
             db_data = []
             for row in data_result.data:
@@ -717,6 +721,9 @@ class DataManager:
                     "turnover": row.get("turnover"),
                     "is_suspended": 1 if row.get("volume", 0) == 0 else 0,
                     "data_source": data_result.source,
+                    "ingest_time": ingest_time,
+                    "ingest_batch": ingest_batch,
+                    "anomaly_flags": None,  # B-04 门禁①接线后写入 FLAG 标记
                 })
             return queries.bulk_insert_market_data(db_data)
         except Exception:
