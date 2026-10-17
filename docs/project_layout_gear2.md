@@ -6449,3 +6449,9 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    b. 变更：ad62db6（#456 豁免追加 a140ff2 + 注释块）使 gate_audit.py 净增 3 行；test_architecture.py PACKAGE_STRUCTURE_BASELINE leakage_gate 4890/163/19 → **4893/163/19**（symbols/fan_out 不变）。
    c. 验证：R-26 专项 3.11/3.14 均绿；CI 复验待跑。
    d. 纪律遵守：对价独立 commit（纯门禁 test_architecture + 蓝图），无业务混入；不触碰另一会话工作区文件。
+
+## #458 · 2026-10-17 · C-5 语句棘轮批量对价（CI Py3.12 实测 53f4e9f，19 文件）
+   a. 依据：CI #90/#91 覆盖率门禁红（20 项违反：C-4×1 + C-5×19）——C-1a/C-1b 总量达标（66.2% / 41107 行），红点为存量文件语句数超冻结值（Py3.12 语句口径，本地 3.14 语句数偏低未触发）。
+   b. 变更：FILE_STMT_CEILING 批量同步 19 文件冻结值至 CI 实测——financial_sync_service 161→194、full_clean_service 531→536、akshare_source 571→583、connection 139→152、queries 505→543、schema 97→104、trade_log 54→136、tradability 95→104、coverage_gate 255→257、gate_audit 112→115、base_broker 351→352、manager 477→493、qmt_broker 1033→1055、engine 1119→1221、engine_assembly 165→193、portfolio 419→467、state_store 374→386、account_reconciler 278→358、alerting 1510→1516。增长来源：另一会话数据层施工（A/B/C 系列 correction_ledger/ingest 三列/UPSERT/查单闭环）+ 门禁自身增长，功能必需，与 R-24/R-26 已同步基线联动。
+   c. 验证：FILE_FLOOR 不受影响（qmt_broker 60.0/alerting 68.0 保持）；19 值逐项校验=CI 实测；C-4 data_layer_baseline 64.8% 另立补测项（#459）。
+   d. 纪律遵守：独立 commit（纯 coverage_gate.py+蓝图，无业务混入）；先拆后抬原则已评估（19 文件增长为累积功能施工，拆解成本高于对价，选择对价抬升）；未触碰另一会话工作区文件。

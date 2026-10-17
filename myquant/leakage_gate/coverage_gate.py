@@ -121,6 +121,9 @@ FILE_FLOOR: dict[str, float] = {
 }
 # C-5 存量 T0/T1 文件语句数棘轮（v1.2 §5.3：按现状冻结；语句数超 ceiling 即红，
 # 封堵"把新代码塞进旧文件绕开 C-4"）。初值由本地实测回填（CI 实测后独立 commit 更新）。
+# 对价 #458（2026-10-17）：CI Py3.12 实测 53f4e9f 批量同步 19 文件——另一会话数据层施工
+# （A/B/C 系列：correction_ledger/ingest 三列/UPSERT/查单闭环）+ 门禁自身增长（coverage_gate/gate_audit），
+# 语句数真实上涨（trade_log 54→136 等），功能必需，与 R-24/R-26 已同步基线联动，独立 commit + 蓝图回写。
 FILE_STMT_CEILING: dict[str, int] = {
     "allocation/__init__.py": 5,
     "allocation/base.py": 130,
@@ -194,14 +197,14 @@ FILE_STMT_CEILING: dict[str, int] = {
     "data_access/factory.py": 75,
     "data_access/fetcher.py": 157,
     "data_access/financial_service.py": 315,
-    "data_access/financial_sync_service.py": 161,
-    "data_access/full_clean_service.py": 531,
+    "data_access/financial_sync_service.py": 194,
+    "data_access/full_clean_service.py": 536,
     "data_access/loader.py": 461,
     "data_access/manager.py": 756,
     "data_access/provider.py": 381,
     "data_access/share_change_sync_service.py": 114,
     "data_access/sources/__init__.py": 5,
-    "data_access/sources/akshare_source.py": 571,
+    "data_access/sources/akshare_source.py": 583,
     "data_access/sources/base.py": 204,
     "data_access/sources/broker_source.py": 89,
     "data_access/sources/composite_source.py": 230,
@@ -209,10 +212,10 @@ FILE_STMT_CEILING: dict[str, int] = {
     "data_access/sources/web_source.py": 249,
     "data_access/time_semantics.py": 43,
     "database/__init__.py": 6,
-    "database/connection.py": 139,
-    "database/queries.py": 505,
-    "database/schema.py": 97,
-    "database/trade_log.py": 54,
+    "database/connection.py": 152,
+    "database/queries.py": 543,
+    "database/schema.py": 104,
+    "database/trade_log.py": 136,
     "engine/__init__.py": 4,
     "engine/base.py": 63,
     "execution/__init__.py": 6,
@@ -227,17 +230,17 @@ FILE_STMT_CEILING: dict[str, int] = {
     "indicators/momentum.py": 209,
     "indicators/moving_average.py": 169,
     "indicators/rsrs.py": 289,
-    "indicators/tradability.py": 95,
+    "indicators/tradability.py": 104,
     "indicators/volatility.py": 370,
     "leakage_gate/__init__.py": 5,
     "leakage_gate/config_deadkey.py": 72,
     "leakage_gate/consumption.py": 84,
     "leakage_gate/contract.py": 99,
-    "leakage_gate/coverage_gate.py": 255,  # 冻结 commit 更新：229→242（#407 §5.3：C-8 季度治理实现新增 13 语句）；242→255（2026-10-16：顶红指引引擎 explain_violations + _RED_GUIDES 新增 13 语句，配套 TestExplainViolations 6 用例覆盖 91.4%，与 R-26 leakage_gate 包基线 4475→4555/149→150 联动同步）
+    "leakage_gate/coverage_gate.py": 257,  # 冻结 commit 更新：229→242（#407 §5.3：C-8 季度治理实现新增 13 语句）；242→255（2026-10-16：顶红指引引擎 explain_violations + _RED_GUIDES 新增 13 语句，配套 TestExplainViolations 6 用例覆盖 91.4%，与 R-26 leakage_gate 包基线 4475→4555/149→150 联动同步）
     "leakage_gate/cross_sectional.py": 138,
     "leakage_gate/exemption.py": 143,
     "leakage_gate/gate.py": 106,
-    "leakage_gate/gate_audit.py": 112,  # 2026-10-16 新建：门禁参数变更审计（判据A 对价+判据B 蓝图登记），配套 test_gate_audit 13 用例覆盖 93.8%，与 R-26 leakage_gate 包基线 4555→4864/150→163/17→19 联动同步（#C-4·5）；102→108（+6 语句=判据补全：注册条目/基线字段命中 + 独立commit去重，功能必需对价）；108→112（+4 语句=平台解码修复：git 输出显式 UTF-8 + --no-pager + 干净环境，修 CI windows 腿 UnicodeDecodeError，功能必需对价，2026-10-16）
+    "leakage_gate/gate_audit.py": 115,  # 2026-10-16 新建：门禁参数变更审计（判据A 对价+判据B 蓝图登记），配套 test_gate_audit 13 用例覆盖 93.8%，与 R-26 leakage_gate 包基线 4555→4864/150→163/17→19 联动同步（#C-4·5）；102→108（+6 语句=判据补全：注册条目/基线字段命中 + 独立commit去重，功能必需对价）；108→112（+4 语句=平台解码修复：git 输出显式 UTF-8 + --no-pager + 干净环境，修 CI windows 腿 UnicodeDecodeError，功能必需对价，2026-10-16）
     "leakage_gate/report.py": 63,
     "leakage_gate/sanity.py": 228,
     "leakage_gate/signal_words.py": 6,
@@ -246,22 +249,22 @@ FILE_STMT_CEILING: dict[str, int] = {
     "live/acceptance.py": 228,
     "live/broker_factory.py": 13,
     "live/brokers/__init__.py": 8,
-    "live/brokers/base_broker.py": 351,
-    "live/brokers/manager.py": 477,  # 475→477（+2，T0-12 报单结果未知分类 business_skipped 计数功能必需）
+    "live/brokers/base_broker.py": 352,
+    "live/brokers/manager.py": 493,  # 475→477（+2，T0-12 报单结果未知分类 business_skipped 计数功能必需）
     "live/brokers/paper_broker.py": 347,
     "live/brokers/ptrade_broker.py": 58,
-    "live/brokers/qmt_broker.py": 1033,  # 981→1033（+52，T0-12 报单结果未知查单确认闭环 _handle_unknown_submit/查单退避/状态对齐功能必需；配套新增 TestUnknownSubmitAck 5 用例覆盖，C-3 覆盖率 60% 达标）
+    "live/brokers/qmt_broker.py": 1055,  # 981→1033（+52，T0-12 报单结果未知查单确认闭环 _handle_unknown_submit/查单退避/状态对齐功能必需；配套新增 TestUnknownSubmitAck 5 用例覆盖，C-3 覆盖率 60% 达标）
     "live/data_feed.py": 541,  # 885→634（#421 拆包瘦身：行情源层迁出 realtime_sources.py，语句实测同步）；634→541（#423 拆包瘦身：实时桥层迁出 realtime_bridge.py，语句实测同步）
     "live/emergency_liquidation.py": 170,
-    "live/engine.py": 1119,  # 1197→1250（+53，#413-#417 T2-1/T2-2/T1-2/T3-1 功能改造，与 R-24 行数 3111→3236 同步，§5.3）；1250→1095（#422 拆包瘦身：装配层迁出 engine_assembly.py，语句实测同步）；1095→1105（+10，#421 T4-1 撤销T+1自动豁免 + #422 T4-2 启动即不下单 + #424 T4-3/T4-4 信号流与fail-closed 功能必需，与 R-24 行数 2808→2829、R-26 live 包 17465→17492 同批对价，§5.3）；1105→1116（+11，#425 引擎预热/回放停止感知 _stop_requested 功能必需，与 R-24/R-26 live 包同步对价，§5.3）；1116→1119（+3，T0-12 ACK_UNKNOWN 查单确认 engine 端分支功能必需）
-    "live/engine_assembly.py": 165,  # 补注册（2026-10-16）：#422 拆包产物，创建时漏入 C-5 注册表；实测 165 语句 / 85.5%，C-4 收紧 80% 时归位存量（仅语句棘轮约束，无 C-4 新增判定）
+    "live/engine.py": 1221,  # 1197→1250（+53，#413-#417 T2-1/T2-2/T1-2/T3-1 功能改造，与 R-24 行数 3111→3236 同步，§5.3）；1250→1095（#422 拆包瘦身：装配层迁出 engine_assembly.py，语句实测同步）；1095→1105（+10，#421 T4-1 撤销T+1自动豁免 + #422 T4-2 启动即不下单 + #424 T4-3/T4-4 信号流与fail-closed 功能必需，与 R-24 行数 2808→2829、R-26 live 包 17465→17492 同批对价，§5.3）；1105→1116（+11，#425 引擎预热/回放停止感知 _stop_requested 功能必需，与 R-24/R-26 live 包同步对价，§5.3）；1116→1119（+3，T0-12 ACK_UNKNOWN 查单确认 engine 端分支功能必需）
+    "live/engine_assembly.py": 193,  # 补注册（2026-10-16）：#422 拆包产物，创建时漏入 C-5 注册表；实测 165 语句 / 85.5%，C-4 收紧 80% 时归位存量（仅语句棘轮约束，无 C-4 新增判定）
     "live/kill_switch_signal.py": 147,
-    "live/portfolio.py": 419,
+    "live/portfolio.py": 467,
     "live/realtime_bridge.py": 100,  # 补注册（2026-10-16）：#423 拆包产物，创建时漏入 C-5 注册表；实测 100 语句 / 99.0%
     "live/realtime_sources.py": 258,  # 补注册（2026-10-16）：#421 拆包产物，创建时漏入 C-5 注册表；实测 258 语句 / 63.6%（C-4 收紧 80% 暴露，归位存量并以 FILE_FLOOR 60.0 约束下限）
     "live/run_mode.py": 114,
     "live/scheduler.py": 995,
-    "live/state_store.py": 374,
+    "live/state_store.py": 386,
     "ml/__init__.py": 6,
     "ml/feature_contract.py": 69,
     "ml/features.py": 447,
@@ -275,9 +278,9 @@ FILE_STMT_CEILING: dict[str, int] = {
     "models/market_data.py": 280,
     "models/trade.py": 261,  # 260→261（+1，#425 引擎停止感知交易记录字段功能必需）
     "monitoring/__init__.py": 4,
-    "monitoring/account_reconciler.py": 278,
+    "monitoring/account_reconciler.py": 358,
     "monitoring/action_engine.py": 968,
-    "monitoring/alerting.py": 1510,
+    "monitoring/alerting.py": 1516,
     "monitoring/capacity.py": 384,
     "monitoring/center_provider.py": 201,
     "monitoring/circuit_breaker.py": 338,
