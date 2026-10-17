@@ -23,16 +23,21 @@ import pandas as pd
 import pytest
 
 from myquant.data_access.data_layer_baseline import (
+    _open_readonly,
+    _safe_scalar,
     build_baseline,
     build_duplicate_listing,
     collect_aux_tables_fingerprint,
     collect_data_source_fingerprint,
+    collect_duplicate_details,
     collect_duplicate_keys_fingerprint,
     collect_financial_fingerprint,
     collect_market_data_fingerprint,
     collect_processed_fingerprint,
     collect_schema_version_fingerprint,
+    compare_baseline,
     save_baseline_json,
+    save_duplicate_listing,
 )
 
 
@@ -280,15 +285,6 @@ def test_empty_db_fingerprints_present_false(tmp_path: Path) -> None:
 # 覆盖 compare_baseline 一致性比对（含数值容差/类型/缺失键/列表长度/嵌套）、
 # _safe_scalar 查询异常、缺聚合列、processed 目录缺失/坏文件、无 ann_date 列、
 # 辅助表缺表、落盘缺省日期等此前未覆盖分支，抬升 data_layer_baseline 覆盖率。
-
-from myquant.data_access.data_layer_baseline import (
-    _safe_scalar,
-    _open_readonly,
-    collect_duplicate_details,
-    collect_financial_fingerprint,
-    compare_baseline,
-    save_duplicate_listing,
-)
 
 
 def test_compare_baseline_identical(baseline_db: str, processed_dir: Path) -> None:
