@@ -1054,6 +1054,7 @@ Pythonwdhmm/
     │           └── 0002_add_market_data_composite_index.py  # 增量迁移：market_data(symbol,period,trade_date)复合索引
 
     │           ├── 0004_add_trade_ledger.py  # ✨【回写#142】增量迁移：KP-P4-02 orders/fills/positions_daily 三关系账 + 9 索引（幂等 CREATE IF NOT EXISTS）
+    │           ├── 0010_partial_unique_daily.py  # ✨【回写#429】增量迁移（数据层施工 B-01，前置 A-13）：market_data 部分唯一索引 uq_market_data_daily_key (symbol,period,adjust,trade_date) WHERE trade_time IS NULL——只约束日线行防重复，分钟线不受影响；CREATE UNIQUE INDEX IF NOT EXISTS 幂等；downgrade 删索引
 
     │
 
@@ -6191,3 +6192,14 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
       - R-26：PACKAGE_STRUCTURE_BASELINE["data_access"] 三维 PR2 对价抬升 17796/622/37→18016/630/37（+220 行/+8 符号，fan_out 37 不变；拆不动理由=功能必需新增于已登记模块 duplicate_cleaner.py、模块归 data_access 语义正确、无等量旧代码可删；对价五要素齐全：功能必需 A-13 + 工单 #428 + 实测 + 独立 commit + 蓝图回写；沿用用户 A-00 已拍板的 PR2 对价通道，本批施工结束汇总留痕）。
    e. 验证：py_compile 3 文件通过；pytest tests/unit/test_duplicate_cleaner.py 4 passed；真实库 dry-run 确认重复键 4,377 / 重复行 11,945 / 待删 7,568（=11,945−4,377）；--run 执行：在线备份 backups/quant.db.bak_20261017_120016（校验行数一致）→ 事务删除 7,568 行 → 清理后行数 16,910,309（=16,917,877−7,568，恰为重复增量）→ 重复键归 0；独立路径交叉验证（build_duplicate_listing JOIN+GROUP BY）重复键 0 / 重复行 0。
    f. 纪律遵守：动生产库前置完整备份 + dry-run 先行 + 事务删除 + 独立交叉验证；新增文件蓝图登记 + 门禁登记/对价 + 独立 commit。
+
+## #429 · 2026-10-17 · 数据层施工 B-01：部分唯一索引迁移（前置 A-13）
+   a. 依据：《数据层结构优化可行性施工方案报告_v1.1》§5.2 B-01（验收=建索引成功、A-01 重复键=0 且保持、可 downgrade；前置 A-13 已完成）+ §5.3 最短见效路径（A-01→A-13→B-01）。
+   b. 变更文件（两件，蓝图目录树已同步登记 versions/ 段与 tests/unit 段）：
+      - myquant/database/migrations/versions/0010_partial_unique_daily.py —— 迁移：部分唯一索引 uq_market_data_daily_key ON market_data(symbol,period,adjust,trade_date) WHERE trade_time IS NULL（只约束日线行，分钟线不受影响）；CREATE UNIQUE INDEX IF NOT EXISTS 幂等；downgrade 删索引；down_revision=0009（head=0010）；
+      - tests/unit/test_migration_0010.py —— 单测 4 项（upgrade DDL 可执行且含 WHERE 子句 / 日线重复键插入被拒 IntegrityError / 同键分钟线可插入 / downgrade 删索引后约束解除）。
+   c. 门禁处置：
+      - R-19：0010 经 test_migration_0010 动态 importlib 导入执行 DDL（模块名数字开头无法静态 import），AST 静态扫描不计覆盖 → 登记入 ZERO_COVERAGE_BASELINE（与 0005-0009 迁移文件同款先例；DDL 可执行+约束行为已 4 项单测覆盖）；
+      - R-26：PACKAGE_STRUCTURE_BASELINE["database"] 三维 PR2 对价抬升 3960/124/17→4013/126/17（+53 行/+2 符号，fan_out 17 不变；拆不动理由=迁移文件必须置于 versions/ 语义正确、单文件职责单一、无等量旧代码可删；对价五要素齐全：功能必需 B-01 + 工单 #429 + 实测 + 独立 commit + 蓝图回写；沿用用户 A-00 已拍板的 PR2 对价通道，本批施工结束汇总留痕）。
+   d. 验证：py_compile 2 文件通过；pytest tests/unit/test_migration_0010.py 4 passed；生产库 scripts/数据库迁移.py check（0009/16,910,309 行）→ upgrade 执行 0010 成功 → 独立只读验证 alembic_version=0010、uq_market_data_daily_key 存在、重复键保持 0。
+   e. 纪律遵守：先迁移单测（临时库）→ 生产库 check → upgrade → 独立验证；蓝图登记 + 门禁登记/对价 + 独立 commit。
