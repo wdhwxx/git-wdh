@@ -270,7 +270,7 @@ class AkshareDataSource(DataSourceBase):
                             record[std_col] = str(val)[:10]
                     else:
                         try:
-                            record[std_col] = float(val)
+                            record[std_col] = float(val) * 100.0 if (std_col == "volume" and col == "成交量") else float(val)  # 东财历史/分钟成交量=手→股（A-07 #438 实测 tdx/东财 ratio≈100）；新浪 volume 原生=股直取
                         except (ValueError, TypeError):
                             record[std_col] = None
             if "date" in record and record["date"]:

@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS market_data (
     high        REAL,                        -- 最高价
     low         REAL,                        -- 最低价
     close       REAL,                        -- 收盘价
-    volume      REAL,                        -- 成交量（手）
+    volume      REAL,                        -- 成交量（股，A-07 统一口径：东财/腾讯×100 手→股、网易原生股）
     amount      REAL,                        -- 成交额（元）
     pct_chg     REAL,                        -- 涨跌幅（百分比格式，-0.49表示-0.49%）
     turnover    REAL,                        -- 换手率（%）

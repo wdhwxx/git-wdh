@@ -691,6 +691,7 @@ Pythonwdhmm/
 │   │   ├── test_savepoint_transaction.py # ✨【回写#434】SAVEPOINT 嵌套事务单测（A-05，6 项，真实 DataQueries+临时库）：嵌套 delete+insert 失败→整体回滚旧数据保留（A-03 场景验收）/ 嵌套正常路径行数正确 / 内层失败被调用方捕获时仅内层回滚、外层后续写入仍提交 / 单层 commit / 单层 rollback / 三层嵌套最内层失败全回滚 ✅已完成
 │   │   ├── test_a08_orders_filled_columns.py # ✨【回写#435】orders UPSERT 补 3 列单测（A-08，4 项）：INSERT 落库 filled 列有值 / 部分→全部成交 filled_qty 递增不被重置 / 部分成交后撤单残量保留 / schema orders DDL 与迁移双路一致 ✅已完成
 │   │   ├── test_a09_processed_pre_close.py # ✨【回写#436】processed 前收盘价两写入方一致单测（A-09 方案二，5 项）：增量模板不含前收盘价 / 导出列集合==模板（两写入方一致）/ provider 读取层兜底派生存在 / mixed_engine 兜底存在 / 导出脚本无派生代码回归 ✅已完成
+│   │   ├── test_a07_volume_unit.py # ✨【回写#438】volume 单位契约统一单测（A-07，5 项）：schema 注释=股 / 东财换算 ×100 / 网易直取不换算 / 腾讯实时 ×100 / DB 抽样同日期比值∈[0.9,1.1]（多源同口径） ✅已完成
 │   │   ├── test_akshare_ann_date.py  # ✨【回写#431】财务取数补公告日单测（B-09，8 项，monkeypatch 不联网）：_normalize_notice_date 归一化 3 / 东财估值补+空 2 / 东财历史补+空 2 / 新浪显式空 1 ✅已完成
 
 │   │   ├── test_live_risk.py         # 风控规则拦截、仓位限制、流控（83项）✅已完成
@@ -6294,3 +6295,10 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    c. 变更：docs/data_dictionary.md 修订四处失真——①复权口径：DB market_data 现为 raw 原始层、processed 为 hfq 复权（删除"回测使用 hfq、实盘也 hfq"旧表述）；②表名：§3 旧表结构替换为真实表清单+核心表字段；③features 空转：标注 factor_data 0 行、未接线；④清理文末生成指令残留（"复制保存/回复我第2个完成"）；volume 单位按"股"写（A-07 同步后代码注释一致）。
    d. 验证：修订后文档与 schema.py 表清单逐表一致；全文档 grep 无 daily_bar/stock_factor/trade_record/position_state/live_run_log 旧表名残留。
    e. 纪律遵守：蓝图已有条目（docs 段 267 行），先追加回写记录再修订；独立 commit。
+
+## #438 · 2026-10-17 · 数据层施工 A-07：volume 单位契约统一
+   a. 依据：《数据层结构优化可行性施工方案报告_v1.1》§5.2 A-07（交付物=代码注释+换算路径回归样例+单测；验收=三源 volume 口径一致为股、抽样同日期比值∈[0.9,1.1]）。
+   b. 事实基线（代码级取证）：**存储口径实际已是股**——东财路径 akshare_source.py:556 `volume = item[5] * 100.0  # 手→股（P1-④ #83，与腾讯实时/全库口径一致）`；腾讯实时 realtime_sources.py:530 `volume_hand * 100.0  # 手→股`；网易路径 akshare_source.py:632 `volume = _safe_float(row.get("成交量"))` 直取不换算（163 接口原生=股）。**唯一失真=schema.py:73 注释"成交量（手）"**。
+   c. 变更：①schema.py:73 注释"成交量（手）"→"成交量（股）"（纯注释，database 包行数不变，不触发 R-26）；②新增 tests/unit/test_a07_volume_unit.py 5 项回归样例（见 tests 段条目）。
+   d. 验证：py_compile schema.py 通过；pytest tests/unit/test_a07_volume_unit.py 5 passed；门禁复跑（test_architecture）全绿；DB 抽样同日期比值∈[0.9,1.1]（tdx/tencent_http/eastmoney 多源同口径）。
+   e. 纪律遵守：先登记蓝图（tests 段条目+本回写）再落代码；独立 commit。
