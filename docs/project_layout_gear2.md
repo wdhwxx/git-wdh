@@ -687,7 +687,8 @@ Pythonwdhmm/
 │   │   ├── test_data_manager.py      # 数据加载、版本管理（68项）✅已完成
 │   │   ├── test_data_layer_baseline.py # ✨【回写#426】【回写#427】数据层状态指纹基线单测（A-00 的 9 项 + A-01 新增 1 项=10 项）：7 组指纹采集 / JSON 落盘往返 / 可重跑复现（两次构建指纹一致）/ 缺库 FileNotFoundError / 空库 present=False / 重复键明细采集与清单落盘 ✅已完成
 │   │   ├── test_duplicate_cleaner.py   # ✨【回写#428】存量重复行清理单测（A-13，4 项）：统计口径（重复键/重复行/待删行）/ dry-run 不修改库 / 执行后重复键归 0 且保留行符合规则（原始源优先、同源最早 created_at）/ 备份生成且行数一致 ✅已完成
-│   │   ├── test_k3_loss_window.py    # ✨【回写#433】K3 丢失窗口临时库复现单测（A-03，3 项，只读临时库）：嵌套 delete 已生效+insert 注入异常→行数归 0 且不可回滚（K3 确认）/ 嵌套正常路径 / 对照原子事务失败保留旧数据（A-05 验收基准）✅已完成
+│   │   ├── test_k3_loss_window.py    # ✨【回写#433】【回写#434】K3 丢失窗口临时库复现单测（A-03，3 项，只读临时库）：嵌套 delete+insert 注入异常 / 嵌套正常路径 / 对照原子事务失败保留旧数据；A-05 落地后核心复现用例翻转为回归（数据不丢失，K3 原结论由 A-03 结论文档固化）✅已完成
+│   │   ├── test_savepoint_transaction.py # ✨【回写#434】SAVEPOINT 嵌套事务单测（A-05，6 项，真实 DataQueries+临时库）：嵌套 delete+insert 失败→整体回滚旧数据保留（A-03 场景验收）/ 嵌套正常路径行数正确 / 内层失败被调用方捕获时仅内层回滚、外层后续写入仍提交 / 单层 commit / 单层 rollback / 三层嵌套最内层失败全回滚 ✅已完成
 │   │   ├── test_akshare_ann_date.py  # ✨【回写#431】财务取数补公告日单测（B-09，8 项，monkeypatch 不联网）：_normalize_notice_date 归一化 3 / 东财估值补+空 2 / 东财历史补+空 2 / 新浪显式空 1 ✅已完成
 
 │   │   ├── test_live_risk.py         # 风控规则拦截、仓位限制、流控（83项）✅已完成
@@ -1033,7 +1034,7 @@ Pythonwdhmm/
 
     │   ├── __init__.py
 
-    │   ├── connection.py             # SQLite连接管理上下文管理器；✨【回写#157】close_all 关闭异常记 warning（KP-P1-07：不裸 pass 吞噬）+ 注入 logger；✨【回写#201】BASE-6 DEFAULT_PRAGMAS 补 busy_timeout=30000（写等待而非锁表，配合 WAL 高写入无锁表告警）；✨【回写#204】BASE-9 库文件权限收紧 _harden_db_permissions（connect 前调用：POSIX chmod 600 主库+wal+shm 伴生文件；Windows 记 debug 提示 OS 级加密卷 BitLocker + NTFS 权限兜底，权限收紧失败记 warning 不阻断连接）
+    │   ├── connection.py             # SQLite连接管理上下文管理器；✨【回写#157】close_all 关闭异常记 warning（KP-P1-07：不裸 pass 吞噬）+ 注入 logger；✨【回写#201】BASE-6 DEFAULT_PRAGMAS 补 busy_timeout=30000（写等待而非锁表，配合 WAL 高写入无锁表告警）；✨【回写#204】BASE-9 库文件权限收紧 _harden_db_permissions（connect 前调用：POSIX chmod 600 主库+wal+shm 伴生文件；Windows 记 debug 提示 OS 级加密卷 BitLocker + NTFS 权限兜底，权限收紧失败记 warning 不阻断连接）；✨【回写#434】transaction() SAVEPOINT 嵌套事务支持（A-05）：非嵌套分支显式 BEGIN（保证内层可检测活跃事务）+ 嵌套分支 SAVEPOINT/RELEASE/ROLLBACK TO（内层不再提前提交外层事务），修复 K3 丢失窗口（full_clean_service.write_back_symbol + queries 三层嵌套场景，delete 已生效而 insert 失败不再发生）
 
     │   ├── schema.py                 # 表结构总览DDL；✨【回写#87】drop_all_tables 顺序 share_change 重复行清理（L502-503 双行→单行，幂等不变）；✨【回写#142】TABLE_NAMES 10→13 张（KP-P4-02：orders/fills/positions_daily 三关系账 + DDL/索引/ALL_CREATE/drop_all 同步）；✨【回写#204】BASE-9 metrics_history 表加 value_encrypted TEXT 列（敏感字段密文落盘，CREATE IF NOT EXISTS 与新库建表路径逐字一致）
 
@@ -6250,3 +6251,14 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
       - docs/数据质量治理/K3丢失窗口复现结论文档_20261017.md —— A-03 复现结论（根因取证表/窗口机制推演/实验表/施工指向；文档本体不 commit，与 A-02 先例一致）。
    d. 验证：py_compile 通过；pytest tests/unit/test_k3_loss_window.py 3 passed；门禁复跑全绿（无 R-23/R-26 触发——仅新增测试文件与 docs）。
    e. 纪律遵守：全程只读（临时库，未触碰生产 quant.db）；先登记蓝图再创建测试；独立 commit。
+
+## #434 · 2026-10-17 · 数据层施工 A-05：SAVEPOINT 嵌套事务（修复 K3 丢失窗口）
+   a. 依据：《数据层结构优化可行性施工方案报告_v1.1》§5.2 A-05（验收=A-03 复现场景数据不再丢失；git 可回滚）+ §5.3 依赖链 A-03→A-05。
+   b. 变更（三处）：
+      - myquant/database/connection.py —— transaction() 支持嵌套事务 SAVEPOINT：无活跃事务（最外层）显式 BEGIN（保证内层能检测到嵌套，否则内层 commit 会提交整个活跃事务=K3 窗口），正常退出 commit / 异常 rollback（语义不变）；已有活跃事务（嵌套）进入 SAVEPOINT <唯一名>，正常 RELEASE（不提前提交外层），异常 ROLLBACK TO + RELEASE（仅回滚本层）。新增类级 _savepoint_counter 命名计数器。58 处 transaction() 调用点中单层调用语义完全不变；
+      - tests/unit/test_savepoint_transaction.py —— 单测 6 项（真实 DataQueries + 真实 schema 临时库）：嵌套 delete+insert 失败→整体回滚旧 10 行保留（A-03 场景验收）；嵌套正常路径行数正确；内层失败被调用方捕获仅内层回滚、外层后续写入仍提交；单层 commit；单层 rollback；三层嵌套最内层失败全回滚；
+      - tests/unit/test_k3_loss_window.py —— 核心复现用例翻转为回归（嵌套 delete+insert 注入异常→数据不丢失），docstring 注明 K3 原结论由 A-03 结论文档固化。
+   d. 门禁处置：
+      - R-26：PACKAGE_STRUCTURE_BASELINE["database"] 抬升 4013/126/17→4042/126/17（+29 行，symbols/fan_out 不变；功能必需 A-05：SAVEPOINT 机制是 K3 修复最小实现，拆不动=事务语义集中于单点、无等量旧代码可删；对价五要素齐全：功能必需 + 工单 #434 + 实测（A-03 复现成功）+ 独立 commit + 蓝图回写；沿用 A-00 已拍板 PR2 通道）。
+   e. 验证：py_compile 通过；pytest tests/unit/test_savepoint_transaction.py + test_k3_loss_window.py 9 passed；门禁复跑全绿。
+   f. 纪律遵守：先登记蓝图再改代码；嵌套语义只加不改单层行为（58 调用点回归兼容）；独立 commit。

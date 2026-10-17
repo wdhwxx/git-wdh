@@ -269,20 +269,49 @@ class DatabaseConnection:
 
     # ── 事务上下文管理器 ──
 
+    #: SAVEPOINT 命名计数器（A-05：嵌套事务唯一命名，线程安全足够——单进程内递增）
+    _savepoint_counter = 0
+
     @contextmanager
     def transaction(self) -> Iterator[None]:
         """
-        事务上下文管理器
+        事务上下文管理器（A-05 起支持嵌套事务 SAVEPOINT）
+
         with conn.transaction():
             conn.execute_update(...)
-        正常退出自动commit，异常自动rollback
+
+        无活跃事务（最外层）：正常退出自动 commit，异常自动 rollback —— 语义不变。
+        已有活跃事务（嵌套调用，如 DataQueries 方法套在调用方事务内）：
+        进入建立 SAVEPOINT，正常退出 RELEASE（不提前提交外层事务），
+        异常 ROLLBACK TO + RELEASE（仅回滚本层改动）。
+
+        修复 K3 丢失窗口：此前嵌套事务中内层 commit 会提交整个活跃事务
+        （delete_market_data 已生效、后续 bulk_insert 失败即"标的被删空且不可回滚"），
+        本实现让内层写入始终归属外层事务，失败时整体回滚、数据不丢失。
         """
         conn = self._get_conn()
+        nested = bool(conn.in_transaction)
+        savepoint: Optional[str] = None
+        if nested:
+            type(self)._savepoint_counter += 1
+            savepoint = f"dq_sp_{type(self)._savepoint_counter}"
+            conn.execute(f"SAVEPOINT {savepoint}")
+        else:
+            # A-05：显式开启外层事务（非惰性），保证内层 transaction() 能检测到
+            # 活跃事务并走 SAVEPOINT 嵌套路径（否则内层 commit 会提交整个事务=K3 窗口）
+            conn.execute("BEGIN")
         try:
             yield
-            conn.commit()
+            if nested:
+                conn.execute(f"RELEASE SAVEPOINT {savepoint}")
+            else:
+                conn.commit()
         except Exception:
-            conn.rollback()
+            if nested:
+                conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+                conn.execute(f"RELEASE SAVEPOINT {savepoint}")
+            else:
+                conn.rollback()
             raise
 
     # ── 上下文管理器 ──

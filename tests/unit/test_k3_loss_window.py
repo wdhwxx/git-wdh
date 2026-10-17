@@ -14,8 +14,10 @@ K3 根因（代码级）：DataQueries.bulk_insert_market_data（queries.py:218�
      ⇒ 标的被删空且不可回滚（数据丢失窗口）。
 
 本文件即 A-03 的"临时库复现脚本"：复现成功 = K3 机制确认（delete 已生效、
-insert 未生效、外层 rollback 救不回）。对照用例验证"若 DELETE+INSERT 处于同一
-原子事务（SAVEPOINT 语义），失败时数据不丢失" —— 该对照是 A-05 的验收基准。
+insert 未生效、外层 rollback 救不回）。**A-05（SAVEPOINT）落地后，本文件核心
+复现用例已翻转为回归验证（数据不丢失），K3 原复现结论由 A-03 结论文档固化。**
+`test_atomic_control_insert_failed_keeps_old` 对照用例原为 A-05 验收基准，
+现已被 test_savepoint_transaction 的嵌套用例直接覆盖（保留作独立回归）。
 """
 from __future__ import annotations
 
@@ -139,16 +141,18 @@ def _new_rows(symbol: str, n: int) -> List[dict]:
 
 
 def test_k3_nested_delete_committed_insert_failed(tmp_path: Path) -> None:
-    """【K3 复现=确认】嵌套模式下 bulk_insert 注入异常：
-    DELETE 已生效（行数 0=标的被删空），外层事务无法回滚恢复（旧数据丢失）。"""
+    """【A-05 修复后回归】嵌套模式下 bulk_insert 注入异常：
+    原 K3 复现（commit 8d03233）行为=DELETE 已生效（行数 0）、外层救不回；
+    A-05 起 transaction() 支持 SAVEPOINT，内层写入归属外层事务，失败整体回滚
+    → 旧 10 行保留（K3 丢失窗口已封堵，与 test_savepoint_transaction 验收一致）。"""
     dq = _make_dq(tmp_path)
     _seed(dq, "000001.SZ", 10)
     assert _count(dq, "000001.SZ") == 10
 
     status = _simulate_nested_write_back(dq, "000001.SZ", _new_rows("000001.SZ", 10),
                                          fail_insert=True)
-    assert status == "error"            # 写回报错（insert 失败）
-    assert _count(dq, "000001.SZ") == 0  # DELETE 已生效且不可回滚 → 丢失窗口成立
+    assert status == "error"              # 写回报错（insert 失败）
+    assert _count(dq, "000001.SZ") == 10  # 数据不丢失（SAVEPOINT 修复生效）
 
 
 def test_k3_nested_normal_path_ok(tmp_path: Path) -> None:
