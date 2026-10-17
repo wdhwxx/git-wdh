@@ -7,12 +7,15 @@
 myquant/data_access/data_layer_baseline.py（build_baseline / save_baseline_json）。
 
 产出：outputs/数据层基线_<YYYYMMDD>.json —— 7 组只读指纹，施工前后可重跑复现，
-作为《数据层结构优化可行性施工方案报告_v1.1》A-00 的验收产物。
+作为《数据层结构优化可行性施工方案报告_v1.1》A-00 的验收产物；
+加 --dup-listing 额外产出 outputs/重复键定位清单_<YYYYMMDD>.json —— 重复键
+全量明细（A-01 验收产物，供 A-13 清理决策使用）。
 
 用法:
   python scripts/数据层基线.py                                   # 默认库+默认 processed+默认日期
   python scripts/数据层基线.py --db database/quant.db --processed datasets/processed
   python scripts/数据层基线.py --out-dir outputs --date 2026-10-17
+  python scripts/数据层基线.py --dup-listing                     # 额外输出重复键全量明细
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from myquant.data_access.data_layer_baseline import (  # noqa: E402
     build_baseline,
+    build_duplicate_listing,
     save_baseline_json,
 )
 
@@ -68,6 +72,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="额外打印基线 JSON 全文到 stdout（便于人工核对）",
     )
+    parser.add_argument(
+        "--dup-listing",
+        action="store_true",
+        help="额外输出重复键全量明细清单（A-01，供 A-13 清理决策使用）",
+    )
     return parser.parse_args()
 
 
@@ -97,6 +106,16 @@ def main() -> int:
 
     if args.print:
         print(json.dumps(baseline, ensure_ascii=False, indent=2, default=str))
+
+    if args.dup_listing:
+        dup_path, listing = build_duplicate_listing(
+            db_path=args.db,
+            out_dir=args.out_dir,
+            baseline_date=args.date,
+        )
+        print(f"✅ 重复键定位清单已生成: {dup_path}（"
+              f"{listing.get('duplicate_key_total')} 个重复键 / "
+              f"{listing.get('duplicate_row_total')} 行重复明细）")
     return 0
 
 

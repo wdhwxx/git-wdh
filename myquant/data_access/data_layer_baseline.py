@@ -243,6 +243,119 @@ def collect_financial_fingerprint(conn: sqlite3.Connection) -> Dict[str, Any]:
     }
 
 
+def collect_duplicate_details(conn: sqlite3.Connection) -> Dict[str, Any]:
+    """全量定位重复键明细（A-01）。
+
+    按 (symbol, period, adjust, trade_date) 聚合出全部重复键，并输出每个键下的
+    全部重复行（rowid / data_source / created_at / 价格量字段），供 A-13
+    存量重复行清理的"保留最优行"决策使用。
+
+    Args:
+        conn: 只读数据库连接。
+
+    Returns:
+        明细字典：present / key_columns / duplicate_key_total /
+        duplicate_row_total / details（每键 key + rows 全量明细）。
+    """
+    if not _table_exists(conn, "market_data"):
+        return {"present": False}
+    cols = _table_columns(conn, "market_data")
+    key_cols = [c for c in DUP_KEY_COLUMNS if c in cols]
+    if len(key_cols) != len(DUP_KEY_COLUMNS):
+        return {
+            "present": False,
+            "error": f"缺少聚合列: {DUP_KEY_COLUMNS} vs {cols}",
+        }
+    group_sql = ", ".join(key_cols)
+    detail_cols = ["rowid"] + key_cols + [
+        c
+        for c in ("trade_time", "data_source", "created_at", "open", "high",
+                  "low", "close", "volume", "amount", "pct_chg")
+        if c in cols
+    ]
+    sel = ", ".join("m.rowid" if c == "rowid" else f"m.{c}" for c in detail_cols)
+    rows = conn.execute(
+        f"SELECT {sel} FROM market_data m JOIN (SELECT {group_sql} FROM market_data "
+        f"GROUP BY {group_sql} HAVING COUNT(*)>1) d USING ({group_sql}) "
+        f"ORDER BY {group_sql}"
+    ).fetchall()
+    details: List[Dict[str, Any]] = []
+    current_key: Optional[Tuple[Any, ...]] = None
+    current: Optional[Dict[str, Any]] = None
+    for r in rows:
+        # SELECT 首列是 rowid，键列从第 2 列起
+        k = tuple(r[1 : 1 + len(key_cols)])
+        if k != current_key:
+            current = {"key": dict(zip(key_cols, k)), "rows": []}
+            details.append(current)
+            current_key = k
+        current["rows"].append(dict(zip(detail_cols, r)))
+    return {
+        "present": True,
+        "key_columns": list(key_cols),
+        "duplicate_key_total": len(details),
+        "duplicate_row_total": sum(len(d["rows"]) for d in details),
+        "details": details,
+    }
+
+
+def save_duplicate_listing(
+    listing: Dict[str, Any],
+    out_dir: str,
+    baseline_date: Optional[str] = None,
+) -> str:
+    """把重复键明细原子写入 ``out_dir/重复键定位清单_<YYYYMMDD>.json``。
+
+    Args:
+        listing: collect_duplicate_details 返回的明细字典。
+        out_dir: 输出目录。
+        baseline_date: 清单日期；缺省取今天。
+
+    Returns:
+        实际写入的 JSON 文件绝对路径。
+    """
+    if baseline_date is None:
+        baseline_date = date.today().isoformat()
+    stamp = baseline_date.replace("-", "")
+    out = Path(out_dir)
+    os.makedirs(out, exist_ok=True)
+    target = out / f"重复键定位清单_{stamp}.json"
+    tmp = out / f"重复键定位清单_{stamp}.json.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(listing, f, ensure_ascii=False, indent=2, default=str)
+        f.write("\n")
+    os.replace(tmp, target)
+    logger.info("重复键定位清单已写入: %s", target)
+    return str(target)
+
+
+def build_duplicate_listing(
+    db_path: str,
+    out_dir: str,
+    baseline_date: Optional[str] = None,
+) -> Tuple[str, Dict[str, Any]]:
+    """构建并落盘重复键全量明细（A-01 一站式入口）。
+
+    Args:
+        db_path: 数据库文件绝对路径（只读打开）。
+        out_dir: 清单输出目录。
+        baseline_date: 清单日期；缺省取今天。
+
+    Returns:
+        (清单文件绝对路径, 明细字典)。
+
+    Raises:
+        FileNotFoundError: 数据库文件不存在时抛出。
+    """
+    conn = _open_readonly(db_path)
+    try:
+        listing = collect_duplicate_details(conn)
+    finally:
+        conn.close()
+    path = save_duplicate_listing(listing, out_dir, baseline_date)
+    return path, listing
+
+
 def collect_processed_fingerprint(processed_dir: str) -> Dict[str, Any]:
     """采集 processed parquet 物理现状指纹（第 5 组）。
 

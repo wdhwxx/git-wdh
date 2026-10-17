@@ -24,6 +24,7 @@ import pytest
 
 from myquant.data_access.data_layer_baseline import (
     build_baseline,
+    build_duplicate_listing,
     collect_aux_tables_fingerprint,
     collect_data_source_fingerprint,
     collect_duplicate_keys_fingerprint,
@@ -226,6 +227,32 @@ def test_build_save_reload_and_reproducible(
     assert reloaded["schema_version"] == 1
     assert reloaded["baseline_date"] == "2026-10-17"
     assert reloaded["fingerprints"] == b1["fingerprints"]
+
+
+def test_duplicate_details_and_listing(
+    baseline_db: str, tmp_path: Path
+) -> None:
+    """A-01：重复键全量明细采集与清单落盘。"""
+    out = str(tmp_path / "out")
+    path, listing = build_duplicate_listing(baseline_db, out, "2026-10-17")
+    assert listing["present"] is True
+    assert listing["duplicate_key_total"] == 1
+    assert listing["duplicate_row_total"] == 2
+    assert listing["key_columns"] == ["symbol", "period", "adjust", "trade_date"]
+    detail = listing["details"][0]
+    assert detail["key"] == {
+        "symbol": "000001.SZ", "period": "daily", "adjust": "raw",
+        "trade_date": "2026-10-15",
+    }
+    rows = detail["rows"]
+    assert len(rows) == 2
+    assert {r["data_source"] for r in rows} == {"tdx", "incremental_clean"}
+    assert all("rowid" in r and "created_at" in r and "close" in r for r in rows)
+    assert path.endswith("重复键定位清单_20261017.json")
+    with open(path, encoding="utf-8") as f:
+        reloaded = json.load(f)
+    assert reloaded["duplicate_key_total"] == 1
+    assert reloaded["duplicate_row_total"] == 2
 
 
 def test_missing_db_raises(tmp_path: Path) -> None:
