@@ -73,6 +73,9 @@ class TradabilityConfig:
         是否启用流动性过滤，默认 True。
     filter_limit : bool
         是否启用一字涨跌停过滤，默认 True。
+    fail_closed_on_skipped : bool
+        B-06 #446：规则因列缺失/规则关闭而无法执行时，False=跳过不拒（fail-open，
+        默认，向后兼容）；True=整列拒单（fail-closed，告警可观测）。
     """
 
     min_avg_amount: float = DEFAULT_MIN_AVG_AMOUNT
@@ -82,6 +85,7 @@ class TradabilityConfig:
     filter_suspend: bool = True
     filter_liquidity: bool = True
     filter_limit: bool = True
+    fail_closed_on_skipped: bool = False
 
     def __post_init__(self) -> None:
         """防御式校验：非法参数显式报错。"""
@@ -176,7 +180,26 @@ def filter_tradable(
         "limit_rejected": 0,
         "total_rejected": 0,
         "rules_skipped": [],
+        # B-06 #446：结构化告警明细（rule/code/reason 三元组），随字符串摘要同步
+        "rules_skipped_detail": [],
     }
+
+    def _skip(rule: str, code: str, reason: str) -> None:
+        """记录规则跳过：字符串摘要（兼容）+ 结构化明细（告警可观测）。"""
+        stats["rules_skipped"].append(f"{rule}({reason})")
+        stats["rules_skipped_detail"].append(
+            {"rule": rule, "code": code, "reason": reason}
+        )
+        # fail-closed：无法执行即整列拒单（原地置 False，避免闭包内增强赋值绑定新名）
+        if cfg.fail_closed_on_skipped:
+            mask.iloc[:] = False
+            _reject_key = {
+                "suspend": "suspended_rejected",
+                "liquidity": "liquidity_rejected",
+                "limit": "limit_rejected",
+            }.get(rule)
+            if _reject_key is not None:
+                stats[_reject_key] = len(df)
 
     # ── 1. 当日停牌过滤 ──
     if cfg.filter_suspend:
@@ -189,9 +212,9 @@ def filter_tradable(
             stats["suspended_rejected"] = int(blocked.sum())
             mask &= ~blocked
         else:
-            stats["rules_skipped"].append("suspend(列缺失，跳过)")
+            _skip("suspend", "SUSPEND_COL_MISSING", "列缺失，跳过")
     else:
-        stats["rules_skipped"].append("suspend(规则关闭)")
+        _skip("suspend", "SUSPEND_RULE_OFF", "规则关闭")
 
     # ── 2. 流动性过滤（近 N 日均成交额）──
     if cfg.filter_liquidity:
@@ -206,9 +229,9 @@ def filter_tradable(
             stats["liquidity_rejected"] = int(low_liq.sum())
             mask &= ~low_liq
         else:
-            stats["rules_skipped"].append("liquidity(列缺失，跳过)")
+            _skip("liquidity", "LIQUIDITY_COL_MISSING", "列缺失，跳过")
     else:
-        stats["rules_skipped"].append("liquidity(规则关闭)")
+        _skip("liquidity", "LIQUIDITY_RULE_OFF", "规则关闭")
 
     # ── 3. 一字涨跌停过滤 ──
     if cfg.filter_limit:
@@ -222,9 +245,9 @@ def filter_tradable(
             stats["limit_rejected"] = int(blocked.sum())
             mask &= ~blocked
         else:
-            stats["rules_skipped"].append("limit(列缺失，跳过)")
+            _skip("limit", "LIMIT_COL_MISSING", "列缺失，跳过")
     else:
-        stats["rules_skipped"].append("limit(规则关闭)")
+        _skip("limit", "LIMIT_RULE_OFF", "规则关闭")
 
     stats["total_rejected"] = int((~mask).sum())
     return mask, stats

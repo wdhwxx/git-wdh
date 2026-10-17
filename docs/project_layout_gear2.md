@@ -6361,3 +6361,10 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    c. 变更：①新增 myquant/data_access/writer_shadow.py：WriteShadowComparer（enabled 默认 False）——对原始行批量过门禁①（AdmissionChecker，prev 上下文逐行）→ BLOCK 拒收清单（不产生写入行）/ FLAG 打 anomaly_flags 落列 / PASS 原样；shadow_rows 补 ingest_time/ingest_batch；compare(legacy_db_rows, shadow_rows) 除 ingest 三列外逐字段 diff → ShadowReport(consistent/diffs/blocked/flagged)；②tests/unit/test_writer_shadow.py：等价（正常行零 diff）/ BLOCK 拒收落 blocked / FLAG 落 anomaly_flags / enabled=False 无副作用。
    d. 验证：py_compile 通过；pytest tests/unit/test_writer_shadow.py 全绿；test_architecture 门禁全绿（新模块被单测 import 有覆盖，不抬基线）。
    e. 纪律遵守：先登记蓝图（data_access/tests 目录树 + 本回写）再落代码；独立 commit；影子开关默认关（生产零影响），C-03 收敛写入口后才接线。生产差异=0（连续3交易日）为生产验证项，随 C-03 后观察。
+
+## #446 · 2026-10-17 · 数据层施工 B-06：停牌过滤接线 + rules_skipped 结构化告警
+   a. 依据：《数据层结构优化可行性施工方案报告_v1.1》§5.2 B-06（P1，交付=入口+tradability；验收=回测停牌股被拒单、告警可观测）+ §4.3(f)（tradability.py rules_skipped 升级结构化告警 + 可配 fail-closed 拒单；生产入口不再传 is_suspended=None）。
+   b. 事实基线（代码级取证）：make_suspended_lookup 已存在（sim_broker.py:599-616，None/空集→不拦截向后兼容）；生产回测入口 run_回测入口.py:347、run_批量回测.py:60 的 _broker_factory 均传 is_suspended=None（停牌接线缺位）；tradability.py:181-227 三规则列缺失/规则关闭时 rules_skipped 追加字符串（人类可读摘要，无结构化码）；rejected_summary 消费 rules_skipped join。
+   c. 变更：①tradability.py TradabilityConfig 新增 fail_closed_on_skipped: bool=False（默认保持 fail-open 跳过行为，可配为拒单）；filter_tradable 三规则跳过场景：新增 rules_skipped_detail 结构化告警（rule/code/reason 三元组，保留 rules_skipped 字符串摘要兼容），fail_closed_on_skipped=True 时列缺失/规则关闭 → 该规则整列拒（mask&=False）+ total_rejected 计入 + detail 记 fail_closed 拒因；②run_回测入口.py + run_批量回测.py _broker_factory：从回测配置读 suspended_symbols（可选键，缺失 None 兼容）→ make_suspended_lookup → is_suspended=lookup（回测停牌股拒单生效）；③tests/unit/test_tradability_fail_closed.py：默认 fail-open 行为不变 / fail-closed 列缺失全拒+detail 结构化 / 接线配置读取。
+   d. 验证：py_compile 通过；pytest 新增测试全绿 + 既有 tradability/sim_broker 测试不回归；test_architecture 门禁全绿（无新顶层模块，不抬基线）。
+   e. 纪律遵守：先登记蓝图（myquant/indicators/scripts 目录树 + 本回写）再落代码；独立 commit；停牌清单未配置时保持向后兼容（is_suspended=None）。

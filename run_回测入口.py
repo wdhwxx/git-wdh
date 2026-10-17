@@ -335,7 +335,13 @@ def run_backtest(args: argparse.Namespace) -> int:
     # ── 8. 创建回测引擎（三模式调度，从DataProvider加载数据）──
     # P1-18：注册 broker factory（event 路径需要，否则 event 模式必崩）
     from myquant.backtest.engine import register_broker_factory
-    from myquant.execution.sim_broker import SimBroker
+    from myquant.execution.sim_broker import SimBroker, make_suspended_lookup
+
+    # B-06 #446：停牌接线——回测配置可配 suspended_symbols（缺失 None 向后兼容），
+    # 不再硬编码 is_suspended=None，停牌股在撮合层被拒单
+    _sus_raw = config_dict.get("suspended_symbols")
+    _sus_symbols = set(_sus_raw) if isinstance(_sus_raw, list) else None
+    _suspended_lookup = make_suspended_lookup(_sus_symbols)
 
     def _broker_factory(config):
         return SimBroker(
@@ -344,7 +350,7 @@ def run_backtest(args: argparse.Namespace) -> int:
             slippage_model=config.slippage,
             price_limit_pct=float(config.price_limit_pct),
             enforce_limit=bool(config.enforce_limit),
-            is_suspended=None,
+            is_suspended=_suspended_lookup,
         )
 
     register_broker_factory(_broker_factory)

@@ -48,16 +48,21 @@ def _backtest_broker_factory(config: Any) -> Any:
     入口脚本为合法装配层；主进程经 BatchBacktester.broker_factory 装配，
     进程池子进程经 initializer 重装配（嵌套函数不可 pickle，故定义在模块级）。
     """
-    from myquant.execution.sim_broker import SimBroker
+    from myquant.execution.sim_broker import SimBroker, make_suspended_lookup
 
     _bcfg = config.to_dict()
+    # B-06 #446：停牌接线——回测配置可配 suspended_symbols（缺失 None 向后兼容）
+    _sus = _bcfg.get("suspended_symbols")
+    _suspended_lookup = make_suspended_lookup(
+        set(_sus) if isinstance(_sus, list) else None
+    )
     return SimBroker(
         initial_capital=config.initial_capital,
         commission_model=config.commission,
         slippage_model=config.slippage,
         price_limit_pct=float(_bcfg.get("price_limit_pct", 0.10)),
         enforce_limit=bool(_bcfg.get("enforce_limit", False)),
-        is_suspended=None,
+        is_suspended=_suspended_lookup,
     )
 
 
