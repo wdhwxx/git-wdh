@@ -691,6 +691,7 @@ Pythonwdhmm/
 │   │   ├── test_data_layer_baseline.py # ✨【回写#426】【回写#427】数据层状态指纹基线单测（A-00 的 9 项 + A-01 新增 1 项=10 项）：7 组指纹采集 / JSON 落盘往返 / 可重跑复现（两次构建指纹一致）/ 缺库 FileNotFoundError / 空库 present=False / 重复键明细采集与清单落盘 ✅已完成
 │   │   ├── test_correction_ledger.py  # ✨【回写#443】修正台账读写单测（B-03）：correction_ledger/admission_reject 写入+按symbol/日期过滤查询/None文本化/0012迁移幂等降级，5项✅已完成
 │   │   ├── test_admission.py          # ✨【回写#444】门禁①准入单测（B-04）：BLOCK（缺字段/类型不可转/high<low/负价/空symbol/时间戳无效）/FLAG（价格跳变分品种·量异动·源切换）/PASS/白名单（生效窗内放行、窗外失效）4类用例✅已完成
+│   │   ├── test_writer_shadow.py      # ✨【回写#445】统一写入口影子单测（B-05）：正常行现网vs影子零diff等价/BLOCK拒收落blocked清单/FLAG落anomaly_flags列/enabled=False无副作用✅已完成
 │   │   ├── test_duplicate_cleaner.py   # ✨【回写#428】存量重复行清理单测（A-13，4 项）：统计口径（重复键/重复行/待删行）/ dry-run 不修改库 / 执行后重复键归 0 且保留行符合规则（原始源优先、同源最早 created_at）/ 备份生成且行数一致 ✅已完成
 │   │   ├── test_k3_loss_window.py    # ✨【回写#433】【回写#434】K3 丢失窗口临时库复现单测（A-03，3 项，只读临时库）：嵌套 delete+insert 注入异常 / 嵌套正常路径 / 对照原子事务失败保留旧数据；A-05 落地后核心复现用例翻转为回归（数据不丢失，K3 原结论由 A-03 结论文档固化）✅已完成
 │   │   ├── test_savepoint_transaction.py # ✨【回写#434】SAVEPOINT 嵌套事务单测（A-05，6 项，真实 DataQueries+临时库）：嵌套 delete+insert 失败→整体回滚旧数据保留（A-03 场景验收）/ 嵌套正常路径行数正确 / 内层失败被调用方捕获时仅内层回滚、外层后续写入仍提交 / 单层 commit / 单层 rollback / 三层嵌套最内层失败全回滚 ✅已完成
@@ -1101,6 +1102,7 @@ Pythonwdhmm/
 
     │   ├── data_layer_baseline.py       # ✨【回写#426】【回写#427】数据层状态指纹基线（数据层施工 A-00/A-01）：只读采集 7 组指纹（market_data 规模 / data_source 分布 / 唯一键重复 / financial_data ann_date 覆盖 / processed parquet 物理现状 / 辅助表规模 / alembic 版本戳）→ outputs/数据层基线_<YYYYMMDD>.json 原子落盘；A-01 新增重复键全量明细（collect_duplicate_details 按 (symbol,period,adjust,trade_date) 聚合全部重复行含 rowid/data_source/created_at/价格量 → save_duplicate_listing 原子落盘 outputs/重复键定位清单_<YYYYMMDD>.json；build_duplicate_listing 一站式入口）；sqlite file:...?mode=ro + PRAGMA query_only=ON 全程只读，不修改数据库与业务文件；__main__ 自带冒烟自测；被 scripts/数据层基线.py 薄入口调用（架构纪律）；【回写#440·A-11】新增 compare_baseline(current, baseline) 一致性比对函数（7 组指纹逐键比对，数字 1e-9 相对容差，返回差异描述列表；被 scripts/数据一致性校验.py 薄入口调用）✅已完成
     │   ├── admission.py                 # ✨【回写#444】门禁①ODS准入模块（数据层施工 B-04）：AdmissionChecker 判定 BLOCK（必需字段缺失/类型不可转/high<low/负价/空symbol/时间戳无效）/ FLAG（价格跳变·量异动·缺失行·源切换→anomaly_flags 落列）/ PASS；分品种跳变阈值（data_clean.yaml default+by_market+by_symbol）；白名单 admission_whitelist.yaml（生效窗+条目）；AdmissionResult 结构化返回；被 manager.update_symbol 影子/接线调用（C-01）✅已完成
+    │   ├── writer_shadow.py            # ✨【回写#445】统一写入口影子模式（数据层施工 B-05）：WriteShadowComparer 对原始行批量过门禁①（BLOCK 拒收清单/FLAG 打 anomaly_flags 落列/PASS 原样）+ 补 ingest 三列；compare(legacy,shadow) 逐字段 diff（除 ingest 三列）→ ShadowReport(consistent/diffs/blocked/flagged)；enabled 默认 False 影子可关；C-03 收敛写入口后接线（生产差异=0 连续3交易日为生产验证项）✅已完成
     │   ├── duplicate_cleaner.py         # ✨【回写#428】存量重复行清理服务（数据层施工 A-13）：按 (symbol,period,adjust,trade_date) 去重，保留规则=原始源行(tdx/tencent_http)>incremental_clean、同源保留最早 created_at、tdx 与 tencent_http 不同原始源按 created_at 最早、兜底 rowid 最小；collect_duplicate_stats 只读统计（重复键/重复行/待删行）→ backup_db 用 SQLite 在线备份 API（合并 WAL，6GB 级库不可直接复制文件）生成 backups/quant.db.bak_<时间戳> 并校验行数一致 → 事务 DELETE 精确删 rowid 集 → 报告落盘 outputs/重复行清理报告_<YYYYMMDD>.json；默认 dry-run 不修改；被 scripts/数据重复清理.py 薄入口调用（架构纪律）
 
     │   ├── cleaner/                  # ✨【数据清洗核心模块】已重构为面向对象架构
@@ -6352,3 +6354,10 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    c. 变更：①新增 myquant/data_access/admission.py：AdmissionResult(decision/reasons/flags) 结构化；AdmissionChecker.check(row, symbol, data_source, prev_row=None)：BLOCK 规则（必需字段缺失/数值类型不可转/high<low/负价/空symbol/时间戳无效）、FLAG 规则（价格跳变按分品种阈值·量异动·缺失行·源切换→anomaly_flags 落列）、PASS；分品种阈值读取 data_clean.yaml bar.max_price_jump_pct_by_market（主板0.11/创业板0.21/科创板0.21/北交所0.31）+ by_symbol 覆盖 + default 0.22；白名单加载 admission_whitelist.yaml（enabled+生效窗 valid_from/valid_until+entries，生效窗内命中白名单直接 PASS）；②config/admission_whitelist.yaml 新建（默认 enabled=false，B-05 影子/C-01 接线才启用）；③config/data_clean.yaml 扩展分品种阈值段（旧键保留）；④tests/unit/test_admission.py 4 类用例。
    d. 验证：py_compile 通过；pytest tests/unit/test_admission.py 全绿；test_architecture 门禁全绿（data_access 包新增 admission.py，若超基线按 PR2 对价 #444 抬升）。
    e. 纪律遵守：先登记蓝图（data_access/config/tests 目录树 + 本回写）再落代码；独立 commit；新模块不接线（B-05 影子模式/C-01 接入才生效）。
+
+## #445 · 2026-10-17 · 数据层施工 B-05：统一写入口影子模式
+   a. 依据：《数据层结构优化可行性施工方案报告_v1.1》§5.2 B-05（P1，交付=writer_shadow 模块 + 比对报告；验收=与现网差异=0；影子可关）+ §4.3(a)（统一写入口收敛 3 条 DB 写路径，C-03 接线）。
+   b. 事实基线（代码级取证）：现网写路径 manager._save_to_database（manager.py:681-730）组装 db_data（B-02 三列已落，anomaly_flags 恒 None 待门禁①接线，B-04 #444 注释标注）；无影子比对机制；manager.py 2204 行受 R-24 只减不增红线约束 → B-05 影子逻辑放独立模块不动 manager。
+   c. 变更：①新增 myquant/data_access/writer_shadow.py：WriteShadowComparer（enabled 默认 False）——对原始行批量过门禁①（AdmissionChecker，prev 上下文逐行）→ BLOCK 拒收清单（不产生写入行）/ FLAG 打 anomaly_flags 落列 / PASS 原样；shadow_rows 补 ingest_time/ingest_batch；compare(legacy_db_rows, shadow_rows) 除 ingest 三列外逐字段 diff → ShadowReport(consistent/diffs/blocked/flagged)；②tests/unit/test_writer_shadow.py：等价（正常行零 diff）/ BLOCK 拒收落 blocked / FLAG 落 anomaly_flags / enabled=False 无副作用。
+   d. 验证：py_compile 通过；pytest tests/unit/test_writer_shadow.py 全绿；test_architecture 门禁全绿（新模块被单测 import 有覆盖，不抬基线）。
+   e. 纪律遵守：先登记蓝图（data_access/tests 目录树 + 本回写）再落代码；独立 commit；影子开关默认关（生产零影响），C-03 收敛写入口后才接线。生产差异=0（连续3交易日）为生产验证项，随 C-03 后观察。
