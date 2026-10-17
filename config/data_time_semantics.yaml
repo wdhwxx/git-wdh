@@ -64,17 +64,17 @@ columns:
   # ---------- 财务/股本族（raw 直读 + cleaner 增量派生，保守正确） ----------
   换手率:
     derived_at: ["market_data.turnover (raw)", "myquant/data_access/cleaner/derived_metrics.py:220-224"]
-    date_basis: report_deadline_estimate   # 增量派生：法定披露截止日推定（保守正确，v3.0 §6.4.2 ②）
+    date_basis: eff_disclosure_date   # B-07 #447 收敛（2026-10-17）：由 report_deadline_estimate 更正——增量派生统一经 time_semantics.match_latest_financial（ann_date 优先 → report_deadline 推定 → report_date 兜底），消除 (report_deadline, 真实 ann_date] 泄漏窗口
     severity: 通过
     consumers: []                # 实测零消费（回测 metrics.turnover 为资金周转指标，非本数据列）
   流通股本:
     derived_at: ["market_data.float_share (raw)", "myquant/data_access/cleaner/derived_metrics.py:226-227"]
-    date_basis: report_deadline_estimate
+    date_basis: eff_disclosure_date   # B-07 #447 收敛（2026-10-17）：由 report_deadline_estimate 更正——被多因子策略消费（consumed_columns 声明），PIT 保障随收敛生效
     severity: 通过
     consumers: ["multi_factor（consumed_columns 声明, multi_factor_strategy.py:696）"]
   市盈动:
     derived_at: ["market_data.pe_dynamic (raw)", "myquant/data_access/cleaner/derived_metrics.py:229-275"]
-    date_basis: report_deadline_estimate
+    date_basis: eff_disclosure_date   # B-07 #447 收敛（2026-10-17）：由 report_deadline_estimate 更正——与换手率/流通股本同源（match_latest_financial 单次匹配）
     severity: 通过
     consumers: []                # 实测零消费（2026-10-10 实测）
   每股收益:

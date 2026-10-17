@@ -6368,3 +6368,10 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    c. 变更：①tradability.py TradabilityConfig 新增 fail_closed_on_skipped: bool=False（默认保持 fail-open 跳过行为，可配为拒单）；filter_tradable 三规则跳过场景：新增 rules_skipped_detail 结构化告警（rule/code/reason 三元组，保留 rules_skipped 字符串摘要兼容），fail_closed_on_skipped=True 时列缺失/规则关闭 → 该规则整列拒（mask&=False）+ total_rejected 计入 + detail 记 fail_closed 拒因；②run_回测入口.py + run_批量回测.py _broker_factory：从回测配置读 suspended_symbols（可选键，缺失 None 兼容）→ make_suspended_lookup → is_suspended=lookup（回测停牌股拒单生效）；③tests/unit/test_tradability_fail_closed.py：默认 fail-open 行为不变 / fail-closed 列缺失全拒+detail 结构化 / 接线配置读取。
    d. 验证：py_compile 通过；pytest 新增测试全绿 + 既有 tradability/sim_broker 测试不回归；test_architecture 门禁全绿（无新顶层模块，不抬基线）。
    e. 纪律遵守：先登记蓝图（myquant/indicators/scripts 目录树 + 本回写）再落代码；独立 commit；停牌清单未配置时保持向后兼容（is_suspended=None）。
+
+## #447 · 2026-10-17 · 数据层施工 B-07：被消费列 PIT 口径收敛
+   a. 依据：《数据层结构优化可行性施工方案报告_v1.1》§5.2 B-07（P1，交付=代码+台账；验收=三列 date_basis=eff_disclosure_date；late-disclosure 用例通过；git 可回滚）+ 修正2（唯一被策略消费的财务派生量=流通股本，换手率/市盈动零消费但无 PIT 保障，三列统一收敛）。
+   b. 事实基线（代码级取证）：derived_metrics.py:187,236 用 _report_deadline（法定披露截止日推定）判定财务可见性，代码不看 ann_date（K2）；time_semantics.match_latest_financial 已存在（ann_date 优先 → report_deadline 推定 → report_date 兜底，降序首个<=trade_date）；台账 data_time_semantics.yaml:67,72,77 三列 date_basis=report_deadline_estimate；B-09/A-04 已修取数+CSV 回填 ann_date（依赖满足）。
+   c. 变更：①derived_metrics.py compute_b_class_metrics 两处 fin_idx 循环（187/236）重构为 match_latest_financial 单次匹配（fin_avail 复用，删除 fin_sorted 死代码）：流通股本反推/换手率/市盈动全部按"有效披露日<=trade_date 可见最新一期"，消除 (report_deadline, 真实 ann_date] 泄漏窗口；②config/data_time_semantics.yaml 三列 date_basis 更正 report_deadline_estimate→eff_disclosure_date（台账例外入库，随 commit）；③tests/unit/test_derived_metrics_pit.py：late-disclosure 用例（构造 ann_date>report_deadline 样本，ann_date 前不可见、ann_date 后可见）+ 正常披露等价用例。
+   d. 验证：py_compile 通过；pytest 新增测试全绿 + 既有 derived_metrics/manager 财务测试不回归；test_architecture 门禁全绿（derived_metrics 净行数变化小，若超基线按 PR2 对价 #447 抬升；R-09 测试命名门禁无涉）。
+   e. 纪律遵守：先登记蓝图（cleaner/data_access 目录树 + 台账 + 本回写）再落代码；独立 commit；历史行不重导（回填未授权，新增/重算路径生效）。

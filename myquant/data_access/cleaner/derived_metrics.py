@@ -23,7 +23,10 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from myquant.data_access.time_semantics import report_deadline
+from myquant.data_access.time_semantics import (
+    match_latest_financial,
+    report_deadline,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -167,8 +170,6 @@ def compute_b_class_metrics(
     if not records or not financial_records:
         return records
 
-    fin_sorted = sorted(financial_records, key=lambda r: r.get("report_date", ""))
-
     # P1-②(#83)：真实股本事件（按 change_date 升序），每交易日取 <= trade_date 最近变更
     share_sorted = sorted(
         (share_records or []), key=lambda r: str(r.get("change_date", ""))
@@ -179,23 +180,17 @@ def compute_b_class_metrics(
         close = _to_float(rec.get("close"))
         volume = _to_float(rec.get("volume"))
 
-        # 市盈(动)：找该交易日之前最近一期财务数据
-        # P1-①(#83)：按披露截止日（发布日推算）而非报告期判定，
-        #   消除 报告期~披露日 窗口（如 Q1: 4/1~4/29）的未来函数
-        fin_idx = -1
-        for i, fin in enumerate(fin_sorted):
-            if _report_deadline(str(fin.get("report_date", ""))) <= trade_date:
-                fin_idx = i
-            else:
-                break
+        # B-07 #447：PIT 口径收敛——统一经 match_latest_financial 取"该交易日可见最新一期"，
+        #   有效披露日 = ann_date 优先 → report_deadline 推定 → report_date 兜底（time_semantics），
+        #   取代原 report_deadline 推定口径：消除 (report_deadline, 真实 ann_date] 泄漏窗口。
+        fin_avail = match_latest_financial(financial_records, trade_date)
 
         # P0-03修复：兜底反推股本不得用"整段最后一行收盘价"反推后套用全部历史bar（未来函数）。
-        # 改为：仅用"该交易日已披露的市值快照（报告截止日<=trade_date）÷ 该日自身收盘价"；
+        # 改为：仅用"该交易日已披露的市值快照（有效披露日<=trade_date）÷ 该日自身收盘价"；
         # 当日无已披露市值快照则置 None（宁可缺失，不可穿越）。
         fb_float: Optional[float] = None
         fb_total: Optional[float] = None
-        if fin_idx >= 0 and close and close > 0:
-            fin_avail = fin_sorted[fin_idx]
+        if fin_avail and close and close > 0:
             circ_mv = _to_float(fin_avail.get("circ_mv"))
             total_mv = _to_float(fin_avail.get("total_mv"))
             if circ_mv and circ_mv > 0:
@@ -228,21 +223,12 @@ def compute_b_class_metrics(
         # 流通股本（写回每条记录，真实股本优先）
         rec["float_share"] = round(cur_float, 2) if cur_float else None
 
-        # 市盈(动)：找该交易日之前最近一期财务数据
-        # P1-①(#83)：按披露截止日（发布日推算）而非报告期判定，
-        #   消除 报告期~披露日 窗口（如 Q1: 4/1~4/29）的未来函数
-        fin_idx = -1
-        for i, fin in enumerate(fin_sorted):
-            if _report_deadline(str(fin.get("report_date", ""))) <= trade_date:
-                fin_idx = i
-            else:
-                break
-
+        # 市盈(动)：复用 B-07 收敛的 fin_avail（match_latest_financial 单次匹配，
+        #   ann_date 优先，消除 报告期~真实披露日 窗口的未来函数）
         pe_dynamic: Optional[float] = None
-        if fin_idx >= 0 and close and cur_total:
-            fin = fin_sorted[fin_idx]
-            net_profit = _to_float(fin.get("net_profit"))
-            report_date = fin.get("report_date", "")
+        if fin_avail and close and cur_total:
+            net_profit = _to_float(fin_avail.get("net_profit"))
+            report_date = fin_avail.get("report_date", "")
             if net_profit and net_profit > 0:
                 annual_factor = _annualize_factor(report_date)
                 annual_profit = net_profit * annual_factor
