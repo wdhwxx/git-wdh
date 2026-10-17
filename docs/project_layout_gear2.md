@@ -687,6 +687,8 @@ Pythonwdhmm/
 │   │   ├── test_data_manager.py      # 数据加载、版本管理（68项）✅已完成
 │   │   ├── test_data_layer_baseline.py # ✨【回写#426】【回写#427】数据层状态指纹基线单测（A-00 的 9 项 + A-01 新增 1 项=10 项）：7 组指纹采集 / JSON 落盘往返 / 可重跑复现（两次构建指纹一致）/ 缺库 FileNotFoundError / 空库 present=False / 重复键明细采集与清单落盘 ✅已完成
 │   │   ├── test_duplicate_cleaner.py   # ✨【回写#428】存量重复行清理单测（A-13，4 项）：统计口径（重复键/重复行/待删行）/ dry-run 不修改库 / 执行后重复键归 0 且保留行符合规则（原始源优先、同源最早 created_at）/ 备份生成且行数一致 ✅已完成
+│   │   ├── test_k3_loss_window.py    # ✨【回写#433】K3 丢失窗口临时库复现单测（A-03，3 项，只读临时库）：嵌套 delete 已生效+insert 注入异常→行数归 0 且不可回滚（K3 确认）/ 嵌套正常路径 / 对照原子事务失败保留旧数据（A-05 验收基准）✅已完成
+│   │   ├── test_akshare_ann_date.py  # ✨【回写#431】财务取数补公告日单测（B-09，8 项，monkeypatch 不联网）：_normalize_notice_date 归一化 3 / 东财估值补+空 2 / 东财历史补+空 2 / 新浪显式空 1 ✅已完成
 
 │   │   ├── test_live_risk.py         # 风控规则拦截、仓位限制、流控（83项）✅已完成
 
@@ -6239,3 +6241,12 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
       - R-26：PACKAGE_STRUCTURE_BASELINE["data_access"] 三维 PR2 对价抬升 18042/631/37→18107/632/37（+65 行/+1 符号，fan_out 37 不变；功能必需 A-04：补列常量 + 回填函数，拆不动=常量是 CSV 唯一列权威、回填函数是存量迁移必需且归已登记模块；对价五要素齐全：功能必需 + 工单 #432 + 实测（存量表头 17 列）+ 独立 commit + 蓝图回写；沿用 A-00 已拍板 PR2 通道）。
    e. 验证：py_compile 3 文件通过；pytest tests/unit/test_a04_ann_date_backfill.py 6 passed；门禁复跑全绿。
    f. 纪律遵守：先登记蓝图（scripts 薄入口 + 常量/函数）再创建；默认 dry-run 不动存量 CSV（真实回写由用户 --run 确认后执行）；独立 commit。
+
+## #433 · 2026-10-17 · 数据层施工 A-03：K3 丢失窗口临时库复现（只读）
+   a. 依据：《数据层结构优化可行性施工方案报告_v1.1》§5.2 A-03（复现成功=确认；失败=证伪；只读临时库）。
+   b. 根因代码级取证：queries.py:218（bulk_insert_market_data 自开 transaction）/ queries.py:237（delete_market_data 自开 transaction）/ full_clean_service.py:735（write_back_symbol 外层再开 transaction）——三层嵌套、SQLite 单连接、无 SAVEPOINT；内层 commit 提交整个活跃事务。
+   c. 变更（两处）：
+      - tests/unit/test_k3_loss_window.py —— 临时库复现 3 项（嵌套 delete 已生效+insert 注入异常→行数归 0 且外层救不回=K3 确认；嵌套正常路径；对照原子事务失败保留旧数据=A-05 验收基准）；
+      - docs/数据质量治理/K3丢失窗口复现结论文档_20261017.md —— A-03 复现结论（根因取证表/窗口机制推演/实验表/施工指向；文档本体不 commit，与 A-02 先例一致）。
+   d. 验证：py_compile 通过；pytest tests/unit/test_k3_loss_window.py 3 passed；门禁复跑全绿（无 R-23/R-26 触发——仅新增测试文件与 docs）。
+   e. 纪律遵守：全程只读（临时库，未触碰生产 quant.db）；先登记蓝图再创建测试；独立 commit。
