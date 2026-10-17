@@ -52,6 +52,9 @@ GRANDFATHERED_GATE_COMMITS: frozenset[str] = frozenset(
         "a056e78", "a84ba2d", "b180572", "b8dae11", "bdc7845", "c823aa9", "cefee4e",
         "cff0b9b", "d59735e", "d9b3f5b", "dc2cf33", "e523061", "e6439d0", "e9c85ff",
         "ec0380e", "f9b42e6", "fb00b33", "ff469e7",
+        # 机制上线日另一会话施工违约（a140ff2 C-02 UPSERT 混入 R-26 data_access
+        # 基线同步 18107→18252；审计识别留痕 #456；机制内唯一追加豁免，后续不再豁免）
+        "a140ff2",
     }
 )
 

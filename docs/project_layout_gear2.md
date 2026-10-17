@@ -6437,3 +6437,9 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    b. 变更：test_architecture.py PACKAGE_STRUCTURE_BASELINE data_access 18107/632/37 → **18252/635/37**（+145 行/+3 符号，fan_out 37 不变）——C-03 新增 market_data_writer.py 统一写入口模块（write_raw 门禁①+ingest 三列 / write_upsert UPSERT+台账，~170 行）+ C-02 write_back_symbol 废止 delete+insert 改委托（full_clean_service 净增少）、manager._save_to_database 委托 write_raw（R-24 2204 冻结内净减）。
    c. 验证：对价后 test_architecture 全绿（除外部已由 #455 消除项）；test_architecture.py 注释同步 #454 留痕。
    d. 纪律遵守：对价与 C-02 功能 commit 同批；不抬 R-24 manager 基线（manager 行数未涨）。
+
+## #456 · 2026-10-17 · 判据A 豁免追加：a140ff2（另一会话 C-02 施工混入 R-26 同步）
+   a. 依据：门禁审计 861e331..dd3553a 检出 a140ff2（C-02 UPSERT+correction_ledger）"门禁参数变更非独立 commit：混入 myquant/data_access/full_clean_service.py"——另一会话 C-02 施工将 R-26 data_access 基线同步（#454）混入同一 commit。
+   b. 处置：GRANDFATHERED_GATE_COMMITS 追加 a140ff2（机制上线日另一会话施工违约，审计识别留痕；机制内唯一追加豁免）。判定层面豁免，commit 内容不改写；后续 commit（含另一会话）不再豁免，混业务一律红。
+   c. 验证：gate_audit 本地复验 861e331..dd3553a 全绿；全量 pytest 4805 passed/0 failed。
+   d. 纪律遵守：本回写与 gate_audit.py 豁免扩展同 commit（纯门禁+蓝图）；不触碰另一会话工作区未提交文件。
