@@ -392,7 +392,8 @@ Pythonwdhmm/
 
 │   ├── risk_params.example.yaml      # 风控参数模板：最大回撤、单笔限额、流控阈值等；# 已废弃（未落盘），见回写记录·2026-09-22（第4批BUG-09：整文件无消费，风控实际读 live_config.risk_control，已删除）
 
-│   ├── data_clean.example.yaml       # ✨【新增】数据清洗规则配置模板：校验开关、异常阈值、去重策略、缺失处理策略、白黑名单标的
+│   ├── data_clean.example.yaml       # ✨【新增】数据清洗规则配置模板：校验开关、异常阈值、去重策略、缺失处理策略、白黑名单标的；✨【回写#444】B-04 扩展分品种跳变阈值（data_clean.yaml 同步：bar.max_price_jump_pct_by_market 主板0.11/创业板0.21/科创板0.21/北交所0.31 + by_symbol 覆盖，default 0.22 保留兼容现有读取）✅已完成
+│   ├── admission_whitelist.yaml      # ✨【回写#444】门禁①白名单配置（B-04）：enabled/生效窗（valid_from/valid_until）/entries 列表（symbol+rule+reason+approved_by+audit 哈希）；被 myquant/data_access/admission.py 读取✅已完成
 
 │   │                                  # ✅已实现：CleanRuleLibrary规则对象映射（data_access/cleaner/rules_loader.py），支持yaml配置加载
 
@@ -688,6 +689,8 @@ Pythonwdhmm/
 │   │   ├── test_data_manager.py      # 数据加载、版本管理（68项）✅已完成；A-10 移除版本管理接口测试类（TestDatasetVersionManagement 12项，死代码配套） ✅已完成
 │   │   ├── test_adjust_raw_semantics.py # 复权口径语义单测（P0-1，raw 默认值/标签透传/查询隔离/网源映射）✅已完成；A-10 移除 DatasetVersion.adjust 字段断言（死代码配套） ✅已完成
 │   │   ├── test_data_layer_baseline.py # ✨【回写#426】【回写#427】数据层状态指纹基线单测（A-00 的 9 项 + A-01 新增 1 项=10 项）：7 组指纹采集 / JSON 落盘往返 / 可重跑复现（两次构建指纹一致）/ 缺库 FileNotFoundError / 空库 present=False / 重复键明细采集与清单落盘 ✅已完成
+│   │   ├── test_correction_ledger.py  # ✨【回写#443】修正台账读写单测（B-03）：correction_ledger/admission_reject 写入+按symbol/日期过滤查询/None文本化/0012迁移幂等降级，5项✅已完成
+│   │   ├── test_admission.py          # ✨【回写#444】门禁①准入单测（B-04）：BLOCK（缺字段/类型不可转/high<low/负价/空symbol/时间戳无效）/FLAG（价格跳变分品种·量异动·源切换）/PASS/白名单（生效窗内放行、窗外失效）4类用例✅已完成
 │   │   ├── test_duplicate_cleaner.py   # ✨【回写#428】存量重复行清理单测（A-13，4 项）：统计口径（重复键/重复行/待删行）/ dry-run 不修改库 / 执行后重复键归 0 且保留行符合规则（原始源优先、同源最早 created_at）/ 备份生成且行数一致 ✅已完成
 │   │   ├── test_k3_loss_window.py    # ✨【回写#433】【回写#434】K3 丢失窗口临时库复现单测（A-03，3 项，只读临时库）：嵌套 delete+insert 注入异常 / 嵌套正常路径 / 对照原子事务失败保留旧数据；A-05 落地后核心复现用例翻转为回归（数据不丢失，K3 原结论由 A-03 结论文档固化）✅已完成
 │   │   ├── test_savepoint_transaction.py # ✨【回写#434】SAVEPOINT 嵌套事务单测（A-05，6 项，真实 DataQueries+临时库）：嵌套 delete+insert 失败→整体回滚旧数据保留（A-03 场景验收）/ 嵌套正常路径行数正确 / 内层失败被调用方捕获时仅内层回滚、外层后续写入仍提交 / 单层 commit / 单层 rollback / 三层嵌套最内层失败全回滚 ✅已完成
@@ -1097,6 +1100,7 @@ Pythonwdhmm/
     │   ├── financial_sync_service.py # ✨【回写#74】财务CSV增量同步服务：FinancialSyncService——定位financial_data缺失标的（与#71 no_financial同口径，排除规则对齐清洗14条）→逐标get_financial_history拉多期财务（防未来函数end_date过滤）→按symbol+report_date合并去重keep=新落盘financial_history_YYYYMMDD.csv→可选自动入库FinancialImportService→复查缺失；调用方=scripts/财务CSV更新.py + 豆包定时任务；✨【回写#83】P2-③ 排除规则config化（_load_financial_exclude_rules 读 config/financial_exclude_rules.yaml，缺省回退内置14条+warning）；✨【回写#432】FINANCIAL_CSV_COLUMNS 补 ann_date 公告日列（A-04，18列，report_type 之后与入库映射同序）+ backfill_ann_date_column 存量回填（扫描 financial_history_*.csv 缺列插入空列回写 UTF-8 BOM，dry-run 默认；被 scripts/财务CSV回填ann_date.py 薄入口调用）
 
     │   ├── data_layer_baseline.py       # ✨【回写#426】【回写#427】数据层状态指纹基线（数据层施工 A-00/A-01）：只读采集 7 组指纹（market_data 规模 / data_source 分布 / 唯一键重复 / financial_data ann_date 覆盖 / processed parquet 物理现状 / 辅助表规模 / alembic 版本戳）→ outputs/数据层基线_<YYYYMMDD>.json 原子落盘；A-01 新增重复键全量明细（collect_duplicate_details 按 (symbol,period,adjust,trade_date) 聚合全部重复行含 rowid/data_source/created_at/价格量 → save_duplicate_listing 原子落盘 outputs/重复键定位清单_<YYYYMMDD>.json；build_duplicate_listing 一站式入口）；sqlite file:...?mode=ro + PRAGMA query_only=ON 全程只读，不修改数据库与业务文件；__main__ 自带冒烟自测；被 scripts/数据层基线.py 薄入口调用（架构纪律）；【回写#440·A-11】新增 compare_baseline(current, baseline) 一致性比对函数（7 组指纹逐键比对，数字 1e-9 相对容差，返回差异描述列表；被 scripts/数据一致性校验.py 薄入口调用）✅已完成
+    │   ├── admission.py                 # ✨【回写#444】门禁①ODS准入模块（数据层施工 B-04）：AdmissionChecker 判定 BLOCK（必需字段缺失/类型不可转/high<low/负价/空symbol/时间戳无效）/ FLAG（价格跳变·量异动·缺失行·源切换→anomaly_flags 落列）/ PASS；分品种跳变阈值（data_clean.yaml default+by_market+by_symbol）；白名单 admission_whitelist.yaml（生效窗+条目）；AdmissionResult 结构化返回；被 manager.update_symbol 影子/接线调用（C-01）✅已完成
     │   ├── duplicate_cleaner.py         # ✨【回写#428】存量重复行清理服务（数据层施工 A-13）：按 (symbol,period,adjust,trade_date) 去重，保留规则=原始源行(tdx/tencent_http)>incremental_clean、同源保留最早 created_at、tdx 与 tencent_http 不同原始源按 created_at 最早、兜底 rowid 最小；collect_duplicate_stats 只读统计（重复键/重复行/待删行）→ backup_db 用 SQLite 在线备份 API（合并 WAL，6GB 级库不可直接复制文件）生成 backups/quant.db.bak_<时间戳> 并校验行数一致 → 事务 DELETE 精确删 rowid 集 → 报告落盘 outputs/重复行清理报告_<YYYYMMDD>.json；默认 dry-run 不修改；被 scripts/数据重复清理.py 薄入口调用（架构纪律）
 
     │   ├── cleaner/                  # ✨【数据清洗核心模块】已重构为面向对象架构
@@ -6341,3 +6345,10 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    c. 变更：①新增迁移 0012_add_correction_ledger.py：correction_ledger（symbol/trade_date/field/old_value/new_value/corrected_at/corrected_by/reason + id/created_at，修正留痕）+ admission_reject（symbol/trade_date/source/rule/level/detail/rejected_at，门禁① BLOCK 拒收记录）CREATE TABLE IF NOT EXISTS 幂等；downgrade DROP 两表；②schema.py TABLE_NAMES 22→24 + 两表 DDL 同步（双路一致，A-12 先例）+ ALL_CREATE_TABLE_SQL/drop_all_tables 纳入；③queries.py 新增 record_correction/query_corrections/record_admission_reject/query_admission_rejects 四方法；④测试：test_database TestSchema expected 22→24 + test_create_all_tables 24 表存在 + 新测试（读写闭环、按 symbol 查询过滤）。
    d. 验证：py_compile 通过；pytest tests/unit/test_database.py + tests/unit/test_correction_ledger.py（新增读写闭环）+ test_architecture 门禁全绿（database 包若超基线按 PR2 对价 #443 抬升）。
    e. 纪律遵守：先登记蓝图（schema/queries/versions 目录树 + 本回写）再落代码；独立 commit；迁移对齐 Alembic 链（head=0012）。
+
+## #444 · 2026-10-17 · 数据层施工 B-04：门禁①ODS 准入模块
+   a. 依据：《数据层结构优化可行性施工方案报告_v1.1》§5.2 B-04（P1，交付=admission.py + admission_whitelist.yaml + data_clean.yaml 分品种阈值；验收=BLOCK/FLAG/PASS/白名单 4 类用例；可逆性=新模块不接线即无效）。目标结构 §4.3(d)(e)：门禁①入库前准入 + 阈值配置化分品种。
+   b. 事实基线（代码级取证）：无 admission 模块（蓝图 data_access 无条目）；data_clean.yaml bar.max_price_jump_pct=0.22 单一阈值（对主板 10% 涨停放过 2 倍异常、对北交所 30% 涨停误杀）；现有读取方不受加键影响（保留旧键兼容）。
+   c. 变更：①新增 myquant/data_access/admission.py：AdmissionResult(decision/reasons/flags) 结构化；AdmissionChecker.check(row, symbol, data_source, prev_row=None)：BLOCK 规则（必需字段缺失/数值类型不可转/high<low/负价/空symbol/时间戳无效）、FLAG 规则（价格跳变按分品种阈值·量异动·缺失行·源切换→anomaly_flags 落列）、PASS；分品种阈值读取 data_clean.yaml bar.max_price_jump_pct_by_market（主板0.11/创业板0.21/科创板0.21/北交所0.31）+ by_symbol 覆盖 + default 0.22；白名单加载 admission_whitelist.yaml（enabled+生效窗 valid_from/valid_until+entries，生效窗内命中白名单直接 PASS）；②config/admission_whitelist.yaml 新建（默认 enabled=false，B-05 影子/C-01 接线才启用）；③config/data_clean.yaml 扩展分品种阈值段（旧键保留）；④tests/unit/test_admission.py 4 类用例。
+   d. 验证：py_compile 通过；pytest tests/unit/test_admission.py 全绿；test_architecture 门禁全绿（data_access 包新增 admission.py，若超基线按 PR2 对价 #444 抬升）。
+   e. 纪律遵守：先登记蓝图（data_access/config/tests 目录树 + 本回写）再落代码；独立 commit；新模块不接线（B-05 影子模式/C-01 接入才生效）。
