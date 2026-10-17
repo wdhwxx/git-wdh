@@ -24,8 +24,8 @@ run_批量回测.py 主入口的支撑核心：
   - 引擎模式降级不影响正确性（三模式净值在 P1 已验收一致），仅牺牲性能换内存
 
 数据版本（P3-D8-003 整改声明）:
-  - DatasetVersion（数据版本标记）由 data_access/ 数据层（fetcher/manager/full_clean_service）管理，
-    回测侧不消费；回测防呆由 fingerprint_hash 指纹承担——版本标记仅服务于数据层，不回测路径，文档声明覆盖。
+  - 数据集口径快照由 utils/data_versioner（唯一 DatasetVersion 定义，A-10 起）承担，
+    回测侧不消费；回测防呆由 fingerprint_hash 指纹承担——版本快照仅服务数据层，文档声明覆盖。
 """
 
 from __future__ import annotations

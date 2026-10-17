@@ -10,7 +10,8 @@
     clean_run_meta.run_id UNIQUE 天然满足，无需改表结构
   - bad 脏数据复用 pipeline save_bad 落盘到 datasets/bad/
   - processed 重建调用 scripts/数据导出_DB到processed.export_all（统一 parquet）
-  - DatasetVersion 完整版本管理服务当前项目未实现（仅数据模型类），
+  - DatasetVersion 完整版本管理服务当前项目未实现（A-10 已移除 manager 侧未接线模型类），
+    数据集口径快照由 utils/data_versioner（DATASET_SCHEMA_REVISIONS 登记）承担，
     重建 processed 暂用直接导出，标注 TODO 待版本服务落地后接入
 
 数据流:

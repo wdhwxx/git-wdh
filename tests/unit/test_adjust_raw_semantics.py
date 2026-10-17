@@ -14,12 +14,11 @@ test_adjust_raw_semantics.py - P0-1 复权口径语义单测（raw 不复权原�
 """
 from __future__ import annotations
 
-import dataclasses
 import inspect
 from typing import Any, List
 
 from myquant.backtest.data_loader import HistoricalDataProvider
-from myquant.data_access.manager import DataManager, DatasetVersion
+from myquant.data_access.manager import DataManager
 from myquant.data_access.sources.base import MarketDataResult
 from myquant.data_access.sources.web_source import WebSourceDataSource
 from myquant.database import DatabaseConnection, create_all_tables
@@ -45,9 +44,6 @@ class _StubFetcher:
 
 def test_defaults_are_raw() -> None:
     """manager/回测加载器/查询层 默认 adjust 均为 'raw'。"""
-    f = next(f for f in dataclasses.fields(DatasetVersion) if f.name == "adjust")
-    assert f.default == "raw", f"DatasetVersion.adjust 默认应为 raw，实际 {f.default!r}"
-
     params = inspect.signature(HistoricalDataProvider.__init__).parameters
     assert params["default_adjust"].default == "raw", "HistoricalDataProvider 默认应为 raw"
 

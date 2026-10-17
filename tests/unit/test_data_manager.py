@@ -4,13 +4,13 @@ test_data_manager.py - 数据管理层单元测试
 ==========================================
 覆盖 myquant/data_access/ 和 myquant/core/cache.py：
   - MemoryCache          内存缓存（TTL/LRU/批量/装饰器/统计）
-  - DatasetVersion       数据集版本（序列化/反序列化/文件名）
+  - （A-10 起：manager 侧 DatasetVersion 数据类已移除，版本口径由 utils/data_versioner 登记）
   - DataFetcher          数据获取器（多源/缓存/实时订阅接口）
   - DataManager          数据管理器（更新/校验/同步/版本管理）
 
 测试维度:
   1. MemoryCache（get/set/delete/clear/exists/keys/mget/mset/memoize/TTL/淘汰/统计）
-  2. DatasetVersion（to_dict/from_dict/data_file_name/字段完整性）
+  2. （A-10 已删：DatasetVersion 数据类单测——死代码配套）
   3. DataFetcher（实例化/缓存开关/数据源管理/实时订阅接口）
   4. DataManager（实例化/fetcher属性/同步报告/数据集版本CRUD）
   5. 实盘准备（subscribe_realtime/unsubscribe/增量更新/缓存失效）
@@ -39,7 +39,6 @@ from myquant.data_access import (
     DataSourceBase,
     DataSourceStatus,
 )
-from myquant.data_access.manager import DatasetVersion
 
 # ═══════════════════════════════════════════
 #  Mock 数据源（用于测试，不依赖外部）
@@ -289,93 +288,6 @@ class TestMemoryCache:
 
 
 # ═══════════════════════════════════════════
-#  TestDatasetVersion - 数据集版本
-# ═══════════════════════════════════════════
-
-class TestDatasetVersion:
-    """DatasetVersion 数据集版本测试"""
-
-    def test_creation(self):
-        """创建版本对象"""
-        v = DatasetVersion(version=1, symbol="000001.SZ", record_count=100)
-        assert v.version == 1
-        assert v.symbol == "000001.SZ"
-        assert v.record_count == 100
-
-    def test_default_values(self):
-        """默认值"""
-        v = DatasetVersion(version=1, symbol="000001.SZ")
-        assert v.data_type == "bar"
-        assert v.period == "daily"
-        assert v.adjust == "raw"
-        assert v.source == "offline"
-        assert v.record_count == 0
-
-    def test_to_dict(self):
-        """序列化为字典"""
-        v = DatasetVersion(
-            version=1, symbol="000001.SZ", data_type="bar",
-            period="daily", record_count=100, total=100, valid=98, bad=2,
-        )
-        d = v.to_dict()
-        assert isinstance(d, dict)
-        assert d["version"] == 1
-        assert d["symbol"] == "000001.SZ"
-        assert d["record_count"] == 100
-
-    def test_from_dict(self):
-        """从字典反序列化"""
-        data = {
-            "version": 2, "symbol": "600000.SH", "data_type": "bar",
-            "period": "daily", "record_count": 200, "total": 200,
-            "valid": 195, "bad": 5, "source": "akshare",
-        }
-        v = DatasetVersion.from_dict(data)
-        assert v.version == 2
-        assert v.symbol == "600000.SH"
-        assert v.record_count == 200
-
-    def test_roundtrip(self):
-        """序列化-反序列化往返"""
-        v1 = DatasetVersion(
-            version=3, symbol="000001.SZ", record_count=50,
-            description="测试版本", quality_grade="A",
-        )
-        d = v1.to_dict()
-        v2 = DatasetVersion.from_dict(d)
-        assert v2.version == v1.version
-        assert v2.symbol == v1.symbol
-        assert v2.record_count == v1.record_count
-        assert v2.description == v1.description
-
-    def test_data_file_name(self):
-        """数据文件名生成"""
-        v = DatasetVersion(version=1, symbol="000001.SZ", data_type="bar",
-                           period="daily", adjust="raw")
-        fname = v.data_file_name
-        assert isinstance(fname, str)
-        assert fname.endswith(".csv")
-        assert "bar" in fname
-        assert "daily" in fname
-
-    def test_metadata_dict(self):
-        """metadata 字段"""
-        v = DatasetVersion(version=1, symbol="000001.SZ",
-                           metadata={"cleaned": True, "pipeline": "v2"})
-        assert v.metadata["cleaned"] is True
-        assert v.metadata["pipeline"] == "v2"
-
-    def test_data_range(self):
-        """数据范围字段"""
-        v = DatasetVersion(
-            version=1, symbol="000001.SZ",
-            data_range={"start": "2024-01-01", "end": "2024-06-30"},
-        )
-        assert v.data_range["start"] == "2024-01-01"
-        assert v.data_range["end"] == "2024-06-30"
-
-
-# ═══════════════════════════════════════════
 #  TestDataFetcher - 数据获取器
 # ═══════════════════════════════════════════
 
@@ -608,78 +520,6 @@ class TestDataManager:
         manager = DataManager(fetcher=fetcher)
         assert hasattr(manager, "load_processed_data")
         assert callable(manager.load_processed_data)
-
-
-# ═══════════════════════════════════════════
-#  TestDatasetVersionManagement - 版本管理
-# ═══════════════════════════════════════════
-
-class TestDatasetVersionManagement:
-    """DataManager 数据集版本管理测试"""
-
-    def _make_manager(self, tmp_path=None):
-        """创建带临时目录的 DataManager"""
-        source = MockDataSource()
-        fetcher = DataFetcher(source=source)
-        manager = DataManager(fetcher=fetcher)
-        return manager
-
-    def test_create_dataset_version_interface(self):
-        """创建数据集版本接口存在"""
-        manager = self._make_manager()
-        assert hasattr(manager, "create_dataset_version")
-        assert callable(manager.create_dataset_version)
-
-    def test_list_dataset_versions_interface(self):
-        """列出版本接口存在"""
-        manager = self._make_manager()
-        assert hasattr(manager, "list_dataset_versions")
-        assert callable(manager.list_dataset_versions)
-
-    def test_get_dataset_version_interface(self):
-        """获取版本接口存在"""
-        manager = self._make_manager()
-        assert hasattr(manager, "get_dataset_version")
-        assert callable(manager.get_dataset_version)
-
-    def test_get_latest_dataset_version_interface(self):
-        """获取最新版本接口存在"""
-        manager = self._make_manager()
-        assert hasattr(manager, "get_latest_dataset_version")
-        assert callable(manager.get_latest_dataset_version)
-
-    def test_load_dataset_version_interface(self):
-        """加载版本数据接口存在"""
-        manager = self._make_manager()
-        assert hasattr(manager, "load_dataset_version")
-        assert callable(manager.load_dataset_version)
-
-    def test_rollback_dataset_version_interface(self):
-        """回滚版本接口存在"""
-        manager = self._make_manager()
-        assert hasattr(manager, "rollback_dataset_version")
-        assert callable(manager.rollback_dataset_version)
-
-    def test_delete_dataset_version_interface(self):
-        """删除版本接口存在"""
-        manager = self._make_manager()
-        assert hasattr(manager, "delete_dataset_version")
-        assert callable(manager.delete_dataset_version)
-
-    def test_verify_dataset_version_interface(self):
-        """验证版本接口存在"""
-        manager = self._make_manager()
-        assert hasattr(manager, "verify_dataset_version")
-        assert callable(manager.verify_dataset_version)
-
-    def test_create_and_list_version(self, tmp_path):
-        """创建版本后可列出（使用临时目录）"""
-        source = MockDataSource()
-        fetcher = DataFetcher(source=source)
-        manager = DataManager(fetcher=fetcher)
-        # P2-2 定性：原 try/except skip 多余——list_dataset_versions 对无版本索引确定性返回空列表
-        versions = manager.list_dataset_versions("000001.SZ")
-        assert isinstance(versions, list)
 
 
 # ═══════════════════════════════════════════

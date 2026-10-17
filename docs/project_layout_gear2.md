@@ -684,7 +684,8 @@ Pythonwdhmm/
 
 │   │   ├── test_data_clean.py        # 数据清洗单元测试（高频核心case + 极端边界，93项 + ✨【回写#71】B类财务缺失留痕 4 项，现 97 项）✅已完成
 
-│   │   ├── test_data_manager.py      # 数据加载、版本管理（68项）✅已完成
+│   │   ├── test_data_manager.py      # 数据加载、版本管理（68项）✅已完成；A-10 移除版本管理接口测试类（TestDatasetVersionManagement 12项，死代码配套） ✅已完成
+│   │   ├── test_adjust_raw_semantics.py # 复权口径语义单测（P0-1，raw 默认值/标签透传/查询隔离/网源映射）✅已完成；A-10 移除 DatasetVersion.adjust 字段断言（死代码配套） ✅已完成
 │   │   ├── test_data_layer_baseline.py # ✨【回写#426】【回写#427】数据层状态指纹基线单测（A-00 的 9 项 + A-01 新增 1 项=10 项）：7 组指纹采集 / JSON 落盘往返 / 可重跑复现（两次构建指纹一致）/ 缺库 FileNotFoundError / 空库 present=False / 重复键明细采集与清单落盘 ✅已完成
 │   │   ├── test_duplicate_cleaner.py   # ✨【回写#428】存量重复行清理单测（A-13，4 项）：统计口径（重复键/重复行/待删行）/ dry-run 不修改库 / 执行后重复键归 0 且保留行符合规则（原始源优先、同源最早 created_at）/ 备份生成且行数一致 ✅已完成
 │   │   ├── test_k3_loss_window.py    # ✨【回写#433】【回写#434】K3 丢失窗口临时库复现单测（A-03，3 项，只读临时库）：嵌套 delete+insert 注入异常 / 嵌套正常路径 / 对照原子事务失败保留旧数据；A-05 落地后核心复现用例翻转为回归（数据不丢失，K3 原结论由 A-03 结论文档固化）✅已完成
@@ -6302,3 +6303,10 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    c. 变更：①schema.py:73 注释"成交量（手）"→"成交量（股）"（纯注释，database 包行数不变，不触发 R-26）；②新增 tests/unit/test_a07_volume_unit.py 5 项回归样例（见 tests 段条目）。
    d. 验证：py_compile schema.py 通过；pytest tests/unit/test_a07_volume_unit.py 5 passed；门禁复跑（test_architecture）全绿；DB 抽样同日期比值∈[0.9,1.1]（tdx/tencent_http/eastmoney 多源同口径）。
    e. 纪律遵守：先登记蓝图（tests 段条目+本回写）再落代码；独立 commit。
+
+## #439 · 2026-10-17 · 数据层施工 A-10：死代码清理（manager.DatasetVersion 全族移除）
+   a. 依据：《数据层结构优化可行性施工方案报告_v1.1》§5.2 A-10（交付物=代码清理+文档注释对齐；验收=全仓 grep 无 manager.DatasetVersion 歧义引用）。
+   b. 事实基线（全仓 grep 取证）：manager.py 任务14「数据集版本管理」全族（异常 3 类 + DatasetVersion dataclass + _versions_root/_version_dir/_read_version_index/_next_version/_extract_data_range/_now_utc_str + create_dataset_version/create_dataset_version_from_clean_run/list_dataset_versions/get_dataset_version/get_dataset_versions_metadata，约 1652-2197 行）**无任何生产调用**（grep 仅 data_access/__init__ 导出 + 2 个测试接口断言）；utils/data_versioner.py 为活跃模块（scripts/数据导出_DB到processed.py:45 import DATASET_SCHEMA_REVISIONS/DatasetVersion/assert_versions_compatible 在用，280 行"schema_revision 单一真源"）。full_clean_service.py:13 注释自证"完整版本管理服务当前项目未实现（仅数据模型类）"。同名歧义=manager.py 与 utils/data_versioner.py 各定义 DatasetVersion。
+   c. 变更：①manager.py 删 85-97 异常族、164-284 DatasetVersion 类、1652-2197 版本管理方法段（__repr__ 保留）；②data_access/__init__.py 删 4 项导出；③tests/test_adjust_raw_semantics.py 删 DatasetVersion import + adjust 字段断言；④tests/test_data_manager.py 删 TestDatasetVersionManagement 类（617-683）；⑤full_clean_service.py:13-14 / batch_backtest.py:26-28 注释措辞改为 utils/data_versioner 口径快照登记。
+   d. 验证：py_compile 4 文件通过；pytest test_adjust_raw_semantics + test_data_manager + test_a07 + 门禁 test_architecture 全绿；全仓 grep DatasetVersion 仅剩 utils/data_versioner.py（活跃）+ 导出脚本（活跃）——歧义消除。
+   e. 纪律遵守：R-26 行数只减不增（删约 660 行必然绿）；先登记蓝图再落代码；独立 commit。

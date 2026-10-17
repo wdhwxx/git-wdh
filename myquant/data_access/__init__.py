@@ -36,10 +36,6 @@ from .loader import (
 )
 from .manager import (
     DataManager,
-    DatasetVersion,
-    DatasetVersionError,
-    DatasetVersionNotFoundError,
-    DataVersionIntegrityError,
 )
 from .sources import CompositeDataSource
 from .sources.base import (
@@ -52,10 +48,6 @@ __all__ = [
     # 原有核心
     "DataFetcher",
     "DataManager",
-    "DatasetVersion",
-    "DatasetVersionError",
-    "DatasetVersionNotFoundError",
-    "DataVersionIntegrityError",
     "create_default_fetcher",
     "create_fetcher",
     "get_available_sources",
