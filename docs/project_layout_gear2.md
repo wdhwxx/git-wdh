@@ -515,6 +515,7 @@ Pythonwdhmm/
 
 │   ├── 一致性校验.py                  # ✨【V5·P3】三模式一致性校验入口：engine.py/vectorized_engine.py/mixed_engine.py同参数同数据比对收益曲线与成交，差异超阈值即失败
 │   ├── 数据层基线.py                  # ✨【回写#426】【回写#427】数据层状态指纹基线薄入口（数据层施工 A-00/A-01）：--db/--processed/--out-dir/--date/--print/--dup-listing；业务逻辑归 myquant/data_access/data_layer_baseline.py（架构纪律）；产出 outputs/数据层基线_<YYYYMMDD>.json 只读 7 组指纹 + outputs/重复键定位清单_<YYYYMMDD>.json 重复键全量明细（A-01）
+│   ├── 数据重复清理.py                # ✨【回写#428】存量重复行清理薄入口（数据层施工 A-13）：默认 dry-run 只统计，--run 才执行（先在线备份合并 WAL 再事务删除）；业务逻辑归 myquant/data_access/duplicate_cleaner.py（架构纪律）；产出 outputs/重复行清理报告_<YYYYMMDD>.json + backups/quant.db.bak_<时间戳> 完整备份
 
 │   ├── 财务数据入库.py              # ✨【回写#36】财务数据入库薄入口：参数解析(--mode import/factors/all/--csv/--lookback-days/--output-dir)+路径探测+调用FinancialImportService；自动定位datasets/raw/financial/最新financial_history_*.csv；输出outputs/财务数据入库报告/全中文HTML+CSV报告；GUI财务数据栏「财务数据入库」选项共用同一服务
 ；✨【回写#258】G1 装配注入（缓存管理 7 处 _new_factor_cache_factory / 其余 4 脚本各 1 处装配，业务逻辑零写入不变）
@@ -682,6 +683,7 @@ Pythonwdhmm/
 
 │   │   ├── test_data_manager.py      # 数据加载、版本管理（68项）✅已完成
 │   │   ├── test_data_layer_baseline.py # ✨【回写#426】【回写#427】数据层状态指纹基线单测（A-00 的 9 项 + A-01 新增 1 项=10 项）：7 组指纹采集 / JSON 落盘往返 / 可重跑复现（两次构建指纹一致）/ 缺库 FileNotFoundError / 空库 present=False / 重复键明细采集与清单落盘 ✅已完成
+│   │   ├── test_duplicate_cleaner.py   # ✨【回写#428】存量重复行清理单测（A-13，4 项）：统计口径（重复键/重复行/待删行）/ dry-run 不修改库 / 执行后重复键归 0 且保留行符合规则（原始源优先、同源最早 created_at）/ 备份生成且行数一致 ✅已完成
 
 │   │   ├── test_live_risk.py         # 风控规则拦截、仓位限制、流控（83项）✅已完成
 
@@ -1081,6 +1083,7 @@ Pythonwdhmm/
     │   ├── financial_sync_service.py # ✨【回写#74】财务CSV增量同步服务：FinancialSyncService——定位financial_data缺失标的（与#71 no_financial同口径，排除规则对齐清洗14条）→逐标get_financial_history拉多期财务（防未来函数end_date过滤）→按symbol+report_date合并去重keep=新落盘financial_history_YYYYMMDD.csv→可选自动入库FinancialImportService→复查缺失；调用方=scripts/财务CSV更新.py + 豆包定时任务；✨【回写#83】P2-③ 排除规则config化（_load_financial_exclude_rules 读 config/financial_exclude_rules.yaml，缺省回退内置14条+warning）
 
     │   ├── data_layer_baseline.py       # ✨【回写#426】【回写#427】数据层状态指纹基线（数据层施工 A-00/A-01）：只读采集 7 组指纹（market_data 规模 / data_source 分布 / 唯一键重复 / financial_data ann_date 覆盖 / processed parquet 物理现状 / 辅助表规模 / alembic 版本戳）→ outputs/数据层基线_<YYYYMMDD>.json 原子落盘；A-01 新增重复键全量明细（collect_duplicate_details 按 (symbol,period,adjust,trade_date) 聚合全部重复行含 rowid/data_source/created_at/价格量 → save_duplicate_listing 原子落盘 outputs/重复键定位清单_<YYYYMMDD>.json；build_duplicate_listing 一站式入口）；sqlite file:...?mode=ro + PRAGMA query_only=ON 全程只读，不修改数据库与业务文件；__main__ 自带冒烟自测；被 scripts/数据层基线.py 薄入口调用（架构纪律）
+    │   ├── duplicate_cleaner.py         # ✨【回写#428】存量重复行清理服务（数据层施工 A-13）：按 (symbol,period,adjust,trade_date) 去重，保留规则=原始源行(tdx/tencent_http)>incremental_clean、同源保留最早 created_at、tdx 与 tencent_http 不同原始源按 created_at 最早、兜底 rowid 最小；collect_duplicate_stats 只读统计（重复键/重复行/待删行）→ backup_db 用 SQLite 在线备份 API（合并 WAL，6GB 级库不可直接复制文件）生成 backups/quant.db.bak_<时间戳> 并校验行数一致 → 事务 DELETE 精确删 rowid 集 → 报告落盘 outputs/重复行清理报告_<YYYYMMDD>.json；默认 dry-run 不修改；被 scripts/数据重复清理.py 薄入口调用（架构纪律）
 
     │   ├── cleaner/                  # ✨【数据清洗核心模块】已重构为面向对象架构
 
@@ -6175,3 +6178,16 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
       - R-26：PACKAGE_STRUCTURE_BASELINE["data_access"] 三维 PR2 对价抬升 17683/619/37→17796/622/37（+113 行/+3 符号，fan_out 37 不变；拆不动理由=功能必需新增于已登记模块 data_layer_baseline.py、模块归 data_access 语义正确、无等量旧代码可删；对价五要素齐全：功能必需 A-01 + 工单 #427 + 实测 + 独立 commit + 蓝图回写；沿用用户 A-00 已拍板的 PR2 对价通道，本批施工结束汇总留痕）。
    d. 验证：py_compile 3 文件通过；pytest tests/unit/test_data_layer_baseline.py 10 passed；真实库运行 scripts/数据层基线.py --dup-listing：重复键 4,377（与实测完全一致）→ outputs/重复键定位清单_20261017.json（4,377 键 / 11,945 行重复明细）；基线其余指纹与 A-00 全对齐（16,917,877 行 / 5,589 标的 / ann_date 非空 0 / processed 3,195 / alembic 0009）。
    e. 纪律遵守：先改代码→py_compile→单测→真实库验收→蓝图回写→门禁处置→独立 commit 的严格顺序（比 A-00 提前完成蓝图同步）；A-01 清单为 A-13 清理的前置输入。
+
+## #428 · 2026-10-17 · 数据层施工 A-13：存量重复行清理（动生产库，已备份）
+   a. 依据：《数据层结构优化可行性施工方案报告_v1.1》§5.2 ★A-13（验收=清理后重复键=0、行数减少恰为 4,377 的重复增量；交付=一次性脚本+清理报告；DB 备份+git）+ §5.3 最短见效路径（A-01→A-13→B-01）。
+   b. 新增文件（三件，蓝图目录树已同步登记 data_access/、scripts/、tests/unit/ 三段）：
+      - myquant/data_access/duplicate_cleaner.py —— 业务模块：collect_duplicate_stats 只读统计（重复键/重复行/待删行）→ backup_db 用 SQLite 在线备份 API（合并 WAL；6GB 级 quant.db 不可直接复制文件）生成 backups/quant.db.bak_<时间戳> 并校验行数一致 → clean_duplicates 事务 DELETE 精确删 rowid 集 → 报告原子落盘 outputs/重复行清理报告_<YYYYMMDD>.json；默认 dry-run；
+      - scripts/数据重复清理.py —— 薄入口：--db/--backup-dir/--report-dir/--date/--run（不加 --run 仅 dry-run），业务全归 myquant；
+      - tests/unit/test_duplicate_cleaner.py —— 单测 4 项（统计口径 / dry-run 不改库 / 执行后重复键归 0 且保留行符合规则 / 备份往返）。
+   c. 保留规则与边界决策（实测驱动）：A-01 清单探测 4,377 键全部含原始源行；组合分布 (incremental_clean×2,tdx)=3,187 / (tdx,tencent_http)=1,184 / (tdx×3)=4 / (tdx×2)=2；所有键内 created_at 全不同（排序稳定）。规则未覆盖边界：键内同时含 tdx 与 tencent_http 两个不同原始源时按 created_at 最早（先写入者）保留——与"同源保留最早"时间优先精神一致，报告中已记录。
+   d. 门禁处置：
+      - R-23：ENTRY_ALLOWLIST 登记 scripts/数据重复清理.py（结构红正常登记流程）；
+      - R-26：PACKAGE_STRUCTURE_BASELINE["data_access"] 三维 PR2 对价抬升 17796/622/37→18016/630/37（+220 行/+8 符号，fan_out 37 不变；拆不动理由=功能必需新增于已登记模块 duplicate_cleaner.py、模块归 data_access 语义正确、无等量旧代码可删；对价五要素齐全：功能必需 A-13 + 工单 #428 + 实测 + 独立 commit + 蓝图回写；沿用用户 A-00 已拍板的 PR2 对价通道，本批施工结束汇总留痕）。
+   e. 验证：py_compile 3 文件通过；pytest tests/unit/test_duplicate_cleaner.py 4 passed；真实库 dry-run 确认重复键 4,377 / 重复行 11,945 / 待删 7,568（=11,945−4,377）；--run 执行：在线备份 backups/quant.db.bak_20261017_120016（校验行数一致）→ 事务删除 7,568 行 → 清理后行数 16,910,309（=16,917,877−7,568，恰为重复增量）→ 重复键归 0；独立路径交叉验证（build_duplicate_listing JOIN+GROUP BY）重复键 0 / 重复行 0。
+   f. 纪律遵守：动生产库前置完整备份 + dry-run 先行 + 事务删除 + 独立交叉验证；新增文件蓝图登记 + 门禁登记/对价 + 独立 commit。
