@@ -190,6 +190,10 @@ class DataManager:
         # 连续失败达到阈值时日志升级 error，暴露问题而非静默。
         self._b_class_derivation_failures: int = 0
         self._b_class_failure_threshold: int = 5
+        # C-01 #450：门禁①准入判定器（惰性构造，默认关闭——is_enabled()=False 时直通）
+        self._admission_checker: Optional[Any] = None
+        # C-01 #450：最近一次入库的准入统计（BLOCK 拒收 / FLAG 标记计数，供结果可观测）
+        self._admission_stats: Dict[str, int] = {"blocked": 0, "flagged": 0}
 
     # ── 属性 ──
 
@@ -289,6 +293,9 @@ class DataManager:
                 # 持久化到数据库（如果有连接）
                 if self._db:
                     self._save_to_database(symbol, data_result, period, adjust)
+                    # C-01 #450：准入统计暴露（BLOCK 拒收 / FLAG 标记；默认关=0）
+                    result["admission_blocked"] = self._admission_stats.get("blocked", 0)
+                    result["admission_flagged"] = self._admission_stats.get("flagged", 0)
 
                 # 更新同步状态
                 self._update_sync_status(
@@ -696,10 +703,29 @@ class DataManager:
             ingest_time = datetime.now().isoformat(timespec="seconds")
             self._ingest_batch_seq = getattr(self, "_ingest_batch_seq", 0) + 1
             ingest_batch = f"{datetime.now():%Y%m%d}-{self._ingest_batch_seq:04d}"
+            # C-01 #450：门禁①接线——总开关默认关闭（is_enabled()=False 直通，生产零变化）；
+            # 开启后 BLOCK 拒收（admission_reject 留痕，不写库）/ FLAG 落 anomaly_flags 列
+            self._admission_stats = {"blocked": 0, "flagged": 0}
+            checker = self._admission_checker
+            if checker is None:
+                from ..data_access.admission import AdmissionChecker
+                checker = AdmissionChecker()
+                self._admission_checker = checker
+            admission_on = checker.is_enabled()
+            prev_row: Optional[Dict[str, Any]] = None
+            if admission_on:
+                # 首行上下文：取 DB 中该标的最近一根（价格跳变/量异动/缺失行/源切换判定）
+                # 转 dict：sqlite3.Row 无 .get，admission.check 依赖 dict 接口
+                _prev = self._db.execute_one(
+                    "SELECT * FROM market_data WHERE symbol=? AND period=? AND adjust=? "
+                    "ORDER BY trade_date DESC, trade_time DESC LIMIT 1",
+                    (symbol, period, adjust),
+                )
+                prev_row = dict(_prev) if _prev is not None else None
             # 转换为数据库格式
             db_data = []
             for row in data_result.data:
-                db_data.append({
+                entry = {
                     "symbol": symbol,
                     "market": data_result.market,
                     "period": period,
@@ -718,8 +744,31 @@ class DataManager:
                     "data_source": data_result.source,
                     "ingest_time": ingest_time,
                     "ingest_batch": ingest_batch,
-                    "anomaly_flags": None,  # B-04 门禁①接线后写入 FLAG 标记
-                })
+                    "anomaly_flags": None,
+                }
+                if admission_on:
+                    # 字段映射：原始行 date 键 → 门禁① trade_date 键（B-05 #445 同款修正）
+                    admission_row = dict(row)
+                    admission_row.setdefault("trade_date", row.get("date", ""))
+                    result = checker.check(
+                        admission_row, symbol, data_result.source, prev_row=prev_row,
+                    )
+                    if result.decision == "BLOCK":
+                        self._admission_stats["blocked"] += 1
+                        queries.record_admission_reject(
+                            symbol=symbol,
+                            rule=result.reasons[0].split(":")[0] if result.reasons else "admission_block",
+                            detail="|".join(result.reasons),
+                            source=data_result.source,
+                            trade_date=str(row.get("date", "") or None),
+                            level="BLOCK",
+                        )
+                        continue  # 拒收：不写库
+                    if result.decision == "FLAG":
+                        self._admission_stats["flagged"] += 1
+                        entry["anomaly_flags"] = "|".join(result.flags)
+                db_data.append(entry)
+                prev_row = row
             return queries.bulk_insert_market_data(db_data)
         except Exception:
             return 0

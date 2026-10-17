@@ -6395,3 +6395,10 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    d. 变更（纯文档收敛，零生产代码改动）：①蓝图目录树 datasets/features/（L235）标注更新为 #449 决策结论（历史"供策略与模型使用"标注作废）；②docs/data_dictionary.md 三处"见 C-09 空转"占位标注→决策结论（L18 目录注释 / L69 表清单 / §3.4 小节标题与字段说明，标注可选能力未启用）；③施工清单 C-09 完成回写。
    e. 验证：文档一致性自查（data_dictionary 与蓝图对 factor_data/features 口径一致，不再出现"待决策/见 C-09"悬置表述）；无代码变更→不触碰 R-24/R-26/C-5 门禁，无需跑代码门禁（架构纪律：纯文档 commit 独立提交）。
    f. 纪律遵守：先登记蓝图（目录树 + 本回写）再落文档；独立 commit；不删 features/ 占位（目录树 3.3 保留+注释纪律）；config/datasets/features 预留占位（L425）不动（真实 .gitkeep 占位）。
+
+## #450 · 2026-10-17 · 数据层施工 C-01：门禁①接入 update_symbol（BLOCK 拒收 + FLAG 落列，开关可关）
+   a. 依据：《数据层结构优化可行性施工方案报告_v1.1》§5.2 C-01（P2，交付=接线；验收=影子 1 周 BLOCK 误报<1%；可逆=开关可关）+ §4.3(d)(e)。
+   b. 事实基线（代码级取证）：manager._save_to_database（manager.py:676-725）B-02 已落 ingest 三列、anomaly_flags 硬编码 None（L721 注释"B-04 门禁①接线后写入 FLAG 标记"）；AdmissionChecker（admission.py，B-04 #444）check(row,symbol,data_source,prev_row,rule)→BLOCK/FLAG/PASS；queries.record_admission_reject（queries.py:329，B-03 #443）BLOCK 留痕已就绪。
+   c. 变更：①admission.py AdmissionChecker 增 `enabled` 属性 + is_enabled()（读 config/data_clean.yaml admission.enabled，默认 False——接线开关，false=现状直通满足"开关可关"）；②manager.py __init__ 惰性建 self._admission_checker；_save_to_database enabled=true 时批量过门禁：prev_row 取 DB 该 symbol 末根（首行上下文），BLOCK→record_admission_reject（rule=首条 reason 规则名，detail=全部 reasons）+拒收不写库，FLAG→anomaly_flags="|".join(flags)，PASS 原样；拒收/标记计数存 self._admission_stats，update_symbol result 追加 admission_blocked/admission_flagged；③config/data_clean.yaml 增 admission.enabled=false（真实 yaml 不入 git 约定，代码默认兜底）；④tests/unit/test_admission_wiring.py：默认关直通（存量行为零变化）/开 BLOCK 拒收+reject 留痕+不写库/FLAG 落列/PASS 原样/prev_row 上下文/计数暴露。
+   d. 验证：py_compile 通过；新增单测全绿 + test_adjust_raw_semantics/test_data_manager 不回归；test_architecture 门禁全绿（manager.py R-24 冻结 2204 只减不增——本次 +~45 行功能必需，超限按顶红六步协议对价 #450；admission.py R-26 包级聚合若有增按联动同步）。
+   e. 纪律遵守：先登记蓝图（manager/admission 目录树 + 本回写）再落代码；独立 commit；默认关闭不改变生产行为（验收期由用户开开关 + 影子比对）；不动 B-05 影子模块。

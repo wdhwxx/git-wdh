@@ -75,7 +75,12 @@ class AdmissionResult:
 
 
 class AdmissionChecker:
-    """门禁①ODS 准入判定器（无状态，可并发）。"""
+    """门禁①ODS 准入判定器（无状态，可并发）。
+
+    C-01 #450 接线语义：``enabled`` 为总开关（读 config/data_clean.yaml
+    ``admission.enabled``，默认 False）——关闭时 is_enabled()=False，调用方直通
+    （生产行为零变化，满足"开关可关"）；开启后 BLOCK 拒收 / FLAG 标记生效。
+    """
 
     def __init__(
         self,
@@ -91,6 +96,7 @@ class AdmissionChecker:
         self._config_path = config_path or self._default_path("data_clean.yaml")
         self._whitelist_path = whitelist_path or self._default_path("admission_whitelist.yaml")
         self._max_volume_ratio = _DEFAULT_MAX_VOLUME_RATIO
+        self._enabled: bool = False
         self._load_config()
 
     @staticmethod
@@ -106,7 +112,7 @@ class AdmissionChecker:
         return cand[0]
 
     def _load_config(self) -> None:
-        """加载 data_clean.yaml（跳变阈值/量异动；缺文件用默认值不报错）。"""
+        """加载 data_clean.yaml（跳变阈值/量异动/总开关；缺文件用默认值不报错）。"""
         try:
             if not self._config_path.exists():
                 logger.warning("准入配置缺失 %s，使用默认阈值", self._config_path)
@@ -116,8 +122,15 @@ class AdmissionChecker:
             self._max_volume_ratio = float(
                 bar.get("max_volume_ratio", _DEFAULT_MAX_VOLUME_RATIO)
             )
+            # C-01 #450：接线总开关（默认关闭；缺失/异常一律 False=fail-open 直通）
+            admission_cfg = raw.get("admission", {}) or {}
+            self._enabled = bool(admission_cfg.get("enabled", False))
         except Exception as exc:  # 配置损坏不阻断准入（降级默认，记录日志）
             logger.warning("准入配置解析失败 %s: %s，使用默认阈值", self._config_path, exc)
+
+    def is_enabled(self) -> bool:
+        """门禁①总开关是否开启（false=调用方直通，生产零变化）。"""
+        return self._enabled
 
     # ── 阈值解析 ─────────────────────────────────────────
     def _resolve_price_jump_threshold(self, symbol: str) -> float:
