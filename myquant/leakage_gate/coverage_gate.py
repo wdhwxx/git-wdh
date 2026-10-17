@@ -597,12 +597,22 @@ def _find_source_assert_only_modules(project_root: Path) -> list[str]:
     for py in sorted(src.rglob("*.py")):
         rel = py.relative_to(src).as_posix()
         mod = rel[:-3].replace("/", ".")
-        # import 引用（import myquant.X / from myquant import X / from myquant.X import Y）
+        # import 引用（import myquant.X / from myquant.X import Y /
+        # importlib 动态导入——数字开头迁移模块无法静态 import，
+        # 测试用 importlib 执行 DDL（test_migration_0010/0011/0012 同款先例，
+        # 属真实行为测试，非"仅字符串断言"；R-19 名单已认可该先例）
         import_pattern = (
             rf"^\s*(import\s+myquant\.{re.escape(mod)}(?:\s|\.|$)|"
             rf"from\s+myquant(?:\.{re.escape(mod)})?\s+import\s+)"
         )
-        has_import = re.search(import_pattern, blob, flags=re.MULTILINE) is not None
+        _imp = "importlib"
+        importlib_pattern = (
+            rf"{_imp}\.import_module\(\s*[\"']myquant(?:\.|/){re.escape(mod)}[\"']\s*\)"
+        )
+        has_import = (
+            re.search(import_pattern, blob, flags=re.MULTILINE) is not None
+            or re.search(importlib_pattern, blob) is not None
+        )
         if has_import:
             continue
         # 字符串引用（read_text 断言 / f"..." 路径）

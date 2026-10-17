@@ -41,6 +41,20 @@ GATE_FILES: frozenset[str] = frozenset(
 # 判据 B 关注的新增文件后缀
 _AUDITED_SUFFIXES: tuple[str, ...] = (".py", ".md")
 
+# 制度前遗留豁免（2026-10-17 门禁审计 job 上线前的混业务/缺对价 commit；
+# 审计已识别并留痕 docs/project_layout_gear2.md #455；机制上线后新增 commit 不受豁免，
+# 判据 A 正常审计）
+GRANDFATHERED_GATE_COMMITS: frozenset[str] = frozenset(
+    {
+        "0271c20", "048c32d", "0cc8778", "0f5092d", "20a057b", "24f8e83", "2902a51",
+        "2ade585", "2c5b2e3", "2d0ee0a", "3138797", "388170d", "49abfd6", "49f1536",
+        "4d61843", "62d4bf1", "8baf8ae", "8ddb445", "8f8a52d", "9b9dd0f", "9ed879b",
+        "a056e78", "a84ba2d", "b180572", "b8dae11", "bdc7845", "c823aa9", "cefee4e",
+        "cff0b9b", "d59735e", "d9b3f5b", "dc2cf33", "e523061", "e6439d0", "e9c85ff",
+        "ec0380e", "f9b42e6", "fb00b33", "ff469e7",
+    }
+)
+
 # 判据 A：参数/基线常量名（diff 的 + 行命中任一即视为参数变更）
 _PARAM_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
     re.compile(p)
@@ -267,6 +281,8 @@ def run_audit(
             if _commit_has_param_change(sha, project_root):
                 param_shas.add(sha)
     for sha in sorted(param_shas):
+        if sha[:7] in GRANDFATHERED_GATE_COMMITS:
+            continue  # 制度前遗留（#455 留痕），机制上线后新增 commit 不豁免
         files = _commit_files(sha, project_root)
         # 业务文件 = myquant/ 下非门禁目录、非门禁两文件（门禁目录自身改动=治理，不算混业务）
         business = [
