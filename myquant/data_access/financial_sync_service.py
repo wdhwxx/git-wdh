@@ -53,11 +53,12 @@ FINANCIAL_HISTORY_PREFIX: str = "financial_history"
 #: 每次拉取间隔秒数（限速，与 GUI run_finance 一致）
 FETCH_SLEEP_SEC: float = 0.3
 
-#: CSV 列顺序（与既有 financial_history_*.csv 完全一致）
+#: CSV 列顺序（与既有 financial_history_*.csv 完全一致；
+#: A-04 起含 ann_date 公告日列，位置与 financial_service 入库映射同序 report_type 之后）
 FINANCIAL_CSV_COLUMNS: List[str] = [
-    "symbol", "market", "report_date", "report_type", "pe", "pb", "total_mv",
-    "circ_mv", "eps", "bps", "revenue", "net_profit", "net_profit_parent",
-    "roe", "gross_margin", "debt_ratio", "data_source",
+    "symbol", "market", "report_date", "report_type", "ann_date", "pe", "pb",
+    "total_mv", "circ_mv", "eps", "bps", "revenue", "net_profit",
+    "net_profit_parent", "roe", "gross_margin", "debt_ratio", "data_source",
 ]
 
 #: 合并去重主键列
@@ -421,3 +422,67 @@ class FinancialSyncService:
             len(records), before_count, after_count,
         )
         return stats
+
+
+def backfill_ann_date_column(fin_dir: Path, dry_run: bool = True) -> Dict[str, Any]:
+    """A-04：为存量 ``financial_history_*.csv`` 补 ``ann_date`` 列（默认 dry-run）。
+
+    B-09 之前的存量 CSV 无 ann_date 列；本函数按 FINANCIAL_CSV_COLUMNS 校验表头，
+    缺列则插入空列回写（UTF-8 BOM，保持其余列值/行序不变）。已有 ann_date 列的文件
+    跳过（不重写）。公告日真实值由下一次东财拉取经 B-09 链路补入新行，存量行的
+    ann_date 空串在入库时被 financial_service 视为无公告日（时点回退 report_date，
+    向后兼容）。
+
+    Parameters
+    ----------
+    fin_dir : Path
+        财务 CSV 目录（默认 datasets/raw/financial/）。
+    dry_run : bool
+        True（默认）只扫描统计不写盘；False 实际回写。
+
+    Returns
+    -------
+    dict : {files_scanned, files_backfilled, rows_updated}
+    """
+    stats: Dict[str, Any] = {"files_scanned": 0, "files_backfilled": 0, "rows_updated": 0}
+    if not fin_dir.exists():
+        logger.warning("财务 CSV 目录不存在: %s", fin_dir)
+        return stats
+
+    for csv_path in sorted(fin_dir.glob(f"{FINANCIAL_HISTORY_PREFIX}_*.csv")):
+        stats["files_scanned"] += 1
+        with open(csv_path, "r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            fields = list(reader.fieldnames or [])
+            rows = [dict(r) for r in reader]
+        if "ann_date" in fields:
+            logger.info("跳过（已含 ann_date 列）: %s", csv_path.name)
+            continue
+
+        # 插入位置：report_type 之后（与 FINANCIAL_CSV_COLUMNS 同序）
+        pos = fields.index("report_type") + 1 if "report_type" in fields else len(fields)
+        new_fields = fields[:pos] + ["ann_date"] + fields[pos:]
+        if new_fields != FINANCIAL_CSV_COLUMNS:
+            logger.warning(
+                "%s 表头顺序与 FINANCIAL_CSV_COLUMNS 不一致（现 %d 列→将 %d 列），"
+                "按现有列序插入 ann_date",
+                csv_path.name, len(fields), len(new_fields),
+            )
+
+        if dry_run:
+            logger.info("[dry-run] 待回填: %s（%d 行，%d 列→%d 列）",
+                        csv_path.name, len(rows), len(fields), len(new_fields))
+            stats["files_backfilled"] += 1
+            stats["rows_updated"] += len(rows)
+            continue
+
+        with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=new_fields)
+            writer.writeheader()
+            for r in rows:
+                r["ann_date"] = ""
+                writer.writerow({c: r.get(c, "") for c in new_fields})
+        stats["files_backfilled"] += 1
+        stats["rows_updated"] += len(rows)
+        logger.info("已回填: %s（%d 行）", csv_path.name, len(rows))
+    return stats

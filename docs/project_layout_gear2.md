@@ -518,6 +518,7 @@ Pythonwdhmm/
 │   ├── 一致性校验.py                  # ✨【V5·P3】三模式一致性校验入口：engine.py/vectorized_engine.py/mixed_engine.py同参数同数据比对收益曲线与成交，差异超阈值即失败
 │   ├── 数据层基线.py                  # ✨【回写#426】【回写#427】数据层状态指纹基线薄入口（数据层施工 A-00/A-01）：--db/--processed/--out-dir/--date/--print/--dup-listing；业务逻辑归 myquant/data_access/data_layer_baseline.py（架构纪律）；产出 outputs/数据层基线_<YYYYMMDD>.json 只读 7 组指纹 + outputs/重复键定位清单_<YYYYMMDD>.json 重复键全量明细（A-01）
 │   ├── 数据重复清理.py                # ✨【回写#428】存量重复行清理薄入口（数据层施工 A-13）：默认 dry-run 只统计，--run 才执行（先在线备份合并 WAL 再事务删除）；业务逻辑归 myquant/data_access/duplicate_cleaner.py（架构纪律）；产出 outputs/重复行清理报告_<YYYYMMDD>.json + backups/quant.db.bak_<时间戳> 完整备份
+│   ├── 财务CSV回填ann_date.py         # ✨【回写#432】存量财务CSV补ann_date列薄入口（数据层施工 A-04）：默认 dry-run 统计，--run 实际回写；业务逻辑归 myquant/data_access/financial_sync_service.backfill_ann_date_column（架构纪律）
 
 │   ├── 财务数据入库.py              # ✨【回写#36】财务数据入库薄入口：参数解析(--mode import/factors/all/--csv/--lookback-days/--output-dir)+路径探测+调用FinancialImportService；自动定位datasets/raw/financial/最新financial_history_*.csv；输出outputs/财务数据入库报告/全中文HTML+CSV报告；GUI财务数据栏「财务数据入库」选项共用同一服务
 ；✨【回写#258】G1 装配注入（缓存管理 7 处 _new_factor_cache_factory / 其余 4 脚本各 1 处装配，业务逻辑零写入不变）
@@ -1083,7 +1084,7 @@ Pythonwdhmm/
 
     │   ├── financial_service.py      # ✨【回写#36】财务数据入库服务：FinancialImportService——财务CSV读取→字段映射(net_profit_parent→net_profit/report_date YYYYMMDD→YYYY-MM-DD)→分批批量入库financial_data；FactorEngine向量化计算14个技术因子(SMA5/10/20/60,EMA12/26,MACD_DIF/DEA/HIST,RSI14,BOLL_UP/MID/LOW,ATR14)+5个基本面因子(PE/PB/ROE/毛利率/资产负债率)映射最新报告期→长表写入factor_data；生成全中文表头HTML+CSV入库报告；防未来函数(财务仅取report_date<=trade_date最新一期)；调用方=scripts/财务数据入库.py + GUI财务数据入库选项；✨【回写#281】M1A-02 _eff_date 改调 eff_disclosure_date 统一时点日落点（ann_date 优先→report_deadline 推定→report_date 兜底，原直取 ann_date or report_date 存在报告期~披露窗口穿越）
 ；✨【回写#258】G1 EX-08A：FinancialImportService 构造新增 factor_engine_factory 注入参数，compute_factors 未装配 logger.warning+return stats（删延迟导入），scripts/财务数据入库.py _new_factor_engine_factory 装配（cache_dir/use_cache/auto_fingerprint 与旧延迟导入一致）
-    │   ├── financial_sync_service.py # ✨【回写#74】财务CSV增量同步服务：FinancialSyncService——定位financial_data缺失标的（与#71 no_financial同口径，排除规则对齐清洗14条）→逐标get_financial_history拉多期财务（防未来函数end_date过滤）→按symbol+report_date合并去重keep=新落盘financial_history_YYYYMMDD.csv→可选自动入库FinancialImportService→复查缺失；调用方=scripts/财务CSV更新.py + 豆包定时任务；✨【回写#83】P2-③ 排除规则config化（_load_financial_exclude_rules 读 config/financial_exclude_rules.yaml，缺省回退内置14条+warning）
+    │   ├── financial_sync_service.py # ✨【回写#74】财务CSV增量同步服务：FinancialSyncService——定位financial_data缺失标的（与#71 no_financial同口径，排除规则对齐清洗14条）→逐标get_financial_history拉多期财务（防未来函数end_date过滤）→按symbol+report_date合并去重keep=新落盘financial_history_YYYYMMDD.csv→可选自动入库FinancialImportService→复查缺失；调用方=scripts/财务CSV更新.py + 豆包定时任务；✨【回写#83】P2-③ 排除规则config化（_load_financial_exclude_rules 读 config/financial_exclude_rules.yaml，缺省回退内置14条+warning）；✨【回写#432】FINANCIAL_CSV_COLUMNS 补 ann_date 公告日列（A-04，18列，report_type 之后与入库映射同序）+ backfill_ann_date_column 存量回填（扫描 financial_history_*.csv 缺列插入空列回写 UTF-8 BOM，dry-run 默认；被 scripts/财务CSV回填ann_date.py 薄入口调用）
 
     │   ├── data_layer_baseline.py       # ✨【回写#426】【回写#427】数据层状态指纹基线（数据层施工 A-00/A-01）：只读采集 7 组指纹（market_data 规模 / data_source 分布 / 唯一键重复 / financial_data ann_date 覆盖 / processed parquet 物理现状 / 辅助表规模 / alembic 版本戳）→ outputs/数据层基线_<YYYYMMDD>.json 原子落盘；A-01 新增重复键全量明细（collect_duplicate_details 按 (symbol,period,adjust,trade_date) 聚合全部重复行含 rowid/data_source/created_at/价格量 → save_duplicate_listing 原子落盘 outputs/重复键定位清单_<YYYYMMDD>.json；build_duplicate_listing 一站式入口）；sqlite file:...?mode=ro + PRAGMA query_only=ON 全程只读，不修改数据库与业务文件；__main__ 自带冒烟自测；被 scripts/数据层基线.py 薄入口调用（架构纪律）
     │   ├── duplicate_cleaner.py         # ✨【回写#428】存量重复行清理服务（数据层施工 A-13）：按 (symbol,period,adjust,trade_date) 去重，保留规则=原始源行(tdx/tencent_http)>incremental_clean、同源保留最早 created_at、tdx 与 tencent_http 不同原始源按 created_at 最早、兜底 rowid 最小；collect_duplicate_stats 只读统计（重复键/重复行/待删行）→ backup_db 用 SQLite 在线备份 API（合并 WAL，6GB 级库不可直接复制文件）生成 backups/quant.db.bak_<时间戳> 并校验行数一致 → 事务 DELETE 精确删 rowid 集 → 报告落盘 outputs/重复行清理报告_<YYYYMMDD>.json；默认 dry-run 不修改；被 scripts/数据重复清理.py 薄入口调用（架构纪律）
@@ -6225,3 +6226,16 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
       - R-26：PACKAGE_STRUCTURE_BASELINE["data_access"] 三维 PR2 对价抬升 18016/630/37→18042/631/37（+26 行/+1 符号，fan_out 37 不变；拆不动理由=功能必需新增于已登记模块 akshare_source.py、模块归 data_access 语义正确、无等量旧代码可删；对价五要素齐全：功能必需 B-09 + 工单 #431 + 实测（第0步字段探测）+ 独立 commit + 蓝图回写；沿用用户 A-00 已拍板的 PR2 对价通道，本批施工结束汇总留痕）。
    e. 验证：py_compile 2 文件通过；pytest tests/unit/test_akshare_ann_date.py 8 passed；门禁复跑全绿。
    f. 纪律遵守：字段名第 0 步实测先行（不猜字段名）；monkeypatch 单测不联网；蓝图登记 + 门禁对价 + 独立 commit。
+
+## #432 · 2026-10-17 · 数据层施工 A-04：CSV 链路补 ann_date
+   a. 依据：《数据层结构优化可行性施工方案报告_v1.1》§5.2 ★A-04（验收=回填后 CSV 含列；late-disclosure 用例通过；git 可回滚）+ 断点定位结论（A-02）：CSV 列清单 FINANCIAL_CSV_COLUMNS 缺 ann_date，入库映射有解析能力无供给。
+   b. 实测：datasets/raw/financial/ 存量 2 个 CSV（financial_history_20260912.csv / _20260930.csv，各 ~53.7MB）表头 17 列无 ann_date（与旧常量一致）。
+   c. 变更（四处）：
+      - myquant/data_access/financial_sync_service.py —— FINANCIAL_CSV_COLUMNS 补 "ann_date"（report_type 之后，与 financial_service 入库映射同序）→ 同步合并写出自动带新列（272-275 用该常量）；新增模块级 backfill_ann_date_column(fin_dir, dry_run=True)（扫描 financial_history_*.csv，缺列则按现有列序插入空列回写，UTF-8 BOM 原值/行序不动；已有 ann_date 列跳过不重写；dry-run 默认）；
+      - scripts/财务CSV回填ann_date.py —— A-04 薄入口（--run 实际回写，默认 dry-run；业务逻辑归 myquant 架构纪律）；
+      - tests/unit/test_a04_ann_date_backfill.py —— 单测 6 项（列序常量 1 / dry-run 不写盘 1 / 实际回写补列保原值 1 / 已含列跳过 1 / late-disclosure 入库 ann_date 非空 1 / 空列入库 NULL 回退 1，临时库 create_all_tables 初始化）。
+   d. 门禁处置：
+      - R-23：ENTRY_ALLOWLIST 登记 scripts/财务CSV回填ann_date.py（211-241 行，委托 financial_sync_service.backfill_ann_date_column）；
+      - R-26：PACKAGE_STRUCTURE_BASELINE["data_access"] 三维 PR2 对价抬升 18042/631/37→18107/632/37（+65 行/+1 符号，fan_out 37 不变；功能必需 A-04：补列常量 + 回填函数，拆不动=常量是 CSV 唯一列权威、回填函数是存量迁移必需且归已登记模块；对价五要素齐全：功能必需 + 工单 #432 + 实测（存量表头 17 列）+ 独立 commit + 蓝图回写；沿用 A-00 已拍板 PR2 通道）。
+   e. 验证：py_compile 3 文件通过；pytest tests/unit/test_a04_ann_date_backfill.py 6 passed；门禁复跑全绿。
+   f. 纪律遵守：先登记蓝图（scripts 薄入口 + 常量/函数）再创建；默认 dry-run 不动存量 CSV（真实回写由用户 --run 确认后执行）；独立 commit。

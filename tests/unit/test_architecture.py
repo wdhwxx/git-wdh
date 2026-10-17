@@ -235,6 +235,7 @@ ENTRY_ALLOWLIST: set[str] = {
     "scripts/告警通道实测.py",  # 回写#C-6：告警通道实测薄入口（飞书 Webhook 单条/并发/直连探测，委托 myquant/monitoring/alerting.py）
     "scripts/数据层基线.py",  # ✨【回写#426】数据层状态指纹基线薄入口（A-00，委托 myquant/data_access/data_layer_baseline.py）
     "scripts/数据重复清理.py",  # ✨【回写#428】存量重复行清理薄入口（A-13，委托 myquant/data_access/duplicate_cleaner.py）
+    "scripts/财务CSV回填ann_date.py",  # ✨【回写#432】存量财务CSV补ann_date列薄入口（A-04，委托 myquant/data_access/financial_sync_service.backfill_ann_date_column）
     # 根目录入口（.py + .bat）
     "run_GUI入口.py", "run_全量清洗GUI.py", "run_回测入口.py", "run_回测配置GUI.py",
     "run_实盘入口.py", "run_批量回测.py", "run_数据下载GUI.py", "run_清理GUI.py",
@@ -358,7 +359,7 @@ PACKAGE_STRUCTURE_BASELINE: dict[str, dict[str, int]] = {
     "api": {"lines": 3871, "symbols": 196, "fan_out": 26},  # T0-16 新增 /api/reconciliation/unfreeze 解冻接口 +32行/+1符号功能必需；3807/194→3833/195（T2-3 新增 /api/reconciliation/status 对账状态查询 +26行/+1符号）；3833/195→3871/196（T2-4 新增 /api/reconciliation/history 对账历史查询 +38行/+1符号）
     "backtest": {"lines": 20722, "symbols": 560, "fan_out": 37},  # T4-3 信号流 20711→20722
     "core": {"lines": 12976, "symbols": 600, "fan_out": 40},  # 12975→12976（+1，#425 引擎停止感知 _stop_requested 功能必需）
-    "data_access": {"lines": 18042, "symbols": 631, "fan_out": 37},  # 17223/605/34→17683/619/37（+460/+14/+3，A-00 新增 data_layer_baseline.py 数据层状态指纹模块，功能必需对价 #426，2026-10-17）；17683/619/37→17796/622/37（+113/+3，A-01 新增 collect_duplicate_details/save_duplicate_listing/build_duplicate_listing 重复键全量明细三函数，功能必需对价 #427，2026-10-17）；17796/622/37→18016/630/37（+220/+8，A-13 新增 duplicate_cleaner.py 存量重复行清理模块，功能必需对价 #428，2026-10-17）；18016/630/37→18042/631/37（+26/+1，B-09 akshare_source 三处财务记录构造补 ann_date + _normalize_notice_date 归一化，功能必需对价 #431，2026-10-17）
+    "data_access": {"lines": 18107, "symbols": 632, "fan_out": 37},  # 17223/605/34→17683/619/37（+460/+14/+3，A-00 新增 data_layer_baseline.py 数据层状态指纹模块，功能必需对价 #426，2026-10-17）；17683/619/37→17796/622/37（+113/+3，A-01 新增 collect_duplicate_details/save_duplicate_listing/build_duplicate_listing 重复键全量明细三函数，功能必需对价 #427，2026-10-17）；17796/622/37→18016/630/37（+220/+8，A-13 新增 duplicate_cleaner.py 存量重复行清理模块，功能必需对价 #428，2026-10-17）；18016/630/37→18042/631/37（+26/+1，B-09 akshare_source 三处财务记录构造补 ann_date + _normalize_notice_date 归一化，功能必需对价 #431，2026-10-17）；18042/631/37→18107/632/37（+65/+1，A-04 financial_sync_service FINANCIAL_CSV_COLUMNS 补 ann_date 列 + backfill_ann_date_column 存量回填函数，功能必需对价 #432，2026-10-17）
     "database": {"lines": 4013, "symbols": 126, "fan_out": 17},  # 3608/113→3763/116（+155行/+3符号，T1-3 0009 对账账本迁移 upgrade/downgrade/辅助函数，fan_out 不变）；3763/116→3831/120（+68行/+4符号，T1-4 record_order ON CONFLICT + 新增 record_order_event/record_reconciliation_run/diff/freeze 四个方法）；3831/120→3882/120（+51行，T1-7 四类写入同步 AuditLogStore 哈希链，symbols/fan_out 不变）；3882/120→3910/122（+28行/+2符号，T2-2 get_order_by_id + get_order_events 查询接口）；3910/122→3960/124（+50行/+2符号，T2-4 query_reconciliation_runs + query_reconciliation_diffs 对账历史查询）；3960/124/17→4013/126/17（+53行/+2符号，B-01 新增 0010_partial_unique_daily.py 部分唯一索引迁移，功能必需对价 #429，2026-10-17）
     "engine": {"lines": 209, "symbols": 14, "fan_out": 4},
     "execution": {"lines": 1097, "symbols": 59, "fan_out": 6},  # 1085→1097（+12，#425 引擎停止感知 _stop_requested 状态机贯通功能必需）
