@@ -236,6 +236,7 @@ ENTRY_ALLOWLIST: set[str] = {
     "scripts/数据层基线.py",  # ✨【回写#426】数据层状态指纹基线薄入口（A-00，委托 myquant/data_access/data_layer_baseline.py）
     "scripts/数据重复清理.py",  # ✨【回写#428】存量重复行清理薄入口（A-13，委托 myquant/data_access/duplicate_cleaner.py）
     "scripts/财务CSV回填ann_date.py",  # ✨【回写#432】存量财务CSV补ann_date列薄入口（A-04，委托 myquant/data_access/financial_sync_service.backfill_ann_date_column）
+    "scripts/数据一致性校验.py",  # ✨【回写#440】数据层一致性校验薄入口（A-11，委托 myquant/data_access/data_layer_baseline.build_baseline/compare_baseline）
     # 根目录入口（.py + .bat）
     "run_GUI入口.py", "run_全量清洗GUI.py", "run_回测入口.py", "run_回测配置GUI.py",
     "run_实盘入口.py", "run_批量回测.py", "run_数据下载GUI.py", "run_清理GUI.py",

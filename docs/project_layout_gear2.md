@@ -515,7 +515,8 @@ Pythonwdhmm/
 
 │   ├── 清理历史回测输出.py              # ✨【回写#25】清理outputs历史回测输出入口：按YYYYMMDD_HHMMSS时间戳归组仅保留最近N期（--keep），默认dry-run、--execute才删除；保护清单（子目录/非匹配模式/无法解析时间戳一律不删）
 
-│   ├── 一致性校验.py                  # ✨【V5·P3】三模式一致性校验入口：engine.py/vectorized_engine.py/mixed_engine.py同参数同数据比对收益曲线与成交，差异超阈值即失败
+│   ├── 一致性校验.py                  # ✨【V5·P3】三模式一致性校验入口：engine.py/vectorized_engine.py/mixed_engine.py同参数同数据比对收益曲线与成交，差异超阈值即失败；【A-11 #440】顶部 docstring 标注"回测一致性（非数据层）"防误用
+│   ├── 数据一致性校验.py              # ✨【回写#440】数据层一致性校验薄入口（数据层施工 A-11）：--db/--processed/--baseline/--out-dir/--date/--rebuild；现算 7 组指纹 vs 基线 JSON 比对（compare_baseline 业务归 myquant/data_access/data_layer_baseline.py）；基线可一键复现（--rebuild 重建后再比对）✅已完成
 │   ├── 数据层基线.py                  # ✨【回写#426】【回写#427】数据层状态指纹基线薄入口（数据层施工 A-00/A-01）：--db/--processed/--out-dir/--date/--print/--dup-listing；业务逻辑归 myquant/data_access/data_layer_baseline.py（架构纪律）；产出 outputs/数据层基线_<YYYYMMDD>.json 只读 7 组指纹 + outputs/重复键定位清单_<YYYYMMDD>.json 重复键全量明细（A-01）
 │   ├── 数据重复清理.py                # ✨【回写#428】存量重复行清理薄入口（数据层施工 A-13）：默认 dry-run 只统计，--run 才执行（先在线备份合并 WAL 再事务删除）；业务逻辑归 myquant/data_access/duplicate_cleaner.py（架构纪律）；产出 outputs/重复行清理报告_<YYYYMMDD>.json + backups/quant.db.bak_<时间戳> 完整备份
 │   ├── 财务CSV回填ann_date.py         # ✨【回写#432】存量财务CSV补ann_date列薄入口（数据层施工 A-04）：默认 dry-run 统计，--run 实际回写；业务逻辑归 myquant/data_access/financial_sync_service.backfill_ann_date_column（架构纪律）
@@ -1093,7 +1094,7 @@ Pythonwdhmm/
 ；✨【回写#258】G1 EX-08A：FinancialImportService 构造新增 factor_engine_factory 注入参数，compute_factors 未装配 logger.warning+return stats（删延迟导入），scripts/财务数据入库.py _new_factor_engine_factory 装配（cache_dir/use_cache/auto_fingerprint 与旧延迟导入一致）
     │   ├── financial_sync_service.py # ✨【回写#74】财务CSV增量同步服务：FinancialSyncService——定位financial_data缺失标的（与#71 no_financial同口径，排除规则对齐清洗14条）→逐标get_financial_history拉多期财务（防未来函数end_date过滤）→按symbol+report_date合并去重keep=新落盘financial_history_YYYYMMDD.csv→可选自动入库FinancialImportService→复查缺失；调用方=scripts/财务CSV更新.py + 豆包定时任务；✨【回写#83】P2-③ 排除规则config化（_load_financial_exclude_rules 读 config/financial_exclude_rules.yaml，缺省回退内置14条+warning）；✨【回写#432】FINANCIAL_CSV_COLUMNS 补 ann_date 公告日列（A-04，18列，report_type 之后与入库映射同序）+ backfill_ann_date_column 存量回填（扫描 financial_history_*.csv 缺列插入空列回写 UTF-8 BOM，dry-run 默认；被 scripts/财务CSV回填ann_date.py 薄入口调用）
 
-    │   ├── data_layer_baseline.py       # ✨【回写#426】【回写#427】数据层状态指纹基线（数据层施工 A-00/A-01）：只读采集 7 组指纹（market_data 规模 / data_source 分布 / 唯一键重复 / financial_data ann_date 覆盖 / processed parquet 物理现状 / 辅助表规模 / alembic 版本戳）→ outputs/数据层基线_<YYYYMMDD>.json 原子落盘；A-01 新增重复键全量明细（collect_duplicate_details 按 (symbol,period,adjust,trade_date) 聚合全部重复行含 rowid/data_source/created_at/价格量 → save_duplicate_listing 原子落盘 outputs/重复键定位清单_<YYYYMMDD>.json；build_duplicate_listing 一站式入口）；sqlite file:...?mode=ro + PRAGMA query_only=ON 全程只读，不修改数据库与业务文件；__main__ 自带冒烟自测；被 scripts/数据层基线.py 薄入口调用（架构纪律）
+    │   ├── data_layer_baseline.py       # ✨【回写#426】【回写#427】数据层状态指纹基线（数据层施工 A-00/A-01）：只读采集 7 组指纹（market_data 规模 / data_source 分布 / 唯一键重复 / financial_data ann_date 覆盖 / processed parquet 物理现状 / 辅助表规模 / alembic 版本戳）→ outputs/数据层基线_<YYYYMMDD>.json 原子落盘；A-01 新增重复键全量明细（collect_duplicate_details 按 (symbol,period,adjust,trade_date) 聚合全部重复行含 rowid/data_source/created_at/价格量 → save_duplicate_listing 原子落盘 outputs/重复键定位清单_<YYYYMMDD>.json；build_duplicate_listing 一站式入口）；sqlite file:...?mode=ro + PRAGMA query_only=ON 全程只读，不修改数据库与业务文件；__main__ 自带冒烟自测；被 scripts/数据层基线.py 薄入口调用（架构纪律）；【回写#440·A-11】新增 compare_baseline(current, baseline) 一致性比对函数（7 组指纹逐键比对，数字 1e-9 相对容差，返回差异描述列表；被 scripts/数据一致性校验.py 薄入口调用）✅已完成
     │   ├── duplicate_cleaner.py         # ✨【回写#428】存量重复行清理服务（数据层施工 A-13）：按 (symbol,period,adjust,trade_date) 去重，保留规则=原始源行(tdx/tencent_http)>incremental_clean、同源保留最早 created_at、tdx 与 tencent_http 不同原始源按 created_at 最早、兜底 rowid 最小；collect_duplicate_stats 只读统计（重复键/重复行/待删行）→ backup_db 用 SQLite 在线备份 API（合并 WAL，6GB 级库不可直接复制文件）生成 backups/quant.db.bak_<时间戳> 并校验行数一致 → 事务 DELETE 精确删 rowid 集 → 报告落盘 outputs/重复行清理报告_<YYYYMMDD>.json；默认 dry-run 不修改；被 scripts/数据重复清理.py 薄入口调用（架构纪律）
 
     │   ├── cleaner/                  # ✨【数据清洗核心模块】已重构为面向对象架构
@@ -6310,3 +6311,10 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    c. 变更：①manager.py 删 85-97 异常族、164-284 DatasetVersion 类、1652-2197 版本管理方法段（__repr__ 保留）；②data_access/__init__.py 删 4 项导出；③tests/test_adjust_raw_semantics.py 删 DatasetVersion import + adjust 字段断言；④tests/test_data_manager.py 删 TestDatasetVersionManagement 类（617-683）；⑤full_clean_service.py:13-14 / batch_backtest.py:26-28 注释措辞改为 utils/data_versioner 口径快照登记。
    d. 验证：py_compile 4 文件通过；pytest test_adjust_raw_semantics + test_data_manager + test_a07 + 门禁 test_architecture 全绿；全仓 grep DatasetVersion 仅剩 utils/data_versioner.py（活跃）+ 导出脚本（活跃）——歧义消除。
    e. 纪律遵守：R-26 行数只减不增（删约 660 行必然绿）；先登记蓝图再落代码；独立 commit。
+
+## #440 · 2026-10-17 · 数据层施工 A-11：校验脚本正名（数据一致性校验薄入口）
+   a. 依据：《数据层结构优化可行性施工方案报告_v1.1》§5.2 A-11（交付物=2 脚本；验收=基线可经新薄入口一键复现、一致性校验.py 顶部加非数据层提示）。
+   b. 事实基线（代码级取证）：scripts/一致性校验.py 已是薄入口（业务在 myquant/backtest/consistency_check.py），但语义=回测三模式净值对拍（非数据层），docstring 无醒目领域标注；数据层基线业务在 myquant/data_access/data_layer_baseline.py（build_baseline/save_baseline_json，A-00 产物），**缺一致性比对函数**（现算指纹 vs 基线 JSON）。
+   c. 变更：①scripts/一致性校验.py docstring 首行后加"非数据层"提示（回测一致性，防与数据层校验混淆）；②myquant/data_access/data_layer_baseline.py 新增 compare_baseline(current, baseline)（7 组指纹逐键比对，数字相对容差 1e-9，返回差异列表，空=一致）；③新建 scripts/数据一致性校验.py 薄入口（--db/--processed/--baseline/--out-dir/--date/--rebuild；现算→比对；--rebuild 重建基线后比对=一键复现）。
+   d. 验证：py_compile 3 文件通过；pytest 相关回归+门禁 test_architecture 全绿（data_access 现 17415+约70 行 < R-26 基线 18107）；实际运行 scripts/数据一致性校验.py 对 2026-10-17 基线比对通过（差异=预期施工变化项）；scripts/一致性校验.py --help 显示非数据层提示。
+   e. 纪律遵守：业务归 myquant（compare_baseline 入 data_layer_baseline.py）、scripts 只薄入口；先登记蓝图再落代码；独立 commit。

@@ -514,6 +514,73 @@ def save_baseline_json(
     return str(target)
 
 
+def compare_baseline(
+    current: Dict[str, Any], baseline: Dict[str, Any], rel_tol: float = 1e-9
+) -> List[str]:
+    """现算指纹 vs 基线 JSON 一致性比对（A-11，只读纯函数）。
+
+    对 ``fingerprints`` 下 7 组指纹逐键比对：基本类型等值、数值按相对容差
+    ``rel_tol`` 判定（避免浮点合法偏差误报）；缺失键 / 类型变化 / 超差一律
+    记为差异。返回差异描述列表，空列表表示一致。
+
+    Args:
+        current: build_baseline 现算得到的基线字典。
+        baseline: 历史基线 JSON 加载的字典。
+        rel_tol: 数值相对容差（默认 1e-9）。
+
+    Returns:
+        差异描述列表（空=一致）。
+    """
+    diffs: List[str] = []
+    cur_fp = current.get("fingerprints", {})
+    base_fp = baseline.get("fingerprints", {})
+    if not cur_fp or not base_fp:
+        return ["fingerprints 缺失（current 或 baseline 无指纹段）"]
+
+    def _cmp_val(key: str, a: Any, b: Any) -> None:
+        if isinstance(a, bool) or isinstance(b, bool):
+            if a != b:
+                diffs.append(f"{key}: {a!r} != {b!r}")
+            return
+        if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+            try:
+                if abs(a - b) > rel_tol * max(1.0, abs(a), abs(b)):
+                    diffs.append(f"{key}: {a!r} != {b!r}（超相对容差 {rel_tol}）")
+            except (TypeError, OverflowError):
+                diffs.append(f"{key}: 数值比较异常 {a!r} vs {b!r}")
+            return
+        if isinstance(a, dict) and isinstance(b, dict):
+            for k in sorted(set(a) | set(b)):
+                if k not in a:
+                    diffs.append(f"{key}.{k}: 基线缺失")
+                elif k not in b:
+                    diffs.append(f"{key}.{k}: 现算缺失")
+                else:
+                    _cmp_val(f"{key}.{k}", a[k], b[k])
+            return
+        if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+            if len(a) != len(b):
+                diffs.append(f"{key}: 长度 {len(a)} != {len(b)}")
+                return
+            for i, (x, y) in enumerate(zip(a, b)):
+                if isinstance(x, (dict, list)) or isinstance(y, (dict, list)):
+                    _cmp_val(f"{key}[{i}]", x, y)
+                else:
+                    _cmp_val(f"{key}[{i}]", x, y)
+            return
+        if a != b:
+            diffs.append(f"{key}: {a!r} != {b!r}")
+
+    for name in sorted(set(cur_fp) | set(base_fp)):
+        if name not in base_fp:
+            diffs.append(f"fingerprints.{name}: 基线缺失")
+        elif name not in cur_fp:
+            diffs.append(f"fingerprints.{name}: 现算缺失")
+        else:
+            _cmp_val(f"fingerprints.{name}", cur_fp[name], base_fp[name])
+    return diffs
+
+
 def _self_test() -> None:
     """模块自带冒烟测试：内存临时库 + 临时 parquet 目录，验证采集闭环。"""
     import tempfile
