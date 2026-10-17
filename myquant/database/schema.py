@@ -327,7 +327,10 @@ CREATE TABLE IF NOT EXISTS orders (
     strategy_id  TEXT,                       -- 策略ID
     engine_id    TEXT,                       -- 引擎ID
     submitted_at REAL,                       -- 提交时间（epoch秒）
-    created_at   TEXT    DEFAULT (datetime('now'))  -- 记录创建时间（UTC）
+    created_at   TEXT    DEFAULT (datetime('now')),  -- 记录创建时间（UTC）
+    filled_qty     REAL    DEFAULT 0,       -- 已成交数量（0009 迁移新增；A-08 同步 DDL，消除 create_all_tables 与迁移双路不一致）
+    filled_price   REAL    DEFAULT 0,       -- 成交均价（0009 迁移新增；A-08 同步 DDL）
+    last_update_at TEXT                     -- 最后状态更新时间（0009 迁移新增；A-08 同步 DDL）
 );
 """
 

@@ -689,6 +689,7 @@ Pythonwdhmm/
 │   │   ├── test_duplicate_cleaner.py   # ✨【回写#428】存量重复行清理单测（A-13，4 项）：统计口径（重复键/重复行/待删行）/ dry-run 不修改库 / 执行后重复键归 0 且保留行符合规则（原始源优先、同源最早 created_at）/ 备份生成且行数一致 ✅已完成
 │   │   ├── test_k3_loss_window.py    # ✨【回写#433】【回写#434】K3 丢失窗口临时库复现单测（A-03，3 项，只读临时库）：嵌套 delete+insert 注入异常 / 嵌套正常路径 / 对照原子事务失败保留旧数据；A-05 落地后核心复现用例翻转为回归（数据不丢失，K3 原结论由 A-03 结论文档固化）✅已完成
 │   │   ├── test_savepoint_transaction.py # ✨【回写#434】SAVEPOINT 嵌套事务单测（A-05，6 项，真实 DataQueries+临时库）：嵌套 delete+insert 失败→整体回滚旧数据保留（A-03 场景验收）/ 嵌套正常路径行数正确 / 内层失败被调用方捕获时仅内层回滚、外层后续写入仍提交 / 单层 commit / 单层 rollback / 三层嵌套最内层失败全回滚 ✅已完成
+│   │   ├── test_a08_orders_filled_columns.py # ✨【回写#435】orders UPSERT 补 3 列单测（A-08，4 项）：INSERT 落库 filled 列有值 / 部分→全部成交 filled_qty 递增不被重置 / 部分成交后撤单残量保留 / schema orders DDL 与迁移双路一致 ✅已完成
 │   │   ├── test_akshare_ann_date.py  # ✨【回写#431】财务取数补公告日单测（B-09，8 项，monkeypatch 不联网）：_normalize_notice_date 归一化 3 / 东财估值补+空 2 / 东财历史补+空 2 / 新浪显式空 1 ✅已完成
 
 │   │   ├── test_live_risk.py         # 风控规则拦截、仓位限制、流控（83项）✅已完成
@@ -1036,13 +1037,13 @@ Pythonwdhmm/
 
     │   ├── connection.py             # SQLite连接管理上下文管理器；✨【回写#157】close_all 关闭异常记 warning（KP-P1-07：不裸 pass 吞噬）+ 注入 logger；✨【回写#201】BASE-6 DEFAULT_PRAGMAS 补 busy_timeout=30000（写等待而非锁表，配合 WAL 高写入无锁表告警）；✨【回写#204】BASE-9 库文件权限收紧 _harden_db_permissions（connect 前调用：POSIX chmod 600 主库+wal+shm 伴生文件；Windows 记 debug 提示 OS 级加密卷 BitLocker + NTFS 权限兜底，权限收紧失败记 warning 不阻断连接）；✨【回写#434】transaction() SAVEPOINT 嵌套事务支持（A-05）：非嵌套分支显式 BEGIN（保证内层可检测活跃事务）+ 嵌套分支 SAVEPOINT/RELEASE/ROLLBACK TO（内层不再提前提交外层事务），修复 K3 丢失窗口（full_clean_service.write_back_symbol + queries 三层嵌套场景，delete 已生效而 insert 失败不再发生）
 
-    │   ├── schema.py                 # 表结构总览DDL；✨【回写#87】drop_all_tables 顺序 share_change 重复行清理（L502-503 双行→单行，幂等不变）；✨【回写#142】TABLE_NAMES 10→13 张（KP-P4-02：orders/fills/positions_daily 三关系账 + DDL/索引/ALL_CREATE/drop_all 同步）；✨【回写#204】BASE-9 metrics_history 表加 value_encrypted TEXT 列（敏感字段密文落盘，CREATE IF NOT EXISTS 与新库建表路径逐字一致）
+    │   ├── schema.py                 # 表结构总览DDL；✨【回写#87】drop_all_tables 顺序 share_change 重复行清理（L502-503 双行→单行，幂等不变）；✨【回写#142】TABLE_NAMES 10→13 张（KP-P4-02：orders/fills/positions_daily 三关系账 + DDL/索引/ALL_CREATE/drop_all 同步）；✨【回写#204】BASE-9 metrics_history 表加 value_encrypted TEXT 列（敏感字段密文落盘，CREATE IF NOT EXISTS 与新库建表路径逐字一致）；✨【回写#435】orders DDL 补 filled_qty/filled_price/last_update_at 三列（A-08，与 0009 迁移双路一致，消除 create_all_tables 建库缺列导致的 record_order no such column）
 
     │   │                             # ✅已实现：clean_run_meta(清洗运行元信息) + dirty_data_stats(脏数据统计14种类型) 两表 + CleanRunMetaSchema/DirtyDataStatsSchema + 9索引
 
     │   ├── queries.py               # 类型安全SQL封装CRUD
 
-    │   ├── trade_log.py             # ✨【回写#142】订单/成交/持仓关系账（KP-P4-02）：TradeLedger 逐笔落库+查询
+    │   ├── trade_log.py             # ✨【回写#142】订单/成交/持仓关系账（KP-P4-02）：TradeLedger 逐笔落库+查询；✨【回写#435】record_order INSERT 补 filled_qty/filled_price/last_update_at 三列（A-08，此前仅 ON CONFLICT UPDATE 引用 excluded.* 导致状态流转 filled_qty 被重置；配套 schema.py orders DDL 同步三列消除 create_all_tables 与 0009 迁移双路不一致；存量红 test_trade_ledger 10 passed 消除）
 
     │   └── migrations/               # ✨【第6项】Alembic数据库迁移
 
@@ -6262,3 +6263,14 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
       - R-26：PACKAGE_STRUCTURE_BASELINE["database"] 抬升 4013/126/17→4042/126/17（+29 行，symbols/fan_out 不变；功能必需 A-05：SAVEPOINT 机制是 K3 修复最小实现，拆不动=事务语义集中于单点、无等量旧代码可删；对价五要素齐全：功能必需 + 工单 #434 + 实测（A-03 复现成功）+ 独立 commit + 蓝图回写；沿用 A-00 已拍板 PR2 通道）。
    e. 验证：py_compile 通过；pytest tests/unit/test_savepoint_transaction.py + test_k3_loss_window.py 9 passed；门禁复跑全绿。
    f. 纪律遵守：先登记蓝图再改代码；嵌套语义只加不改单层行为（58 调用点回归兼容）；独立 commit。
+
+## #435 · 2026-10-17 · 数据层施工 A-08：orders UPSERT 残量修复（INSERT 补 3 列）
+   a. 依据：《数据层结构优化可行性施工方案报告_v1.1》§5.2 A-08（验收=状态流转后 filled_qty 不被重置；git 可回滚）+ 存量红 test_trade_ledger[excluded.filled_qty 列缺失]。
+   b. 根因：record_order INSERT 列清单（trade_log.py:63-64）缺 filled_qty/filled_price/last_update_at——仅 ON CONFLICT UPDATE 引用 excluded.*，INSERT 未写该三列 → 状态流转时 excluded 取缺省值把残量重置为 0/NULL；且 schema.py orders DDL（318-331）缺三列（0009 迁移 ALTER 才有），create_all_tables 建的新库 record_order 直接 no such column。
+   c. 变更（三处）：
+      - myquant/database/trade_log.py —— INSERT 列清单补 filled_qty/filled_price/last_update_at（VALUES 补 order.filled_qty/filled_price + datetime('now')），ON CONFLICT UPDATE 不变（excluded.* 现在取真实值）；
+      - myquant/database/schema.py —— orders DDL 补三列（filled_qty REAL DEFAULT 0 / filled_price REAL DEFAULT 0 / last_update_at TEXT），消除 create_all_tables 与 0009 迁移双路不一致；
+      - tests/unit/test_a08_orders_filled_columns.py —— 单测 4 项（INSERT 落库 filled 列有值 / 部分→全部成交 filled_qty 递增不被重置 / 部分成交后撤单残量保留 / schema orders DDL 与迁移双路一致）。
+   d. 验证（含存量红）：py_compile 通过；pytest tests/unit/test_a08_orders_filled_columns.py 4 passed；**存量红 test_trade_ledger 10 passed 消除**（原 excluded.filled_qty 列缺失已修）。
+   e. 门禁处置：R-26 PACKAGE_STRUCTURE_BASELINE["database"] 抬升 4042/126/17→4051/126/17（+9 行，symbols/fan_out 不变；功能必需 A-08：INSERT 补列 + DDL 双路同步，拆不动=写路径与建表路径各一处最小改动；对价五要素齐全：功能必需 + 工单 #435 + 实测（存量红复现 no such column）+ 独立 commit + 蓝图回写；沿用 A-00 已拍板 PR2 通道）。
+   f. 纪律遵守：先登记蓝图（trade_log/schema/测试）再改代码；验收=存量红消除 + filled_qty 不重置双证据；独立 commit。

@@ -57,12 +57,16 @@ class TradeLedger:
         """逐笔订单落库（order_id 唯一，T1-4：ON CONFLICT DO UPDATE 更新状态/残量）。"""
         # T1-4：submitted_at 恒 NULL 修复——用 order.created_at 落库（created_at 是订单创建时刻）
         submitted_ts = getattr(order, "submitted_at", None) or getattr(order, "created_at", None)
-        # T1-4：新增列（0009 迁移）——filled_qty / filled_price / last_update_at / broker_id 等
+        # T1-4 + A-08：新增列（0009 迁移）——filled_qty / filled_price / last_update_at / broker_id 等。
+        # A-08：INSERT 列清单补 filled_qty/filled_price/last_update_at（此前仅 ON CONFLICT UPDATE
+        # 引用 excluded.*，INSERT 未写该三列 → 状态流转时 excluded 取缺省值把残量重置为 0/NULL）
         sql = (
             f"INSERT INTO {TABLE_NAMES['orders']} "
             "(order_id, symbol, side, order_type, quantity, price, status, "
-            " strategy_id, engine_id, submitted_at, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now')) "
+            " strategy_id, engine_id, submitted_at, created_at, "
+            " filled_qty, filled_price, last_update_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), "
+            " ?, ?, datetime('now')) "
             "ON CONFLICT(order_id) DO UPDATE SET "
             "  status=excluded.status, "
             "  filled_qty=excluded.filled_qty, "
@@ -83,6 +87,8 @@ class TradeLedger:
                     order.strategy_id,
                     engine_id,
                     submitted_ts,
+                    float(getattr(order, "filled_qty", 0.0) or 0.0),
+                    float(getattr(order, "filled_price", 0.0) or 0.0),
                 ),
             )
         # T1-7：同步审计哈希链（order 类）
