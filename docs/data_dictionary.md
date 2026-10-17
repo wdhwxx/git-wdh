@@ -210,14 +210,14 @@ data:
 - database/quant.db：核心数据仓库（market_data/financial_data 等，alembic 迁移管理）
 - datasets/raw/：原始数据不可变，下载后不修改（财务 CSV 经 A-04 回填含 ann_date 列）
 - datasets/processed/：清洗后数据，每次更新覆盖旧文件（增量只追加缺失日期、绝不覆盖存量）
-- datasets/features/：⚠️ 当前空转（factor_data 0 行，未接线；决策见 C-09）
+- datasets/features/：⚠️ 【C-09 决策 2026-10-17】保留占位（仅 .gitkeep）：因子**不落库**，DWS 口径=processed + DB 派生列组合 + 因子内存现算（features.py FactorEngine/IncrementalFeatureSession）；factor_data=可选能力未启用、不设计门禁
 
 ### 6.2 数据更新流程
 
 1. 增量下载：akshare 增量拉取最新日线 → 清洗管线（bar 清洗）→ 事务写回 quant.db market_data
 2. 全量清洗：scripts/数据全量清洗.py → FullCleanService → 事务写回 + 清洗元信息落库 + bad 归档
 3. 导出 processed：scripts/数据导出_DB到processed.py（quant.db hfq 日线 → processed 扁平 parquet，逐只导出 + 完整性校验 + 断点续传 + export_manifest.json sidecar）
-4. 因子计算：预留（factor_data 空转，见 C-09 决策）
+4. 因子计算：预留（C-09 决策=不落库：因子内存现算；factor_data 可选能力未启用，若未来出现真实消费方须先登记蓝图再接线 scripts/财务数据入库.py --mode factors）
 
 ### 6.3 数据校验规则
 
