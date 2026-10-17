@@ -9,9 +9,7 @@ test_t0_10_recovery_gate.py - T0-10 崩溃恢复撤单专项测试
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
-
-import pytest
+from typing import Any, Dict, Optional
 
 from myquant.live.brokers.base_broker import BaseBroker, BrokerType
 from myquant.live.brokers.manager import BrokerManager
@@ -96,7 +94,7 @@ class TestCancelOrderReturnValue:
 
     def test_cancel_false_not_counted_as_reconciled(self):
         """cancel_order 返回 False → 该单不计入 reconciled_orders。"""
-        from myquant.live.state_store import restore_live_state, StateSnapshot
+        from myquant.live.state_store import StateSnapshot, restore_live_state
 
         broker = _RecordingBroker("test")
         broker.cancel_results = {"O1": True, "O2": False, "O3": RuntimeError("net")}
@@ -113,7 +111,7 @@ class TestCancelOrderReturnValue:
 
     def test_cancel_false_logged_in_notes(self):
         """cancel 失败的订单出现在 notes 里（需人工核查）。"""
-        from myquant.live.state_store import restore_live_state, StateSnapshot
+        from myquant.live.state_store import StateSnapshot, restore_live_state
 
         broker = _RecordingBroker("test")
         broker.cancel_results = {"O1": False}

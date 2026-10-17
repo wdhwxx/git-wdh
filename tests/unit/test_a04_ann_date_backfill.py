@@ -18,8 +18,8 @@ import pytest
 
 from myquant.data_access import financial_sync_service as fss
 from myquant.data_access.financial_service import FinancialImportService
-from myquant.database.schema import create_all_tables
 from myquant.database.connection import get_connection
+from myquant.database.schema import create_all_tables
 
 # ═══════════════════════════════════════════
 # 1. 常量列序

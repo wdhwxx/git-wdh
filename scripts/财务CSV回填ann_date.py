@@ -14,7 +14,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from myquant.data_access.financial_sync_service import backfill_ann_date_column  # noqa: E402
+from myquant.data_access.financial_sync_service import (
+    backfill_ann_date_column,  # noqa: E402
+)
 
 _DEFAULT_DIR = Path(__file__).resolve().parents[1] / "datasets" / "raw" / "financial"
 

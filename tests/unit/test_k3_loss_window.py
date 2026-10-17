@@ -23,9 +23,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import List, Optional
-
-import pytest
+from typing import List
 
 from myquant.database.connection import DatabaseConnection
 from myquant.database.queries import DataQueries
@@ -122,7 +120,7 @@ def _simulate_atomic_write_back(
                     [tuple(r[c] for c in _COLS) for r in new_rows],
                 )
         return "written"
-    except Exception as exc:
+    except Exception:
         return "error"
 
 

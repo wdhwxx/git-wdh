@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import pandas as pd
-import pytest
 
 from myquant.execution.sim_broker import SimBroker, make_suspended_lookup
 from myquant.indicators.tradability import (

@@ -12,8 +12,8 @@ A-07 volume 单位契约统一 —— 回归样例单测（5 项，离线可复�
 实测依据（2026-10-17，600519.SH）：tdx 库 5,767,722（股） vs akshare 东财 57,677（手），ratio=99.9986~100.0004。
 """
 import os
-import pandas as pd
 
+import pandas as pd
 import pytest
 
 PROJECT_ROOT = os.path.abspath(

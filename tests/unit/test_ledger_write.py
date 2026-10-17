@@ -1,12 +1,13 @@
 """T1-2/T1-8 单元测试：验证 ledger 写入逻辑（intent/ack/error）。"""
-import sqlite3
 import os
+import sqlite3
 import tempfile
+
 import pytest
 
 from myquant.database.connection import DatabaseConnection
 from myquant.database.trade_log import TradeLedger
-from myquant.models.trade import Order, OrderSide, OrderType, OrderStatus
+from myquant.models.trade import Order, OrderSide, OrderStatus, OrderType
 
 
 @pytest.fixture

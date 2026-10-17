@@ -52,8 +52,8 @@ class TestT02BrokerQueryError:
 
     def test_get_positions_raises_on_error(self):
         """get_positions 异常 → 抛 BrokerQueryError（旧实现返回空列表）。"""
-        broker = _StubBroker(raise_on_query=True)
-        p = LivePortfolio(initial_capital=100_000.0)
+        _broker = _StubBroker(raise_on_query=True)
+        _p = LivePortfolio(initial_capital=100_000.0)
         with pytest.raises(BrokerQueryError):
             # 注意：_StubBroker 是简化版，这里直接测 BrokerQueryError 异常类存在
             # 真实 qmt_broker 的 get_positions LIVE 路径会抛这个异常

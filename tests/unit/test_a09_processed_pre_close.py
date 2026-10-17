@@ -17,8 +17,6 @@ import importlib.util
 from pathlib import Path
 from typing import Any, List
 
-import pytest
-
 from myquant.data_access.manager import PROCESSED_COLUMN_TEMPLATE
 
 _PROJECT = Path(__file__).resolve().parents[2]

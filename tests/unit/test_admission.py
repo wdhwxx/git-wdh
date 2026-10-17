@@ -13,7 +13,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-import yaml
 
 from myquant.data_access.admission import (
     _DEFAULT_MAX_PRICE_JUMP_PCT,

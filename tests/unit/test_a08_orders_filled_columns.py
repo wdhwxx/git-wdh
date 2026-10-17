@@ -60,7 +60,7 @@ def _order_row(store: TradeLedger, order_id: str):
 # ═══════════════════════════════════════════
 
 
-def test_insert_persists_filled_columns(store: TradeLogStore) -> None:
+def test_insert_persists_filled_columns(store: TradeLedger) -> None:
     """新订单 INSERT 落库：filled_qty/filled_price 有值、last_update_at 非空。"""
     store.record_order(_order("o1", OrderStatus.SUBMITTED))
     row = _order_row(store, "o1")
@@ -75,7 +75,7 @@ def test_insert_persists_filled_columns(store: TradeLogStore) -> None:
 # ═══════════════════════════════════════════
 
 
-def test_status_flow_keeps_filled_qty(store: TradeLogStore) -> None:
+def test_status_flow_keeps_filled_qty(store: TradeLedger) -> None:
     """部分成交→全部成交：filled_qty 递增保留（不被重置为缺省 0）。"""
     store.record_order(_order("o2", OrderStatus.SUBMITTED))
     store.record_order(_order("o2", OrderStatus.PARTIAL_FILLED,
@@ -111,7 +111,7 @@ def test_partial_then_cancel_keeps_filled_qty(store: TradeLedger) -> None:
 # ═══════════════════════════════════════════
 
 
-def test_schema_orders_has_filled_columns(store: TradeLogStore) -> None:
+def test_schema_orders_has_filled_columns(store: TradeLedger) -> None:
     """create_all_tables 建的 orders 表含 3 列（与 0009 迁移一致）。"""
     cols = {r["name"] for r in store._db.execute("PRAGMA table_info(orders)")}
     assert {"filled_qty", "filled_price", "last_update_at"} <= cols

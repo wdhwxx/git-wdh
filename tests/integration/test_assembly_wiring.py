@@ -70,10 +70,9 @@ class TestRegistryWiring:
 
     def test_account_reconciler_registered(self) -> None:
         """registry 有 account_reconciler 工厂（T0-8 硬前置）。"""
-        from myquant.core.registry import get_component
-
         # 触发 monitoring.account_reconciler 模块 import（自注册）
         import myquant.monitoring.account_reconciler  # noqa: F401
+        from myquant.core.registry import get_component
 
         assert get_component("account_reconciler") is not None, (
             "account_reconciler 未注册——T0-8 live 拒启；检查 myquant.monitoring.account_reconciler 是否被 import"
@@ -81,9 +80,8 @@ class TestRegistryWiring:
 
     def test_alert_manager_registered(self) -> None:
         """registry 有 alert_manager 工厂（T0-8 硬前置）。"""
-        from myquant.core.registry import get_component
-
         import myquant.monitoring.alerting  # noqa: F401
+        from myquant.core.registry import get_component
 
         assert get_component("alert_manager") is not None, (
             "alert_manager 未注册——T0-8 live 拒启；检查 myquant.monitoring.alerting 是否被 import"
@@ -112,6 +110,7 @@ class TestEngineInterface:
     def test_engine_has_pause_force(self) -> None:
         """LiveEngine.pause 支持 force 参数（T0-11 启动期暂停标记）。"""
         import inspect
+
         from myquant.live.engine import LiveEngine
 
         sig = inspect.signature(LiveEngine.pause)
@@ -121,10 +120,10 @@ class TestEngineInterface:
 
     def test_engine_has_startup_blocked_attr(self) -> None:
         """LiveEngine 有 _startup_blocked 属性（T0-11 启动期暂停标记）。"""
-        from myquant.live.engine import LiveEngine
-
         # 不实例化（避免外部依赖），直接从 __init__ 源码确认
         import inspect
+
+        from myquant.live.engine import LiveEngine
         src = inspect.getsource(LiveEngine.__init__)
         assert "_startup_blocked" in src, (
             "LiveEngine.__init__ 缺 _startup_blocked 初始化（T0-11）"
@@ -133,6 +132,7 @@ class TestEngineInterface:
     def test_broker_manager_restore_state_forwards(self) -> None:
         """BrokerManager.restore_state 有转发子券商逻辑（T0-10）。"""
         import inspect
+
         from myquant.live.brokers.manager import BrokerManager
 
         src = inspect.getsource(BrokerManager.restore_state)

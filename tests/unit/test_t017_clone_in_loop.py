@@ -3,8 +3,8 @@
 原缺陷：第 1 个备券商提交后 retry_order 状态改变，第 2、3 个备券商再用同一对象会被幂等入口拒绝。
 修复：每个备券商用全新副本（不共享状态）。
 """
-import pytest
 from unittest.mock import MagicMock
+
 from myquant.live.brokers.manager import BrokerManager
 from myquant.models.trade import Order, OrderSide, OrderType
 
@@ -63,7 +63,7 @@ class TestT017CloneOrderInLoop:
         primary.submit_order.side_effect = Exception("主券商连接超时")
 
         # 调用 submit_order（auto_failover=True）
-        result = mgr.submit_order(order)
+        _result = mgr.submit_order(order)
 
         # 验证：2 个备券商都收到了订单（每个用全新副本）
         assert len(backup1.received_orders) == 1, "backup1 应收到 1 单"
@@ -109,7 +109,7 @@ class TestT017CloneOrderInLoop:
             return original_submit(o)
         backup2.submit_order.side_effect = submit_check_status
 
-        result = mgr.submit_order(order)
+        _result = mgr.submit_order(order)
 
         # 验证：第 2 个备券商收到的订单状态是 PENDING（全新副本，不受第 1 个影响）
         assert len(backup2_status_received) == 1, "backup2 应被调用"

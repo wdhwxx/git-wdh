@@ -4,7 +4,6 @@ PR-B 是否闭环的唯一判据：
 - 冻结后差异不再被覆写（book_cash 保持不变）
 - 解冻入口可用（adopt_broker_ledger 显式采用 broker 账本）
 """
-import pytest
 from myquant.live.portfolio import LivePortfolio
 
 
@@ -37,7 +36,7 @@ class TestT018ReconciliationLoop:
 
         # 制造 1 分钱差异：broker 返回 99999.99
         broker = MockBroker(cash=99999.99)
-        diff = self.portfolio.sync_from_broker(broker)
+        _diff = self.portfolio.sync_from_broker(broker)
 
         # 应该冻结（差异超容差）
         assert self.portfolio.is_reconciliation_blocked, "差异超阈应置 blocked"
@@ -66,7 +65,7 @@ class TestT018ReconciliationLoop:
         """容差内差异不冻结，且正常同步（T0-15 round 2 位比较）。"""
         # 制造 0.001 元差异（round 2 位后 diff=0，不超阈）
         broker = MockBroker(cash=100000.001)
-        diff = self.portfolio.sync_from_broker(broker)
+        _diff = self.portfolio.sync_from_broker(broker)
 
         # 不应冻结（round 2 位后 diff=0）
         assert not self.portfolio.is_reconciliation_blocked, "容差内差异不应冻结"
@@ -77,7 +76,7 @@ class TestT018ReconciliationLoop:
         """T0-3 健全性闸：broker 返回全 0 → 拒绝覆盖 + CRITICAL（不冻结但也不覆写）。"""
         # broker 返回 cash=0（异常情况）
         broker = MockBroker(cash=0.0, positions={})
-        diff = self.portfolio.sync_from_broker(broker)
+        _diff = self.portfolio.sync_from_broker(broker)
 
         # 健全性闸应该触发（cash 从 100000 骤降到 0）
         # 预期：blocked=True（健全性闸拒绝覆盖），book_cash 保持 100000
