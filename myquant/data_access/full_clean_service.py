@@ -51,6 +51,40 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DB_PATH = PROJECT_ROOT / "database" / "quant.db"
 PROCESSED_DIR = PROJECT_ROOT / "datasets" / "processed"
 BAD_DIR = PROJECT_ROOT / "datasets" / "bad"
+
+# C-04 #451：派生量写回保护列（worker_clean 就地计算，行数不变；逐行比较判定 needs_write）
+_DERIVED_WRITEBACK_COLS = (
+    "pct_chg", "amplitude", "volume_ratio",
+    "turnover", "float_share", "pe_dynamic",
+)
+
+
+def _evaluate_needs_write(
+    rows: List[Dict[str, Any]],
+    cleaned: List[Dict[str, Any]],
+    bad: List[Dict[str, Any]],
+    stats: Dict[str, Any],
+) -> bool:
+    """写回判定（C-04 #451）：消除恒真式，无变更标的跳过写回。
+
+    触发条件任一为真即需写回：
+      1. bad 非空（脏数据剔除）
+      2. 去重数 > 0
+      3. 清洗前后行数变化
+      4. 派生列逐行不一致（cleaned 经 compute_derived_metrics /
+         compute_b_class_metrics 就地更新，行数不变但内容变——原恒真式
+         ``True or`` 隐式保护该场景，现显式比较 _DERIVED_WRITEBACK_COLS）
+    """
+    return bool(
+        bad
+        or (stats.get("removed_duplicates", 0) or 0) > 0
+        or len(cleaned) != len(rows)
+        or any(
+            old.get(col) != new.get(col)
+            for old, new in zip(rows, cleaned)
+            for col in _DERIVED_WRITEBACK_COLS
+        )
+    )
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
 BACKUP_DIR = PROJECT_ROOT / "backups"
 
@@ -589,12 +623,8 @@ def worker_clean(task: Tuple[str, str, Dict[str, Any]]) -> Dict[str, Any]:
         stats = pipe_result["stats"]
         bad_file = pipe_result.get("bad_file")
 
-        # 判断是否需要写回：派生量已写入（强制写回），或有脏数据剔除/去重/行数变化
-        needs_write = True or (
-            len(bad) > 0
-            or (stats.get("removed_duplicates", 0) or 0) > 0
-            or len(cleaned) != len(rows)
-        )
+        # C-04 #451：写回判定（恒真消除 + 派生量变化保护，见 _evaluate_needs_write）
+        needs_write = _evaluate_needs_write(rows, cleaned, bad, stats)
 
         # bad 记录摘要（不回传整条超大 payload，只保留定位+错误码）
         bad_records = []
