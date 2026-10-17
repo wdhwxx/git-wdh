@@ -6,6 +6,9 @@
   - SELECT 语句包含 turnover（防映射与查询失同步）
   - load_symbol_data 对临时 DB 输出 13 列中文集合（含换手率），与增量 _en_to_cn 一致
   - financial_data 无记录 → 每股收益列仍存在（全 None），列集合不受影响
+
+A-09（方案二）：processed 统一不含「前收盘价」派生列——由读取层兜底派生
+（provider.py:797-799 / mixed_engine.py:1120-1123），两写入方 schema 一致。
 """
 
 from __future__ import annotations
@@ -21,10 +24,10 @@ from myquant.database.schema import CREATE_FINANCIAL_DATA_SQL, CREATE_MARKET_DAT
 
 _EXPORT_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "数据导出_DB到processed.py"
 
-#: 目标中文列集合（与增量 _en_to_cn 列集合一致）；#135/KP-P2-10 补 前收盘价 派生列；
-#: M1A-10 补 available_time（财务列=有效披露日+1，v3.0 §6.4.4）
+#: 目标中文列集合（与增量 _en_to_cn 列集合一致）；
+#: A-09（方案二）移除「前收盘价」派生列（processed 统一不含，读取层 provider/mixed_engine 兜底派生）
 EXPECTED_CN_COLUMNS: List[str] = [
-    "开盘价", "最高价", "最低价", "收盘价", "前收盘价", "成交量", "成交额",
+    "开盘价", "最高价", "最低价", "收盘价", "成交量", "成交额",
     "涨跌幅", "振幅", "量比", "换手率", "流通股本", "市盈动", "每股收益",
     "available_time",
 ]
@@ -71,12 +74,13 @@ class TestExportColumnSet:
         assert "turnover" in body
         assert "float_share" in body
         assert "pe_dynamic" in body
-        # KP-P2-10/T-02：前收盘价派生（收盘价.shift(1)）必须在导出链路中
-        assert "前收盘价" in body
-        assert ".shift(1)" in body
+        # A-09（方案二）：导出链路不再派生前收盘价（由读取层 provider 兜底派生），
+        # 防回归——若未来重新写回派生列（df.insert / _pre_close）将破坏两写入方 schema 一致
+        assert "df.insert" not in body
+        assert "_pre_close" not in body
 
     def test_load_symbol_data_输出完整列集合(self, tmp_path: Path) -> None:
-        """load_symbol_data 输出 14 列中文集合（含换手率与前收盘价），与增量 _en_to_cn 一致。"""
+        """load_symbol_data 输出 14 列中文集合（含换手率，无前收盘价派生列），与增量 _en_to_cn 一致。"""
         row: List[Any] = [
             "000001.SZ", "A股", "daily", "raw", "2026-09-28", 11.28, 11.41, 11.27, 11.3,
             71534144.0, 810575808.0, 0.0, 1.23, 1.2389, 0.8165, 1.94e10, 5.0, "test",
@@ -101,8 +105,8 @@ class TestExportColumnSet:
         assert df["换手率"].iloc[0] == 1.23
         # 每股收益按报告期向前匹配
         assert df["每股收益"].iloc[0] == 1.24
-        # KP-P2-10/T-02：单行行情无前驱 → 前收盘价为 NaN（列存在）
-        assert df["前收盘价"].isna().iloc[0]
+        # A-09（方案二）：导出列集合不含「前收盘价」（读取层 provider 兜底派生）
+        assert "前收盘价" not in df.columns
 
     def test_load_symbol_data_无财务记录每股收益为None(self, tmp_path: Path) -> None:
         """financial_data 无记录 → 每股收益列仍存在（全 None），列集合不受影响。"""

@@ -496,7 +496,7 @@ Pythonwdhmm/
 
 │   ├── 标的预筛选.py                  # ✨【回写】标的预筛选入口：从quant.db按代码前缀/上市年限/日均成交额/换手率筛出可交易标的池，输出config/stock_pool.yaml供回测配置引用；流动性指标按回测起始日前历史窗口计算（防未来）；回测/实盘共用同一套筛选条件（实盘无缝对接）
 
-│   ├── 数据导出_DB到processed.py      # ✨【回写】DB导出入口（当前主格式）：quant.db的hfq日线→datasets/processed/扁平parquet，逐只导出+完整性校验+断点续传；格式与实盘数据提供器一致（实盘无缝对接）；取代旧CSV子目录版脚本（导出DB到回测数据.py，仅存档不再使用）；✨【回写#72】CN_COLUMN_MAP/SELECT/数值列加 turnover→换手率，导出列集合=增量 _en_to_cn 13列统一；✨【回写#77】F1 改扁平式（去set_index/"日期"列整数YYYYMMDD/eps按df["日期"].dt.strftime/verify_parquet读"日期"列+旧索引式判失败触发重建/to_parquet(index=False)/新增_int_date_to_iso）+ export_all 接 resolve_incremental_symbols 规则过滤（防 DB 全量污染 processed）；✨【回写#136】load_symbol_data 派生 前收盘价=收盘价.shift(1)（df.insert 紧跟收盘价列，防涨跌停校验 pre_close 恒 0 空转）；✨【回写#281】M1A-01③ 每股收益匹配改统一时点日落点（SQL 增选 ann_date + match_latest_financial，原注释自称"防未来函数"实为穿越）+ M1A-09/10/11 available_time 派生（=有效披露日+1，禁止与 trade_date 混同）+ export_manifest.json 批次 sidecar（available_time_rule/schema_revision/stats，旧 manifest rev 不兼容抛 DataVersionMismatchError，旧 manifest 缺失/异常仅告警不阻断）
+│   ├── 数据导出_DB到processed.py      # ✨【回写】DB导出入口（当前主格式）：quant.db的hfq日线→datasets/processed/扁平parquet，逐只导出+完整性校验+断点续传；格式与实盘数据提供器一致（实盘无缝对接）；取代旧CSV子目录版脚本（导出DB到回测数据.py，仅存档不再使用）；✨【回写#72】CN_COLUMN_MAP/SELECT/数值列加 turnover→换手率，导出列集合=增量 _en_to_cn 13列统一；✨【回写#77】F1 改扁平式（去set_index/"日期"列整数YYYYMMDD/eps按df["日期"].dt.strftime/verify_parquet读"日期"列+旧索引式判失败触发重建/to_parquet(index=False)/新增_int_date_to_iso）+ export_all 接 resolve_incremental_symbols 规则过滤（防 DB 全量污染 processed）；✨【回写#136】load_symbol_data 派生 前收盘价=收盘价.shift(1)（df.insert 紧跟收盘价列，防涨跌停校验 pre_close 恒 0 空转）；✨【回写#281】M1A-01③ 每股收益匹配改统一时点日落点（SQL 增选 ann_date + match_latest_financial，原注释自称"防未来函数"实为穿越）+ M1A-09/10/11 available_time 派生（=有效披露日+1，禁止与 trade_date 混同）+ export_manifest.json 批次 sidecar（available_time_rule/schema_revision/stats，旧 manifest rev 不兼容抛 DataVersionMismatchError，旧 manifest 缺失/异常仅告警不阻断）；✨【回写#436】A-09 方案二：移除 load_symbol_data 前收盘价派生（df.insert/_pre_close），processed 统一不含派生列，由读取层 provider.py:797-799 / mixed_engine.py:1120-1123 兜底派生（收盘价.shift(1) 同口径），两写入方 schema 一致
 │   ├── 复权因子同步.py          # ✨【回写#82】方案B复权因子同步薄入口：--all/--symbols/--limit/--dry-run；业务逻辑在 data_access/factor_sync_service.py（架构纪律）✅已完成
 
 │   ├── 豁免管理.py              # ✨【回写#365】P1-14 豁免流管理薄入口：list/grant/approve/revoke 子命令；业务逻辑归 myquant.leakage_gate.exemption（架构纪律）；台账受控持久化 database/exemptions.json
@@ -690,6 +690,7 @@ Pythonwdhmm/
 │   │   ├── test_k3_loss_window.py    # ✨【回写#433】【回写#434】K3 丢失窗口临时库复现单测（A-03，3 项，只读临时库）：嵌套 delete+insert 注入异常 / 嵌套正常路径 / 对照原子事务失败保留旧数据；A-05 落地后核心复现用例翻转为回归（数据不丢失，K3 原结论由 A-03 结论文档固化）✅已完成
 │   │   ├── test_savepoint_transaction.py # ✨【回写#434】SAVEPOINT 嵌套事务单测（A-05，6 项，真实 DataQueries+临时库）：嵌套 delete+insert 失败→整体回滚旧数据保留（A-03 场景验收）/ 嵌套正常路径行数正确 / 内层失败被调用方捕获时仅内层回滚、外层后续写入仍提交 / 单层 commit / 单层 rollback / 三层嵌套最内层失败全回滚 ✅已完成
 │   │   ├── test_a08_orders_filled_columns.py # ✨【回写#435】orders UPSERT 补 3 列单测（A-08，4 项）：INSERT 落库 filled 列有值 / 部分→全部成交 filled_qty 递增不被重置 / 部分成交后撤单残量保留 / schema orders DDL 与迁移双路一致 ✅已完成
+│   │   ├── test_a09_processed_pre_close.py # ✨【回写#436】processed 前收盘价两写入方一致单测（A-09 方案二，5 项）：增量模板不含前收盘价 / 导出列集合==模板（两写入方一致）/ provider 读取层兜底派生存在 / mixed_engine 兜底存在 / 导出脚本无派生代码回归 ✅已完成
 │   │   ├── test_akshare_ann_date.py  # ✨【回写#431】财务取数补公告日单测（B-09，8 项，monkeypatch 不联网）：_normalize_notice_date 归一化 3 / 东财估值补+空 2 / 东财历史补+空 2 / 新浪显式空 1 ✅已完成
 
 │   │   ├── test_live_risk.py         # 风控规则拦截、仓位限制、流控（83项）✅已完成
@@ -6274,3 +6275,15 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    d. 验证（含存量红）：py_compile 通过；pytest tests/unit/test_a08_orders_filled_columns.py 4 passed；**存量红 test_trade_ledger 10 passed 消除**（原 excluded.filled_qty 列缺失已修）。
    e. 门禁处置：R-26 PACKAGE_STRUCTURE_BASELINE["database"] 抬升 4042/126/17→4051/126/17（+9 行，symbols/fan_out 不变；功能必需 A-08：INSERT 补列 + DDL 双路同步，拆不动=写路径与建表路径各一处最小改动；对价五要素齐全：功能必需 + 工单 #435 + 实测（存量红复现 no such column）+ 独立 commit + 蓝图回写；沿用 A-00 已拍板 PR2 通道）。
    f. 纪律遵守：先登记蓝图（trade_log/schema/测试）再改代码；验收=存量红消除 + filled_qty 不重置双证据；独立 commit。
+
+## #436 · 2026-10-17 · 数据层施工 A-09：processed 前收盘价两写入方 schema 一致（方案二）
+   a. 依据：《数据层结构优化可行性施工方案报告_v1.1》§5.2 A-09（方案一=模板补列消除 reindex NaN 根因 / 方案二=导出侧删派生列走 provider 兜底；验收=增量新行前收盘价非 NaN；两写入方 schema 一致）+ KP-P2-10/T-02 防 pre_close 恒 0 空转。
+   b. 实测取证：全量导出 scripts/数据导出_DB到processed.py:134-138 已派生前收盘价（df.insert 收盘价后）；增量模板 PROCESSED_COLUMN_TEMPLATE（manager.py:74-78）15 列无前收盘价 → 两写入方 schema 分叉（增量文件缺列 → vectorized_engine fail-closed/NaN 潜伏）；消费侧 provider.py:797-799 / mixed_engine.py:1120-1123 已具备收盘价.shift(1) 兜底派生。
+   c. 方案决策（门禁硬顶→改走方案二）：方案一（manager.py 模板补「前收盘价」+ _ensure_pre_close_column 派生函数 + _en_to_cn 补映射）实施后门禁三重红：R-24（manager.py 属 OVERSIZE 白名单，2231>2204 基线，薄化冻结只减不增、无对价通道）+ R-26 白名单文件（lines/symbols）+ R-26 包级——**R-24 对 manager.py 是硬顶，任何加行均红**；方案一在 manager.py 净增 ≥3 行（模板/映射/调用），无等量旧代码可删 → 不可行。改走报告备选方案二：processed 统一不含「前收盘价」派生列（两写入方一致），由读取层 provider/mixed_engine 兜底派生（同口径 shift(1)），消费侧 fail-closed 由 provider 兜底满足。
+   d. 变更（三处，manager.py 零改动）：
+      - scripts/数据导出_DB到processed.py —— 移除 load_symbol_data 前收盘价派生（df.insert/_pre_close），注释说明方案二与兜底链路；
+      - tests/unit/test_data_export_columns.py —— 列契约更新（EXPECTED_CN_COLUMNS 删前收盘价 14 列；test_select 断言改防回归：无 df.insert/_pre_close；输出列集合断言无前收盘价）；
+      - tests/unit/test_a09_processed_pre_close.py —— 新增 5 项：模板不含前收盘价 / 导出列集合==增量模板（两写入方一致）/ provider 兜底派生存在 / mixed_engine 兜底存在 / 导出脚本无派生代码回归。
+   e. 验证：py_compile 通过；pytest test_a09_processed_pre_close.py + test_data_export_columns.py 11 passed；门禁复跑（test_architecture + 相关回归）63 passed, 1 skipped —— R-24/R-26 全绿（manager.py 零改动，无需对价抬升）。
+   f. 验收对照（报告 §6 V-00 系列）：两写入方 schema 一致=均无前收盘价派生列 ✓；增量新行前收盘价由 provider 兜底派生（shift(1)，非 NaN）✓；vectorized_engine fail-closed 读取路径经 provider 兜底不误拒 ✓。
+   g. 纪律遵守：方案一先实现后因门禁硬顶回滚（manager.py 恢复原状、git diff 零残留），改走方案二并完整留痕；先登记蓝图（manager/导出脚本/两测试）再落代码；独立 commit。

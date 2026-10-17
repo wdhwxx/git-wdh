@@ -131,11 +131,11 @@ def load_symbol_data(conn: sqlite3.Connection, symbol: str) -> pd.DataFrame:
     # 表头全中文显示（下游加载器自动映射回英文列名，不影响回测）；
     # trade_date 一并映射为「日期」列（扁平式）
     df = df.rename(columns={**CN_COLUMN_MAP, "trade_date": "日期"})
-    # KP-P2-10/T-02：前收盘价 = 前一日收盘价（导出 SQL 无该列，统一派生；
-    # 防混合/事件引擎涨跌停校验因 pre_close 恒 0 而空转——首行无前驱为 NaN）；
-    # 用 insert 紧跟收盘价列，保证列顺序稳定（CI 契约断言依赖）。
-    _pre_close = pd.to_numeric(df["收盘价"], errors="coerce").shift(1)
-    df.insert(int(df.columns.get_loc("收盘价")) + 1, "前收盘价", _pre_close)
+    # A-09（方案二）：processed 统一不含「前收盘价」派生列——该列由读取层兜底派生
+    # （provider.py:797-799 / mixed_engine.py:1120-1123，收盘价.shift(1) 同口径），
+    # 两写入方（全量导出 / 增量 manager）schema 一致=无前收盘价列，消除 reindex NaN
+    # 潜伏与 vectorized_engine fail-closed 误拒（读取路径 provider 兜底后必含该列）。
+    # 注：此前此处派生前收盘价列（KP-P2-10/T-02），2026-10-17 A-09 施工移除。
     # 每股收益 = 按交易日匹配最近一期 financial_data.eps。
     # 统一时点日落点（v3.0 §6.4.2，M1A-01 修 ③）：有效披露日 = ann_date 优先
     # → report_deadline 推定 → report_date 兜底，仅取有效披露日 <= 交易日的最
