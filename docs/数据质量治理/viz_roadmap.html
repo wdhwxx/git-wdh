@@ -1,0 +1,112 @@
+<html style="margin:0;padding:0;">
+<title>数据层结构优化施工路线（实测基线）</title>
+<div style="width:100%;box-sizing:border-box;font-family:system-ui,'Microsoft YaHei',sans-serif;background:#f6f7f9;padding:16px;color:#1f2430;">
+  <div style="font-size:18px;font-weight:700;margin-bottom:4px;">数据层结构优化 · 实测驱动施工路线（2026-10-17 只读核验）</div>
+  <div style="font-size:13px;color:#5a6474;margin-bottom:14px;">数字全部来自 quant.db / processed 磁盘实测，非文档引用</div>
+
+  <!-- 基线数字卡 -->
+  <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px;">
+    <div style="flex:1;min-width:150px;background:#fff;border:1px solid #dde2ea;border-left:4px solid #d64545;border-radius:6px;padding:10px 12px;">
+      <div style="font-size:13px;color:#5a6474;">重复键（已发生）</div>
+      <div style="font-size:24px;font-weight:700;color:#d64545;">4,377</div>
+      <div style="font-size:12px;color:#8891a1;">集中在 10-15(3,187)/10-09(734)/10-08(450)</div>
+    </div>
+    <div style="flex:1;min-width:150px;background:#fff;border:1px solid #dde2ea;border-left:4px solid #d64545;border-radius:6px;padding:10px 12px;">
+      <div style="font-size:13px;color:#5a6474;">ann_date 非空（已发生）</div>
+      <div style="font-size:24px;font-weight:700;color:#d64545;">0 / 329,735</div>
+      <div style="font-size:12px;color:#8891a1;">财务表 100% NULL，PIT 时点退化为法定截止日推定</div>
+    </div>
+    <div style="flex:1;min-width:150px;background:#fff;border:1px solid #dde2ea;border-left:4px solid #e09700;border-radius:6px;padding:10px 12px;">
+      <div style="font-size:13px;color:#5a6474;">market_data 行数</div>
+      <div style="font-size:24px;font-weight:700;color:#e09700;">16,917,877</div>
+      <div style="font-size:12px;color:#8891a1;">5,589 标的 · raw 100% · 1990-12-19~2026-10-15</div>
+    </div>
+    <div style="flex:1;min-width:150px;background:#fff;border:1px solid #dde2ea;border-left:4px solid #2f6fed;border-radius:6px;padding:10px 12px;">
+      <div style="font-size:13px;color:#5a6474;">processed parquet</div>
+      <div style="font-size:24px;font-weight:700;color:#2f6fed;">3,195 个</div>
+      <div style="font-size:12px;color:#8891a1;">15列×3,189 + 14列×6；无前收盘价列</div>
+    </div>
+  </div>
+
+  <!-- 三条 P0 风险修复流 -->
+  <div style="font-size:14px;font-weight:700;margin-bottom:8px;">三条已确认风险 → 立即施工（P0）</div>
+  <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">
+    <!-- 流1 -->
+    <div style="display:flex;flex-wrap:wrap;align-items:stretch;gap:6px;background:#fff;border:1px solid #dde2ea;border-radius:6px;padding:10px;">
+      <div style="flex:1;min-width:200px;background:#fdf1f1;border-radius:4px;padding:8px 10px;">
+        <div style="font-size:13px;font-weight:700;color:#c33;">① 重复行污染回测/实盘</div>
+        <div style="font-size:12px;color:#5a6474;">增量清洗 upsert 无去重 + UNIQUE 对 NULL 失效（schema.py:84）</div>
+      </div>
+      <div style="align-self:center;font-size:16px;color:#8891a1;">→</div>
+      <div style="flex:1;min-width:180px;background:#eef3fe;border-radius:4px;padding:8px 10px;">
+        <div style="font-size:13px;font-weight:700;color:#2f6fed;">A-13 存量去重</div>
+        <div style="font-size:12px;color:#5a6474;">保留原始源行（tdx/tencent）优先于 incremental_clean；备份可还原</div>
+      </div>
+      <div style="align-self:center;font-size:16px;color:#8891a1;">→</div>
+      <div style="flex:1;min-width:180px;background:#eef7ee;border-radius:4px;padding:8px 10px;">
+        <div style="font-size:13px;font-weight:700;color:#1e7a2e;">B-01 部分唯一索引</div>
+        <div style="font-size:12px;color:#5a6474;">(symbol,period,adjust,trade_date) WHERE trade_time IS NULL</div>
+      </div>
+    </div>
+    <!-- 流2 -->
+    <div style="display:flex;flex-wrap:wrap;align-items:stretch;gap:6px;background:#fff;border:1px solid #dde2ea;border-radius:6px;padding:10px;">
+      <div style="flex:1;min-width:200px;background:#fdf1f1;border-radius:4px;padding:8px 10px;">
+        <div style="font-size:13px;font-weight:700;color:#c33;">② PIT 穿越（结论不可信）</div>
+        <div style="font-size:12px;color:#5a6474;">akshare 取数映射不取公告日（akshare_source.py）→ time_semantics 回退法定截止日</div>
+      </div>
+      <div style="align-self:center;font-size:16px;color:#8891a1;">→</div>
+      <div style="flex:1;min-width:180px;background:#eef3fe;border-radius:4px;padding:8px 10px;">
+        <div style="font-size:13px;font-weight:700;color:#2f6fed;">B-09 取数补公告日 + A-04 CSV 补列</div>
+        <div style="font-size:12px;color:#5a6474;">断点比 CSV 链路更上游：接口映射即缺 ann_date 键</div>
+      </div>
+      <div style="align-self:center;font-size:16px;color:#8891a1;">→</div>
+      <div style="flex:1;min-width:180px;background:#eef7ee;border-radius:4px;padding:8px 10px;">
+        <div style="font-size:13px;font-weight:700;color:#1e7a2e;">B-07 流通股本收敛</div>
+        <div style="font-size:12px;color:#5a6474;">被策略消费的唯一财务派生量改走 eff_disclosure_date</div>
+      </div>
+    </div>
+    <!-- 流3 -->
+    <div style="display:flex;flex-wrap:wrap;align-items:stretch;gap:6px;background:#fff;border:1px solid #dde2ea;border-radius:6px;padding:10px;">
+      <div style="flex:1;min-width:200px;background:#fdf1f1;border-radius:4px;padding:8px 10px;">
+        <div style="font-size:13px;font-weight:700;color:#c33;">③ 数据丢失窗口（数据会消失）</div>
+        <div style="font-size:12px;color:#5a6474;">嵌套事务：delete 已 commit、insert 失败无可回滚（full_clean_service.py:735）</div>
+      </div>
+      <div style="align-self:center;font-size:16px;color:#8891a1;">→</div>
+      <div style="flex:1;min-width:180px;background:#eef3fe;border-radius:4px;padding:8px 10px;">
+        <div style="font-size:13px;font-weight:700;color:#2f6fed;">A-05 SAVEPOINT 嵌套事务</div>
+        <div style="font-size:12px;color:#5a6474;">同批：A-08 orders 残量归零 · A-09 前收盘价潜伏分叉</div>
+      </div>
+      <div style="align-self:center;font-size:16px;color:#8891a1;">→</div>
+      <div style="flex:1;min-width:180px;background:#eef7ee;border-radius:4px;padding:8px 10px;">
+        <div style="font-size:13px;font-weight:700;color:#1e7a2e;">验收：复现场景数据不再丢失</div>
+        <div style="font-size:12px;color:#5a6474;">写失败可观测，不再静默 return 0</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 阶段条 -->
+  <div style="font-size:14px;font-weight:700;margin-bottom:8px;">施工次序（验收标准 = 可观测行为变化）</div>
+  <div style="display:flex;flex-wrap:wrap;gap:8px;">
+    <div style="flex:1;min-width:170px;background:#fff;border:1px solid #dde2ea;border-top:3px solid #d64545;border-radius:6px;padding:10px 12px;">
+      <div style="font-size:14px;font-weight:700;color:#d64545;">P0 清账</div>
+      <div style="font-size:12px;color:#5a6474;margin-top:4px;">只读+新增列/表。去重 4,377、补披露日、SAVEPOINT、残量修复。任何时刻可中止无副作用。</div>
+    </div>
+    <div style="flex:1;min-width:170px;background:#fff;border:1px solid #dde2ea;border-top:3px solid #e09700;border-radius:6px;padding:10px 12px;">
+      <div style="font-size:14px;font-weight:700;color:#e09700;">P1 立契约</div>
+      <div style="font-size:12px;color:#5a6474;margin-top:4px;">唯一索引/三时间戳/修正台账/admission 模块/影子写入口/PIT 口径收敛。小批量先行+指纹比对。</div>
+    </div>
+    <div style="flex:1;min-width:170px;background:#fff;border:1px solid #dde2ea;border-top:3px solid #2f6fed;border-radius:6px;padding:10px 12px;">
+      <div style="font-size:14px;font-weight:700;color:#2f6fed;">P2 上闸门</div>
+      <div style="font-size:12px;color:#5a6474;margin-top:4px;">FLAG/BLOCK 真正接入写入；废止整标的 delete+insert；收敛到唯一写入口。先影子跑误报率。</div>
+    </div>
+    <div style="flex:1;min-width:170px;background:#fff;border:1px solid #dde2ea;border-top:3px solid #7a5aa8;border-radius:6px;padding:10px 12px;">
+      <div style="font-size:14px;font-weight:700;color:#7a5aa8;">P3 时间积累</div>
+      <div style="font-size:12px;color:#5a6474;margin-top:4px;">基于 ingest_time 的延迟分布建模、快照多版本化、跨源时偏监控。依赖 P0/P2 的数据积累。</div>
+    </div>
+  </div>
+
+  <div style="font-size:12px;color:#8891a1;margin-top:14px;border-top:1px dashed #dde2ea;padding-top:8px;">
+    依据：数据层结构优化可行性施工方案报告 v1.1（实测核验版）· 全程只读，未修改项目任何文件。
+  </div>
+</div>
+</html>
