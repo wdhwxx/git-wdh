@@ -688,7 +688,7 @@ class DataManager:
         adjust: Optional[str],
     ) -> int:
         """
-        将行情数据保存到数据库
+        将行情数据保存到数据库（C-03 #452：委托 MarketDataWriter 唯一写入口）
 
         Returns
         -------
@@ -698,79 +698,40 @@ class DataManager:
             return 0
         try:
             from ..database.queries import DataQueries
-            queries = DataQueries(self._db)
+            from ..data_access.market_data_writer import MarketDataWriter
+            writer = MarketDataWriter(
+                DataQueries(self._db), admission_checker=self._admission_checker,
+            )
             # B-02 #442：采集元数据——ingest_time 精确到采集时刻、ingest_batch 用日期+自增序号
             ingest_time = datetime.now().isoformat(timespec="seconds")
             self._ingest_batch_seq = getattr(self, "_ingest_batch_seq", 0) + 1
             ingest_batch = f"{datetime.now():%Y%m%d}-{self._ingest_batch_seq:04d}"
-            # C-01 #450：门禁①接线——总开关默认关闭（is_enabled()=False 直通，生产零变化）；
-            # 开启后 BLOCK 拒收（admission_reject 留痕，不写库）/ FLAG 落 anomaly_flags 列
-            self._admission_stats = {"blocked": 0, "flagged": 0}
-            checker = self._admission_checker
-            if checker is None:
-                from ..data_access.admission import AdmissionChecker
-                checker = AdmissionChecker()
-                self._admission_checker = checker
-            admission_on = checker.is_enabled()
+            # C-01 #450 门禁① + C-03 #452：首行上下文取 DB 末根（转 dict 防 sqlite3.Row）
             prev_row: Optional[Dict[str, Any]] = None
-            if admission_on:
-                # 首行上下文：取 DB 中该标的最近一根（价格跳变/量异动/缺失行/源切换判定）
-                # 转 dict：sqlite3.Row 无 .get，admission.check 依赖 dict 接口
+            if (self._admission_checker is not None
+                    and self._admission_checker.is_enabled()):
                 _prev = self._db.execute_one(
                     "SELECT * FROM market_data WHERE symbol=? AND period=? AND adjust=? "
                     "ORDER BY trade_date DESC, trade_time DESC LIMIT 1",
                     (symbol, period, adjust),
                 )
                 prev_row = dict(_prev) if _prev is not None else None
-            # 转换为数据库格式
-            db_data = []
-            for row in data_result.data:
-                entry = {
-                    "symbol": symbol,
-                    "market": data_result.market,
-                    "period": period,
-                    "adjust": adjust,
-                    "trade_date": row.get("date", ""),
-                    "trade_time": row.get("time"),
-                    "open": row.get("open"),
-                    "high": row.get("high"),
-                    "low": row.get("low"),
-                    "close": row.get("close"),
-                    "volume": row.get("volume"),
-                    "amount": row.get("amount"),
-                    "pct_chg": row.get("pct_chg"),
-                    "turnover": row.get("turnover"),
-                    "is_suspended": 1 if row.get("volume", 0) == 0 else 0,
-                    "data_source": data_result.source,
-                    "ingest_time": ingest_time,
-                    "ingest_batch": ingest_batch,
-                    "anomaly_flags": None,
-                }
-                if admission_on:
-                    # 字段映射：原始行 date 键 → 门禁① trade_date 键（B-05 #445 同款修正）
-                    admission_row = dict(row)
-                    admission_row.setdefault("trade_date", row.get("date", ""))
-                    result = checker.check(
-                        admission_row, symbol, data_result.source, prev_row=prev_row,
-                    )
-                    if result.decision == "BLOCK":
-                        self._admission_stats["blocked"] += 1
-                        queries.record_admission_reject(
-                            symbol=symbol,
-                            rule=result.reasons[0].split(":")[0] if result.reasons else "admission_block",
-                            detail="|".join(result.reasons),
-                            source=data_result.source,
-                            trade_date=str(row.get("date", "") or None),
-                            level="BLOCK",
-                        )
-                        continue  # 拒收：不写库
-                    if result.decision == "FLAG":
-                        self._admission_stats["flagged"] += 1
-                        entry["anomaly_flags"] = "|".join(result.flags)
-                db_data.append(entry)
-                prev_row = row
-            return queries.bulk_insert_market_data(db_data)
-        except Exception:
+            stats = writer.write_raw(
+                rows=data_result.data,
+                symbol=symbol,
+                market=data_result.market,
+                period=period,
+                adjust=adjust,
+                data_source=data_result.source,
+                ingest_time=ingest_time,
+                ingest_batch=ingest_batch,
+                prev_row=prev_row,
+            )
+            self._admission_stats = {"blocked": stats["blocked"], "flagged": stats["flagged"]}
+            return stats["written"]
+        except Exception as exc:
+            # C-03 #452：写失败可观测——记 error 日志并返回 0（不再裸 except 静默吞噬）
+            logger.error("增量采集写库失败 [%s]: %s", symbol, exc)
             return 0
 
     # ═══════════════════════════════════════════
@@ -1114,7 +1075,7 @@ class DataManager:
         if output_path.exists():
             try:
                 existing_df = pd.read_parquet(output_path)
-                # 归一化存量（兼容旧索引式/扁平 datetime64 → 整数「日期」列）
+  # noqa: BLE001 - 归一化存量（兼容旧索引式/扁平 datetime64 → 整数「日期」列）
                 existing_df = _normalize_processed_df(existing_df)
             except Exception as exc:
                 processed_read_failed = True

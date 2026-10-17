@@ -749,12 +749,12 @@ class FullCleanService:
         print(f"  [备份] quant.db → {dst} ({dst.stat().st_size/1024/1024:.1f} MB)")
         return dst
 
-    # ── 单只写回（DataQueries 事务） ──
+    # ── 单只写回（DataQueries 事务；C-03 #452 委托统一写入口） ──
     def write_back_symbol(
         self, dq: DataQueries, symbol: str, cleaned_data: Optional[List[Dict]]
     ) -> str:
         """
-        事务内写回：删该标的原数据 + 批量插入清洗后数据。
+        事务内写回：删该标的原数据 + 批量插入清洗后数据（委托 MarketDataWriter.write_upsert）。
         注意：delete_market_data 按 symbol 删除（当前 DB 仅 daily/raw，安全）。
         Returns: 'written' / 'unchanged' / 'error'
         """
@@ -763,10 +763,12 @@ class FullCleanService:
         if self.dry_run:
             return "written"
         try:
+            from ..data_access.market_data_writer import MarketDataWriter
+            writer = MarketDataWriter(dq)
             with dq.conn.transaction():
                 dq.delete_market_data(symbol)
                 if cleaned_data:
-                    dq.bulk_insert_market_data(cleaned_data, replace=True)
+                    writer.write_upsert(cleaned_data, symbol)
             return "written"
         except Exception as e:
             logger.error(f"写回失败 {symbol}: {e}")
@@ -1098,7 +1100,7 @@ def run_incremental_clean(
                 cleaned = pipe.get("cleaned") or []
                 if not cleaned:
                     continue  # 全部为脏/无有效增量，跳过该标的（不写 DB/processed）
-                # 1) 写 DB（清洗后记录 INSERT OR REPLACE upsert）
+                # 1) 写 DB（C-03 #452 委托统一写入口；INSERT OR REPLACE upsert，C-02 #453 升级台账）
                 db_rows = []
                 for cc in cleaned:
                     db_rows.append({
@@ -1110,7 +1112,9 @@ def run_incremental_clean(
                         "pct_chg": cc.get("pct_chg"), "turnover": cc.get("turnover"),
                         "data_source": cc.get("data_source", "incremental_clean"),
                     })
-                db_written = dq.bulk_insert_market_data(db_rows, replace=True) if db_rows else 0
+                from ..data_access.market_data_writer import MarketDataWriter
+                writer = MarketDataWriter(dq)
+                db_written = writer.write_upsert(db_rows, symbol) if db_rows else 0
                 # 2) 写 processed（复用 save_cleaned_incremental_parquet，records 传入内部同规则再清洗）
                 dates = [cc.get("date") for cc in cleaned if cc.get("date")]
                 start_date = min(dates) if dates else None

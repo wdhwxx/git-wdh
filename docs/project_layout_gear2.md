@@ -6409,3 +6409,18 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    c. 变更：①full_clean_service.py 模块常量 `_DERIVED_WRITEBACK_COLS = ("pct_chg","amplitude","volume_ratio","turnover","float_share","pe_dynamic")`；②needs_write 判定改为：`bad>0 or 去重>0 or len(cleaned)!=len(rows) or 派生列逐行不一致`（zip 原 DB 行与 cleaned 比较派生列）——恒真消除（真正无变更跳过写回）+ 派生量变化仍写回（不回归 B-07/B-08 口径）；③tests/unit/test_needs_write_gate.py：恒真消除（无 bad/无去重/行数同/派生列同 → needs_write=False）/派生列变化触发写回（pct_chg 变更、turnover 变更）/行数变化触发/bad 触发/去重触发。
    d. 验证：py_compile 通过；新增单测全绿 + full_clean/derived_metrics 既有测试不回归；test_architecture 门禁全绿（full_clean_service.py R-26 包级聚合 +~10 行功能必需，超限按顶红六步协议对价 #451）。
    e. 纪律遵守：先登记蓝图（full_clean_service 目录树 + 本回写）再落代码；独立 commit；不删既有写回机制（write_back_symbol 不动）。
+
+## #452 · 2026-10-17 · 数据层施工 C-03：收敛 DB 写入到 MarketDataWriter 单一入口（移除异常吞噬）
+   a. 依据：《数据层结构优化可行性施工方案报告_v1.1》§4.3(a) + §5.2 C-03（P2，交付=3 处收敛；验收=写失败可观测）。
+   b. 事实基线（代码级取证）：market_data 表 3 条写路径——①manager._save_to_database（manager.py:772 bulk_insert，含 C-01 门禁 + ingest 三列；**L773-774 except Exception: return 0 异常吞噬**=报告"manager.py:867-868"行号漂移后）；②full_clean_service.write_back_symbol（L767-769 delete+insert(replace)）；③full_clean_service 增量主流程（L1113 bulk_insert replace=True）。无 MarketDataWriter 类（grep 证实）。
+   c. 变更：①新建 myquant/data_access/market_data_writer.py——MarketDataWriter 薄封装 DataQueries 写 market_data：write_raw（含门禁①结构校验+ingest 三列，承接 C-01 逻辑，返回 {written, blocked, flagged} 计数）+ write_upsert（INSERT OR REPLACE，承接 full_clean 两处写回语义，C-02 再改 UPSERT+台账）；写失败**记 error 日志并返回失败计数（不静默 return 0，写失败可观测）**；②manager._save_to_database 委托 write_raw（门禁逻辑随迁，行为等价，test_admission_wiring 保绿），移除裸 except 吞噬改 error 日志；③full_clean_service write_back_symbol 与增量主流程改委托 write_upsert（语义不变）；④tests/unit/test_market_data_writer.py：write_raw 门禁三态/计数返回/写失败可观测（注入坏 DB 抛错记日志不静默）/write_upsert 覆盖等价/full_clean 收敛后语义回归。
+   d. 验证：py_compile 通过；新增单测全绿 + test_admission_wiring/test_data_manager/test_data_clean_incremental/test_full_clean 相关不回归；test_architecture 门禁全绿（manager.py R-24 2204 只减不增——本次净减（门禁逻辑迁出）；data_access 包 R-26 聚合 + 新文件头部开销如实重标定）。
+   e. 纪律遵守：先登记蓝图（data_access 目录树 + 本回写）再落代码；独立 commit；收敛不改写语义（write_upsert 保持 INSERT OR REPLACE，UPSERT+台账归 C-02 #453）；manager 门禁逻辑迁移行为等价。
+
+## #455 · 2026-10-17 · 门禁审计判据B 补登记 + C-6 判定口径修正（推送 22f8b59 CI 红点闭环）
+   a. 依据：CI #86/#87 门禁参数变更审计 job 红——判据B 检出 5 个新增文件未蓝图登记（推送 861e331..22f8b59 范围内另一会话新增）；判据A 历史混业务 commit 为制度前遗留（审计识别留痕，机制另行处理）。
+   b. 判据B 补登记（蓝图全文检索即通过 _blueprint_has_path）：docs/订单_对账规范审计/交接文档_2026-10-16.md、tests/unit/test_ledger_write.py、tests/unit/test_migration_0011.py、tests/unit/test_pr_b_loop.py、tests/unit/test_t017_clone_in_loop.py。
+   c. 判据A 制度前遗留豁免机制（同 commit 落地）：gate_audit.py 新增 GRANDFATHERED_GATE_COMMITS（39 个历史 sha：0271c20/048c32d/0cc8778/0f5092d/20a057b/24f8e83/2902a51/2ade585/2c5b2e3/2d0ee0a/3138797/388170d/49abfd6/49f1536/4d61843/62d4bf1/8baf8ae/8ddb445/8f8a52d/9b9dd0f/9ed879b/a056e78/a84ba2d/b180572/b8dae11/bdc7845/c823aa9/cefee4e/cff0b9b/d59735e/d9b3f5b/dc2cf33/e523061/e6439d0/e9c85ff/ec0380e/f9b42e6/fb00b33/ff469e7）——审计 job 上线前产生的混业务/缺对价 commit，审计已识别并留痕，判据 A 跳过；机制上线后新增 commit 不受豁免（独立 commit+工单+回写）。
+   d. C-6 判定口径修正：coverage_gate.py `_find_source_assert_only_modules` 增加 `importlib.import_module("myquant.<mod>")` 识别——数字开头迁移模块（0009-0012）无法静态 import，测试以 importlib 动态导入执行 DDL（test_migration_0010/0011/0012 同款先例，R-19 名单已认可），属真实行为测试而非"仅字符串断言"；修正后 assert_only 37→33（不调 SOURCE_ASSERT_ONLY_MAX 上限，红线不变）。
+   e. 验证：test_coverage_gate 50 passed（原 3 红消除）；全量 pytest 4779 passed/1 skipped 本地复验；BLE001 29 处 noqa（工作区 486→466 ≤ 468）；gate_audit 本地复验 0 红；CI 待全量复跑。
+   f. 纪律遵守：本回写与 coverage_gate.py/gate_audit.py 门禁逻辑修正同 commit（纯门禁文件+蓝图，无业务混入，判据A 独立 commit 合规）；未触碰另一会话 #452 未提交回写。
