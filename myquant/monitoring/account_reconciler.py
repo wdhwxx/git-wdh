@@ -270,7 +270,7 @@ class AccountReconciler:
                     "[reconciler] T2-1 ledger vs broker 对账发现差异: %s", ledger_diff
                 )
             self._ingest_realtime_diff(diff)
-        except Exception as e:  # T0-14：核对异常 → 置 UNKNOWN + CRITICAL，不再保持旧 True
+        except Exception as e:  # noqa: BLE001 - T0-14：核对异常 → 置 UNKNOWN + CRITICAL，不再保持旧 True
             with self._lock:
                 self._consistent = None  # UNKNOWN：broker 查询失联
                 self._last_check_ts = time.time()
@@ -294,7 +294,7 @@ class AccountReconciler:
             # TODO: 后续可扩展为查当日 ACK_UNKNOWN/SUBMITTED/PARTIAL_FILLED 订单
             # 与 broker.query_stock_orders() 对比
             return None  # 暂不实现全量对比，留接口
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("[reconciler] T2-1 ledger vs broker 对账异常（跳过）: %s", e)
             return None
 
@@ -346,7 +346,7 @@ class AccountReconciler:
                         position_diff=str(diff.position_diff) if diff.position_diff else "",
                         exceeds_threshold=1,
                     )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("[account_reconciler] T2-6 实时对账落库失败（不阻断）: %s", e)
 
     # ═══════════════════════════════════════════
@@ -421,7 +421,7 @@ class AccountReconciler:
                         position_diff=str(diff.position_diff) if diff.position_diff else "",
                         exceeds_threshold=1,
                     )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("[account_reconciler] T2-5 T+1 对账落库失败（不阻断）: %s", e)
         return diff
 
@@ -478,7 +478,7 @@ class AccountReconciler:
                     actor=DEFAULT_ACTOR,
                     reason=f"现金差={diff.cash_diff:.2f}, 持仓差异={len(diff.position_diffs)}只",
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("[account_reconciler] T2-7 冻结记录落库失败（不阻断）: %s", e)
 
     def mark_resolved(self, actor: str, note: str = "") -> None:
@@ -520,7 +520,7 @@ class AccountReconciler:
                     actor=actor_s,
                     reason=note or "",
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("[account_reconciler] T2-8 解冻记录落库失败（不阻断）: %s", e)
         logger.info(
             "[account_reconciler] 账户解冻: account=%s actor=%s was_frozen=%s",

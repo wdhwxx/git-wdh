@@ -489,7 +489,7 @@ class BrokerManager:
                         f"symbol={order.symbol} reason=reconciliation_blocked"
                     )
                     return order
-        except Exception as e:  # registry 获取失败不阻断（保守放行）
+        except Exception as e:  # noqa: BLE001 - registry 获取失败不阻断（保守放行）
             logger.warning(f"[broker_manager] T0-19 检查 portfolio 冻结状态失败（放行）: {e}")
 
         do_failover = self._auto_failover if auto_failover is None else auto_failover

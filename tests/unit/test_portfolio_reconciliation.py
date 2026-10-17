@@ -124,7 +124,8 @@ class TestConsistent:
         broker = _FakeBroker(cash=100_000.005, positions=[])
         p = _make_portfolio(100_000.0, {})
         diff = p.reconcile_vs_broker(broker)
-        assert abs(diff.cash_diff - (-0.005)) < 1e-9
+        # T0-15 #FI-22：cash_diff round 2 位（round(-0.005, 2) = -0.01，浮点表示取整到分）
+        assert diff.cash_diff == -0.01
         # 容差=0：0.005 非零差即超阈（不再有 1 分钱级 slack）
         assert diff.exceeds_threshold is True
 
@@ -142,10 +143,11 @@ class TestDiffDetection:
         diff = p.sync_from_broker(broker)
         assert diff.exceeds_threshold is True
         assert diff.cash_diff == 10_000.0
-        # 先 diff 后重建：本地已按券商权威账本重建
-        assert p._cash == 90_000.0
+        # T0-1 双值并存：diff 超阈 → 冻结，本地账(book_cash)不被券商快照覆写
+        assert p.book_cash == 100_000.0
+        assert p.is_reconciliation_blocked is True
         assert "__reconciliation_diff__" in notified
-        assert "__sync__" in notified
+        assert "__reconciliation_blocked__" in notified
         assert "last_reconciliation_diff" in p.stats
 
     def test_持仓数量不一致_产出差异清单(self) -> None:
@@ -185,15 +187,17 @@ class TestDiffDetection:
 # ═══════════════════════════════════════════════
 
 class TestSyncAndSerialize:
-    def test_sync超阈值_仍按券商重建且记录stats(self) -> None:
+    def test_sync超阈值_冻结本地账且记录stats(self) -> None:
+        """T0-1：diff 超阈 → reconciliation_blocked，本地账保持（不按券商重建）。"""
         broker = _FakeBroker(cash=100_000.0, positions=[_pos(SYMBOL2, 200.0)])
         p = _make_portfolio(100_000.0, {SYMBOL: _pos(SYMBOL, 100.0)})
         diff = p.sync_from_broker(broker)
         assert diff.exceeds_threshold is True
-        # 重建到券商权威账本
-        assert SYMBOL2 in p._positions
-        assert p._positions[SYMBOL2].quantity == 200.0
-        assert SYMBOL not in p._positions
+        # 冻结：本地账保持原状，不覆写为券商账（需人工 adopt_broker_ledger 收敛）
+        assert SYMBOL in p._positions
+        assert p._positions[SYMBOL].quantity == 100.0
+        assert SYMBOL2 not in p._positions
+        assert p.is_reconciliation_blocked is True
         assert "last_reconciliation_diff" in p.stats
         assert str(diff) in p.stats["last_reconciliation_diff"]
 

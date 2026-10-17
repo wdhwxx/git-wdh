@@ -2276,7 +2276,7 @@ class LiveEngine(BaseEngine):
         portfolio_count = len(self._portfolio.get_all_positions())
         try:
             broker_positions = broker.get_positions()
-        except Exception as e:  # T0-7：live 下 fail-closed 拒启；paper/sim 告警放行
+        except Exception as e:  # noqa: BLE001 - T0-7：live 下 fail-closed 拒启；paper/sim 告警放行
             msg = f"[engine] T1-2 启动断言：broker 持仓读取失败: {e}"
             if getattr(self, "_trade_mode", "paper") == "live":
                 raise RuntimeError(msg + "，live 模式拒绝启动（broker 查询失败不可放行）") from e
@@ -2307,7 +2307,7 @@ class LiveEngine(BaseEngine):
                     f"[engine] T1-2 启动对账完成: portfolio={portfolio_count} -> "
                     f"{len(self._portfolio.get_all_positions())} 只, diff={diff}"
                 )
-            except Exception as e:  # T0-7：live 下 fail-closed 拒启；paper/sim 告警放行
+            except Exception as e:  # noqa: BLE001 - T0-7：live 下 fail-closed 拒启；paper/sim 告警放行
                 msg = f"[engine] T1-2 启动对账失败: {e}"
                 if getattr(self, "_trade_mode", "paper") == "live":
                     raise RuntimeError(msg + "，live 模式拒绝启动（对账失败不可放行）") from e
@@ -2370,7 +2370,7 @@ class LiveEngine(BaseEngine):
                     unrealized_pnl=pos.unrealized_pnl,
                     cash=self._portfolio.cash,
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(f"[engine] T1-5 持仓日快照落库失败（不阻断）: {e}")
 
     def _collect_pnl_snapshot_task(self) -> None:
@@ -2386,7 +2386,7 @@ class LiveEngine(BaseEngine):
             total_assets = self._portfolio.get_total_assets()
             self._stats["last_pnl_snapshot_assets"] = total_assets
             logger.debug(f"[engine] T1-6 PnL 快照: total_assets={total_assets:,.2f}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(f"[engine] T1-6 PnL 快照落库失败（不阻断）: {e}")
 
     def _guardian_patrol(self) -> None:
@@ -2509,7 +2509,7 @@ class LiveEngine(BaseEngine):
                     order_id=order.order_id, seq=1, event_type="intent",
                     payload=f"symbol={order.symbol} side={order.side.value} qty={order.quantity}",
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(f"[engine] T1-2 record_order_intent 失败（不阻断提交）: {e}")
             # T1-8：连续落库失败计数
             self._ledger_fail_count += 1
@@ -2540,7 +2540,7 @@ class LiveEngine(BaseEngine):
                         payload=f"status={getattr(result, 'status', order.status).value}",
                     )
                     self._ledger_fail_count = 0  # T1-8：落库成功重置计数器
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning(f"[engine] T1-2 record_order_ack 失败（不阻断）: {e}")
                 # T1-8：连续落库失败计数
                 self._ledger_fail_count += 1
@@ -2630,7 +2630,7 @@ class LiveEngine(BaseEngine):
                         order_id=order.order_id, seq=3, event_type="error",
                         payload=f"error={e}",
                     )
-            except Exception as ledger_e:
+            except Exception as ledger_e:  # noqa: BLE001
                 logger.warning(f"[engine] T1-2 record_order_error 失败（不阻断）: {ledger_e}")
             self._stats["errors"] += 1
             self._stats["rejected_orders"] += 1

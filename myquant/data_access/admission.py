@@ -116,7 +116,7 @@ class AdmissionChecker:
         try:
             if not self._config_path.exists():
                 logger.warning("准入配置缺失 %s，使用默认阈值", self._config_path)
-                return
+                return  # noqa: BLE001
             raw = yaml.safe_load(self._config_path.read_text(encoding="utf-8")) or {}
             bar = raw.get("bar", {}) or {}
             self._max_volume_ratio = float(
@@ -134,7 +134,7 @@ class AdmissionChecker:
 
     # ── 阈值解析 ─────────────────────────────────────────
     def _resolve_price_jump_threshold(self, symbol: str) -> float:
-        """分品种跳变阈值：by_symbol > by_market > default。"""
+        """分品种跳变阈值：by_symbol > by_market > default。"""  # noqa: BLE001
         try:
             if self._config_path.exists():
                 raw = yaml.safe_load(self._config_path.read_text(encoding="utf-8")) or {}
@@ -166,7 +166,7 @@ class AdmissionChecker:
             if not self._whitelist_path.exists():
                 return False
             raw = yaml.safe_load(self._whitelist_path.read_text(encoding="utf-8")) or {}
-            if not raw.get("enabled", False):
+            if not raw.get("enabled", False):  # noqa: BLE001
                 return False
             today = date.today().isoformat()
             for entry in raw.get("entries", []) or []:

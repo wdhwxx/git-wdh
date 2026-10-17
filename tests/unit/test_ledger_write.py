@@ -87,7 +87,15 @@ def temp_ledger():
         ledger = TradeLedger(db)
         yield ledger, db_path
     finally:
-        os.unlink(db_path)
+        # 先关连接再删文件（Windows 文件锁：sqlite 句柄占用时 unlink 抛 WinError 32）
+        try:
+            db.close()
+        except Exception:
+            pass
+        try:
+            os.unlink(db_path)
+        except FileNotFoundError:
+            pass
 
 
 class TestLedgerWrite:

@@ -96,7 +96,7 @@ def _simulate_nested_write_back(
                 )
         outer.__exit__(None, None, None)
         return "written"
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         outer.__exit__(type(exc), exc, exc.__traceback__)
         return "error"
 
@@ -120,7 +120,7 @@ def _simulate_atomic_write_back(
                     [tuple(r[c] for c in _COLS) for r in new_rows],
                 )
         return "written"
-    except Exception:
+    except Exception:  # noqa: BLE001
         return "error"
 
 

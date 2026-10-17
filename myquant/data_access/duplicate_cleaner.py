@@ -161,7 +161,7 @@ def clean_duplicates(
         )
         deleted = cur.rowcount
         conn.commit()
-    except Exception:
+    except Exception:  # noqa: BLE001
         conn.rollback()
         raise
     finally:

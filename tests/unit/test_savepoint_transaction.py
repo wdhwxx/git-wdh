@@ -24,9 +24,11 @@ _COLS = [
     "open", "high", "low", "close", "volume", "amount", "pct_chg", "turnover",
     "amplitude", "volume_ratio", "float_share", "pe_dynamic", "is_suspended",
     "data_source",
+    # B-02 #442 契约：bulk_insert 列清单含 ingest 三列（schema.py 与 0011 迁移双路一致）
+    "ingest_time", "ingest_batch", "anomaly_flags",
 ]
 _COL_DDL = ",".join(
-    f"{c} TEXT" if c in ("trade_time", "data_source") else f"{c} REAL"
+    f"{c} TEXT" if c in ("trade_time", "data_source", "ingest_time", "ingest_batch", "anomaly_flags") else f"{c} REAL"
     for c in _COLS
 )
 
@@ -132,7 +134,7 @@ def test_single_transaction_commit(dq: DataQueries) -> None:
         dq.conn.execute_update(
             f"INSERT INTO {_TABLE} ({','.join(_COLS)}) VALUES "
             f"('600000.SH','A股','daily','none','2025-01-01',NULL,"
-            f"NULL,NULL,NULL,30.0,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'tdx')"
+            f"NULL,NULL,NULL,30.0,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'tdx',NULL,NULL,NULL)"
         )
     assert _count(dq, "600000.SH") == 1
 
@@ -144,7 +146,7 @@ def test_single_transaction_rollback(dq: DataQueries) -> None:
             dq.conn.execute_update(
                 f"INSERT INTO {_TABLE} ({','.join(_COLS)}) VALUES "
                 f"('600000.SH','A股','daily','none','2025-01-01',NULL,"
-                f"NULL,NULL,NULL,30.0,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'tdx')"
+                f"NULL,NULL,NULL,30.0,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'tdx',NULL,NULL,NULL)"
             )
             raise ValueError("boom")
     assert _count(dq, "600000.SH") == 0

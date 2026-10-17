@@ -23,9 +23,11 @@ def _reset_registry():
 
 
 def _register_both():
-    """模拟 account_reconciler + alert_manager 已注册。"""
+    """模拟 account_reconciler + alert_manager + trade_ledger 已注册（T1-1 装配门 4 项）。"""
+    _component_factories.clear()  # 隔离：只保留本用例显式注册的组件
     _component_factories["account_reconciler"] = lambda: object()
     _component_factories["alert_manager"] = lambda: object()
+    _component_factories["trade_ledger"] = lambda: object()
 
 
 class TestLiveReconciliationGate:
@@ -37,12 +39,14 @@ class TestLiveReconciliationGate:
 
     def test_live_account_reconciler_unregistered_raises(self):
         """live + account_reconciler 未注册 → ValueError 拒启。"""
+        _component_factories.clear()  # 隔离全量顺序污染
         _component_factories["alert_manager"] = lambda: object()
         with pytest.raises(ValueError, match="account_reconciler 未注册"):
             _assert_live_reconciliation_gate("live", {"enabled": True})
 
     def test_live_alert_manager_unregistered_raises(self):
         """live + alert_manager 未注册 → ValueError 拒启。"""
+        _component_factories.clear()  # 隔离全量顺序污染
         _component_factories["account_reconciler"] = lambda: object()
         with pytest.raises(ValueError, match="alert_manager 未注册"):
             _assert_live_reconciliation_gate("live", {"enabled": True})
@@ -62,9 +66,11 @@ class TestLiveReconciliationGate:
 
     def test_multiple_errors_combined(self):
         """多项缺失时错误信息合并。"""
+        _component_factories.clear()  # 隔离全量顺序污染
         with pytest.raises(ValueError) as exc_info:
             _assert_live_reconciliation_gate("live", {"enabled": False})
         msg = str(exc_info.value)
         assert "scheduler.enabled=false" in msg
         assert "account_reconciler" in msg
         assert "alert_manager" in msg
+        assert "trade_ledger" in msg  # T1-1 装配门 4 项齐报

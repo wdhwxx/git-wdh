@@ -226,7 +226,7 @@ def create_live_engine(
         from myquant.database.trade_log import TradeLedger
         trade_ledger = TradeLedger(DatabaseConnection("database/quant.db"))
         logger.info("[build] TradeLedger 已装配（T1-1 本地账本）")
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.warning(f"[build] TradeLedger 装配失败（live 模式将拒启）: {exc}")
 
     # 6.5) LookaheadGuard（任务42：消费配置 lookahead_guard.enabled / strict_mode 段）

@@ -1081,7 +1081,7 @@ class QmtBroker(BaseBroker):
                     pos = self._map_qmt_position(raw)
                     if pos is not None:
                         positions.append(pos)
-            except Exception as e:  # T0-2：查询异常抛 BrokerQueryError（不再返回空列表）
+            except Exception as e:  # noqa: BLE001 - T0-2：查询异常抛 BrokerQueryError（不再返回空列表）
                 logger.critical(f"[qmt_broker] 持仓查询异常(T0-2 fail-closed): {e}")
                 self._stats["last_error"] = f"get_positions: {e}"
                 from myquant.live.brokers.base_broker import BrokerQueryError
@@ -1122,7 +1122,7 @@ class QmtBroker(BaseBroker):
                     "account_id": self._account_id,
                     "mode": self._mode,
                 }
-            except Exception as e:  # T0-2：查询异常抛 BrokerQueryError（不再返回零账户）
+            except Exception as e:  # noqa: BLE001 - T0-2：查询异常抛 BrokerQueryError（不再返回零账户）
                 logger.critical(f"[qmt_broker] 资产查询异常(T0-2 fail-closed): {e}")
                 self._stats["last_error"] = f"get_account: {e}"
                 from myquant.live.brokers.base_broker import BrokerQueryError

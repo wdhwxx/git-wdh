@@ -122,10 +122,10 @@ class TestMergeAndSaveCsv:
         assert by_key[("600000.SH", "20260630")]["eps"] == "0.95"  # 新值生效
         assert by_key[("601091.SH", "20260630")]["eps"] == "1.10"
         assert by_key[("600000.SH", "20251231")]["eps"] == "0.80"  # 旧值保留
-        # 列头 17 列顺序不变
+        # 列头 18 列顺序不变（A-04 #432 新增 ann_date 后，与 FINANCIAL_CSV_COLUMNS 契约一致）
         with open(out, encoding="utf-8-sig", newline="") as f:
             header = next(csv.reader(f))
-        assert len(header) == 17 and header[0] == "symbol" and header[-1] == "data_source"
+        assert len(header) == 18 and header[0] == "symbol" and header[-1] == "data_source"
 
     def test_无新记录返回None(self, tmp_path: Path) -> None:
         """new_records 为空 → 不落盘返回 None。"""

@@ -46,7 +46,7 @@ class TradeLedger:
         try:
             from myquant.core.audit_log import AuditLogStore
             self._audit = AuditLogStore()
-        except Exception:
+        except Exception:  # noqa: BLE001
             self._audit = None  # 审计存储不可用不阻断交易
 
     # ── 写入：订单 ──
@@ -100,7 +100,7 @@ class TradeLedger:
                     actor="trade_ledger",
                     detail={"order_id": order.order_id, "symbol": order.symbol},
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass  # 审计写失败不阻断交易
 
     # ── 写入：成交 ──
@@ -139,7 +139,7 @@ class TradeLedger:
                     actor="trade_ledger",
                     detail={"trade_id": trade.trade_id, "order_id": trade.order_id},
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
 
     # ── 写入：订单事件（T1-4，append-only）──
@@ -185,7 +185,7 @@ class TradeLedger:
                     actor="trade_ledger",
                     detail={"account_id": account_id, "consistent": consistent, "frozen": frozen},
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
 
     def record_reconciliation_diff(
@@ -223,7 +223,7 @@ class TradeLedger:
                     actor=actor,
                     detail={"account_id": account_id, "reason": reason},
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
 
     # ── 写入：持仓日快照 ──

@@ -1266,8 +1266,14 @@ class _FakeDataQueries:
         return list(self._rows)
 
 
-def _make_worker_result(monkeypatch: Any, fin_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """调用 worker_clean，返回 result（monkeypatch 注入伪连接/查询/管道）。"""
+def _make_worker_result(
+    monkeypatch: Any, fin_rows: List[Dict[str, Any]], *, needs_write: bool = True,
+) -> Dict[str, Any]:
+    """调用 worker_clean，返回 result（monkeypatch 注入伪连接/查询/管道）。
+
+    needs_write 默认 True：C-04 #451 恒真消除后，needs_write=False 时 worker 不再
+    回传 cleaned_data（省内存），B类派生列断言需在回传场景下检查。
+    """
     import myquant.data_access.full_clean_service as fcs
 
     rows: List[Dict[str, Any]] = [{
@@ -1284,6 +1290,7 @@ def _make_worker_result(monkeypatch: Any, fin_rows: List[Dict[str, Any]]) -> Dic
         return {"cleaned": cleaned_out, "bad": [], "stats": {}, "bad_file": None}
 
     monkeypatch.setattr(fcs, "run_clean_pipeline", _fake_pipeline)
+    monkeypatch.setattr(fcs, "_evaluate_needs_write", lambda *a, **k: needs_write)
     task = ("000001.SZ", "fake.db", {})
     return fcs.worker_clean(task)
 

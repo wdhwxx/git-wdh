@@ -49,7 +49,7 @@ def test_restore_reconciles_unclaimed_orders_cancelled():
     res = restore_live_state(_snapshot([{"order_id": "O1"}, {"order_id": "O2"}]), broker=broker)
     assert res["reconciled_orders"] == 2
     assert set(broker._cancelled) == {"O1", "O2"}
-    assert any("未在券商账本领回" in n for n in res["notes"])
+    assert any("挂单已 cancel" in n for n in res["notes"])
 
 
 def _order(oid):
