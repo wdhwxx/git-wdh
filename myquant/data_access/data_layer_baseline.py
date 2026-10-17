@@ -596,7 +596,7 @@ def _self_test() -> None:
             "CREATE TABLE financial_data (symbol TEXT, report_date TEXT, ann_date TEXT)"
         )
         conn.execute("CREATE TABLE alembic_version (version_num TEXT)")
-        conn.execute("INSERT INTO alembic_version VALUES ('0009')")
+        conn.execute("INSERT INTO alembic_version VALUES ('0010')")  # A-12 #441：对齐当前 head（B-01 已升 0010）
         conn.executemany(
             "INSERT INTO market_data VALUES (?,?,?,?,?,?,?)",
             [
@@ -627,7 +627,7 @@ def _self_test() -> None:
         assert fp["duplicate_keys"]["duplicate_key_total"] == 1, fp["duplicate_keys"]
         assert fp["financial_data"]["ann_date_notnull"] == 1, fp["financial_data"]
         assert fp["processed"]["file_count"] == 1, fp["processed"]
-        assert fp["schema_version"]["alembic_version"] == ["0009"], fp["schema_version"]
+        assert fp["schema_version"]["alembic_version"] == ["0010"], fp["schema_version"]  # A-12 #441：对齐当前 head
         path = save_baseline_json(baseline, str(Path(tmp) / "out"))
         with open(path, encoding="utf-8") as f:
             reloaded = json.load(f)

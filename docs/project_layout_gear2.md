@@ -1041,7 +1041,7 @@ Pythonwdhmm/
 
     │   ├── connection.py             # SQLite连接管理上下文管理器；✨【回写#157】close_all 关闭异常记 warning（KP-P1-07：不裸 pass 吞噬）+ 注入 logger；✨【回写#201】BASE-6 DEFAULT_PRAGMAS 补 busy_timeout=30000（写等待而非锁表，配合 WAL 高写入无锁表告警）；✨【回写#204】BASE-9 库文件权限收紧 _harden_db_permissions（connect 前调用：POSIX chmod 600 主库+wal+shm 伴生文件；Windows 记 debug 提示 OS 级加密卷 BitLocker + NTFS 权限兜底，权限收紧失败记 warning 不阻断连接）；✨【回写#434】transaction() SAVEPOINT 嵌套事务支持（A-05）：非嵌套分支显式 BEGIN（保证内层可检测活跃事务）+ 嵌套分支 SAVEPOINT/RELEASE/ROLLBACK TO（内层不再提前提交外层事务），修复 K3 丢失窗口（full_clean_service.write_back_symbol + queries 三层嵌套场景，delete 已生效而 insert 失败不再发生）
 
-    │   ├── schema.py                 # 表结构总览DDL；✨【回写#87】drop_all_tables 顺序 share_change 重复行清理（L502-503 双行→单行，幂等不变）；✨【回写#142】TABLE_NAMES 10→13 张（KP-P4-02：orders/fills/positions_daily 三关系账 + DDL/索引/ALL_CREATE/drop_all 同步）；✨【回写#204】BASE-9 metrics_history 表加 value_encrypted TEXT 列（敏感字段密文落盘，CREATE IF NOT EXISTS 与新库建表路径逐字一致）；✨【回写#435】orders DDL 补 filled_qty/filled_price/last_update_at 三列（A-08，与 0009 迁移双路一致，消除 create_all_tables 建库缺列导致的 record_order no such column）
+    │   ├── schema.py                 # 表结构总览DDL；✨【回写#87】drop_all_tables 顺序 share_change 重复行清理（L502-503 双行→单行，幂等不变）；✨【回写#142】TABLE_NAMES 10→13 张（KP-P4-02：orders/fills/positions_daily 三关系账 + DDL/索引/ALL_CREATE/drop_all 同步）；✨【回写#204】BASE-9 metrics_history 表加 value_encrypted TEXT 列（敏感字段密文落盘，CREATE IF NOT EXISTS 与新库建表路径逐字一致）；✨【回写#435】orders DDL 补 filled_qty/filled_price/last_update_at 三列（A-08，与 0009 迁移双路一致，消除 create_all_tables 建库缺列导致的 record_order no such column）；✨【回写#441】A-12 补 4 张对账表 DDL+4 索引（order_events/reconciliation_runs/reconciliation_diffs/reconciliation_freeze，与 0009 迁移逐字一致，消除 create_all_tables 与迁移双路不一致；TABLE_NAMES 22 张全建；存量红 test_database TestSchema 消除；database 包 R-26 对价抬升见文末 #441）✅已完成
 
     │   │                             # ✅已实现：clean_run_meta(清洗运行元信息) + dirty_data_stats(脏数据统计14种类型) 两表 + CleanRunMetaSchema/DirtyDataStatsSchema + 9索引
 
@@ -6318,3 +6318,10 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    c. 变更：①scripts/一致性校验.py docstring 首行后加"非数据层"提示（回测一致性，防与数据层校验混淆）；②myquant/data_access/data_layer_baseline.py 新增 compare_baseline(current, baseline)（7 组指纹逐键比对，数字相对容差 1e-9，返回差异列表，空=一致）；③新建 scripts/数据一致性校验.py 薄入口（--db/--processed/--baseline/--out-dir/--date/--rebuild；现算→比对；--rebuild 重建基线后比对=一键复现）。
    d. 验证：py_compile 3 文件通过；pytest 相关回归+门禁 test_architecture 全绿（data_access 现 17415+约70 行 < R-26 基线 18107）；实际运行 scripts/数据一致性校验.py 对 2026-10-17 基线比对通过（差异=预期施工变化项）；scripts/一致性校验.py --help 显示非数据层提示。
    e. 纪律遵守：业务归 myquant（compare_baseline 入 data_layer_baseline.py）、scripts 只薄入口；先登记蓝图再落代码；独立 commit。
+
+## #441 · 2026-10-17 · 数据层施工 A-12：版本戳对齐 + schema 对账表 DDL 补齐
+   a. 依据：《数据层结构优化可行性施工方案报告_v1.1》§5.2 A-12（交付物=代码+对账测试；验收=schema↔Alembic 全量 DDL 对账通过、存量红 test_database TestSchema 消除）。
+   b. 事实基线（代码级取证）：alembic 当前 head=**0010**（B-01 已升，报告原文 ALEMBIC_HEAD=0009 为施工前旧口径）；schema.py TABLE_NAMES 已含 22 张（含 4 对账表 43-46 行）但**无 4 表 DDL**（create_all_tables 只建 18 张）→ test_database TestSchema 遍历 TABLE_NAMES 断言 4 表存在必红（存量红）；4 表 DDL 已在迁移 0009_reconciliation_ledger.py（_CREATE_ORDER_EVENTS 等 4 段 + 4 索引）；data_layer_baseline.py _self_test 硬编码 alembic_version 0009（599/630，B-01 后失真）；trade_log.py 业务已 INSERT 这 4 表（152/168/197/211）。
+   c. 变更：①schema.py 补 4 张对账表 DDL + 4 索引（与迁移 0009 逐字一致，A-08 双路一致先例），插入 positions_daily 段后；②tests/unit/test_database.py test_table_names_complete expected 18→22 张（对齐 TABLE_NAMES 实际）；③data_layer_baseline.py _self_test 0009→0010（599/630 两处）；④test_architecture.py R-26 database 包基线 4051→约 4115（PR2 对价抬升：功能必需=create_all_tables 与迁移双路一致消除存量红 + 工单 A-12 + 实测 TestSchema 红消除 + 独立 commit + 蓝图 #441）。
+   d. 验证：py_compile 3 文件通过；pytest tests/unit/test_database.py（TestSchema 全绿，存量红消除）+ test_migration_0010 + 门禁 test_architecture 全绿；数据层基线脚本 _self_test 断言 0010 通过。
+   e. 纪律遵守：先登记蓝图（schema.py 条目+本回写+PR2 对价）再落代码；独立 commit。

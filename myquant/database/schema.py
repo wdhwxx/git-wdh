@@ -392,6 +392,69 @@ CREATE_POSITIONS_DAILY_INDEX_SQL = [
 
 
 # ─────────────────────────────────────────────
+# 对账账本 4 表（T1-4：与 0009_reconciliation_ledger.py 迁移 DDL 逐字一致；
+# A-12 #441 补齐，消除 create_all_tables 与迁移双路不一致——此前 TABLE_NAMES 含
+# 4 表但 schema.py 无 DDL，test_database TestSchema 遍历 TABLE_NAMES 断言必红）
+# ─────────────────────────────────────────────
+
+CREATE_ORDER_EVENTS_SQL = """
+CREATE TABLE IF NOT EXISTS order_events (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id     TEXT    NOT NULL,
+    seq          INTEGER NOT NULL,
+    event_type   TEXT    NOT NULL,
+    payload      TEXT,
+    created_at   TEXT    DEFAULT (datetime('now')),
+    UNIQUE(order_id, seq)
+);
+"""
+
+CREATE_RECONCILIATION_RUNS_SQL = """
+CREATE TABLE IF NOT EXISTS reconciliation_runs (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id   TEXT    NOT NULL,
+    run_type     TEXT    NOT NULL,
+    started_at   REAL    NOT NULL,
+    finished_at  REAL,
+    consistent   INTEGER,
+    frozen       INTEGER DEFAULT 0,
+    note         TEXT,
+    created_at   TEXT    DEFAULT (datetime('now'))
+);
+"""
+
+CREATE_RECONCILIATION_DIFFS_SQL = """
+CREATE TABLE IF NOT EXISTS reconciliation_diffs (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id           INTEGER NOT NULL,
+    account_id       TEXT    NOT NULL,
+    cash_diff        REAL,
+    position_diff    TEXT,
+    exceeds_threshold INTEGER DEFAULT 0,
+    created_at       TEXT    DEFAULT (datetime('now'))
+);
+"""
+
+CREATE_RECONCILIATION_FREEZE_SQL = """
+CREATE TABLE IF NOT EXISTS reconciliation_freeze (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id   TEXT    NOT NULL,
+    action       TEXT    NOT NULL,
+    actor        TEXT    NOT NULL,
+    reason       TEXT,
+    created_at   TEXT    DEFAULT (datetime('now'))
+);
+"""
+
+CREATE_RECONCILIATION_INDEX_SQL = [
+    "CREATE INDEX IF NOT EXISTS idx_order_events_order_id ON order_events(order_id);",
+    "CREATE INDEX IF NOT EXISTS idx_recon_runs_account ON reconciliation_runs(account_id);",
+    "CREATE INDEX IF NOT EXISTS idx_recon_diffs_run ON reconciliation_diffs(run_id);",
+    "CREATE INDEX IF NOT EXISTS idx_recon_freeze_account ON reconciliation_freeze(account_id);",
+]
+
+
+# ─────────────────────────────────────────────
 # 告警持久化表（BASE-1：与 0005_add_alerts.py 迁移 DDL 逐字一致）
 # ─────────────────────────────────────────────
 
@@ -535,6 +598,11 @@ ALL_CREATE_TABLE_SQL = [
     CREATE_AUDIT_LOG_SQL,
     CREATE_AUDIT_ARCHIVE_SQL,
     CREATE_AUDIT_ARCHIVE_MANIFEST_SQL,
+    # A-12 #441：对账账本 4 表（与 0009 迁移逐字一致）
+    CREATE_ORDER_EVENTS_SQL,
+    CREATE_RECONCILIATION_RUNS_SQL,
+    CREATE_RECONCILIATION_DIFFS_SQL,
+    CREATE_RECONCILIATION_FREEZE_SQL,
 ]
 
 ALL_CREATE_INDEX_SQL = (
@@ -553,6 +621,7 @@ ALL_CREATE_INDEX_SQL = (
     + CREATE_ALERTS_INDEX_SQL
     + CREATE_METRICS_HISTORY_INDEX_SQL
     + CREATE_AUDIT_LOG_INDEX_SQL
+    + CREATE_RECONCILIATION_INDEX_SQL  # A-12 #441：对账账本 4 索引（与 0009 迁移一致）
 )
 
 
@@ -749,6 +818,10 @@ def drop_all_tables(connection) -> None:
         TABLE_NAMES["positions_daily"],
         TABLE_NAMES["fills"],
         TABLE_NAMES["orders"],
+        TABLE_NAMES["order_events"],          # A-12 #441：对账账本 4 表（无外键）
+        TABLE_NAMES["reconciliation_runs"],
+        TABLE_NAMES["reconciliation_diffs"],
+        TABLE_NAMES["reconciliation_freeze"],
         TABLE_NAMES["market_data"],
         TABLE_NAMES["alerts"],
         TABLE_NAMES["metrics_history"],

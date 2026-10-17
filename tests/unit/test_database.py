@@ -253,11 +253,13 @@ class TestSchema:
     """Schema 表结构测试"""
 
     def test_table_names_complete(self):
-        """TABLE_NAMES 包含全部18张表（B-3 #83 新增 share_change；BASE-1 新增 alerts；BASE-2 新增 metrics_history；BASE-7 新增 audit_log/audit_archive/audit_archive_manifest）"""
+        """TABLE_NAMES 包含全部22张表（B-3 #83 新增 share_change；BASE-1 新增 alerts；BASE-2 新增 metrics_history；BASE-7 新增 audit_log/audit_archive/audit_archive_manifest；T1-4 新增 order_events/reconciliation_runs/reconciliation_diffs/reconciliation_freeze——A-12 #441 后 create_all_tables 与 0009 迁移双路一致）"""
         expected = {"market_data", "financial_data", "factor_data",
                     "strategy_state", "data_source", "sync_status",
                     "clean_run_meta", "dirty_data_stats", "adjust_factor",
                     "share_change", "orders", "fills", "positions_daily",
+                    "order_events", "reconciliation_runs",
+                    "reconciliation_diffs", "reconciliation_freeze",
                     "alerts", "metrics_history",
                     "audit_log", "audit_archive", "audit_archive_manifest"}
         assert set(TABLE_NAMES.keys()) == expected
