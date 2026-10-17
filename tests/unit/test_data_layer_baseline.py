@@ -274,3 +274,170 @@ def test_empty_db_fingerprints_present_false(tmp_path: Path) -> None:
     assert fp["duplicate_keys"]["present"] is False
     assert fp["financial_data"]["present"] is False
     assert fp["schema_version"]["present"] is False
+
+
+# ── C-4 补测（#459，2026-10-17）：compare_baseline 全分支 + 防御分支 ──────
+# 覆盖 compare_baseline 一致性比对（含数值容差/类型/缺失键/列表长度/嵌套）、
+# _safe_scalar 查询异常、缺聚合列、processed 目录缺失/坏文件、无 ann_date 列、
+# 辅助表缺表、落盘缺省日期等此前未覆盖分支，抬升 data_layer_baseline 覆盖率。
+
+from myquant.data_access.data_layer_baseline import (
+    _safe_scalar,
+    _open_readonly,
+    collect_duplicate_details,
+    collect_financial_fingerprint,
+    compare_baseline,
+    save_duplicate_listing,
+)
+
+
+def test_compare_baseline_identical(baseline_db: str, processed_dir: Path) -> None:
+    """compare_baseline：完全一致时返回空差异。"""
+    b1 = build_baseline(baseline_db, str(processed_dir), "2026-10-17")
+    b2 = build_baseline(baseline_db, str(processed_dir), "2026-10-17")
+    assert compare_baseline(b1, b2) == []
+
+
+def test_compare_baseline_numeric_tolerance() -> None:
+    """compare_baseline：数值相对容差内不报差异，超差报差异。"""
+    cur = {"fingerprints": {"a": {"v": 100.0, "rows": 1}}}
+    base = {"fingerprints": {"a": {"v": 100.00000005, "rows": 1}}}
+    assert compare_baseline(cur, base) == []  # 5e-8 < 1e-9*100 相对容差内
+    base2 = {"fingerprints": {"a": {"v": 99.0, "rows": 1}}}
+    diffs = compare_baseline(cur, base2)
+    assert any("超相对容差" in d for d in diffs)
+
+
+def test_compare_baseline_type_and_key_mismatch() -> None:
+    """compare_baseline：类型变化/缺失键/现算缺失均报差异。"""
+    diffs = compare_baseline(
+        {"fingerprints": {"a": {"v": 1}}},
+        {"fingerprints": {"a": {"v": "x"}}},
+    )
+    assert any("!=" in d for d in diffs)  # int vs str 类型不等
+    diffs2 = compare_baseline(
+        {"fingerprints": {"a": {"v": 1}, "b": {"w": 2}}},
+        {"fingerprints": {"a": {"v": 1}}},
+    )
+    assert any("基线缺失" in d for d in diffs2)
+    diffs3 = compare_baseline(
+        {"fingerprints": {"a": {"v": 1}}},
+        {"fingerprints": {"a": {"v": 1}, "b": {"w": 2}}},
+    )
+    assert any("现算缺失" in d for d in diffs3)
+
+
+def test_compare_baseline_list_length_and_nested() -> None:
+    """compare_baseline：列表长度不等/嵌套列表元素差异报差异。"""
+    cur = {"fingerprints": {"a": {"dist": [[1, 2], [3, 4]]}}}
+    base = {"fingerprints": {"a": {"dist": [[1, 2], [3, 5]]}}}
+    diffs = compare_baseline(cur, base)
+    assert any("dist[1][1]" in d for d in diffs)
+    diffs2 = compare_baseline(
+        {"fingerprints": {"a": {"dist": [1, 2]}}},
+        {"fingerprints": {"a": {"dist": [1, 2, 3]}}},
+    )
+    assert any("长度" in d for d in diffs2)
+
+
+def test_compare_baseline_bool_and_missing_fp() -> None:
+    """compare_baseline：布尔严格比较；指纹段缺失返回固定差异。"""
+    diffs = compare_baseline(
+        {"fingerprints": {"a": {"flag": True}}},
+        {"fingerprints": {"a": {"flag": 2}}},
+    )
+    assert any("flag" in d for d in diffs)  # bool vs int(2) 视为不等
+    assert compare_baseline({"x": 1}, {"fingerprints": {}}) == [
+        "fingerprints 缺失（current 或 baseline 无指纹段）"
+    ]
+
+
+def test_safe_scalar_query_error(baseline_db: str) -> None:
+    """_safe_scalar：SQLite 查询异常时返回 None 不抛。"""
+    conn = _open_readonly(baseline_db)
+    try:
+        assert _safe_scalar(conn, "SELECT COUNT(*) FROM no_such_table_xyz") is None
+    finally:
+        conn.close()
+
+
+def test_duplicate_fingerprint_missing_key_columns(tmp_path: Path) -> None:
+    """防御：market_data 缺重复键聚合列时返回 error 标记。"""
+    db = str(tmp_path / "missing_cols.db")
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE market_data (symbol TEXT, trade_date TEXT)"  # 缺 period/adjust
+    )
+    conn.commit()
+    conn.close()
+    conn = _open_readonly(db)
+    try:
+        fp = collect_duplicate_keys_fingerprint(conn)
+        assert fp["present"] is True and "error" in fp
+        det = collect_duplicate_details(conn)
+        assert det["present"] is False and "error" in det
+    finally:
+        conn.close()
+
+
+def test_financial_fingerprint_without_ann_date(tmp_path: Path) -> None:
+    """防御：financial_data 无 ann_date 列时 ann_date_column=False。"""
+    db = str(tmp_path / "no_ann.db")
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE financial_data (symbol TEXT, report_date TEXT)")
+    conn.commit()
+    conn.close()
+    conn = _open_readonly(db)
+    try:
+        fp = collect_financial_fingerprint(conn)
+        assert fp["present"] is True
+        assert fp["ann_date_column"] is False
+    finally:
+        conn.close()
+
+
+def test_processed_fingerprint_missing_and_corrupt(tmp_path: Path) -> None:
+    """防御：processed 目录缺失返回 present=False；坏 parquet 记 <unreadable>。"""
+    assert collect_processed_fingerprint(str(tmp_path / "nope"))["present"] is False
+    proc = tmp_path / "proc"
+    proc.mkdir()
+    (proc / "bad.parquet").write_bytes(b"not a real parquet file at all")
+    (proc / "note.txt").write_text("skip me")
+    fp = collect_processed_fingerprint(str(proc))
+    assert fp["present"] is True
+    assert fp["file_count"] == 1  # txt 被过滤
+    assert fp["column_count_distribution"] == [["1", 1]]  # ["<unreadable>"] 长度 1
+
+
+def test_aux_tables_not_present(tmp_path: Path) -> None:
+    """防御：辅助表缺失记 not_present。"""
+    db = str(tmp_path / "no_aux.db")
+    sqlite3.connect(db).close()
+    conn = _open_readonly(db)
+    try:
+        aux = collect_aux_tables_fingerprint(conn)
+        assert all(v == "not_present" for v in aux.values())
+    finally:
+        conn.close()
+
+
+def test_save_listing_default_date(
+    baseline_db: str, tmp_path: Path, monkeypatch
+) -> None:
+    """save_duplicate_listing：缺省日期用今天；原子落盘可回读。"""
+    import datetime
+
+    monkeypatch.setattr(
+        "myquant.data_access.data_layer_baseline.date",
+        datetime.date(2026, 10, 17),
+    )
+    conn = _open_readonly(baseline_db)
+    try:
+        listing = collect_duplicate_details(conn)
+    finally:
+        conn.close()
+    out = str(tmp_path / "out")
+    path = save_duplicate_listing(listing, out)
+    assert path.endswith("重复键定位清单_20261017.json")
+    with open(path, encoding="utf-8") as f:
+        assert json.load(f)["duplicate_key_total"] == 1
