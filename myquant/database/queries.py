@@ -240,6 +240,168 @@ class DataQueries:
             return self.conn.execute_update(sql, tuple(params))
 
     # ═══════════════════════════════════════════
+    # 修正台账 + 门禁拒收记录（B-03 #443）
+    # ═══════════════════════════════════════════
+
+    def record_correction(
+        self,
+        symbol: str,
+        trade_date: str,
+        field: str,
+        old_value,
+        new_value,
+        corrected_by: str,
+        reason: str = "",
+    ) -> int:
+        """
+        写入修正台账（UPSERT/清洗修正时旧值留痕，C-02 可审计回滚基础）。
+
+        Parameters
+        ----------
+        symbol : str
+            标的代码
+        trade_date : str
+            交易日 YYYY-MM-DD
+        field : str
+            被修正字段名
+        old_value : object
+            旧值（文本化存储）
+        new_value : object
+            新值
+        corrected_by : str
+            修正者（模块/脚本/人）
+        reason : str
+            修正原因
+
+        Returns
+        -------
+        int : 写入记录数
+        """
+        sql = (
+            "INSERT INTO correction_ledger "
+            "(symbol, trade_date, field, old_value, new_value, corrected_by, reason) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)"
+        )
+        params = (
+            symbol, trade_date, field,
+            str(old_value) if old_value is not None else None,
+            str(new_value) if new_value is not None else None,
+            corrected_by, reason,
+        )
+        with self.conn.transaction():
+            return self.conn.execute_update(sql, params)
+
+    def query_corrections(
+        self,
+        symbol: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> List[Dict]:
+        """
+        查询修正台账（按标的/日期范围过滤，时间倒序）。
+
+        Parameters
+        ----------
+        symbol : str | None
+            标的代码过滤
+        start_date : str | None
+            起始交易日
+        end_date : str | None
+            结束交易日
+        """
+        conditions = ["1=1"]
+        params: List = []
+        if symbol:
+            conditions.append("symbol = ?")
+            params.append(symbol)
+        if start_date:
+            conditions.append("trade_date >= ?")
+            params.append(start_date)
+        if end_date:
+            conditions.append("trade_date <= ?")
+            params.append(end_date)
+        sql = (
+            f"SELECT * FROM correction_ledger WHERE {' AND '.join(conditions)} "
+            "ORDER BY id DESC"
+        )
+        return self.conn.execute(sql, tuple(params))
+
+    def record_admission_reject(
+        self,
+        symbol: str,
+        rule: str,
+        detail: str,
+        source: Optional[str] = None,
+        trade_date: Optional[str] = None,
+        level: str = "BLOCK",
+    ) -> int:
+        """
+        写入门禁①拒收记录（BLOCK 拒收可举证）。
+
+        Parameters
+        ----------
+        symbol : str
+            标的代码
+        rule : str
+            触发规则名（如 high_low_conflict）
+        detail : str
+            拒收详情（字段/值）
+        source : str | None
+            数据源标识
+        trade_date : str | None
+            交易日
+        level : str
+            拒收级别（默认 BLOCK）
+
+        Returns
+        -------
+        int : 写入记录数
+        """
+        sql = (
+            "INSERT INTO admission_reject "
+            "(symbol, trade_date, source, rule, level, detail) "
+            "VALUES (?, ?, ?, ?, ?, ?)"
+        )
+        params = (symbol, trade_date, source, rule, level, detail)
+        with self.conn.transaction():
+            return self.conn.execute_update(sql, params)
+
+    def query_admission_rejects(
+        self,
+        symbol: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> List[Dict]:
+        """
+        查询门禁拒收记录（按标的/日期过滤，时间倒序）。
+
+        Parameters
+        ----------
+        symbol : str | None
+            标的代码过滤
+        start_date : str | None
+            起始拒收时间
+        end_date : str | None
+            结束拒收时间
+        """
+        conditions = ["1=1"]
+        params: List = []
+        if symbol:
+            conditions.append("symbol = ?")
+            params.append(symbol)
+        if start_date:
+            conditions.append("rejected_at >= ?")
+            params.append(start_date)
+        if end_date:
+            conditions.append("rejected_at <= ?")
+            params.append(end_date)
+        sql = (
+            f"SELECT * FROM admission_reject WHERE {' AND '.join(conditions)} "
+            "ORDER BY id DESC"
+        )
+        return self.conn.execute(sql, tuple(params))
+
+    # ═══════════════════════════════════════════
     # 财务数据操作
     # ═══════════════════════════════════════════
 

@@ -1041,11 +1041,11 @@ Pythonwdhmm/
 
     │   ├── connection.py             # SQLite连接管理上下文管理器；✨【回写#157】close_all 关闭异常记 warning（KP-P1-07：不裸 pass 吞噬）+ 注入 logger；✨【回写#201】BASE-6 DEFAULT_PRAGMAS 补 busy_timeout=30000（写等待而非锁表，配合 WAL 高写入无锁表告警）；✨【回写#204】BASE-9 库文件权限收紧 _harden_db_permissions（connect 前调用：POSIX chmod 600 主库+wal+shm 伴生文件；Windows 记 debug 提示 OS 级加密卷 BitLocker + NTFS 权限兜底，权限收紧失败记 warning 不阻断连接）；✨【回写#434】transaction() SAVEPOINT 嵌套事务支持（A-05）：非嵌套分支显式 BEGIN（保证内层可检测活跃事务）+ 嵌套分支 SAVEPOINT/RELEASE/ROLLBACK TO（内层不再提前提交外层事务），修复 K3 丢失窗口（full_clean_service.write_back_symbol + queries 三层嵌套场景，delete 已生效而 insert 失败不再发生）
 
-    │   ├── schema.py                 # 表结构总览DDL；✨【回写#87】drop_all_tables 顺序 share_change 重复行清理（L502-503 双行→单行，幂等不变）；✨【回写#142】TABLE_NAMES 10→13 张（KP-P4-02：orders/fills/positions_daily 三关系账 + DDL/索引/ALL_CREATE/drop_all 同步）；✨【回写#204】BASE-9 metrics_history 表加 value_encrypted TEXT 列（敏感字段密文落盘，CREATE IF NOT EXISTS 与新库建表路径逐字一致）；✨【回写#435】orders DDL 补 filled_qty/filled_price/last_update_at 三列（A-08，与 0009 迁移双路一致，消除 create_all_tables 建库缺列导致的 record_order no such column）；✨【回写#441】A-12 补 4 张对账表 DDL+4 索引（order_events/reconciliation_runs/reconciliation_diffs/reconciliation_freeze，与 0009 迁移逐字一致，消除 create_all_tables 与迁移双路不一致；TABLE_NAMES 22 张全建；存量红 test_database TestSchema 消除；database 包 R-26 对价抬升见文末 #441）✅已完成；✨【回写#442】B-02 market_data 加 3 列（ingest_time/ingest_batch/anomaly_flags，与 0011 迁移逐字一致，双路一致）✅已完成
+    │   ├── schema.py                 # 表结构总览DDL；✨【回写#87】drop_all_tables 顺序 share_change 重复行清理（L502-503 双行→单行，幂等不变）；✨【回写#142】TABLE_NAMES 10→13 张（KP-P4-02：orders/fills/positions_daily 三关系账 + DDL/索引/ALL_CREATE/drop_all 同步）；✨【回写#204】BASE-9 metrics_history 表加 value_encrypted TEXT 列（敏感字段密文落盘，CREATE IF NOT EXISTS 与新库建表路径逐字一致）；✨【回写#435】orders DDL 补 filled_qty/filled_price/last_update_at 三列（A-08，与 0009 迁移双路一致，消除 create_all_tables 建库缺列导致的 record_order no such column）；✨【回写#441】A-12 补 4 张对账表 DDL+4 索引（order_events/reconciliation_runs/reconciliation_diffs/reconciliation_freeze，与 0009 迁移逐字一致，消除 create_all_tables 与迁移双路不一致；TABLE_NAMES 22 张全建；存量红 test_database TestSchema 消除；database 包 R-26 对价抬升见文末 #441）✅已完成；✨【回写#442】B-02 market_data 加 3 列（ingest_time/ingest_batch/anomaly_flags，与 0011 迁移逐字一致，双路一致）✅已完成；✨【回写#443】B-03 TABLE_NAMES 22→24 张 + correction_ledger/admission_reject 两表 DDL（与 0012 迁移逐字一致，双路一致；ALL_CREATE/drop_all 同步）✅已完成
 
     │   │                             # ✅已实现：clean_run_meta(清洗运行元信息) + dirty_data_stats(脏数据统计14种类型) 两表 + CleanRunMetaSchema/DirtyDataStatsSchema + 9索引
 
-    │   ├── queries.py               # 类型安全SQL封装CRUD；✨【回写#442】bulk_insert_market_data columns 加 ingest_time/ingest_batch/anomaly_flags 三列（B-02，与 0011 迁移/schema.py 双路一致）✅已完成
+    │   ├── queries.py               # 类型安全SQL封装CRUD；✨【回写#442】bulk_insert_market_data columns 加 ingest_time/ingest_batch/anomaly_flags 三列（B-02，与 0011 迁移/schema.py 双路一致）✅已完成；✨【回写#443】新增 record_correction/query_corrections/record_admission_reject/query_admission_rejects 四方法（B-03 修正台账读写）✅已完成
 
     │   ├── trade_log.py             # ✨【回写#142】订单/成交/持仓关系账（KP-P4-02）：TradeLedger 逐笔落库+查询；✨【回写#435】record_order INSERT 补 filled_qty/filled_price/last_update_at 三列（A-08，此前仅 ON CONFLICT UPDATE 引用 excluded.* 导致状态流转 filled_qty 被重置；配套 schema.py orders DDL 同步三列消除 create_all_tables 与 0009 迁移双路不一致；存量红 test_trade_ledger 10 passed 消除）
 
@@ -1067,6 +1067,7 @@ Pythonwdhmm/
     │           ├── 0004_add_trade_ledger.py  # ✨【回写#142】增量迁移：KP-P4-02 orders/fills/positions_daily 三关系账 + 9 索引（幂等 CREATE IF NOT EXISTS）
     │           ├── 0010_partial_unique_daily.py  # ✨【回写#429】增量迁移（数据层施工 B-01，前置 A-13）：market_data 部分唯一索引 uq_market_data_daily_key (symbol,period,adjust,trade_date) WHERE trade_time IS NULL——只约束日线行防重复，分钟线不受影响；CREATE UNIQUE INDEX IF NOT EXISTS 幂等；downgrade 删索引
     │           ├── 0011_add_ingest_metadata.py   # ✨【回写#442】增量迁移（数据层施工 B-02）：market_data ALTER TABLE ADD COLUMN ingest_time/ingest_batch/anomaly_flags 三列（采集元数据，IF NOT EXISTS 幂等，SQLite 逐列 ADD）；downgrade 逐列 DROP✅已完成
+    │           ├── 0012_add_correction_ledger.py # ✨【回写#443】增量迁移（数据层施工 B-03）：correction_ledger（修正台账，symbol/trade_date/field/old_value/new_value/corrected_at/corrected_by/reason）+ admission_reject（门禁拒收记录，source/rule/level/detail）两表 CREATE IF NOT EXISTS 幂等；downgrade DROP 两表✅已完成
 
     │
 
@@ -6333,3 +6334,10 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    c. 变更：①新增迁移 0011_add_ingest_metadata.py：market_data ALTER TABLE ADD COLUMN 三列（ingest_time TEXT 采集入库时间 ISO8601 / ingest_batch TEXT 批次号 / anomaly_flags TEXT 异常标记，门禁① FLAG 落列预留），SQLite 逐列 ADD IF NOT EXISTS 幂等；downgrade 逐列 DROP；②schema.py market_data DDL 同步三列（双路一致，A-08/A-12 先例）；③queries.py bulk_insert_market_data columns 加三列（item.get 缺省 None，向后兼容旧调用方）；④manager.py _save_to_database 构造 ingest_time=datetime.now().isoformat()、ingest_batch=自增批次（YYYYMMDD-序号）、anomaly_flags=None（B-04 门禁接线后写入 FLAG）；⑤测试：schema 三列存在 + bulk_insert 后三列非空率 100%。
    d. 验证：py_compile 4 文件通过；pytest tests/unit/test_ingest_metadata.py（新增）+ test_database.py（回归）+ test_architecture 门禁全绿（database 包约 +30 行，若超基线按 PR2 对价 #442 抬升）。
    e. 纪律遵守：先登记蓝图（schema/queries/versions 目录树 + 本回写）再落代码；独立 commit；迁移对齐 Alembic 链。
+
+## #443 · 2026-10-17 · 数据层施工 B-03：修正台账 correction_ledger + admission_reject
+   a. 依据：《数据层结构优化可行性施工方案报告_v1.1》§5.2 B-03（P1，交付=迁移 + queries 方法；验收=表存在、读写单测通过；可逆性=表可 DROP）。目标结构 §4.3(b) 修正台账（落地 v2.0 §7.2）+ 门禁① BLOCK 拒收留痕。
+   b. 事实基线（代码级取证）：迁移链 head=0011（B-02 后）；schema.py TABLE_NAMES 22 张（29-52）无两表 DDL；queries.py DataQueries 无修正台账方法；test_database TestSchema expected 22 张（A-12 #441 后）。
+   c. 变更：①新增迁移 0012_add_correction_ledger.py：correction_ledger（symbol/trade_date/field/old_value/new_value/corrected_at/corrected_by/reason + id/created_at，修正留痕）+ admission_reject（symbol/trade_date/source/rule/level/detail/rejected_at，门禁① BLOCK 拒收记录）CREATE TABLE IF NOT EXISTS 幂等；downgrade DROP 两表；②schema.py TABLE_NAMES 22→24 + 两表 DDL 同步（双路一致，A-12 先例）+ ALL_CREATE_TABLE_SQL/drop_all_tables 纳入；③queries.py 新增 record_correction/query_corrections/record_admission_reject/query_admission_rejects 四方法；④测试：test_database TestSchema expected 22→24 + test_create_all_tables 24 表存在 + 新测试（读写闭环、按 symbol 查询过滤）。
+   d. 验证：py_compile 通过；pytest tests/unit/test_database.py + tests/unit/test_correction_ledger.py（新增读写闭环）+ test_architecture 门禁全绿（database 包若超基线按 PR2 对价 #443 抬升）。
+   e. 纪律遵守：先登记蓝图（schema/queries/versions 目录树 + 本回写）再落代码；独立 commit；迁移对齐 Alembic 链（head=0012）。

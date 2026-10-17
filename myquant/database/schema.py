@@ -49,6 +49,8 @@ TABLE_NAMES = {
     "audit_log": "audit_log",               # 审计日志只追加表（BASE-7 哈希链）
     "audit_archive": "audit_archive",       # 审计归档表（BASE-7 定期归档）
     "audit_archive_manifest": "audit_archive_manifest",  # 审计归档校验清单（BASE-7）
+    "correction_ledger": "correction_ledger",  # 修正台账（B-03 #443，与 0012 迁移双路一致）
+    "admission_reject": "admission_reject",    # 门禁①拒收记录（B-03 #443）
 }
 
 
@@ -579,6 +581,38 @@ CREATE TABLE IF NOT EXISTS audit_archive_manifest (
 
 
 # ─────────────────────────────────────────────
+# 修正台账 + 门禁拒收记录（B-03 #443：与 0012 迁移 DDL 逐字一致）
+# ─────────────────────────────────────────────
+
+CREATE_CORRECTION_LEDGER_SQL = """
+CREATE TABLE IF NOT EXISTS correction_ledger (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol       TEXT    NOT NULL,            -- 标的代码
+    trade_date   TEXT    NOT NULL,            -- 交易日 YYYY-MM-DD
+    field        TEXT    NOT NULL,            -- 被修正字段名
+    old_value    TEXT,                         -- 旧值（文本化，兼容数值/NULL）
+    new_value    TEXT,                         -- 新值
+    corrected_at TEXT    DEFAULT (datetime('now')),  -- 修正时间
+    corrected_by TEXT    NOT NULL,            -- 修正者（模块/脚本/人）
+    reason       TEXT                          -- 修正原因
+);
+"""
+
+CREATE_ADMISSION_REJECT_SQL = """
+CREATE TABLE IF NOT EXISTS admission_reject (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol       TEXT    NOT NULL,            -- 标的代码
+    trade_date   TEXT,                         -- 交易日（可为空=非行情类拒收）
+    source       TEXT,                         -- 数据源标识
+    rule         TEXT    NOT NULL,            -- 触发规则名（如 high_low_conflict）
+    level        TEXT    NOT NULL DEFAULT 'BLOCK',  -- 拒收级别（BLOCK）
+    detail       TEXT,                         -- 拒收详情（字段/值）
+    rejected_at  TEXT    DEFAULT (datetime('now'))   -- 拒收时间
+);
+"""
+
+
+# ─────────────────────────────────────────────
 # 所有建表SQL汇总
 # ─────────────────────────────────────────────
 
@@ -606,6 +640,9 @@ ALL_CREATE_TABLE_SQL = [
     CREATE_RECONCILIATION_RUNS_SQL,
     CREATE_RECONCILIATION_DIFFS_SQL,
     CREATE_RECONCILIATION_FREEZE_SQL,
+    # B-03 #443：修正台账 + 门禁拒收记录（与 0012 迁移逐字一致）
+    CREATE_CORRECTION_LEDGER_SQL,
+    CREATE_ADMISSION_REJECT_SQL,
 ]
 
 ALL_CREATE_INDEX_SQL = (
@@ -831,6 +868,8 @@ def drop_all_tables(connection) -> None:
         TABLE_NAMES["audit_archive_manifest"],  # BASE-7 审计三表（无外键，最后删）
         TABLE_NAMES["audit_archive"],
         TABLE_NAMES["audit_log"],
+        TABLE_NAMES["correction_ledger"],      # B-03 #443：修正台账（无外键）
+        TABLE_NAMES["admission_reject"],       # B-03 #443：门禁拒收记录（无外键）
     ]
     with connection.transaction():
         for table in table_order:
