@@ -6453,5 +6453,11 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
 ## #458 · 2026-10-17 · C-5 语句棘轮批量对价（CI Py3.12 实测 53f4e9f，19 文件）
    a. 依据：CI #90/#91 覆盖率门禁红（20 项违反：C-4×1 + C-5×19）——C-1a/C-1b 总量达标（66.2% / 41107 行），红点为存量文件语句数超冻结值（Py3.12 语句口径，本地 3.14 语句数偏低未触发）。
    b. 变更：FILE_STMT_CEILING 批量同步 19 文件冻结值至 CI 实测——financial_sync_service 161→194、full_clean_service 531→536、akshare_source 571→583、connection 139→152、queries 505→543、schema 97→104、trade_log 54→136、tradability 95→104、coverage_gate 255→257、gate_audit 112→115、base_broker 351→352、manager 477→493、qmt_broker 1033→1055、engine 1119→1221、engine_assembly 165→193、portfolio 419→467、state_store 374→386、account_reconciler 278→358、alerting 1510→1516。增长来源：另一会话数据层施工（A/B/C 系列 correction_ledger/ingest 三列/UPSERT/查单闭环）+ 门禁自身增长，功能必需，与 R-24/R-26 已同步基线联动。
-   c. 验证：FILE_FLOOR 不受影响（qmt_broker 60.0/alerting 68.0 保持）；19 值逐项校验=CI 实测；C-4 data_layer_baseline 64.8% 另立补测项（#459）。
+   c. 验证：FILE_FLOOR 不受影响（qmt_broker 60.0/alerting 68.0 保持）；19 值逐项校验=CI 实测；R-26 leakage_gate 联动同步 4893→4896（coverage_gate.py +3 语句）；C-4 data_layer_baseline 补测见 #459。
    d. 纪律遵守：独立 commit（纯 coverage_gate.py+蓝图，无业务混入）；先拆后抬原则已评估（19 文件增长为累积功能施工，拆解成本高于对价，选择对价抬升）；未触碰另一会话工作区文件。
+
+## #459 · 2026-10-17 · C-4 补测 data_layer_baseline（64.8% → 84.98%）
+   a. 依据：CI #90/#91 覆盖率门禁 C-4 红——data_access/data_layer_baseline.py（T1）覆盖率 64.8% < 门槛 80.0%（另一会话 A-11 新增，蓝图已登记 #440，缺覆盖率测试）。
+   b. 变更：tests/unit/test_data_layer_baseline.py 追加 11 个补测——compare_baseline 全分支（等值/相对容差/超差/类型/缺失键/现算缺失/列表长度/嵌套列表/布尔严格/指纹段缺失）、_safe_scalar 查询异常、缺聚合列（duplicate_keys/duplicate_details）、financial_data 无 ann_date 列、processed 目录缺失+坏 parquet+非 parquet 过滤、aux_tables 缺表 not_present、save_duplicate_listing 缺省日期。
+   c. 验证：21 passed（本地 3.14）；全量覆盖率实测 data_layer_baseline 84.98%（215/253）≥ 80.0%；全量 4815 passed / 1 skipped（R-26 联动见 #458 补充）。
+   d. 纪律遵守：只补测试不降门槛（顶红指引 C-4 规则）；未新建低覆盖文件承接逻辑；commit 与 R-26 门禁 commit 分离。
