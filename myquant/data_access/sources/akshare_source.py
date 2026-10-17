@@ -869,6 +869,7 @@ class AkshareDataSource(DataSourceBase):
                 "market": "A股",
                 "report_date": report_date,
                 "report_type": "实时",
+                "ann_date": "",  # B-09：估值接口无公告日，由下方财务主数据 NOTICE_DATE 补
                 "pe": self._safe_float(row.get("PE_TTM")),
                 "pb": self._safe_float(row.get("PB_MRQ")),
                 "total_mv": self._safe_float(row.get("TOTAL_MARKET_CAP")),
@@ -878,7 +879,7 @@ class AkshareDataSource(DataSourceBase):
                 "data_source": f"{self.name}_eastmoney_datacenter",
             }
 
-            # 财务主数据补 EPS/BPS（单独接口，失败不影响估值结果）
+            # 财务主数据补 EPS/BPS + 公告日 NOTICE_DATE（同一接口响应，失败不影响估值结果）
             try:
                 resp2 = requests.get(
                     EASTMONEY_DATACENTER_URL, params=params_fin,
@@ -891,6 +892,9 @@ class AkshareDataSource(DataSourceBase):
                     fin_row = rows2[0]
                     result["eps"] = self._safe_float(fin_row.get("EPSJB"))
                     result["bps"] = self._safe_float(fin_row.get("BPS"))
+                    result["ann_date"] = self._normalize_notice_date(
+                        fin_row.get("NOTICE_DATE")
+                    )
             except Exception as e:
                 logger.debug(f"东财数据中心财务主数据失败 [{symbol}]: {type(e).__name__}: {e}")
             return result
@@ -923,6 +927,9 @@ class AkshareDataSource(DataSourceBase):
                 "market": "A股",
                 "report_date": latest_period,
                 "report_type": "财务摘要",
+                # B-09：新浪财务摘要接口无公告日期列（实测仅报告期列），ann_date 显式空，
+                # 时点语义回退 report_deadline 推定；主链路（东财）补 NOTICE_DATE 覆盖。
+                "ann_date": "",
                 "pe": self._safe_float(fin_dict.get("市盈率")),
                 "pb": self._safe_float(fin_dict.get("市净率")),
                 "total_mv": self._safe_float(fin_dict.get("总市值")),
@@ -1056,6 +1063,8 @@ class AkshareDataSource(DataSourceBase):
                 "market": "A股",
                 "report_date": raw_date,
                 "report_type": "财务摘要(历史)",
+                # B-09：公告日取东财财务主数据 NOTICE_DATE（实测字段，2026-08-15 类格式）
+                "ann_date": self._normalize_notice_date(row.get("NOTICE_DATE")),
                 "pe": None,
                 "pb": None,
                 "total_mv": None,
@@ -1388,6 +1397,23 @@ class AkshareDataSource(DataSourceBase):
         return len(records) > 0
 
     # ── 工具方法 ──
+
+    @staticmethod
+    def _normalize_notice_date(raw) -> str:
+        """公告日归一化为 YYYY-MM-DD（B-09，对齐 financial_service._normalize_report_date 口径）。
+
+        东财数据中心 NOTICE_DATE 形如 "2026-08-15 00:00:00"；取日期部分并按
+        YYYYMMDD 数字串规范化为 YYYY-MM-DD。无效输入返回空串（消费侧视为无公告日）。
+        """
+        if raw is None:
+            return ""
+        s = str(raw).strip()
+        if not s:
+            return ""
+        digits = s.replace("-", "").replace("/", "")[:8]
+        if len(digits) == 8 and digits.isdigit():
+            return f"{digits[0:4]}-{digits[4:6]}-{digits[6:8]}"
+        return s[:10]
 
     @staticmethod
     def _safe_float(value) -> Optional[float]:

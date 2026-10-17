@@ -1114,7 +1114,7 @@ Pythonwdhmm/
 
     │       ├── base.py               # 数据源抽象基类
 
-    │       ├── akshare_source.py      # ✨【第10/11/12条】AkShare数据源（V2稳定链）：行情降级链=东财stock_zh_a_hist→腾讯原生HTTP fqkline→网易原生HTTP chddata CSV→新浪兜底；health_check用实际行情接口判活；每源独立会话级封锁；财务=新浪stock_financial_abstract主力+百度stock_zh_valuation_baidu独立兜底；✨【第12条】新增get_financial_history多报告期获取（防未来函数）；_retry_request失败计数只在最终失败时记录1次（重试不累积）；supports_financial=True；✨【回写#83】P1-④ 腾讯K线volume×100手→股（与腾讯实时/全库口径统一）+ P2-② 财务兜底report_date=今天丢弃+留痕（百度独立兜底/push2实时快照/datacenter TRADE_DATE缺失三处，防伪造报告期未来函数）；✨【回写#85】get_stock_list B股映射加固（90/20 剔除，与 tdx_source B-4 过滤口径对齐，下载层彻底无 B 股出口）
+    │       ├── akshare_source.py      # ✨【第10/11/12条】AkShare数据源（V2稳定链）：行情降级链=东财stock_zh_a_hist→腾讯原生HTTP fqkline→网易原生HTTP chddata CSV→新浪兜底；health_check用实际行情接口判活；每源独立会话级封锁；财务=新浪stock_financial_abstract主力+百度stock_zh_valuation_baidu独立兜底；✨【第12条】新增get_financial_history多报告期获取（防未来函数）；_retry_request失败计数只在最终失败时记录1次（重试不累积）；supports_financial=True；✨【回写#83】P1-④ 腾讯K线volume×100手→股（与腾讯实时/全库口径统一）+ P2-② 财务兜底report_date=今天丢弃+留痕（百度独立兜底/push2实时快照/datacenter TRADE_DATE缺失三处，防伪造报告期未来函数）；✨【回写#85】get_stock_list B股映射加固（90/20 剔除，与 tdx_source B-4 过滤口径对齐，下载层彻底无 B 股出口）；✨【回写#431】财务取数补公告日期字段（B-09）：东财历史 record 补 ann_date=NOTICE_DATE、东财估值经财务主数据响应 NOTICE_DATE 补、新浪显式空（接口无公告日列实测）、_normalize_notice_date 归一化 YYYY-MM-DD（对齐 financial_service 口径）
 
     │       ├── broker_source.py       # 券商实时数据源预留接口
 
@@ -6214,3 +6214,14 @@ e. **门禁基线实测同步（多门禁联动纪律，工单 #425）**：engin
    c. 复核结论（量化 + 源码行号取证）：financial_data 329,735 行 ann_date 非空 0（与 A-00 基线一致）；断点=akshare 三处记录构造无 ann_date（akshare_source.py 867-879 东财估值 / 921-939 新浪摘要 / 1054-1069 东财历史）+ CSV 列清单缺 ann_date（financial_sync_service.py:57-61 FINANCIAL_CSV_COLUMNS 17 列无公告日）；入库映射 financial_service.py:286-289 具备解析能力但两链路均不供给 → 恒 NULL；消费侧（schema.py:108/132、time_semantics.py:89-95、manager.py:1276/1309）全部就绪。施工指向：先 B-09（akshare 三处补字段）再 A-04（CSV 补列+存量回填）。
    d. 验证：只读 SQL + 源码逐行取证，无代码/库改动；门禁无新增红（docs 段变化不触发代码门禁）。
    e. 纪律遵守：全程只读；先登记目录再创建文档；未修改任何业务文件与数据库。
+
+## #431 · 2026-10-17 · 数据层施工 B-09：财务取数补公告日期字段
+   a. 依据：《数据层结构优化可行性施工方案报告_v1.1》§5.2 ★B-09（验收=新导入行 ann_date 非空率>90%；对 ann_date>report_deadline 样本 eff_disclosure_date 返回 ann_date；git 可回滚）+ §5.3 依赖链（A-02→B-09→A-04）。
+   b. 第 0 步实测（网络探测，2026-10-17）：东财估值 RPT_VALUEANALYSIS_DET 22 列**无公告日**；东财财务主数据 RPT_F10_FINANCE_MAINFINADATA 165 列**含 NOTICE_DATE**（=2026-08-15 公告日）；新浪 stock_financial_abstract **仅报告期列无公告日**。
+   c. 变更（两处）：
+      - myquant/data_access/sources/akshare_source.py —— 东财历史 record 构造补 `ann_date`（取 NOTICE_DATE）；东财估值 result 补 ann_date（其内部补 EPS/BPS 的财务主数据响应 NOTICE_DATE 顺带填充，估值接口本身无公告日）；新浪摘要 ann_date 显式空串（接口无公告日列，docstring 注明降级通道回退推定口径）；新增静态方法 _normalize_notice_date（YYYY-MM-DD 归一化，对齐 financial_service._normalize_report_date）；
+      - tests/unit/test_akshare_ann_date.py —— 单测 8 项（归一化 3 / 东财估值补+空 2 / 东财历史补+空 2 / 新浪显式空 1，monkeypatch requests.get 不联网）。
+   d. 门禁处置：
+      - R-26：PACKAGE_STRUCTURE_BASELINE["data_access"] 三维 PR2 对价抬升 18016/630/37→18042/631/37（+26 行/+1 符号，fan_out 37 不变；拆不动理由=功能必需新增于已登记模块 akshare_source.py、模块归 data_access 语义正确、无等量旧代码可删；对价五要素齐全：功能必需 B-09 + 工单 #431 + 实测（第0步字段探测）+ 独立 commit + 蓝图回写；沿用用户 A-00 已拍板的 PR2 对价通道，本批施工结束汇总留痕）。
+   e. 验证：py_compile 2 文件通过；pytest tests/unit/test_akshare_ann_date.py 8 passed；门禁复跑全绿。
+   f. 纪律遵守：字段名第 0 步实测先行（不猜字段名）；monkeypatch 单测不联网；蓝图登记 + 门禁对价 + 独立 commit。
